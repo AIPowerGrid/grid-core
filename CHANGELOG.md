@@ -6,6 +6,77 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Changelog
 
+# 4.44.3
+
+* Fix image validation warnings being sent to the wrong requests
+* Validate request with styles, only after style is applied
+
+# 4.44.2
+
+* Allow trusted users to also create styles
+* Fix styles always returning 1 image
+* Fix style reward not being taken from the requesting user
+
+# 4.44.1
+
+* Various fixes around styles
+* Added `/.well-known/serviceinfo`
+
+# 4.44.0
+
+* Adds styles
+* Adds TabbyAPI as approved LLM backend
+
+# 4.43.9
+
+* Prevent anon gens being visible at their profile page
+
+# 4.43.7
+
+* fixes setting team for worker
+* aborted jobs can't be restarted anymore
+
+
+# 4.43.6
+
+* Fix returning `done` when a job was restarted.
+
+# 4.43.5
+
+* Fix: Added check to ensure the redis servers are still available.
+
+# 4.43.4
+
+* Fix logic error when setting censored key
+
+# 4.43.3
+
+* Add new `information` metadata key
+
+# 4.43.2
+
+* Horde more accurately reports which images are nsfw or csam censored
+
+# 4.43.1
+
+* Fix to prevent limit_max_steps picking up WPs with empty model lists
+
+# 4.43.0
+
+* Adjused TTL formula to be algorithmic
+* prevent workers without flux support picking up flux jobs
+* Adds `extra_slow_workers` bool for image gen async
+* Adds `extra_slow_worker` bool for worker pop
+* Adds `limit_max_steps` for worker pop
+
+# 4.42.0
+
+* Adds support for the Flux family of models
+
+# 4.41.0
+
+* Adds support for extra backends behind LLM bridges, and for knowing which are validated.
+
 # 4.40.3
 
 * Ensure jobs don't expire soon after being picked up

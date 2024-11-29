@@ -12,12 +12,12 @@ from sqlalchemy import Enum, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.hybrid import hybrid_property
 
-from horde import horde_redis as hr
 from horde import vars as hv
 from horde.countermeasures import CounterMeasures
 from horde.discord import send_problem_user_notification
 from horde.enums import UserRecordTypes, UserRoleTypes
 from horde.flask import SQLITE_MODE, db
+from horde.horde_redis import horde_redis as hr
 from horde.logger import logger
 from horde.patreon import patrons
 from horde.suspicions import SUSPICION_LOGS, Suspicions
@@ -251,6 +251,8 @@ class User(db.Model):
 
     workers = db.relationship("Worker", back_populates="user", cascade="all, delete-orphan")
     teams = db.relationship("Team", back_populates="owner", cascade="all, delete-orphan")
+    styles = db.relationship("Style", back_populates="user", cascade="all, delete-orphan")
+    style_collections = db.relationship("StyleCollection", back_populates="user", cascade="all, delete-orphan")
     sharedkeys = db.relationship("UserSharedKey", back_populates="user", cascade="all, delete-orphan")
     suspicions = db.relationship("UserSuspicions", back_populates="user", cascade="all, delete-orphan")
     records = db.relationship("UserRecords", back_populates="user", cascade="all, delete-orphan")
@@ -612,6 +614,14 @@ class User(db.Model):
         else:
             self.modify_kudos(kudos, "accumulated")
 
+    def record_style(self, kudos, contrib_type):
+        self.update_user_record(
+            record_type=UserRecordTypes.STYLE,
+            record=contrib_type,
+            increment_value=1,
+        )
+        self.modify_kudos(kudos, "styled")
+
     def check_for_trust(self):
         """After a user passes the evaluation threshold (?? kudos)
         All the evaluating Kudos added to their total and they automatically become trusted
@@ -863,6 +873,17 @@ class User(db.Model):
             # unnecessary information, since the workers themselves wil be visible
             # "public_workers": self.public_workers,
         }
+        styles_array = []
+        for s in self.styles:
+            if s.public or details_privilege >= 1:
+                styles_array.append(
+                    {
+                        "name": s.get_unique_name(),
+                        "id": str(s.id),
+                        "type": str(s.style_type),
+                    },
+                )
+        ret_dict["styles"] = styles_array
         if self.public_workers or details_privilege >= 1:
             workers_array = []
             for worker in self.workers:
@@ -880,6 +901,9 @@ class User(db.Model):
             for wp in self.waiting_prompts:
                 if wp.wp_type not in ret_dict["active_generations"]:
                     ret_dict["active_generations"][wp.wp_type] = []
+                # We don't return anon list of gens
+                if self.is_anon():
+                    break
                 ret_dict["active_generations"][wp.wp_type].append(str(wp.id))
         if details_privilege >= 2:
             mk_dict = {

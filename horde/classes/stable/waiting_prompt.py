@@ -13,6 +13,7 @@ from horde.bridge_reference import check_bridge_capability
 from horde.classes.base.waiting_prompt import WaitingPrompt
 from horde.classes.stable.kudos import KudosModel
 from horde.consts import (
+    BASELINE_BATCHING_MULTIPLIERS,
     HEAVY_POST_PROCESSORS,
     KNOWN_LCM_LORA_IDS,
     KNOWN_LCM_LORA_VERSIONS,
@@ -124,8 +125,9 @@ class ImageWaitingPrompt(WaitingPrompt):
             self.trusted_workers = True
             self.shared = False
         self.prepare_job_payload(self.params)
-        self.set_job_ttl()
         # Commit will happen in prepare_job_payload()
+        # logger.debug(self.params)
+        # logger.debug(self.prompt)
 
     @logger.catch(reraise=True)
     def prepare_job_payload(self, initial_dict=None):
@@ -197,6 +199,7 @@ class ImageWaitingPrompt(WaitingPrompt):
                 "id": procgen.id,
                 "model": procgen.model,
                 "ids": [g.id for g in procgen_list],
+                "ttl": procgen_list[0].job_ttl,
             }
             if self.source_image and check_bridge_capability("img2img", procgen.worker.bridge_agent):
                 if check_bridge_capability("r2_source", procgen.worker.bridge_agent):
@@ -226,10 +229,10 @@ class ImageWaitingPrompt(WaitingPrompt):
         # logger.debug([payload,prompt_payload])
         return prompt_payload
 
-    def activate(self, downgrade_wp_priority=False, source_image=None, source_mask=None, extra_source_images=None):
+    def activate(self, downgrade_wp_priority=False, source_image=None, source_mask=None, extra_source_images=None, kudos_adjustment=0):
         # We separate the activation from __init__ as often we want to check if there's a valid worker for it
         # Before we add it to the queue
-        super().activate(downgrade_wp_priority, extra_source_images=extra_source_images)
+        super().activate(downgrade_wp_priority, extra_source_images=extra_source_images, kudos_adjustment=kudos_adjustment)
         if source_image or source_mask:
             self.source_image = source_image
             self.source_mask = source_mask
@@ -364,7 +367,7 @@ class ImageWaitingPrompt(WaitingPrompt):
             max_res = 768
         # We allow everyone to use SDXL up to 1024
         if max_res < 1024 and any(
-            model_reference.get_model_baseline(mn) in ["stable_diffusion_xl", "stable_cascade"] for mn in model_names
+            model_reference.get_model_baseline(mn) in ["stable_diffusion_xl", "stable_cascade", "flux_1"] for mn in model_names
         ):
             max_res = 1024
         if max_res > 1024:
@@ -372,10 +375,8 @@ class ImageWaitingPrompt(WaitingPrompt):
         # Using more than 10 steps with LCM requires upfront kudos
         if self.is_using_lcm() and self.get_accurate_steps() > 10:
             return (True, max_res, False)
-        # Stable Cascade doesn't need so many steps, so we limit it a bit to prevent abuse.
-        if any(model_reference.get_model_baseline(mn) in ["stable_cascade"] for mn in model_names) and self.get_accurate_steps() > 30:
-            return (True, max_res, False)
-        if self.get_accurate_steps() > 50:
+        # Some models don't require a lot of steps, so we check their requirements. The max steps we allow without upfront kudos is 40
+        if any(model_reference.get_model_requirements(mn).get("max_steps", 40) < self.get_accurate_steps() for mn in model_names):
             return (True, max_res, False)
         if self.width * self.height > max_res * max_res:
             return (True, max_res, False)
@@ -400,9 +401,7 @@ class ImageWaitingPrompt(WaitingPrompt):
             # Break, just in case we went too low
             if self.width * self.height < 512 * 512:
                 break
-        max_steps = 50
-        if any(model_reference.get_model_baseline(mn) in ["stable_cascade"] for mn in self.get_model_names()):
-            max_steps = 30
+        max_steps = min(model_reference.get_model_requirements(mn).get("max_steps", 30) for mn in self.get_model_names())
         if self.params.get("control_type"):
             max_steps = 20
         if self.is_using_lcm():
@@ -435,7 +434,7 @@ class ImageWaitingPrompt(WaitingPrompt):
         if self.params.get("sampler_name", "k_euler_a") in ["k_dpm_adaptive"]:
             # This sampler chooses the steps amount automatically
             # and disregards the steps value from the user
-            # so we just calculate it as an average 50 steps
+            # so we just calculate it as an average 40 steps
             return 40
         steps = self.params["steps"]
         if self.params.get("sampler_name", "k_euler_a") in SECOND_ORDER_SAMPLERS:
@@ -443,32 +442,6 @@ class ImageWaitingPrompt(WaitingPrompt):
             # So we adjust the things to take that into account
             steps *= 2
         return steps
-
-    def set_job_ttl(self):
-        # default is 2 minutes. Then we scale up based on resolution.
-        # This will be more accurate with a newer formula
-        self.job_ttl = 120
-        if self.width * self.height > 2048 * 2048:
-            self.job_ttl = 800
-        elif self.width * self.height > 1024 * 1024:
-            self.job_ttl = 400
-        elif self.width * self.height > 728 * 728:
-            self.job_ttl = 260
-        elif self.width * self.height >= 512 * 512:
-            self.job_ttl = 150
-        # When too many steps are involved, we increase the expiry time
-        if self.get_accurate_steps() >= 200:
-            self.job_ttl = self.job_ttl * 3
-        elif self.get_accurate_steps() >= 100:
-            self.job_ttl = self.job_ttl * 2
-        # CN is 3 times slower
-        if self.gen_payload.get("control_type"):
-            self.job_ttl = self.job_ttl * 3
-        if "SDXL_beta::stability.ai#6901" in self.get_model_names():
-            logger.debug(self.get_model_names())
-            self.job_ttl = 300
-        # logger.info([weights_count,self.job_ttl])
-        db.session.commit()
 
     def log_faulted_prompt(self):
         source_processing = "txt2img"
@@ -499,6 +472,8 @@ class ImageWaitingPrompt(WaitingPrompt):
             return (self.calculate_extra_kudos_burn(kudos) * self.n * 2) + 1
         if model_reference.get_model_baseline(model_name) in ["stable_cascade"]:
             return (self.calculate_extra_kudos_burn(kudos) * self.n * 4) + 1
+        if model_reference.get_model_baseline(model_name) in ["flux_1"]:
+            return (self.calculate_extra_kudos_burn(kudos) * self.n * 8) + 1
         # The +1 is the extra kudos burn per request
         return (self.calculate_extra_kudos_burn(kudos) * self.n) + 1
 
@@ -512,6 +487,13 @@ class ImageWaitingPrompt(WaitingPrompt):
         if self.params.get("transparent", False):
             return True
         return False
+
+    def get_highest_model_batching_multiplier(self):
+        highest_multiplier = 1
+        for mn in self.get_model_names():
+            if BASELINE_BATCHING_MULTIPLIERS.get(mn, 1) > highest_multiplier:
+                highest_multiplier = BASELINE_BATCHING_MULTIPLIERS.get(mn, 1)
+        return highest_multiplier
 
     def count_pp(self):
         return len(self.params.get("post_processing", []))

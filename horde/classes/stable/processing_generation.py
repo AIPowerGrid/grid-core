@@ -16,7 +16,6 @@ from horde.r2 import (
     download_procgen_image,
     generate_procgen_download_url,
     upload_generated_image,
-    upload_prompt,
     upload_shared_generated_image,
     upload_shared_metadata,
 )
@@ -64,6 +63,9 @@ class ImageProcessingGeneration(ProcessingGeneration):
             if self.wp.params.get("hires_fix", False):
                 return self.wp.kudos * 7
             return self.wp.kudos * 4
+        if model_reference.get_model_baseline(self.model) in ["flux_1"]:
+            # Flux is double the size of SDXL and much slower, so it gives double the rewards from it.
+            return self.wp.kudos * 8
         return self.wp.kudos
 
     def log_aborted_generation(self):
@@ -75,21 +77,31 @@ class ImageProcessingGeneration(ProcessingGeneration):
         )
 
     def set_generation(self, generation, things_per_sec, **kwargs):
-        if kwargs.get("censored", False):
-            self.censored = True
         state = kwargs.get("state", "ok")
-        if state in ["censored", "csam"]:
+        censored = False
+        gen_metadata = kwargs.get("gen_metadata") if kwargs.get("gen_metadata") is not None else []
+        for metadata in gen_metadata:
+            if metadata.get("type") != "censorship":
+                # this metadata isnt about censorship
+                continue
+            if metadata.get("value") == "csam":
+                censored = "csam"
+            else:
+                censored = "nsfw"
+        if censored is not False:
             self.censored = True
             db.session.commit()
-            if state == "csam":
-                prompt_dict = {
-                    "prompt": self.wp.prompt,
-                    "user": self.wp.user.get_unique_alias(),
-                    "type": "clip",
-                }
-                upload_prompt(prompt_dict)
+            # Disabled prompt gathering for now
+            # if censored == "csam":
+            #     prompt_dict = {
+            #         "prompt": self.wp.prompt,
+            #         "user": self.wp.user.get_unique_alias(),
+            #         "type": "clip",
+            #     }
+            #     upload_prompt(prompt_dict)
         elif state == "faulted":
-            self.wp.n += 1
+            if self.wp.count_finished_jobs() < self.wp.jobs:
+                self.wp.n += 1
             self.abort()
         if self.is_completed():
             return 0
@@ -116,7 +128,7 @@ class ImageProcessingGeneration(ProcessingGeneration):
         record_image_statistic(self)
         if self.wp.shared and not self.fake and generation == "R2":
             self.upload_generation_metadata()
-        if state == "csam":
+        if censored == "csam":
             self.wp.user.record_problem_job(
                 procgen=self,
                 ipaddr=self.wp.ipaddr,
@@ -140,3 +152,24 @@ class ImageProcessingGeneration(ProcessingGeneration):
             f.write(json_object)
         upload_shared_metadata(filename)
         os.remove(filename)
+
+    def set_job_ttl(self):
+        # We are aiming here for a graceful min 2sec/it speed on workers for 512x512 which is well below our requested min 0.5mps/s,
+        # to buffer for model loading and allow for the occasional slowdown without dropping jobs.
+        # There is also a minimum of 2mins, regardless of steps and resolution used and an extra 30 seconds for model loading.
+        # This means a worker at 1mps/s should be able to finish a 512x512x50 request comfortably within 30s but we allow up to 2.5mins.
+        # This number then increases lineary based on the resolution requested.
+        # Using this formula, a 1536x768x40 request is expected to take ~50s on a 1mps/s worker, but we will only time out after 390s.
+        ttl_multiplier = (self.wp.width * self.wp.height) / (512 * 512)
+        self.job_ttl = 30 + (self.wp.get_accurate_steps() * 2 * ttl_multiplier)
+        # CN is 3 times slower
+        if self.wp.gen_payload.get("control_type"):
+            self.job_ttl = self.job_ttl * 2
+        # Flux is way slower than Stable Diffusion
+        if any(model_reference.get_model_baseline(mn) in ["flux_1"] for mn in self.wp.get_model_names()):
+            self.job_ttl = self.job_ttl * 3
+        if self.job_ttl < 150:
+            self.job_ttl = 150
+        if self.worker.extra_slow_worker is True:
+            self.job_ttl = self.job_ttl * 3
+        db.session.commit()
