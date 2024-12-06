@@ -152,6 +152,14 @@ class ImageParsers(v2.Parsers):
             help="If True, this worker will pick up requests requesting LoRas.",
             location="json",
         )
+        self.job_pop_parser.add_argument(
+            "limit_max_steps",
+            type=bool,
+            required=False,
+            default=False,
+            help="If True, This worker will not pick up jobs with more steps than the average allowed for that model.",
+            location="json",
+        )
         self.job_submit_parser.add_argument(
             "seed",
             type=int,
@@ -185,6 +193,7 @@ class ImageModels(v2.Models):
                         "source_mask",
                         "extra_source_images",
                         "batch_index",
+                        "information",
                     ],
                     description="The relevance of the metadata field",
                 ),
@@ -313,18 +322,13 @@ class ImageModels(v2.Models):
             },
         )
         self.input_model_special_payload = api.model("ModelSpecialPayloadStable", {"*": fields.Wildcard(fields.Raw)})
-        self.root_model_generation_payload_stable = api.model(
-            "ModelPayloadRootStable",
+        self.root_model_generation_payload_style_stable = api.model(
+            "ModelPayloadStyleStable",
             {
                 "sampler_name": fields.String(required=False, default="k_euler_a", enum=list(KNOWN_SAMPLERS)),
                 "cfg_scale": fields.Float(required=False, default=7.5, min=0, max=100),
                 "denoising_strength": fields.Float(required=False, example=0.75, min=0.01, max=1.0),
                 "hires_fix_denoising_strength": fields.Float(required=False, example=0.75, min=0.01, max=1.0),
-                "seed": fields.String(
-                    required=False,
-                    example="The little seed that could",
-                    description="The seed to use to generate this request. You can pass text as well as numbers.",
-                ),
                 "height": fields.Integer(
                     required=False,
                     default=512,
@@ -340,13 +344,6 @@ class ImageModels(v2.Models):
                     min=64,
                     max=3072,
                     multiple=64,
-                ),
-                "seed_variation": fields.Integer(
-                    required=False,
-                    example=1,
-                    min=1,
-                    max=1000,
-                    description="If passed with multiple n, the provided seed will be incremented every time by this value.",
                 ),
                 "post_processing": fields.List(
                     fields.String(
@@ -377,6 +374,38 @@ class ImageModels(v2.Models):
                     max=12,
                     description="The number of CLIP language processor layers to skip.",
                 ),
+                "facefixer_strength": fields.Float(required=False, example=0.75, min=0, max=1.0),
+                "loras": fields.List(fields.Nested(self.input_model_loras, skip_none=True)),
+                "tis": fields.List(fields.Nested(self.input_model_tis, skip_none=True)),
+                "special": fields.Nested(self.input_model_special_payload, skip_none=True),
+                "workflow": fields.String(
+                    required=False,
+                    default=None,
+                    enum=list(KNOWN_WORKFLOWS),
+                    description="Explicitly specify the horde-engine workflow to use.",
+                ),
+                "transparent": fields.Boolean(
+                    default=False,
+                    description="Set to True to generate the image using Layer Diffuse, creating an image with a transparent background.",
+                ),
+            },
+        )
+        self.root_model_generation_payload_stable = api.inherit(
+            "ModelPayloadRootStable",
+            self.root_model_generation_payload_style_stable,
+            {
+                "seed": fields.String(
+                    required=False,
+                    example="The little seed that could",
+                    description="The seed to use to generate this request. You can pass text as well as numbers.",
+                ),
+                "seed_variation": fields.Integer(
+                    required=False,
+                    example=1,
+                    min=1,
+                    max=1000,
+                    description="If passed with multiple n, the provided seed will be incremented every time by this value.",
+                ),
                 "control_type": fields.String(
                     required=False,
                     enum=[
@@ -399,23 +428,10 @@ class ImageModels(v2.Models):
                     default=False,
                     description="Set to True if you want the ControlNet map returned instead of a generated image.",
                 ),
-                "facefixer_strength": fields.Float(required=False, example=0.75, min=0, max=1.0),
-                "loras": fields.List(fields.Nested(self.input_model_loras, skip_none=True)),
-                "tis": fields.List(fields.Nested(self.input_model_tis, skip_none=True)),
-                "special": fields.Nested(self.input_model_special_payload, skip_none=True),
                 "extra_texts": fields.List(fields.Nested(self.model_extra_texts)),
-                "workflow": fields.String(
-                    required=False,
-                    default=None,
-                    enum=list(KNOWN_WORKFLOWS),
-                    description="Explicitly specify the horde-engine workflow to use.",
-                ),
-                "transparent": fields.Boolean(
-                    default=False,
-                    description="Set to True to generate the image using Layer Diffuse, creating an image with a transparent background.",
-                ),
             },
         )
+        # The response for the pop
         self.response_model_generation_payload = api.inherit(
             "ModelPayloadStable",
             self.root_model_generation_payload_stable,
@@ -430,6 +446,7 @@ class ImageModels(v2.Models):
                 ),
             },
         )
+        # The input for the generation
         self.input_model_generation_payload = api.inherit(
             "ModelGenerationInputStable",
             self.root_model_generation_payload_stable,
@@ -450,6 +467,9 @@ class ImageModels(v2.Models):
             {
                 "max_pixels": fields.Integer(
                     description="How many waiting requests were skipped because they demanded a higher size than this worker provides.",
+                ),
+                "step_count": fields.Integer(
+                    description="How many waiting requests were skipped because they demanded a higher step count that the worker wants.",
                 ),
                 "unsafe_ip": fields.Integer(
                     description="How many waiting requests were skipped because they came from an unsafe IP.",
@@ -482,6 +502,7 @@ class ImageModels(v2.Models):
                         example="00000000-0000-0000-0000-000000000000",
                     ),
                 ),
+                "ttl": fields.Integer(description="The amount of seconds before this job is considered stale and aborted."),
                 "skipped": fields.Nested(self.response_model_generations_skipped, skip_none=True),
                 "model": fields.String(description="Which of the available models to use for this request."),
                 "source_image": fields.String(description="The Base64-encoded webp to use for img2img."),
@@ -544,6 +565,13 @@ class ImageModels(v2.Models):
                     default=True,
                     description="If True, this worker will pick up requests requesting LoRas.",
                 ),
+                "limit_max_steps": fields.Boolean(
+                    default=True,
+                    description=(
+                        "If True, This worker will not pick up jobs with more steps than the average allowed for that model."
+                        " this is for use by workers which might run into issues doing too many steps."
+                    ),
+                ),
             },
         )
         self.input_model_job_submit = api.inherit(
@@ -579,9 +607,23 @@ class ImageModels(v2.Models):
                         "When False, Evaluating workers will also be used which can increase speed but adds more risk!"
                     ),
                 ),
+                "validated_backends": fields.Boolean(
+                    default=True,
+                    description=(
+                        f"When true, only inference backends that are validated by the {horde_title} devs will serve this request. "
+                        "When False, non-validated backends will also be used which can increase speed but "
+                        "you may end up with unexpected results."
+                    ),
+                ),
                 "slow_workers": fields.Boolean(
                     default=True,
                     description="When True, allows slower workers to pick up this request. Disabling this incurs an extra kudos cost.",
+                ),
+                "extra_slow_workers": fields.Boolean(
+                    default=False,
+                    description=(
+                        "When True, allows very slower workers to pick up this request. " "Use this when you don't mind waiting a lot."
+                    ),
                 ),
                 "censor_nsfw": fields.Boolean(
                     default=False,
@@ -664,6 +706,13 @@ class ImageModels(v2.Models):
                         f"Provide a URL where the {horde_title} will send a POST call after each delivered generation. "
                         "The request will include the details of the job as well as the request ID."
                     ),
+                ),
+                "style": fields.String(
+                    required=False,
+                    max_length=1024,
+                    min_length=3,
+                    example="00000000-0000-0000-0000-000000000000",
+                    description=("A horde style ID or name to use for this generation"),
                 ),
             },
         )
@@ -936,5 +985,172 @@ class ImageModels(v2.Models):
                 "day": fields.Nested(self.response_model_model_stats),
                 "month": fields.Nested(self.response_model_model_stats),
                 "total": fields.Nested(self.response_model_model_stats),
+            },
+        )
+
+        # Styles
+        self.input_model_style_params = api.inherit(
+            "ModelStyleInputParamsStable",
+            self.root_model_generation_payload_style_stable,
+            {
+                "steps": fields.Integer(default=30, required=False, min=1, max=500),
+            },
+        )
+        self.input_model_style = api.model(
+            "ModelStyleInputStable",
+            {
+                "name": fields.String(
+                    required=True,
+                    example="My Awesome Image Style",
+                    description="The name for the style. Case-sensitive and unique per user.",
+                    min_length=1,
+                    max_length=100,
+                ),
+                "info": fields.String(
+                    required=False,
+                    description="Some information about this style.",
+                    example="photorealism excellence.",
+                    min_length=10,
+                    max_length=1000,
+                ),
+                "prompt": fields.String(
+                    required=False,
+                    description=(
+                        "The prompt template which will be sent to Stable Diffusion to generate an image. "
+                        "The user's prompt will be injected into this."
+                        " This argument MUST include a '{p}' which specifies the part where the user's prompt will be injected "
+                        "and an '{np}' where the user's negative prompt will be injected (if any)"
+                    ),
+                    default="{p}{np}",
+                    min_length=7,
+                ),
+                "params": fields.Nested(self.input_model_style_params, skip_none=True),
+                "public": fields.Boolean(
+                    default=True,
+                    description=(
+                        "When true this style will be listed among all styles publicly."
+                        "When false, information about this style can only be seen by people who know its ID or name."
+                    ),
+                ),
+                "nsfw": fields.Boolean(
+                    default=False,
+                    description=("When true, it signified this style is expected to generare NSFW images primarily."),
+                ),
+                "tags": fields.List(
+                    fields.String(
+                        description="Tags describing this style. Used for filtering and discovery.",
+                        min_length=1,
+                        max_length=25,
+                        example="photorealistic",
+                    ),
+                ),
+                "models": fields.List(
+                    fields.String(description="The models to use with this style.", min_length=1, example="stable_diffusion"),
+                ),
+            },
+        )
+        self.patch_model_style = api.model(
+            "ModelStylePatchStable",
+            {
+                "name": fields.String(
+                    required=False,
+                    example="My Awesome Image Style",
+                    description="The name for the style. Case-sensitive and unique per user.",
+                    min_length=1,
+                    max_length=100,
+                ),
+                "info": fields.String(
+                    required=False,
+                    example="photorealism excellence.",
+                    description="Extra information about this style.",
+                    min_length=1,
+                    max_length=1000,
+                ),
+                "prompt": fields.String(
+                    required=False,
+                    description=(
+                        "The prompt template which will be sent to Stable Diffusion to generate an image. "
+                        "The user's prompt will be injected into this."
+                        " This argument MUST include a '{p}' which specifies the part where the user's prompt will be injected "
+                        "and an '{np}' where the user's negative prompt will be injected (if any)"
+                    ),
+                    min_length=7,
+                ),
+                "params": fields.Nested(self.input_model_style_params, skip_none=True),
+                "public": fields.Boolean(
+                    default=True,
+                    description=(
+                        "When true this style will be listed among all styles publicly."
+                        "When false, information about this style can only be seen by people who know its ID or name."
+                    ),
+                ),
+                "nsfw": fields.Boolean(
+                    default=False,
+                    description=("When true, it signified this style is expected to generare NSFW images primarily."),
+                ),
+                "tags": fields.List(
+                    fields.String(
+                        description="Tags describing this style. Used for filtering and discovery.",
+                        min_length=1,
+                        max_length=25,
+                        example="photorealistic",
+                    ),
+                ),
+                "models": fields.List(
+                    fields.String(description="The models to use with this style.", min_length=1, example="stable_diffusion"),
+                ),
+            },
+        )
+        self.input_model_style_example_post = api.model(
+            "InputStyleExamplePost",
+            {
+                "url": fields.String(
+                    example="https://lemmy.dbzer0.com/pictrs/image/c9915186-ca30-4f5a-873c-a91287fb4419.webp",
+                    required=True,
+                    description="Any extra information from the horde about this request.",
+                ),
+                "primary": fields.Boolean(
+                    required=True,
+                    default=False,
+                    description="When true this image is to be used as the primary example for this style.",
+                ),
+            },
+        )
+        self.input_model_style_example_patch = api.model(
+            "InputStyleExamplePost",
+            {
+                "url": fields.String(
+                    example="https://lemmy.dbzer0.com/pictrs/image/c9915186-ca30-4f5a-873c-a91287fb4419.webp",
+                    required=False,
+                    description="Any extra information from the horde about this request.",
+                ),
+                "primary": fields.Boolean(
+                    required=False,
+                    description="When true this image is to be used as the primary example for this style.",
+                ),
+            },
+        )
+        self.response_model_style_example = api.inherit(
+            "StyleExample",
+            self.input_model_style_example_post,
+            {
+                "id": fields.String(
+                    example="00000000-0000-0000-0000-000000000000",
+                    description="The UUID of this example.",
+                ),
+            },
+        )
+
+        self.response_model_style = api.inherit(
+            "StyleStable",
+            self.input_model_style,
+            {
+                "id": fields.String(
+                    description="The UUID of the style. Use this to use the style or retrieve its information in the future.",
+                    example="00000000-0000-0000-0000-000000000000",
+                ),
+                "use_count": fields.Integer(description="The amount of times this style has been used in generations."),
+                "creator": fields.String(description="The alias of the user to whom this style belongs to.", example="db0#1"),
+                "examples": fields.List(fields.Nested(self.response_model_style_example, skip_none=True)),
             },
         )

@@ -10,7 +10,9 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import noload
 
 import horde.classes.base.stats as stats
-from horde import horde_redis as hr
+from horde.bridge_reference import (
+    is_backed_validated,
+)
 from horde.classes.base.waiting_prompt import WPAllowedWorkers, WPModels
 from horde.classes.base.worker import WorkerPerformance
 from horde.classes.kobold.processing_generation import TextProcessingGeneration
@@ -19,6 +21,7 @@ from horde.classes.kobold.processing_generation import TextProcessingGeneration
 from horde.classes.kobold.waiting_prompt import TextWaitingPrompt
 from horde.database.functions import query_prioritized_wps
 from horde.flask import SQLITE_MODE, db
+from horde.horde_redis import horde_redis as hr
 from horde.logger import logger
 from horde.model_reference import model_reference
 
@@ -30,7 +33,7 @@ def convert_things_to_kudos(things, **kwargs):
 
 
 def get_sorted_text_wp_filtered_to_worker(worker, models_list=None, priority_user_ids=None, page=0):
-    # This is just the top 100 - Adjusted method to send Worker object. Filters to add.
+    # This is just the top 3 - Adjusted method to send Worker object. Filters to add.
     # TODO: Filter by (Worker in WP.workers) __ONLY IF__ len(WP.workers) >=1
     # TODO: Filter by WP.trusted_workers == False __ONLY IF__ Worker.user.trusted == False
     # TODO: Filter by Worker not in WP.tricked_worker
@@ -49,10 +52,8 @@ def get_sorted_text_wp_filtered_to_worker(worker, models_list=None, priority_use
     final_wp_list = (
         db.session.query(TextWaitingPrompt)
         .options(noload(TextWaitingPrompt.processing_gens))
-        .outerjoin(
-            WPModels,
-            WPAllowedWorkers,
-        )
+        .outerjoin(WPModels, TextWaitingPrompt.id == WPModels.wp_id)
+        .outerjoin(WPAllowedWorkers, TextWaitingPrompt.id == WPAllowedWorkers.wp_id)
         .filter(
             TextWaitingPrompt.n > 0,
             TextWaitingPrompt.max_length <= worker.max_length,
@@ -90,6 +91,10 @@ def get_sorted_text_wp_filtered_to_worker(worker, models_list=None, priority_use
             or_(
                 worker.maintenance == False,  # noqa E712
                 TextWaitingPrompt.user_id == worker.user_id,
+            ),
+            or_(
+                is_backed_validated(worker.bridge_agent),
+                TextWaitingPrompt.validated_backends.is_(False),
             ),
         )
     )

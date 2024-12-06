@@ -9,6 +9,7 @@ from horde.logger import logger
 
 BRIDGE_CAPABILITIES = {
     "AI Horde Worker reGen": {
+        9: {"flux"},
         8: {"layer_diffuse"},
         7: {"qr_code", "extra_texts", "workflow"},
         6: {"stable_cascade_2pass"},
@@ -163,6 +164,14 @@ BRIDGE_SAMPLERS = {  # TODO: Refactor along with schedulers
     },
 }
 
+LLM_VALIDATED_BACKENDS = {
+    "AI Horde Worker",
+    "AI Horde Worker~aphrodite~oai",
+    "AI Horde Worker~aphrodite~kai",
+    "KoboldCppEmbedWorker",
+    "TabbyAPI",
+}
+
 
 @logger.catch(reraise=True)
 def parse_bridge_agent(bridge_agent):
@@ -183,6 +192,7 @@ def parse_bridge_agent(bridge_agent):
 @logger.catch(reraise=True)
 def check_bridge_capability(capability, bridge_agent):
     bridge_name, bridge_version = parse_bridge_agent(bridge_agent)
+    # logger.debug([bridge_name, bridge_version])
     if bridge_name not in BRIDGE_CAPABILITIES:
         return False
     total_capabilities = set()
@@ -192,7 +202,14 @@ def check_bridge_capability(capability, bridge_agent):
         if checked_semver.compare(bridge_version) <= 0:
             total_capabilities.update(BRIDGE_CAPABILITIES[bridge_name][version])
     # logger.debug([total_capabilities, capability, capability in total_capabilities])
+    # logger.debug([bridge_name, BRIDGE_CAPABILITIES[bridge_name]])
     return capability in total_capabilities
+
+
+@logger.catch(reraise=True)
+def is_backed_validated(bridge_agent):
+    bridge_name, _ = parse_bridge_agent(bridge_agent)
+    return bridge_name in LLM_VALIDATED_BACKENDS
 
 
 @logger.catch(reraise=True)

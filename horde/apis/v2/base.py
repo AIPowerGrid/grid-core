@@ -18,13 +18,13 @@ from sqlalchemy.exc import IntegrityError, InvalidRequestError
 import horde.apis.limiter_api as lim
 import horde.classes.base.stats as stats
 from horde import exceptions as e
-from horde import horde_redis as hr
 from horde.apis.models.v2 import Models, Parsers
 from horde.argparser import args
 from horde.classes.base import settings
 from horde.classes.base.detection import Filter
 from horde.classes.base.news import News
-from horde.classes.base.team import Team, get_all_teams
+from horde.classes.base.style import StyleCollection
+from horde.classes.base.team import Team, find_team_by_id, get_all_teams
 from horde.classes.base.user import User, UserSharedKey
 from horde.classes.base.waiting_prompt import WaitingPrompt
 from horde.classes.base.worker import Worker
@@ -33,6 +33,7 @@ from horde.countermeasures import CounterMeasures
 from horde.database import functions as database
 from horde.detection import prompt_checker
 from horde.flask import HORDE, cache, db
+from horde.horde_redis import horde_redis as hr
 from horde.image import ensure_source_image_uploaded
 from horde.limiter import limiter
 from horde.logger import logger
@@ -40,7 +41,7 @@ from horde.metrics import waitress_metrics
 from horde.patreon import patrons
 from horde.r2 import upload_prompt
 from horde.suspicions import Suspicions
-from horde.utils import hash_api_key, hash_dictionary, is_profane, sanitize_string
+from horde.utils import ensure_clean, hash_api_key, hash_dictionary, is_profane, sanitize_string
 from horde.vars import horde_contact_email, horde_title, horde_url
 
 # Not used yet
@@ -122,6 +123,7 @@ class GenerateTemplate(Resource):
         # It causes them to be a shared object from the parsers class
         self.params = {}
         self.warnings = set()
+        self.style_kudos = False
         if self.args.params:
             self.params = self.args.params
         self.models = []
@@ -256,40 +258,40 @@ class GenerateTemplate(Resource):
             if ip_timeout:
                 raise e.TimeoutIP(self.user_ip, ip_timeout)
             # logger.warning(datetime.utcnow())
-            prompt_suspicion, _ = prompt_checker(self.args.prompt)
+            prompt_suspicion, _ = prompt_checker(self.prompt)
             # logger.warning(datetime.utcnow())
             prompt_replaced = False
             if prompt_suspicion >= 2 and self.gentype != "text":
                 # if replacement filter mode is enabled AND prompt is short enough, do that instead
                 if self.args.replacement_filter or self.user.education:
-                    if not prompt_checker.check_prompt_replacement_length(self.args.prompt):
+                    if not prompt_checker.check_prompt_replacement_length(self.prompt):
                         raise e.BadRequest("Prompt has to be below 7000 chars when replacement filter is on")
-                    self.args.prompt = prompt_checker.apply_replacement_filter(self.args.prompt)
+                    self.prompt = prompt_checker.apply_replacement_filter(self.prompt)
                     # If it returns None, it means it replaced everything with an empty string
-                    if self.args.prompt is not None:
+                    if self.prompt is not None:
                         prompt_replaced = True
                 if not prompt_replaced:
                     # Moderators do not get ip blocked to allow for experiments
                     if not self.user.moderator:
                         prompt_dict = {
-                            "prompt": self.args.prompt,
+                            "prompt": self.prompt,
                             "user": self.username,
                             "type": "regex",
                         }
                         upload_prompt(prompt_dict)
                         self.user.report_suspicion(1, Suspicions.CORRUPT_PROMPT)
                         CounterMeasures.report_suspicion(self.user_ip)
-                    raise e.CorruptPrompt(self.username, self.user_ip, self.args.prompt)
-            if_nsfw_model = prompt_checker.check_nsfw_model_block(self.args.prompt, self.models)
+                    raise e.CorruptPrompt(self.username, self.user_ip, self.prompt)
+            if_nsfw_model = prompt_checker.check_nsfw_model_block(self.prompt, self.models)
             if if_nsfw_model or self.user.flagged:
                 # For NSFW models and flagged users, we always do replacements
                 # This is to avoid someone using the NSFW models to figure out the regex since they don't have an IP timeout
-                self.args.prompt = prompt_checker.nsfw_model_prompt_replace(
-                    self.args.prompt,
+                self.prompt = prompt_checker.nsfw_model_prompt_replace(
+                    self.prompt,
                     self.models,
                     already_replaced=prompt_replaced,
                 )
-                if self.args.prompt is None:
+                if self.prompt is None:
                     prompt_replaced = False
                 elif prompt_replaced is False:
                     prompt_replaced = True
@@ -301,16 +303,16 @@ class GenerateTemplate(Resource):
                     )
                     if self.user.flagged and not if_nsfw_model:
                         msg = "To prevent generation of unethical images, we cannot allow this prompt."
-                    raise e.CorruptPrompt(self.username, self.user_ip, self.args.prompt, message=msg)
+                    raise e.CorruptPrompt(self.username, self.user_ip, self.prompt, message=msg)
             # Disabling as this is handled by the worker-csam-filter now
             # If I re-enable it, also make it use the prompt replacement
             # if not prompt_replaced:
-            #     csam_trigger_check = prompt_checker.check_csam_triggers(self.args.prompt)
+            #     csam_trigger_check = prompt_checker.check_csam_triggers(self.prompt)
             #     if csam_trigger_check is not False and self.gentype != "text":
             #         raise e.CorruptPrompt(
             #             self.username,
             #             self.user_ip,
-            #             self.args.prompt,
+            #             self.prompt,
             #             message = (f"The trigger '{csam_trigger_check}' has been detected to generate "
             #                       "unethical images on its own and as such has had to be prevented from use. "
             #                        "Thank you for understanding.")
@@ -332,6 +334,7 @@ class GenerateTemplate(Resource):
             nsfw=self.args.nsfw,
             censor_nsfw=self.args.censor_nsfw,
             trusted_workers=self.args.trusted_workers,
+            validated_backends=self.args.validated_backends,
             worker_blacklist=self.args.worker_blacklist,
             ipaddr=self.user_ip,
             sharedkey_id=self.args.apikey if self.sharedkey else None,
@@ -347,7 +350,11 @@ class GenerateTemplate(Resource):
                     _,
                     _,
                 ) = ensure_source_image_uploaded(eimg["image"], f"{self.wp.id}_exra_src_{iiter}", force_r2=True)
-        self.wp.activate(self.downgrade_wp_priority, extra_source_images=self.args.extra_source_images)
+        self.wp.activate(
+            self.downgrade_wp_priority,
+            extra_source_images=self.args.extra_source_images,
+            kudos_adjustment=2 if self.style_kudos is True else 0,
+        )
 
 
 class SyncGenerate(GenerateTemplate):
@@ -455,7 +462,6 @@ class JobPopTemplate(Resource):
                     # as they're typically countermeasures to raids
                     if skipped_reason != "secret":
                         self.skipped[skipped_reason] = self.skipped.get(skipped_reason, 0) + 1
-                    # logger.warning(datetime.utcnow())
 
                     continue
                 # There is a chance that by the time we finished all the checks, another worker picked up the WP.
@@ -476,7 +482,7 @@ class JobPopTemplate(Resource):
         # We report maintenance exception only if we couldn't find any jobs
         if self.worker.maintenance:
             raise e.WorkerMaintenance(self.worker.maintenance_msg)
-        # logger.warning(datetime.utcnow())
+        # logger.debug(self.skipped)
         return {"id": None, "ids": [], "skipped": self.skipped}, 200
 
     def get_sorted_wp(self, priority_user_ids=None):
@@ -768,6 +774,15 @@ class Workers(Resource):
         location="args",
     )
 
+    get_parser.add_argument(
+        "name",
+        required=False,
+        default=None,
+        type=str,
+        help="Find a worker by name (case insensitive).",
+        location="args",
+    )
+
     @api.expect(get_parser)
     @logger.catch(reraise=True)
     # @cache.cached(timeout=10, query_string=True)
@@ -813,12 +828,83 @@ class Workers(Resource):
         return workers_ret
 
     def parse_worker_by_query(self, workers_list):
-        if not self.args.type:
-            return workers_list
-        return [w for w in workers_list if w["type"] == self.args.type]
+        if self.args.name:
+            return [w for w in workers_list if w["name"].lower() == self.args.name.lower()]
+        if self.args.type:
+            return [w for w in workers_list if w["type"] == self.args.type]
+        return workers_list
 
 
-class WorkerSingle(Resource):
+class WorkerSingleBase(Resource):
+
+    def get_worker_by_id(self, worker_id):
+        cache_exists = True
+        details_privilege = 0
+        if self.args.apikey:
+            admin = database.find_user_by_api_key(self.args["apikey"])
+            if admin and admin.moderator:
+                details_privilege = 2
+        if not hr.horde_r:
+            cache_exists = False
+        if details_privilege > 0:
+            cache_name = f"cached_worker_{worker_id}_privileged"
+            cached_worker = hr.horde_r_get(cache_name)
+        else:
+            cache_name = f"cached_worker_{worker_id}"
+        cached_worker = hr.horde_r_get(cache_name)
+        if cache_exists and cached_worker:
+            worker_details = json.loads(cached_worker)
+        else:
+            worker = database.find_worker_by_id(worker_id)
+            if not worker:
+                raise e.WorkerNotFound(worker_id)
+            worker_details = worker.get_details(details_privilege)
+            hr.horde_r_setex_json(cache_name, timedelta(seconds=30), worker_details)
+        return worker_details
+
+
+class WorkerSingleName(WorkerSingleBase):
+    get_parser = reqparse.RequestParser()
+    get_parser.add_argument(
+        "apikey",
+        type=str,
+        required=False,
+        help="The Moderator or Owner API key.",
+        location="headers",
+    )
+    get_parser.add_argument(
+        "Client-Agent",
+        default="unknown:0:unknown",
+        type=str,
+        required=False,
+        help="The client name and version.",
+        location="headers",
+    )
+
+    @api.expect(get_parser)
+    # @cache.cached(timeout=10)
+    @api.marshal_with(
+        models.response_model_worker_details,
+        code=200,
+        description="Worker Details",
+        skip_none=True,
+    )
+    @api.response(401, "Invalid API Key", models.response_model_error)
+    @api.response(403, "Access Denied", models.response_model_error)
+    @api.response(404, "Worker Not Found", models.response_model_error)
+    def get(self, worker_name=""):
+        """Details of a registered worker
+        Can retrieve the details of a worker even if inactive
+        (A worker is considered inactive if it has not checked in for 5 minutes)
+        """
+        self.args = self.get_parser.parse_args()
+        worker = database.find_worker_id_by_name(worker_name)
+        if not worker:
+            raise e.WorkerNotFound(worker_name)
+        return self.get_worker_by_id(str(worker.id)), 200
+
+
+class WorkerSingle(WorkerSingleBase):
     get_parser = reqparse.RequestParser()
     get_parser.add_argument(
         "apikey",
@@ -852,30 +938,8 @@ class WorkerSingle(Resource):
         Can retrieve the details of a worker even if inactive
         (A worker is considered inactive if it has not checked in for 5 minutes)
         """
-        cache_exists = True
-        details_privilege = 0
         self.args = self.get_parser.parse_args()
-        if self.args.apikey:
-            admin = database.find_user_by_api_key(self.args["apikey"])
-            if admin and admin.moderator:
-                details_privilege = 2
-        if not hr.horde_r:
-            cache_exists = False
-        if details_privilege > 0:
-            cache_name = f"cached_worker_{worker_id}_privileged"
-            cached_worker = hr.horde_r_get(cache_name)
-        else:
-            cache_name = f"cached_worker_{worker_id}"
-        cached_worker = hr.horde_r_get(cache_name)
-        if cache_exists and cached_worker:
-            worker_details = json.loads(cached_worker)
-        else:
-            worker = database.find_worker_by_id(worker_id)
-            if not worker:
-                raise e.WorkerNotFound(worker_id)
-            worker_details = worker.get_details(details_privilege)
-            hr.horde_r_setex_json(cache_name, timedelta(seconds=30), worker_details)
-        return worker_details, 200
+        return self.get_worker_by_id(worker_id), 200
 
     put_parser = reqparse.RequestParser()
     put_parser.add_argument(
@@ -1014,7 +1078,7 @@ class WorkerSingle(Resource):
                 worker.set_team(None)
                 ret_dict["team"] = "None"
             else:
-                team = database.find_team_by_id(self.args.team)
+                team = find_team_by_id(self.args.team)
                 if not team:
                     raise e.TeamNotFound(self.args.team)
                 ret = worker.set_team(team)
@@ -1535,7 +1599,7 @@ class FindUser(Resource):
                     skname = f": {sk.name}"
                 user_details["username"] = user_details["username"] + f" (Shared Key{skname})"
             if hr.horde_r:
-                hr.horde_r_setex_json(cache_name, timedelta(seconds=300), user_details)
+                hr.horde_r_setex_json(cache_name, timedelta(seconds=30), user_details)
         return (user_details, 200)
 
 
@@ -1945,7 +2009,7 @@ class TeamSingle(Resource):
     @api.response(404, "Team Not Found", models.response_model_error)
     def get(self, team_id=""):
         """Details of a worker Team"""
-        team = database.find_team_by_id(team_id)
+        team = find_team_by_id(team_id)
         if not team:
             raise e.TeamNotFound(team_id)
         details_privilege = 0
@@ -1993,7 +2057,7 @@ class TeamSingle(Resource):
     @api.response(404, "Team Not Found", models.response_model_error)
     def patch(self, team_id=""):
         """Update a Team's information"""
-        team = database.find_team_by_id(team_id)
+        team = find_team_by_id(team_id)
         if not team:
             raise e.TeamNotFound(team_id)
         self.args = self.patch_parser.parse_args()
@@ -2049,7 +2113,7 @@ class TeamSingle(Resource):
         Only the team's creator or a horde moderator can use this endpoint.
         This action is unrecoverable!
         """
-        team = database.find_team_by_id(team_id)
+        team = find_team_by_id(team_id)
         if not team:
             raise e.TeamNotFound(team_id)
         self.args = self.delete_parser.parse_args()
@@ -3080,6 +3144,163 @@ class AutoWorkerType(Resource):
         help="A User API key.",
         location="headers",
     )
+
+## Styles
+
+
+class StyleTemplate(Resource):
+    gentype = "template"
+    args = None
+
+    def get(self):
+        if self.args.sort not in ["popular", "age"]:
+            raise e.BadRequest("'model_state' needs to be one of ['popular', 'age']")
+        styles_ret = database.retrieve_available_styles(
+            style_type=self.gentype,
+            sort=self.args.sort,
+            page=self.args.page - 1,
+            tag=self.args.tag,
+            model=self.args.model,
+        )
+        styles_ret = [st.get_details() for st in styles_ret]
+        return styles_ret, 200
+
+    def post(self):
+        # I have to extract and store them this way, because if I use the defaults
+        # It causes them to be a shared object from the parsers class
+        self.params = {}
+        self.warnings = set()
+        if self.args.params:
+            self.params = self.args.params
+        # For styles, we just store the models in the params
+        self.models = []
+        if self.args.models:
+            self.params["models"] = self.args.models.copy()
+        self.user = None
+        self.validate()
+        return
+
+    def validate(self):
+        pass
+
+
+class SingleStyleTemplateGet(Resource):
+    gentype = "template"
+
+    def get_existing_style(self):
+        if self.existing_style.style_type != self.gentype:
+            raise e.BadRequest(
+                f"Style was found but was of the wrong type: {self.existing_style.style_type} != {self.gentype}",
+                "StyleGetMistmatch",
+            )
+        return self.existing_style.get_details()
+
+    def get_through_id(self, style_id):
+        self.existing_style = database.get_style_by_uuid(style_id, is_collection=False)
+        if not self.existing_style:
+            raise e.ThingNotFound(f"{self.gentype} Style", style_id)
+        return self.get_existing_style()
+
+
+class SingleStyleTemplate(SingleStyleTemplateGet):
+
+    def patch(self, style_id):
+        self.params = {}
+        self.warnings = set()
+        self.args = parsers.style_parser.parse_args()
+        if self.args.params:
+            self.params = self.args.params
+        # For styles, we just store the models in the params
+        self.models = []
+        style_modified = False
+        self.tags = []
+        if self.args.tags:
+            self.tags = self.args.tags.copy()
+            if len(self.tags) > 10:
+                raise e.BadRequest("A style can be tagged a maximum of 10 times.")
+        self.user = database.find_user_by_api_key(self.args["apikey"])
+        if not self.user:
+            raise e.InvalidAPIKey("Style PATCH")
+        self.existing_style = database.get_style_by_uuid(style_id, is_collection=False)
+        if not self.existing_style:
+            raise e.ThingNotFound("Style", style_id)
+        if self.existing_style.user_id != self.user.id:
+            raise e.Forbidden(f"This Style is not owned by user {self.user.get_unique_alias()}")
+        if self.args.models:
+            self.models = self.args.models.copy()
+            if len(self.models) > 5:
+                raise e.BadRequest("A style can only use a maximum of 5 models.")
+            if len(self.models) < 1:
+                raise e.BadRequest("A style has to specify at least one model.")
+        else:
+            self.models = self.existing_style.get_model_names()
+        self.style_name = None
+        if self.args.name:
+            self.style_name = ensure_clean(self.args.name, "style name")
+            style_modified = True
+        self.validate()
+        self.existing_style.name = self.style_name
+        if self.args.info is not None:
+            self.existing_style.info = ensure_clean(self.args.info, "style info")
+            style_modified = True
+        if self.args.public is not None:
+            self.existing_style.public = self.args.public
+            style_modified = True
+        if self.args.nsfw is not None:
+            self.existing_style.nsfw = self.args.nsfw
+            style_modified = True
+        if self.args.prompt is not None:
+            self.existing_style.prompt = self.args.prompt
+            style_modified = True
+        if self.args.params is not None:
+            self.existing_style.params = self.args.params
+            style_modified = True
+        if len(self.models) > 0:
+            style_modified = True
+        if len(self.tags) > 0:
+            style_modified = True
+        if not style_modified:
+            return {
+                "id": self.existing_style.id,
+                "message": "OK",
+            }, 200
+        db.session.commit()
+        self.existing_style.set_models(self.models)
+        self.existing_style.set_tags(self.tags)
+        return {
+            "id": self.existing_style.id,
+            "message": "OK",
+            "warnings": self.warnings,
+        }, 200
+
+    def validate(self):
+        pass
+
+    def delete(self, style_id):
+        self.args = parsers.apikey_parser.parse_args()
+        self.user = database.find_user_by_api_key(self.args["apikey"])
+        if not self.user:
+            raise e.InvalidAPIKey("Style DELETE")
+        if self.user.is_anon():
+            raise e.Forbidden("Anonymous users cannot delete styles", rc="StylesAnonForbidden")
+        self.existing_style = database.get_style_by_uuid(style_id, is_collection=False)
+        if not self.existing_style:
+            raise e.ThingNotFound("Style", style_id)
+        if self.existing_style.user_id != self.user.id and not self.user.moderator:
+            raise e.Forbidden(f"This Style is not owned by user {self.user.get_unique_alias()}")
+        if self.existing_style.user_id != self.user.id and self.user.moderator:
+            logger.info(f"Moderator {self.user.moderator} deleted style {self.existing_style.id}")
+        self.existing_style.delete()
+        return ({"message": "OK"}, 200)
+
+
+## Collections
+
+
+class Collection(Resource):
+    args = None
+
+    get_parser = reqparse.RequestParser()
     get_parser.add_argument(
         "Client-Agent",
         default="unknown:0:unknown",
@@ -3123,3 +3344,338 @@ class AutoWorkerType(Resource):
             return {"recommended_worker_type": "text"}, 200
         else:
             return {"recommended_worker_type": "image"}, 200
+    get_parser.add_argument(
+        "sort",
+        required=False,
+        default="popular",
+        type=str,
+        help="How to sort returned styles. 'popular' sorts by usage and 'age' sorts by date added.",
+        location="args",
+    )
+    get_parser.add_argument(
+        "page",
+        required=False,
+        default=1,
+        type=int,
+        help="Which page of results to return. Each page has 25 styles.",
+        location="args",
+    )
+    get_parser.add_argument(
+        "type",
+        required=False,
+        default="all",
+        type=str,
+        help="Filter by type. Accepts either 'image', 'text' or 'all'.",
+        location="args",
+    )
+
+    @cache.cached(timeout=30, query_string=True)
+    @api.expect(get_parser)
+    @api.marshal_with(
+        models.response_model_collection,
+        code=200,
+        description="Lists collection information",
+        as_list=True,
+    )
+    def get(self):
+        """Displays all existing collections. Can filter by type"""
+        self.args = self.get_parser.parse_args()
+        if self.args.sort not in ["popular", "age"]:
+            raise e.BadRequest("'model_state' needs to be one of ['popular', 'age']")
+        if self.args.type not in ["all", "image", "text"]:
+            raise e.BadRequest("'type' needs to be one of ['all', 'image', 'text']")
+        collections = database.retrieve_available_collections(
+            sort=self.args.sort,
+            page=self.args.page - 1,
+            collection_type=self.args.type if self.args.type in ["image", "text"] else None,
+        )
+        collections_ret = [co.get_details() for co in collections]
+        return collections_ret, 200
+
+    post_parser = reqparse.RequestParser()
+    post_parser.add_argument(
+        "apikey",
+        type=str,
+        required=True,
+        help="The API Key corresponding to a registered user.",
+        location="headers",
+    )
+    post_parser.add_argument(
+        "Client-Agent",
+        default="unknown:0:unknown",
+        type=str,
+        required=False,
+        help="The client name and version",
+        location="headers",
+    )
+    post_parser.add_argument(
+        "name",
+        type=str,
+        required=True,
+        location="json",
+    )
+    post_parser.add_argument(
+        "info",
+        type=str,
+        required=False,
+        location="json",
+    )
+    post_parser.add_argument(
+        "public",
+        type=bool,
+        default=True,
+        required=False,
+        location="json",
+    )
+    post_parser.add_argument(
+        "styles",
+        type=list,
+        required=True,
+        location="json",
+    )
+
+    decorators = [
+        limiter.limit(
+            limit_value=lim.get_request_90min_limit_per_ip,
+            key_func=lim.get_request_path,
+        ),
+        limiter.limit(limit_value=lim.get_request_2sec_limit_per_ip, key_func=lim.get_request_path),
+    ]
+
+    @api.expect(post_parser, models.input_model_collection, validate=True)
+    @api.marshal_with(
+        models.response_model_styles_post,
+        code=200,
+        description="Collection Added",
+        skip_none=True,
+    )
+    @api.response(400, "Validation Error", models.response_model_validation_errors)
+    @api.response(401, "Invalid API Key", models.response_model_error)
+    def post(self):
+        """Creates a new style collection."""
+        self.warnings = set()
+        # For styles, we just store the models in the params
+        self.styles = []
+        styles_type = None
+        self.args = self.post_parser.parse_args()
+        if self.args.styles:
+            if len(self.args.styles) < 1:
+                raise e.BadRequest("A collection has to include at least 1 style")
+        else:
+            raise e.BadRequest("A collection has to include at least 1 style")
+        self.user = database.find_user_by_api_key(self.args["apikey"])
+        if not self.user:
+            raise e.InvalidAPIKey("Collection POST")
+        if self.user.is_anon():
+            raise e.Forbidden("Anonymous users cannot create collections", rc="StylesAnonForbidden")
+        for st in self.args.styles:
+            existing_style = database.get_style_by_uuid(st, is_collection=False)
+            if not existing_style:
+                existing_style = database.get_style_by_name(st, is_collection=False)
+                if not existing_style:
+                    raise e.BadRequest(f"A style with name '{st}' cannot be found")
+                if styles_type is None:
+                    styles_type = existing_style.style_type
+                elif styles_type != existing_style.style_type:
+                    raise e.BadRequest("Cannot mix image and text styles in the same collection")
+            self.styles.append(existing_style)
+        self.collection_name = ensure_clean(self.args.name, "collection name")
+        new_collection = StyleCollection(
+            user_id=self.user.id,
+            style_type=styles_type,
+            info=ensure_clean(self.args.info, "collection info") if self.args.info is not None else "",
+            name=self.collection_name,
+            public=self.args.public,
+        )
+        new_collection.create(self.styles)
+        return {
+            "id": new_collection.id,
+            "message": "OK",
+            "warnings": self.warnings,
+        }, 200
+
+
+class SingleCollectionGet(Resource):
+
+    def get_through_id(self, style_id):
+        self.existing_collection = database.get_style_by_uuid(style_id, is_collection=True)
+        if not self.existing_collection:
+            raise e.ThingNotFound("Collection", style_id)
+        return self.existing_collection.get_details()
+
+
+class SingleCollection(SingleCollectionGet):
+    args = None
+
+    @cache.cached(timeout=30, query_string=True)
+    @api.expect(parsers.basic_parser)
+    @api.marshal_with(
+        models.response_model_collection,
+        code=200,
+        description="Lists collection information",
+        as_list=False,
+    )
+    def get(self, collection_id):
+        """Displays information about a single style collection."""
+        return super().get_through_id(collection_id)
+
+    patch_parser = reqparse.RequestParser()
+    patch_parser.add_argument(
+        "apikey",
+        type=str,
+        required=True,
+        help="The API Key corresponding to a registered user.",
+        location="headers",
+    )
+    patch_parser.add_argument(
+        "Client-Agent",
+        default="unknown:0:unknown",
+        type=str,
+        required=False,
+        help="The client name and version",
+        location="headers",
+    )
+    patch_parser.add_argument(
+        "name",
+        type=str,
+        required=False,
+        location="json",
+    )
+    patch_parser.add_argument(
+        "info",
+        type=str,
+        required=False,
+        location="json",
+    )
+    patch_parser.add_argument(
+        "public",
+        type=bool,
+        required=False,
+        location="json",
+    )
+    patch_parser.add_argument(
+        "styles",
+        type=list,
+        required=False,
+        location="json",
+    )
+
+    decorators = [
+        limiter.limit(
+            limit_value=lim.get_request_90min_limit_per_ip,
+            key_func=lim.get_request_path,
+        ),
+        limiter.limit(limit_value=lim.get_request_2sec_limit_per_ip, key_func=lim.get_request_path),
+    ]
+
+    @api.expect(patch_parser, models.input_model_collection, validate=True)
+    @api.marshal_with(
+        models.response_model_styles_post,
+        code=200,
+        description="Collection Modified",
+        skip_none=True,
+    )
+    @api.response(400, "Validation Error", models.response_model_validation_errors)
+    @api.response(401, "Invalid API Key", models.response_model_error)
+    def patch(self, collection_id):
+        """Modifies an existing style collection."""
+        self.warnings = set()
+        # For styles, we just store the models in the params
+        self.styles = []
+        styles_type = None
+        self.args = self.patch_parser.parse_args()
+        if self.args.styles:
+            if len(self.args.styles) < 1:
+                raise e.BadRequest("A collection has to include at least 1 style")
+            for st in self.args.styles:
+                existing_style = database.get_style_by_uuid(st, is_collection=False)
+                if not existing_style:
+                    existing_style = database.get_style_by_name(st, is_collection=False)
+                    if not existing_style:
+                        raise e.BadRequest(f"A style with name '{st}' cannot be found")
+                    if styles_type is None:
+                        styles_type = existing_style.style_type
+                    elif styles_type != existing_style.style_type:
+                        raise e.BadRequest("Cannot mix image and text styles in the same collection", "StyleMismatch")
+                self.styles.append(existing_style)
+        self.user = database.find_user_by_api_key(self.args["apikey"])
+        if not self.user:
+            raise e.InvalidAPIKey("Collection PATCH")
+        self.existing_collection = database.get_style_by_uuid(collection_id, is_collection=True)
+        if not self.existing_collection:
+            raise e.ThingNotFound("Collection", collection_id)
+        if self.existing_collection.user_id != self.user.id:
+            raise e.Forbidden(f"This Collection is not owned by user {self.user.get_unique_alias()}")
+        if self.existing_collection.style_type != styles_type:
+            raise e.BadRequest("Cannot mix image and text styles in the same collection", "StyleMismatch")
+        collection_modified = False
+        if self.args.name:
+            self.existing_collection.name = ensure_clean(self.args.name, "collection name")
+            collection_modified = True
+        if self.args.info is not None:
+            self.existing_collection.info = ensure_clean(self.args.info, "style info")
+            collection_modified = True
+        if self.args.public is not None:
+            self.existing_collection.public = self.args.public
+            collection_modified = True
+        if len(self.styles) > 0:
+            self.existing_collection.styles.clear()
+            for st in self.styles:
+                self.existing_collection.styles.append(st)
+            collection_modified = True
+        if not collection_modified:
+            return {
+                "id": self.existing_collection.id,
+                "message": "OK",
+            }, 200
+        db.session.commit()
+        return {
+            "id": self.existing_collection.id,
+            "message": "OK",
+            "warnings": self.warnings,
+        }, 200
+
+    @api.expect(parsers.apikey_parser)
+    @api.marshal_with(
+        models.response_model_simple_response,
+        code=200,
+        description="Operation Completed",
+        skip_none=True,
+    )
+    @api.response(400, "Validation Error", models.response_model_validation_errors)
+    @api.response(401, "Invalid API Key", models.response_model_error)
+    def delete(self, collection_id):
+        """Deletes a style collection."""
+        self.args = parsers.apikey_parser.parse_args()
+        self.user = database.find_user_by_api_key(self.args["apikey"])
+        if not self.user:
+            raise e.InvalidAPIKey("Collection PATCH")
+        self.existing_collection = database.get_style_by_uuid(collection_id, is_collection=True)
+        if not self.existing_collection:
+            raise e.ThingNotFound("Collection", collection_id)
+        if self.existing_collection.user_id != self.user.id and not self.user.moderator:
+            raise e.Forbidden(f"This Collection is not owned by user {self.user.get_unique_alias()}")
+        if self.existing_collection.user_id != self.user.id and self.user.moderator:
+            logger.info(f"Moderator {self.user.moderator} deleted collection {self.existing_collection.id}")
+        self.existing_collection.delete()
+        return ({"message": "OK"}, 200)
+
+
+class SingleCollectionByName(SingleCollectionGet):
+    @cache.cached(timeout=30)
+    @api.expect(parsers.basic_parser)
+    @api.marshal_with(
+        models.response_model_collection,
+        code=200,
+        description="Lists collection information by name",
+        as_list=False,
+    )
+    def get(self, collection_name):
+        """Seeks an style collection by name and displays its information."""
+        self.existing_collection = database.get_style_by_name(collection_name)
+        if not self.existing_collection:
+            raise e.ThingNotFound("Collection", collection_name)
+        return self.existing_collection.get_details()
+
+
+# TODO: vote and transfer kudos on vote
