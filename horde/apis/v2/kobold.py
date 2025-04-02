@@ -2,14 +2,24 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import copy
+import random
+from collections import defaultdict
+
 from flask import request
 from flask_restx import Resource, reqparse
 
 import horde.apis.limiter_api as lim
 from horde import exceptions as e
 from horde.apis.models.kobold_v2 import TextModels, TextParsers
-from horde.apis.v2.base import GenerateTemplate, JobPopTemplate, JobSubmitTemplate, api
+from horde.apis.v2.base import (
+    GenerateTemplate,
+    JobPopTemplate,
+    JobSubmitTemplate,
+    api,
+)
 from horde.classes.base import settings
+from horde.classes.base.style import StyleCollection
 from horde.classes.kobold.genstats import (
     get_compiled_textgen_stats_models,
     get_compiled_textgen_stats_totals,
@@ -23,6 +33,7 @@ from horde.limiter import limiter
 from horde.logger import logger
 from horde.model_reference import model_reference
 from horde.utils import hash_dictionary
+from horde.validation import ParamValidator
 from horde.vars import horde_title
 
 models = TextModels(api)
@@ -64,10 +75,11 @@ class TextAsyncGenerate(GenerateTemplate):
         self.args = parsers.generate_parser.parse_args()
         try:
             super().post()
-        except KeyError:
+        except KeyError as e:
             logger.error("caught missing Key.")
             logger.error(self.args)
             logger.error(self.args.params)
+            raise e
             return {"message": "Internal Server Error"}, 500
         if self.args.dry_run:
             ret_dict = {"kudos": round(self.kudos)}
@@ -84,17 +96,18 @@ class TextAsyncGenerate(GenerateTemplate):
         self.wp = TextWaitingPrompt(
             worker_ids=self.workers,
             models=self.models,
-            prompt=self.args.prompt,
+            prompt=self.prompt,
             user_id=self.user.id,
             params=self.params,
             softprompt=self.args.softprompt,
             trusted_workers=self.args.trusted_workers,
+            validated_backends=self.args.validated_backends,
             worker_blacklist=self.args.worker_blacklist,
             slow_workers=self.args.slow_workers,
             ipaddr=self.user_ip,
             safe_ip=True,
             client_agent=self.args["Client-Agent"],
-            sharedkey_id=self.args.apikey if self.sharedkey else None,
+            sharedkey_id=self.sharedkey.id if self.sharedkey else None,
             proxied_account=self.args["proxied_account"],
             webhook=self.args.webhook,
         )
@@ -142,8 +155,11 @@ class TextAsyncGenerate(GenerateTemplate):
                 text_tokens=self.wp.max_length,
             )
             if not is_in_limit:
-                self.wp.delete()
-                raise e.BadRequest(fail_message)
+                # If we are using the shared key assigned to a style, then we bypass the shared key requirements
+                # since its owner explicitly allowed to be used with a style exceeding them
+                if not (self.existing_style and self.existing_style.sharedkey and self.existing_style.sharedkey.id == self.sharedkey.id):
+                    self.wp.delete()
+                    raise e.BadRequest(fail_message)
 
     def get_size_too_big_message(self):
         return (
@@ -152,25 +168,14 @@ class TextAsyncGenerate(GenerateTemplate):
         )
 
     def validate(self):
+        self.prompt = self.args.prompt
+        self.apikey = self.args.apikey
+        self.apply_style()
         super().validate()
-        if self.params.get("max_context_length", 1024) < self.params.get("max_length", 80):
-            raise e.BadRequest("You cannot request more tokens than your context length.", rc="TokenOverflow")
-        if "sampler_order" in self.params and len(set(self.params["sampler_order"])) < 7:
-            raise e.BadRequest(
-                "When sending a custom sampler order, you need to specify all possible samplers in the order",
-                rc="MissingFullSamplerOrder",
-            )
+        param_validator = ParamValidator(self.prompt, self.args.models, self.params, self.user)
+        self.warnings = param_validator.validate_text_params()
         if self.args.extra_source_images is not None and len(self.args.extra_source_images) > 0:
             raise e.BadRequest("This request type does not accept extra source images.", rc="InvalidExtraSourceImages.")
-        if "stop_sequence" in self.params:
-            stop_seqs = set(self.params["stop_sequence"])
-            if len(stop_seqs) > 128:
-                raise e.BadRequest("Too many stop sequences specified (max allowed is 128).", rc="TooManyStopSequences")
-            total_stop_seq_len = 0
-            for seq in stop_seqs:
-                total_stop_seq_len += len(seq)
-            if total_stop_seq_len > 2000:
-                raise e.BadRequest("Your total stop sequence length exceeds the allowed limit (2000 chars).", rc="ExcessiveStopSequence")
 
     def get_hashed_params_dict(self):
         gen_payload = self.params.copy()
@@ -180,6 +185,33 @@ class TextAsyncGenerate(GenerateTemplate):
         params_hash = hash_dictionary(gen_payload)
         # logger.debug([params_hash,gen_payload])
         return params_hash
+
+    def apply_style(self):
+        if self.args.style is None:
+            return
+        # The super() ensures the common parts of applying a style
+        super().apply_style()
+        if self.existing_style.style_type != "text":
+            raise e.BadRequest("Image styles cannot be used on image requests", "StyleMismatch")
+        if isinstance(self.existing_style, StyleCollection):
+            colstyles = self.existing_style.styles
+            random.shuffle(colstyles)
+            self.existing_style.use_count += 1
+            self.existing_style = colstyles[0]
+        self.models = self.existing_style.get_model_names()
+        # We need to use defaultdict to avoid getting keyerrors in case the style author added
+        # Erroneous keys in the string
+        self.prompt = self.existing_style.prompt.format_map(defaultdict(str, p=self.prompt))
+        requested_n = self.params.get("n", 1)
+        self.params = copy.deepcopy(self.existing_style.params)
+        self.params["n"] = requested_n
+        self.nsfw = self.existing_style.nsfw
+        self.existing_style.use_count += 1
+        if self.existing_style.user != self.user:
+            self.existing_style.user.record_style(2, "text")
+            self.style_kudos = True
+        db.session.commit()
+        logger.debug(f"Style '{self.args.style}' applied.")
 
 
 class TextAsyncStatus(Resource):
@@ -311,7 +343,6 @@ class TextJobPop(JobPopTemplate):
             priority_user_ids=priority_user_ids,
             page=self.wp_page,
         )
-
         return sorted_wps
 
 

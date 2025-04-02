@@ -8,9 +8,12 @@ from datetime import timedelta
 from sqlalchemy.dialects.postgresql import UUID
 
 from horde import exceptions as e
-from horde import horde_redis as hr
+from horde.bridge_reference import (
+    is_backed_validated,
+)
 from horde.classes.base.worker import Worker
 from horde.flask import SQLITE_MODE, db
+from horde.horde_redis import horde_redis as hr
 from horde.logger import logger
 from horde.model_reference import model_reference
 from horde.utils import sanitize_string
@@ -37,7 +40,7 @@ class TextWorker(Worker):
     }
     # TODO: Switch to max_power
     max_length = db.Column(db.Integer, default=80, nullable=False)
-    max_context_length = db.Column(db.Integer, default=1024, nullable=False)
+    max_context_length = db.Column(db.Integer, default=2048, nullable=False)
 
     softprompts = db.relationship("TextWorkerSoftprompts", back_populates="worker", cascade="all, delete-orphan")
     wtype = "text"
@@ -46,7 +49,7 @@ class TextWorker(Worker):
         super().check_in(**kwargs)
         self.max_length = max_length
         self.max_context_length = max_context_length
-        self.set_softprompts(softprompts)
+        self.set_softprompts(softprompts)  # Does a commit as well
         paused_string = ""
         if self.paused:
             paused_string = "(Paused) "
@@ -54,6 +57,7 @@ class TextWorker(Worker):
             f"{paused_string}Text Worker {self.name} checked-in, offering models {self.models} "
             f"at {self.max_length} max tokens and {self.max_context_length} max content length.",
         )
+        db.session.commit()
 
     def refresh_softprompt_cache(self):
         softprompts_list = [s.softprompt for s in self.softprompts]
@@ -97,23 +101,25 @@ class TextWorker(Worker):
             ],
         )
         db.session.query(TextWorkerSoftprompts).filter_by(worker_id=self.id).delete()
-        db.session.commit()
+        db.session.flush()
         for softprompt_name in softprompts:
             softprompt = TextWorkerSoftprompts(worker_id=self.id, softprompt=softprompt_name)
             db.session.add(softprompt)
-        db.session.commit()
         self.refresh_softprompt_cache()
 
     def calculate_uptime_reward(self):
         model = self.get_model_names()[0]
         # The base amount of kudos one gets is based on the max context length they've loaded
-        base_kudos = 25 + (15 * min(self.max_context_length, 16384) / 1024)
+        base_kudos = 25 + (15 * min(self.max_context_length, 262_144) / 1024)
         if not model_reference.is_known_text_model(model):
             return base_kudos * 0.5
         # We consider the 7B models the baseline here
         param_multiplier = model_reference.get_text_model_multiplier(model) / 7
         if param_multiplier < 0.25:
             param_multiplier = 0.25
+        # Unvalidated backends get less kudos
+        if not is_backed_validated(self.bridge_agent):
+            base_kudos *= 0.3
         # The uptime is based on both how much context they provide, as well as how many parameters they're serving
         return round(base_kudos * param_multiplier, 2)
 
@@ -125,6 +131,8 @@ class TextWorker(Worker):
             return [False, "max_context_length"]
         if self.max_length < waiting_prompt.max_length:
             return [False, "max_length"]
+        if waiting_prompt.validated_backends and not is_backed_validated(self.bridge_agent):
+            return [False, "bridge_version"]
         matching_softprompt = True
         if waiting_prompt.softprompt:
             matching_softprompt = False

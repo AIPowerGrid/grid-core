@@ -13,16 +13,16 @@ from sqlalchemy import Boolean, and_, func, not_, or_
 from sqlalchemy.orm import noload
 
 import horde.classes.base.stats as stats
-from horde import horde_redis as hr
 from horde import vars as hv
 from horde.bridge_reference import (
     check_bridge_capability,
     get_supported_samplers,
 )
 from horde.classes.base.detection import Filter
+from horde.classes.base.style import Style, StyleCollection, StyleModel, StyleTag
 from horde.classes.base.user import KudosTransferLog, User, UserRecords, UserSharedKey
 from horde.classes.base.waiting_prompt import WPAllowedWorkers, WPModels
-from horde.classes.base.worker import WorkerModel, WorkerPerformance
+from horde.classes.base.worker import WorkerMessage, WorkerModel, WorkerPerformance
 from horde.classes.kobold.processing_generation import TextProcessingGeneration
 from horde.classes.kobold.waiting_prompt import TextWaitingPrompt
 from horde.classes.kobold.worker import TextWorker
@@ -34,6 +34,7 @@ from horde.classes.stable.worker import ImageWorker
 from horde.database.classes import FakeWPRow
 from horde.enums import State
 from horde.flask import SQLITE_MODE, db
+from horde.horde_redis import horde_redis as hr
 from horde.logger import logger
 from horde.model_reference import model_reference
 from horde.utils import hash_api_key, validate_regex
@@ -216,6 +217,13 @@ def find_sharedkey(shared_key):
 def find_worker_by_name(worker_name, worker_class=ImageWorker):
     worker = db.session.query(worker_class).filter_by(name=worker_name).first()
     return worker
+
+
+def find_worker_id_by_name(worker_name):
+    for worker_class in [ImageWorker, TextWorker, InterrogationWorker]:
+        worker_id = db.session.query(worker_class.id).filter_by(name=worker_name).first()
+        if worker_id:
+            return worker_id
 
 
 def worker_name_exists(worker_name):
@@ -465,13 +473,22 @@ def transfer_kudos(source_user, dest_user, amount):
 
 def transfer_kudos_to_username(source_user, dest_username, amount):
     dest_user = find_user_by_username(dest_username)
+    shared_key = None
     if not dest_user:
-        return [0, "Invalid target username.", "InvalidTargetUsername"]
+        shared_key = find_sharedkey(dest_username)
+        if not shared_key:
+            return [0, "Invalid target username.", "InvalidTargetUsername"]
+        if shared_key.is_expired():
+            return [0, "This shared key has expired", "SharedKeyExpired"]
+        dest_user = shared_key.user
     if dest_user == get_anon():
         return [0, "Tried to burn kudos via sending to Anonymous. Assuming PEBKAC and aborting.", "KudosTransferToAnon"]
     if dest_user == source_user:
         return [0, "Cannot send kudos to yourself, ya monkey!", "KudosTransferToSelf"]
     kudos = transfer_kudos(source_user, dest_user, amount)
+    if kudos[0] > 0 and shared_key is not None and shared_key.kudos != -1:
+        shared_key.kudos += kudos[0]
+        db.session.commit()
     return kudos
 
 
@@ -761,18 +778,17 @@ def count_things_for_specific_model(wp_class, procgen_class, model_name):
     return things, jobs
 
 
+@logger.catch(reraise=True)
 def get_sorted_wp_filtered_to_worker(worker, models_list=None, blacklist=None, priority_user_ids=None, page=0):
-    # This is just the top 25 - Adjusted method to send ImageWorker object. Filters to add.
+    # This is just the top 3 - Adjusted method to send ImageWorker object. Filters to add.
     # TODO: Filter by ImageWorker not in WP.tricked_worker
     # TODO: If any word in the prompt is in the WP.blacklist rows, then exclude it (L293 in base.worker.ImageWorker.gan_generate())
     PER_PAGE = 3  # how many requests we're picking up to filter further
     final_wp_list = (
         db.session.query(ImageWaitingPrompt)
         .options(noload(ImageWaitingPrompt.processing_gens))
-        .outerjoin(
-            WPModels,
-            WPAllowedWorkers,
-        )
+        .outerjoin(WPModels, ImageWaitingPrompt.id == WPModels.wp_id)
+        .outerjoin(WPAllowedWorkers, ImageWaitingPrompt.id == WPAllowedWorkers.wp_id)
         .filter(
             ImageWaitingPrompt.n > 0,
             ImageWaitingPrompt.active == True,  # noqa E712
@@ -839,6 +855,13 @@ def get_sorted_wp_filtered_to_worker(worker, models_list=None, blacklist=None, p
             or_(
                 worker.speed >= 500000,  # 0.5 MPS/s
                 ImageWaitingPrompt.slow_workers == True,  # noqa E712
+            ),
+            or_(
+                worker.extra_slow_worker is False,
+                and_(
+                    worker.extra_slow_worker is True,
+                    ImageWaitingPrompt.extra_slow_workers.is_(True),
+                ),
             ),
             or_(
                 not_(ImageWaitingPrompt.params.has_key("transparent")),
@@ -921,10 +944,8 @@ def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_us
     open_wp_list = (
         db.session.query(ImageWaitingPrompt)
         .options(noload(ImageWaitingPrompt.processing_gens))
-        .outerjoin(
-            WPModels,
-            WPAllowedWorkers,
-        )
+        .outerjoin(WPModels, ImageWaitingPrompt.id == WPModels.wp_id)
+        .outerjoin(WPAllowedWorkers, ImageWaitingPrompt.id == WPAllowedWorkers.wp_id)
         .filter(
             ImageWaitingPrompt.n > 0,
             ImageWaitingPrompt.active == True,  # noqa E712
@@ -1047,6 +1068,12 @@ def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_us
         ).count()
         if skipped_wps > 0:
             ret_dict["performance"] = skipped_wps
+    if worker.extra_slow_worker is True:
+        skipped_wps = open_wp_list.filter(
+            ImageWaitingPrompt.extra_slow_workers == False,  # noqa E712
+        ).count()
+        if skipped_wps > 0:
+            ret_dict["performance"] = ret_dict.get("performance", 0) + skipped_wps
     # Count skipped WPs requiring trusted workers
     if worker.user.trusted is False:
         skipped_wps = open_wp_list.filter(
@@ -1505,3 +1532,133 @@ def retrieve_regex_replacements(filter_type):
 def get_all_users(sort="kudos", offset=0):
     user_order_by = User.created.asc() if sort == "age" else User.kudos.desc()
     return db.session.query(User).order_by(user_order_by).offset(offset).limit(25).all()
+
+
+def get_style_by_uuid(style_uuid: str, is_collection=None):
+    try:
+        style_uuid = uuid.UUID(style_uuid)
+    except ValueError:
+        return None
+    if SQLITE_MODE:
+        style_uuid = str(style_uuid)
+    style = None
+    if is_collection is not True:
+        style = db.session.query(Style).filter_by(id=style_uuid).first()
+    if is_collection is True or not style:
+        collection = db.session.query(StyleCollection).filter_by(id=style_uuid).first()
+        return collection
+    else:
+        return style
+
+
+def get_style_by_name(style_name: str, is_collection=None):
+    """Goes through the styles and the categories and attempts to find a
+    style or category that matches the given name
+    The user can pre-specify a filter for category or style and/or username
+    by formatting the name like
+    category::db0#1::my_stylename
+    alternatively this format is also allowed to allow multiple users to use the same name
+    style::my_stylename
+    db0#1::my_stylename
+    """
+    style_split = style_name.split("::")
+    user = None
+    # We don't change the is_collection if it comes preset in kwargs, as we then want it explicitly to return none
+    # When searching for styles in collections and vice-versa
+    if len(style_split) == 3:
+        style_name = style_split[2]
+        if is_collection is None:
+            if style_split[0] == "collection":
+                is_collection = True
+            elif style_split[0] == "style":
+                is_collection = False
+        user = find_user_by_username(style_split[1])
+    if len(style_split) == 2:
+        style_name = style_split[1]
+        if style_split[0] == "collection":
+            if is_collection is None:
+                is_collection = True
+        elif style_split[0] == "style":
+            if is_collection is None:
+                is_collection = False
+        else:
+            user = find_user_by_username(style_split[0])
+    seek_classes = [Style, StyleCollection]
+    if is_collection is True:
+        seek_classes = [StyleCollection]
+    elif is_collection is False:
+        seek_classes = [Style]
+    for class_seek in seek_classes:
+        style_query = db.session.query(class_seek).filter_by(name=style_name)
+        if user is not None:
+            style_query = style_query.filter_by(user_id=user.id)
+        style = style_query.first()
+        if style:
+            return style
+
+
+def retrieve_available_styles(
+    style_type=None,
+    sort="popular",
+    public_only=True,
+    page=0,
+    tag=None,
+    model=None,
+):
+    """Retrieves all style details from DB."""
+    style_query = db.session.query(Style).filter_by(style_type=style_type)
+    if tag is not None:
+        style_query = style_query.join(StyleTag)
+    if model is not None:
+        style_query = style_query.join(StyleModel)
+    if public_only:
+        style_query = style_query.filter(Style.public.is_(True))
+    if tag is not None:
+        style_query = style_query.filter(StyleTag.tag == tag)
+    if model is not None:
+        style_query = style_query.filter(StyleModel.model == model)
+    style_order_by = Style.created.asc() if sort == "age" else Style.use_count.desc()
+    return style_query.order_by(style_order_by).offset(page).limit(25).all()
+
+
+def retrieve_available_collections(
+    collection_type=None,
+    sort="popular",
+    public_only=True,
+    page=0,
+):
+    """Retrieves all collection details from DB."""
+    style_query = db.session.query(StyleCollection)
+    if collection_type is not None:
+        style_query = style_query.filter_by(style_type=collection_type)
+    if public_only:
+        style_query = style_query.filter(StyleCollection.public.is_(True))
+    style_order_by = StyleCollection.created.asc() if sort == "age" else StyleCollection.use_count.desc()
+    return style_query.order_by(style_order_by).offset(page).limit(25).all()
+
+
+def get_all_active_worker_messages(worker_id):
+    return (
+        db.session.query(WorkerMessage)
+        .filter(
+            or_(
+                WorkerMessage.worker_id == worker_id,
+                WorkerMessage.worker_id.is_(None),
+            ),
+            WorkerMessage.expiry > datetime.utcnow(),
+        )
+        .all()
+    )
+
+
+def get_worker_messages(user_id=None, worker_id=None, validity="all", page=0):
+    wmquery = db.session.query(WorkerMessage)
+    if user_id is not None:
+        wmquery = wmquery.filter(or_(WorkerMessage.user_id == user_id, WorkerMessage.worker_id.is_(None)))
+    if worker_id is not None:
+        wmquery = wmquery.filter(WorkerMessage.worker_id == worker_id)
+    if validity == "active":
+        wmquery = wmquery.filter(WorkerMessage.expiry > datetime.utcnow())
+    if validity == "expired":
+        wmquery = wmquery.filter(WorkerMessage.expiry <= datetime.utcnow())
+    return wmquery.offset(page).limit(50).all()

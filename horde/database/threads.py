@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 import patreon
 from sqlalchemy import func, or_
 
-from horde import horde_redis as hr
 from horde.argparser import args
 from horde.classes.base.user import User
 from horde.classes.kobold.processing_generation import TextProcessingGeneration
@@ -30,6 +29,7 @@ from horde.database.functions import (
 )
 from horde.enums import State
 from horde.flask import HORDE, SQLITE_MODE, db
+from horde.horde_redis import horde_redis as hr
 from horde.logger import logger
 from horde.patreon import patrons
 from horde.r2 import delete_source_image
@@ -204,17 +204,18 @@ def check_waiting_prompts():
                 .filter(
                     procgen_class.generation == None,  # noqa E712
                     procgen_class.faulted == False,  # noqa E712
-                    # cutoff_time - procgen_class.start_time > wp_class.job_ttl,
-                    # How do we calculate this in the query? Maybe I need to
-                    # set an expiry time iun procgen as well better?
+                    # TODO: How do we calculate this in the query?
+                    # cutoff_time - procgen_class.start_time > procgen_class.job_ttl,
                 )
                 .all()
             )
+            modifed_procgens = 0
             for proc_gen in all_proc_gen:
-                if proc_gen.is_stale(proc_gen.wp.job_ttl):
+                if proc_gen.is_stale():
                     proc_gen.abort()
                     proc_gen.wp.n += 1
-            if len(all_proc_gen) >= 1:
+                    modifed_procgens += 1
+            if modifed_procgens >= 1:
                 db.session.commit()
             # Faults WP with 3 or more faulted Procgens
             wp_ids = (

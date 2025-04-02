@@ -18,21 +18,21 @@ from sqlalchemy.exc import IntegrityError, InvalidRequestError
 import horde.apis.limiter_api as lim
 import horde.classes.base.stats as stats
 from horde import exceptions as e
-from horde import horde_redis as hr
 from horde.apis.models.v2 import Models, Parsers
 from horde.argparser import args
 from horde.classes.base import settings
 from horde.classes.base.detection import Filter
 from horde.classes.base.news import News
-from horde.classes.base.team import Team, get_all_teams
+from horde.classes.base.team import Team, find_team_by_id, find_team_by_name, get_all_teams
 from horde.classes.base.user import User, UserSharedKey
 from horde.classes.base.waiting_prompt import WaitingPrompt
-from horde.classes.base.worker import Worker
+from horde.classes.base.worker import Worker, WorkerMessage
 from horde.consts import HORDE_VERSION
 from horde.countermeasures import CounterMeasures
 from horde.database import functions as database
 from horde.detection import prompt_checker
 from horde.flask import HORDE, cache, db
+from horde.horde_redis import horde_redis as hr
 from horde.image import ensure_source_image_uploaded
 from horde.limiter import limiter
 from horde.logger import logger
@@ -122,6 +122,7 @@ class GenerateTemplate(Resource):
         # It causes them to be a shared object from the parsers class
         self.params = {}
         self.warnings = set()
+        self.style_kudos = False
         if self.args.params:
             self.params = self.args.params
         self.models = []
@@ -136,6 +137,8 @@ class GenerateTemplate(Resource):
         if self.args.workers:
             self.workers = self.args.workers
         self.user = None
+        self.apikey = None
+        self.sharedkey = None
         self.user_ip = request.remote_addr
         # For now this is checked on validate()
         self.safe_ip = True
@@ -180,9 +183,12 @@ class GenerateTemplate(Resource):
         if self.args.webhook and not self.args.webhook.startswith("https://"):
             raise e.BadRequest("webhooks need to point to an https endpoint.")
         with HORDE.app_context():  # TODO DOUBLE CHECK THIS
-            # logger.warning(datetime.utcnow())
-            if self.args.apikey:
-                self.sharedkey = database.find_sharedkey(self.args.apikey)
+            # If this is set, it means we've already found an active shared key through an applied style.
+            if self.sharedkey:
+                self.user = self.sharedkey.user
+                logger.debug(f"Using style-specified shared key {self.sharedkey.id} from user #{self.user.id}")
+            elif self.apikey:
+                self.sharedkey = database.find_sharedkey(self.apikey)
                 if self.sharedkey:
                     is_valid, error_msg, rc = self.sharedkey.is_valid()
                     if not is_valid:
@@ -190,9 +196,14 @@ class GenerateTemplate(Resource):
                             self.downgrade_wp_priority = True
                         else:
                             raise e.Forbidden(message=error_msg, rc=rc)
+                    if not self.sharedkey.is_adhoc():
+                        raise e.Forbidden(
+                            message="This shared key cannot be used as it has been assigned to specific styles only",
+                            rc="SharedKeyAssignedStyles",
+                        )
                     self.user = self.sharedkey.user
                 if not self.user:
-                    self.user = database.find_user_by_api_key(self.args.apikey)
+                    self.user = database.find_user_by_api_key(self.apikey)
             # logger.warning(datetime.utcnow())
             if not self.user:
                 raise e.InvalidAPIKey("generation")
@@ -256,40 +267,40 @@ class GenerateTemplate(Resource):
             if ip_timeout:
                 raise e.TimeoutIP(self.user_ip, ip_timeout)
             # logger.warning(datetime.utcnow())
-            prompt_suspicion, _ = prompt_checker(self.args.prompt)
+            prompt_suspicion, _ = prompt_checker(self.prompt)
             # logger.warning(datetime.utcnow())
             prompt_replaced = False
             if prompt_suspicion >= 2 and self.gentype != "text":
                 # if replacement filter mode is enabled AND prompt is short enough, do that instead
                 if self.args.replacement_filter or self.user.education:
-                    if not prompt_checker.check_prompt_replacement_length(self.args.prompt):
+                    if not prompt_checker.check_prompt_replacement_length(self.prompt):
                         raise e.BadRequest("Prompt has to be below 7000 chars when replacement filter is on")
-                    self.args.prompt = prompt_checker.apply_replacement_filter(self.args.prompt)
+                    self.prompt = prompt_checker.apply_replacement_filter(self.prompt)
                     # If it returns None, it means it replaced everything with an empty string
-                    if self.args.prompt is not None:
+                    if self.prompt is not None:
                         prompt_replaced = True
                 if not prompt_replaced:
                     # Moderators do not get ip blocked to allow for experiments
                     if not self.user.moderator:
                         prompt_dict = {
-                            "prompt": self.args.prompt,
+                            "prompt": self.prompt,
                             "user": self.username,
                             "type": "regex",
                         }
                         upload_prompt(prompt_dict)
                         self.user.report_suspicion(1, Suspicions.CORRUPT_PROMPT)
                         CounterMeasures.report_suspicion(self.user_ip)
-                    raise e.CorruptPrompt(self.username, self.user_ip, self.args.prompt)
-            if_nsfw_model = prompt_checker.check_nsfw_model_block(self.args.prompt, self.models)
+                    raise e.CorruptPrompt(self.username, self.user_ip, self.prompt)
+            if_nsfw_model = prompt_checker.check_nsfw_model_block(self.prompt, self.models)
             if if_nsfw_model or self.user.flagged:
                 # For NSFW models and flagged users, we always do replacements
                 # This is to avoid someone using the NSFW models to figure out the regex since they don't have an IP timeout
-                self.args.prompt = prompt_checker.nsfw_model_prompt_replace(
-                    self.args.prompt,
+                self.prompt = prompt_checker.nsfw_model_prompt_replace(
+                    self.prompt,
                     self.models,
                     already_replaced=prompt_replaced,
                 )
-                if self.args.prompt is None:
+                if self.prompt is None:
                     prompt_replaced = False
                 elif prompt_replaced is False:
                     prompt_replaced = True
@@ -301,16 +312,16 @@ class GenerateTemplate(Resource):
                     )
                     if self.user.flagged and not if_nsfw_model:
                         msg = "To prevent generation of unethical images, we cannot allow this prompt."
-                    raise e.CorruptPrompt(self.username, self.user_ip, self.args.prompt, message=msg)
+                    raise e.CorruptPrompt(self.username, self.user_ip, self.prompt, message=msg)
             # Disabling as this is handled by the worker-csam-filter now
             # If I re-enable it, also make it use the prompt replacement
             # if not prompt_replaced:
-            #     csam_trigger_check = prompt_checker.check_csam_triggers(self.args.prompt)
+            #     csam_trigger_check = prompt_checker.check_csam_triggers(self.prompt)
             #     if csam_trigger_check is not False and self.gentype != "text":
             #         raise e.CorruptPrompt(
             #             self.username,
             #             self.user_ip,
-            #             self.args.prompt,
+            #             self.prompt,
             #             message = (f"The trigger '{csam_trigger_check}' has been detected to generate "
             #                       "unethical images on its own and as such has had to be prevented from use. "
             #                        "Thank you for understanding.")
@@ -332,6 +343,7 @@ class GenerateTemplate(Resource):
             nsfw=self.args.nsfw,
             censor_nsfw=self.args.censor_nsfw,
             trusted_workers=self.args.trusted_workers,
+            validated_backends=self.args.validated_backends,
             worker_blacklist=self.args.worker_blacklist,
             ipaddr=self.user_ip,
             sharedkey_id=self.args.apikey if self.sharedkey else None,
@@ -347,7 +359,22 @@ class GenerateTemplate(Resource):
                     _,
                     _,
                 ) = ensure_source_image_uploaded(eimg["image"], f"{self.wp.id}_exra_src_{iiter}", force_r2=True)
-        self.wp.activate(self.downgrade_wp_priority, extra_source_images=self.args.extra_source_images)
+        self.wp.activate(
+            self.downgrade_wp_priority,
+            extra_source_images=self.args.extra_source_images,
+            kudos_adjustment=2 if self.style_kudos is True else 0,
+        )
+
+    def apply_style(self):
+        # If it reaches this method, we've already made sure  self.args.style isn't empty.
+        self.existing_style = database.get_style_by_uuid(self.args.style)
+        if not self.existing_style:
+            self.existing_style = database.get_style_by_name(self.args.style)
+        if not self.existing_style:
+            raise e.ThingNotFound("Style", self.args.style)
+        # If there's an attached shared key to the style, and it's not empty or expired, we use it.
+        if self.existing_style.sharedkey and self.existing_style.sharedkey.is_valid()[0] is True:
+            self.sharedkey = self.existing_style.sharedkey
 
 
 class SyncGenerate(GenerateTemplate):
@@ -455,7 +482,6 @@ class JobPopTemplate(Resource):
                     # as they're typically countermeasures to raids
                     if skipped_reason != "secret":
                         self.skipped[skipped_reason] = self.skipped.get(skipped_reason, 0) + 1
-                    # logger.warning(datetime.utcnow())
 
                     continue
                 # There is a chance that by the time we finished all the checks, another worker picked up the WP.
@@ -464,6 +490,7 @@ class JobPopTemplate(Resource):
                 if not wp.needs_gen():  # this says if < 1
                     continue
                 worker_ret = self.start_worker(wp)
+                worker_ret["messages"] = database.get_all_active_worker_messages(self.worker.id)
                 # logger.debug(worker_ret)
                 if worker_ret is None:
                     continue
@@ -476,8 +503,8 @@ class JobPopTemplate(Resource):
         # We report maintenance exception only if we couldn't find any jobs
         if self.worker.maintenance:
             raise e.WorkerMaintenance(self.worker.maintenance_msg)
-        # logger.warning(datetime.utcnow())
-        return {"id": None, "ids": [], "skipped": self.skipped}, 200
+        # logger.debug(self.skipped)
+        return {"id": None, "ids": [], "skipped": self.skipped, "messages": database.get_all_active_worker_messages(self.worker.id)}, 200
 
     def get_sorted_wp(self, priority_user_ids=None):
         """Extendable class to retrieve the sorted WP list for this worker"""
@@ -642,7 +669,7 @@ class TransferKudos(Resource):
         "username",
         type=str,
         required=True,
-        help="The user ID which will receive the kudos.",
+        help="The user or shared key ID which will receive the kudos.",
         location="json",
     )
     parser.add_argument(
@@ -768,6 +795,15 @@ class Workers(Resource):
         location="args",
     )
 
+    get_parser.add_argument(
+        "name",
+        required=False,
+        default=None,
+        type=str,
+        help="Find a worker by name (case insensitive).",
+        location="args",
+    )
+
     @api.expect(get_parser)
     @logger.catch(reraise=True)
     # @cache.cached(timeout=10, query_string=True)
@@ -813,12 +849,86 @@ class Workers(Resource):
         return workers_ret
 
     def parse_worker_by_query(self, workers_list):
-        if not self.args.type:
-            return workers_list
-        return [w for w in workers_list if w["type"] == self.args.type]
+        if self.args.name:
+            return [w for w in workers_list if w["name"].lower() == self.args.name.lower()]
+        if self.args.type:
+            return [w for w in workers_list if w["type"] == self.args.type]
+        return workers_list
 
 
-class WorkerSingle(Resource):
+class WorkerSingleBase(Resource):
+
+    def get_worker_by_id(self, worker_id):
+        cache_exists = True
+        details_privilege = 0
+        if self.args.apikey:
+            admin = database.find_user_by_api_key(self.args["apikey"])
+            if admin and admin.moderator:
+                details_privilege = 2
+        if not hr.horde_r:
+            cache_exists = False
+        if details_privilege > 0:
+            cache_name = f"cached_worker_{worker_id}_privileged"
+            cached_worker = hr.horde_r_get(cache_name)
+        else:
+            cache_name = f"cached_worker_{worker_id}"
+        cached_worker = hr.horde_r_get(cache_name)
+        if cache_exists and cached_worker:
+            worker_details = json.loads(cached_worker)
+            for msg in worker_details.get("messages", []):
+                msg["created"] = datetime.strptime(msg["created"], "%a, %d %b %Y %H:%M:%S %z")
+                msg["expiry"] = datetime.strptime(msg["expiry"], "%a, %d %b %Y %H:%M:%S %z")
+        else:
+            worker = database.find_worker_by_id(worker_id)
+            if not worker:
+                raise e.WorkerNotFound(worker_id)
+            worker_details = worker.get_details(details_privilege)
+            hr.horde_r_setex_json(cache_name, timedelta(seconds=30), worker_details)
+        return worker_details
+
+
+class WorkerSingleName(WorkerSingleBase):
+    get_parser = reqparse.RequestParser()
+    get_parser.add_argument(
+        "apikey",
+        type=str,
+        required=False,
+        help="The Moderator or Owner API key.",
+        location="headers",
+    )
+    get_parser.add_argument(
+        "Client-Agent",
+        default="unknown:0:unknown",
+        type=str,
+        required=False,
+        help="The client name and version.",
+        location="headers",
+    )
+
+    @api.expect(get_parser)
+    # @cache.cached(timeout=10)
+    @api.marshal_with(
+        models.response_model_worker_details,
+        code=200,
+        description="Worker Details",
+        skip_none=True,
+    )
+    @api.response(401, "Invalid API Key", models.response_model_error)
+    @api.response(403, "Access Denied", models.response_model_error)
+    @api.response(404, "Worker Not Found", models.response_model_error)
+    def get(self, worker_name=""):
+        """Details of a registered worker
+        Can retrieve the details of a worker even if inactive
+        (A worker is considered inactive if it has not checked in for 5 minutes)
+        """
+        self.args = self.get_parser.parse_args()
+        worker = database.find_worker_id_by_name(worker_name)
+        if not worker:
+            raise e.WorkerNotFound(worker_name)
+        return self.get_worker_by_id(str(worker.id)), 200
+
+
+class WorkerSingle(WorkerSingleBase):
     get_parser = reqparse.RequestParser()
     get_parser.add_argument(
         "apikey",
@@ -852,30 +962,8 @@ class WorkerSingle(Resource):
         Can retrieve the details of a worker even if inactive
         (A worker is considered inactive if it has not checked in for 5 minutes)
         """
-        cache_exists = True
-        details_privilege = 0
         self.args = self.get_parser.parse_args()
-        if self.args.apikey:
-            admin = database.find_user_by_api_key(self.args["apikey"])
-            if admin and admin.moderator:
-                details_privilege = 2
-        if not hr.horde_r:
-            cache_exists = False
-        if details_privilege > 0:
-            cache_name = f"cached_worker_{worker_id}_privileged"
-            cached_worker = hr.horde_r_get(cache_name)
-        else:
-            cache_name = f"cached_worker_{worker_id}"
-        cached_worker = hr.horde_r_get(cache_name)
-        if cache_exists and cached_worker:
-            worker_details = json.loads(cached_worker)
-        else:
-            worker = database.find_worker_by_id(worker_id)
-            if not worker:
-                raise e.WorkerNotFound(worker_id)
-            worker_details = worker.get_details(details_privilege)
-            hr.horde_r_setex_json(cache_name, timedelta(seconds=30), worker_details)
-        return worker_details, 200
+        return self.get_worker_by_id(worker_id), 200
 
     put_parser = reqparse.RequestParser()
     put_parser.add_argument(
@@ -1014,7 +1102,7 @@ class WorkerSingle(Resource):
                 worker.set_team(None)
                 ret_dict["team"] = "None"
             else:
-                team = database.find_team_by_id(self.args.team)
+                team = find_team_by_id(self.args.team)
                 if not team:
                     raise e.TeamNotFound(self.args.team)
                 ret = worker.set_team(team)
@@ -1535,7 +1623,7 @@ class FindUser(Resource):
                     skname = f": {sk.name}"
                 user_details["username"] = user_details["username"] + f" (Shared Key{skname})"
             if hr.horde_r:
-                hr.horde_r_setex_json(cache_name, timedelta(seconds=300), user_details)
+                hr.horde_r_setex_json(cache_name, timedelta(seconds=30), user_details)
         return (user_details, 200)
 
 
@@ -1891,7 +1979,7 @@ class Teams(Resource):
         ret_dict = {}
 
         self.team_name = sanitize_string(self.args.name)
-        self.team = database.find_team_by_name(self.team_name)
+        self.team = find_team_by_name(self.team_name)
         self.team_info = self.args.info
         if self.team_info is not None:
             self.team_info = sanitize_string(self.team_info)
@@ -1945,7 +2033,7 @@ class TeamSingle(Resource):
     @api.response(404, "Team Not Found", models.response_model_error)
     def get(self, team_id=""):
         """Details of a worker Team"""
-        team = database.find_team_by_id(team_id)
+        team = find_team_by_id(team_id)
         if not team:
             raise e.TeamNotFound(team_id)
         details_privilege = 0
@@ -1993,7 +2081,7 @@ class TeamSingle(Resource):
     @api.response(404, "Team Not Found", models.response_model_error)
     def patch(self, team_id=""):
         """Update a Team's information"""
-        team = database.find_team_by_id(team_id)
+        team = find_team_by_id(team_id)
         if not team:
             raise e.TeamNotFound(team_id)
         self.args = self.patch_parser.parse_args()
@@ -2049,7 +2137,7 @@ class TeamSingle(Resource):
         Only the team's creator or a horde moderator can use this endpoint.
         This action is unrecoverable!
         """
-        team = database.find_team_by_id(team_id)
+        team = find_team_by_id(team_id)
         if not team:
             raise e.TeamNotFound(team_id)
         self.args = self.delete_parser.parse_args()
@@ -3070,6 +3158,226 @@ class DocsSponsors(Resource):
         if self.args.format == "markdown":
             return {"markdown": markdownify(html_template).strip("\n")}, 200
         return {"html": html_template}, 200
+
+
+class WorkerMessages(Resource):
+    get_parser = reqparse.RequestParser()
+    get_parser.add_argument("apikey", type=str, required=True, help="User API key.", location="headers")
+    get_parser.add_argument(
+        "Client-Agent",
+        default="unknown:0:unknown",
+        type=str,
+        required=False,
+        help="The client name and version.",
+        location="headers",
+    )
+    get_parser.add_argument(
+        "user_id",
+        required=False,
+        type=str,
+        help="Filter the messages by user id (numerical). If user is not moderator, they can only see their own messages.",
+        location="args",
+    )
+    get_parser.add_argument(
+        "worker_id",
+        required=False,
+        type=str,
+        help="Filter the messages by worker id (numerical).",
+        location="args",
+    )
+    get_parser.add_argument(
+        "validity",
+        required=False,
+        type=str,
+        location="args",
+        help="Filter messages based on whether they're expired or not. Possible values are 'active', 'expired' and 'all",
+        default="active",
+    )
+    get_parser.add_argument(
+        "page",
+        required=False,
+        default=1,
+        type=int,
+        help="Which page of results to return. Each page has 50 messages.",
+        location="args",
+    )
+
+    # @cache.cached(timeout=60)
+    @api.expect(get_parser, validate=True)
+    @api.marshal_with(
+        models.response_model_message_full,
+        code=200,
+        description="Worker Message Details",
+        skip_none=True,
+        as_list=True,
+    )
+    @api.response(401, "Invalid API Key", models.response_model_error)
+    @api.response(403, "Forbidden", models.response_model_error)
+    @api.response(404, "API Key Not Found", models.response_model_error)
+    def get(self):
+        """List Worker Messages"""
+        self.args = self.get_parser.parse_args()
+        user = database.find_user_by_api_key(self.args["apikey"])
+        if not user:
+            raise e.InvalidAPIKey("WorkerMessages GET")
+        if not user.moderator and self.args.user_id is None:
+            self.args.user_id = user.id
+        if not user.moderator and user.id != self.args.user_id:
+            raise e.Forbidden("You can only view your own messages.")
+        if self.args.validity and self.args.validity not in {"active", "expired", "all"}:
+            raise e.BadRequest("validity can only be one of 'active, 'expired', or 'all'")
+        return (
+            database.get_worker_messages(
+                user_id=self.args.user_id,
+                worker_id=self.args.worker_id,
+                validity=self.args.validity if self.args.validity else "active",
+                page=self.args.page - 1,
+            ),
+            200,
+        )
+
+    post_parser = reqparse.RequestParser()
+    post_parser.add_argument("apikey", type=str, required=True, help="User API key.", location="headers")
+    post_parser.add_argument(
+        "Client-Agent",
+        default="unknown:0:unknown",
+        type=str,
+        required=False,
+        help="The client name and version.",
+        location="headers",
+    )
+    post_parser.add_argument(
+        "worker_id",
+        required=False,
+        type=str,
+        help="The worker ID to send the message to.",
+        location="json",
+    )
+    post_parser.add_argument(
+        "expiry",
+        type=int,
+        required=False,
+        help="The amount of hours from now which this key will stay active. Max 30 days.",
+        location="json",
+    )
+    post_parser.add_argument(
+        "message",
+        required=True,
+        type=str,
+        help="Filter the messages by worker id (numerical).",
+        location="json",
+    )
+    post_parser.add_argument(
+        "origin",
+        required=False,
+        default="AI Horde Moderators",
+        type=str,
+        help="Set the origin of the message. Moderator only. Non-moderators always set their own ID.",
+        location="json",
+    )
+
+    @cache.cached(timeout=60)
+    @api.expect(post_parser, models.input_model_message, validate=True)
+    @api.marshal_with(
+        models.response_model_message_full,
+        code=200,
+        description="Create Worker Message",
+        skip_none=True,
+    )
+    @api.response(401, "Invalid API Key", models.response_model_error)
+    @api.response(403, "Forbidden", models.response_model_error)
+    @api.response(404, "API Key Not Found", models.response_model_error)
+    def post(self):
+        """Create New Worker Message"""
+        self.args = self.post_parser.parse_args()
+        user = database.find_user_by_api_key(self.args["apikey"])
+        if not user:
+            raise e.InvalidAPIKey("WorkerMessages POST")
+        if user.is_anon():
+            raise e.AnonForbidden
+        self.origin = self.args.origin
+        if self.args.worker_id is not None:
+            worker = database.find_worker_by_id(self.args.worker_id)
+            if not worker:
+                raise e.WorkerNotFound(self.args.worker_id)
+        if not user.moderator:
+            self.origin = str(user.id)
+            if worker and worker.user_id != user.id:
+                raise e.Forbidden("You can only send messages to your own workers.", rc="MessagesOnlyOwnWorkers")
+        self.expiry = self.args.expiry
+        # Max expiry is 30 days
+        if self.expiry and self.expiry > 30 * 24:
+            self.expiry = 30 * 24
+        new_message = WorkerMessage(
+            user_id=user.id,
+            worker_id=self.args.worker_id,
+            expiry=datetime.utcnow() + timedelta(hours=self.expiry),
+            message=self.args.message,
+            origin=self.origin,
+        )
+        db.session.add(new_message)
+        db.session.commit()
+        return new_message, 200
+
+
+class SingleWorkerMessage(Resource):
+    get_parser = reqparse.RequestParser()
+    get_parser.add_argument(
+        "Client-Agent",
+        default="unknown:0:unknown",
+        type=str,
+        required=False,
+        help="The client name and version.",
+        location="headers",
+    )
+
+    @cache.cached(timeout=60)
+    @api.expect(get_parser)
+    @api.marshal_with(
+        models.response_model_message_full,
+        code=200,
+        description="Worker Message Details",
+        skip_none=True,
+    )
+    def get(self, message_id=""):
+        """Display a Worker Message"""
+        self.args = self.get_parser.parse_args()
+        wmessage = db.session.query(WorkerMessage).filter_by(id=message_id).first()
+        if not wmessage:
+            raise e.ThingNotFound("WorkerMessage", message_id)
+        return wmessage, 200
+
+    delete_parser = reqparse.RequestParser()
+    delete_parser.add_argument("apikey", type=str, required=True, help="User API key.", location="headers")
+    delete_parser.add_argument(
+        "Client-Agent",
+        default="unknown:0:unknown",
+        type=str,
+        required=False,
+        help="The client name and version.",
+        location="headers",
+    )
+
+    @api.expect(delete_parser)
+    @api.marshal_with(
+        models.response_model_simple_response,
+        code=200,
+        description="Delete Worker Message",
+    )
+    def delete(self, message_id=""):
+        """Delete a Worker Message"""
+        self.args = self.delete_parser.parse_args()
+        user = database.find_user_by_api_key(self.args["apikey"])
+        if not user:
+            raise e.InvalidAPIKey("WorkerMessages DELETE")
+        wmessage = db.session.query(WorkerMessage).filter_by(id=message_id).first()
+        if not wmessage:
+            raise e.ThingNotFound("WorkerMessage", message_id)
+        if wmessage.user_id != user.id and user.moderator is False:
+            raise e.Forbidden("You can only delete your own messages.")
+        db.session.delete(wmessage)
+        db.session.commit()
+        return {"message": "OK"}, 200
 
 class AutoWorkerType(Resource):
     get_parser = reqparse.RequestParser()

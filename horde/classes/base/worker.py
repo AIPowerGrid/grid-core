@@ -9,14 +9,14 @@ from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.hybrid import hybrid_property
 
-from horde import horde_redis as hr
 from horde import vars as hv
 from horde.classes.base import settings
 from horde.discord import send_pause_notification
 from horde.flask import SQLITE_MODE, db
+from horde.horde_redis import horde_redis as hr
 from horde.logger import logger
 from horde.suspicions import SUSPICION_LOGS, Suspicions
-from horde.utils import get_db_uuid, is_profane, sanitize_string
+from horde.utils import get_db_uuid, get_message_expiry_date, is_profane, sanitize_string
 
 uuid_column_type = lambda: UUID(as_uuid=True) if not SQLITE_MODE else db.String(36)  # FIXME # noqa E731
 
@@ -86,6 +86,23 @@ class WorkerModel(db.Model):
     model = db.Column(db.String(255))  # TODO model should be a foreign key to a model table
 
 
+class WorkerMessage(db.Model):
+    __tablename__ = "worker_messages"
+    id = db.Column(uuid_column_type(), primary_key=True, default=get_db_uuid)
+    worker_id = db.Column(
+        uuid_column_type(),
+        db.ForeignKey("workers.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    worker = db.relationship("Worker", back_populates="messages")
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"))
+    user = db.relationship("User", back_populates="worker_messages")
+    message = db.Column(db.Text)
+    origin = db.Column(db.String(255))
+    expiry = db.Column(db.DateTime, default=get_message_expiry_date, index=True)
+    created = db.Column(db.DateTime, default=datetime.utcnow())
+
+
 class WorkerTemplate(db.Model):
     __tablename__ = "workers"
     __mapper_args__ = {
@@ -121,6 +138,7 @@ class WorkerTemplate(db.Model):
     # Used by all workers to record how much they can pick up to generate
     # The value of this column is dfferent per worker type
     max_power = db.Column(db.Integer, default=20, nullable=False)
+    extra_slow_worker = db.Column(db.Boolean, default=False, nullable=False, index=True)
 
     paused = db.Column(db.Boolean, default=False, nullable=False)
     maintenance = db.Column(db.Boolean, default=False, nullable=False)
@@ -134,6 +152,7 @@ class WorkerTemplate(db.Model):
     performance = db.relationship("WorkerPerformance", back_populates="worker", cascade="all, delete-orphan")
     suspicions = db.relationship("WorkerSuspicions", back_populates="worker", cascade="all, delete-orphan")
     problem_jobs = db.relationship("UserProblemJobs", back_populates="worker", cascade="all, delete-orphan")
+    messages = db.relationship("WorkerMessage", back_populates="worker", cascade="all, delete-orphan")
 
     require_upfront_kudos = False
     prioritized_users = []
@@ -154,7 +173,7 @@ class WorkerTemplate(db.Model):
     def speed(cls):
         performance_avg = db.select(func.avg(WorkerPerformance.performance)).where(WorkerPerformance.worker_id == cls.id).label("speed")
         return db.case(
-            [(performance_avg == None, 1 * hv.thing_divisors[cls.wtype])],  # noqa E712
+            (performance_avg == None, 1 * hv.thing_divisors[cls.wtype]),  # noqa E712
             else_=performance_avg,
         )
 
@@ -196,7 +215,7 @@ class WorkerTemplate(db.Model):
                 f"Last suspicion log: {reason.name}.\n"
                 f"Total Suspicion {self.get_suspicion()}",
             )
-        db.session.commit()
+        db.session.flush()
 
     def get_suspicion_reasons(self):
         return set([s.suspicion_id for s in self.suspicions])
@@ -240,7 +259,7 @@ class WorkerTemplate(db.Model):
         return "OK"
 
     def set_team(self, new_team):
-        self.team_id = new_team.id
+        self.team_id = new_team.id if new_team else None
         db.session.commit()
         return "OK"
 
@@ -261,10 +280,6 @@ class WorkerTemplate(db.Model):
 
     # This should be extended by each worker type
     def check_in(self, **kwargs):
-        # To avoid excessive commits,
-        # we only record new changes on the worker every 30 seconds
-        if (datetime.utcnow() - self.last_check_in).total_seconds() < 30 and (datetime.utcnow() - self.created).total_seconds() > 30:
-            return
         self.ipaddr = kwargs.get("ipaddr", None)
         self.bridge_agent = sanitize_string(kwargs.get("bridge_agent", "unknown:0:unknown"))
         self.threads = kwargs.get("threads", 1)
@@ -275,6 +290,10 @@ class WorkerTemplate(db.Model):
         self.prioritized_users = kwargs.get("prioritized_users", [])
         if not kwargs.get("safe_ip", True) and not self.user.trusted:
             self.report_suspicion(reason=Suspicions.UNSAFE_IP)
+        # To avoid excessive commits,
+        # we only record new uptime on the worker every 30 seconds
+        if (datetime.utcnow() - self.last_check_in).total_seconds() < 30 and (datetime.utcnow() - self.created).total_seconds() > 30:
+            return
         if not self.is_stale() and not self.paused and not self.maintenance:
             self.uptime += (datetime.utcnow() - self.last_check_in).total_seconds()
             # Every 10 minutes of uptime gets 100 kudos rewarded
@@ -293,7 +312,6 @@ class WorkerTemplate(db.Model):
             # So that they have to stay up at least 10 mins to get uptime kudos
             self.last_reward_uptime = self.uptime
         self.last_check_in = datetime.utcnow()
-        db.session.commit()
 
     def get_human_readable_uptime(self):
         if self.uptime < 60:
@@ -444,6 +462,9 @@ class WorkerTemplate(db.Model):
             db.session.add(new_suspicion)
         db.session.commit()
 
+    def get_active_messages(self):
+        return [m for m in self.messages if m.expiry > datetime.utcnow()]
+
     # Should be extended by each specific horde
     @logger.catch(reraise=True)
     def get_details(self, details_privilege=0):
@@ -472,6 +493,20 @@ class WorkerTemplate(db.Model):
             ret_dict["suspicious"] = len(self.suspicions)
         if details_privilege >= 1 or self.user.public_workers:
             ret_dict["owner"] = self.user.get_unique_alias()
+            msgs = []
+            for m in self.get_active_messages():
+                msgs.append(
+                    {
+                        "worker_id": str(self.id),
+                        "user_id": m.user_id,
+                        "message": m.message,
+                        "origin": m.origin,
+                        "created": m.created,
+                        "expiry": m.expiry,
+                    },
+                )
+            ret_dict["messages"] = msgs
+        if details_privilege >= 1:
             ret_dict["ipaddr"] = self.ipaddr
             ret_dict["contact"] = self.user.contact
         return ret_dict
@@ -511,7 +546,8 @@ class Worker(WorkerTemplate):
         self.set_models(kwargs.get("models"))
         self.nsfw = kwargs.get("nsfw", True)
         self.set_blacklist(kwargs.get("blacklist", []))
-        db.session.commit()
+        self.extra_slow_worker = kwargs.get("extra_slow_worker", False)
+        # Commit should happen on calling extensions
 
     def set_blacklist(self, blacklist):
         # We don't allow more workers to claim they can server more than 50 models atm (to prevent abuse)
@@ -527,7 +563,7 @@ class Worker(WorkerTemplate):
         for word in blacklist:
             blacklisted_word = WorkerBlackList(worker_id=self.id, word=word[0:15])
             db.session.add(blacklisted_word)
-        db.session.commit()
+        db.session.flush()
 
     def refresh_model_cache(self):
         models_list = [m.model for m in self.models]
@@ -563,7 +599,7 @@ class Worker(WorkerTemplate):
             return
         # logger.debug([existing_model_names,models, existing_model_names == models])
         db.session.query(WorkerModel).filter_by(worker_id=self.id).delete()
-        db.session.commit()
+        db.session.flush()
         for model_name in models:
             model = WorkerModel(worker_id=self.id, model=model_name)
             db.session.add(model)

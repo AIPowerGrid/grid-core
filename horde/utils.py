@@ -16,6 +16,7 @@ import regex as re
 from better_profanity import profanity
 from profanity_check import predict
 
+from horde import exceptions as e
 from horde.flask import SQLITE_MODE
 
 profanity.load_censor_words()
@@ -97,8 +98,16 @@ def hash_dictionary(dictionary):
     return hash_object.hexdigest()
 
 
+def get_message_expiry_date():
+    return datetime.utcnow() + dateutil.relativedelta.relativedelta(hours=+12)
+
+
 def get_expiry_date():
     return datetime.utcnow() + dateutil.relativedelta.relativedelta(minutes=+20)
+
+
+def get_extra_slow_expiry_date():
+    return datetime.utcnow() + dateutil.relativedelta.relativedelta(minutes=+60)
 
 
 def get_interrogation_form_expiry_date():
@@ -135,3 +144,9 @@ def does_extra_text_reference_exist(extra_texts, reference):
         if et["reference"] == reference:
             return True
     return False
+
+
+def ensure_clean(string, key):
+    if is_profane(string):
+        raise e.BadRequest(f"{key} contains profanity")
+    return sanitize_string(string)

@@ -9,8 +9,45 @@ from horde.exceptions import KNOWN_RC
 from horde.vars import horde_noun, horde_title
 
 
+def get_default_keys_of_model(model):
+    def_keys = set()
+    for key in model.keys():
+        if model[key].default is not None:
+            def_keys.add(key)
+    return def_keys
+
+
+def remove_all_model_default_params(model):
+    def_keys = get_default_keys_of_model(model)
+    for key in def_keys:
+        model[key].default = None
+
+
 class Parsers:
     def __init__(self):
+        # A Basic parser which only expects a Client-Agent
+        self.basic_parser = reqparse.RequestParser()
+        self.basic_parser.add_argument(
+            "Client-Agent",
+            default="unknown:0:unknown",
+            type=str,
+            required=False,
+            help="The client name and version",
+            location="headers",
+        )
+
+        # A Basic parser which only expects a Client-Agent and an API Key
+        self.apikey_parser = reqparse.RequestParser()
+        self.apikey_parser.add_argument("apikey", type=str, required=True, help="A mod API key.", location="headers")
+        self.apikey_parser.add_argument(
+            "Client-Agent",
+            default="unknown:0:unknown",
+            type=str,
+            required=False,
+            help="The client name and version",
+            location="headers",
+        )
+
         self.generate_parser = reqparse.RequestParser()
         self.generate_parser.add_argument(
             "apikey",
@@ -58,6 +95,16 @@ class Parsers:
             location="json",
         )
         self.generate_parser.add_argument(
+            "validated_backends",
+            type=bool,
+            required=False,
+            default=False,
+            help=f"When true, only inference backends that are validated by the {horde_title} devs will serve this request. "
+            "When False, non-validated backends will also be used which can increase speed but "
+            "you may end up with unexpected results.",
+            location="json",
+        )
+        self.generate_parser.add_argument(
             "workers",
             type=list,
             required=False,
@@ -89,6 +136,14 @@ class Parsers:
             default=True,
             required=False,
             help="When True, allows slower workers to pick up this request. Disabling this incurs an extra kudos cost.",
+            location="json",
+        )
+        self.generate_parser.add_argument(
+            "extra_slow_workers",
+            type=bool,
+            default=False,
+            required=False,
+            help="When True, allows very slower workers to pick up this request. Use this when you don't mind waiting a lot.",
             location="json",
         )
         self.generate_parser.add_argument(
@@ -124,6 +179,7 @@ class Parsers:
             location="json",
         )
         self.generate_parser.add_argument("webhook", type=str, required=False, location="json")
+        self.generate_parser.add_argument("style", type=str, required=False, location="json")
 
         # The parser for RequestPop
         self.job_pop_parser = reqparse.RequestParser()
@@ -194,6 +250,13 @@ class Parsers:
             help="How many jobvs to pop at the same time",
             location="json",
         )
+        self.job_pop_parser.add_argument(
+            "extra_slow_worker",
+            type=bool,
+            default=False,
+            required=False,
+            location="json",
+        )
 
         self.job_submit_parser = reqparse.RequestParser()
         self.job_submit_parser.add_argument(
@@ -230,6 +293,167 @@ class Parsers:
             type=list,
             required=False,
             help="Metadata about this job such as defaulted components due to failures.",
+            location="json",
+        )
+
+        # Style Parsers
+        self.style_parser = reqparse.RequestParser()
+        self.style_parser.add_argument(
+            "apikey",
+            type=str,
+            required=True,
+            help="The API Key corresponding to a registered user.",
+            location="headers",
+        )
+        self.style_parser.add_argument(
+            "Client-Agent",
+            default="unknown:0:unknown",
+            type=str,
+            required=False,
+            help="The client name and version",
+            location="headers",
+        )
+        self.style_parser.add_argument(
+            "name",
+            type=str,
+            required=True,
+            help="The name of the style.",
+            location="json",
+        )
+        self.style_parser.add_argument(
+            "info",
+            type=str,
+            required=False,
+            help="Extra information about this style.",
+            location="json",
+        )
+        self.style_parser.add_argument(
+            "prompt",
+            type=str,
+            required=False,
+            default="{p}{np}",
+            help="The prompt to generate from.",
+            location="json",
+        )
+        self.style_parser.add_argument(
+            "params",
+            type=dict,
+            required=False,
+            help="Extra generate params to send to the worker.",
+            location="json",
+        )
+        self.style_parser.add_argument(
+            "public",
+            type=bool,
+            default=True,
+            required=False,
+            location="json",
+        )
+        self.style_parser.add_argument(
+            "nsfw",
+            type=bool,
+            default=False,
+            required=False,
+            location="json",
+        )
+        self.style_parser.add_argument(
+            "tags",
+            type=list,
+            required=False,
+            help="Tags describing this style. Can be used for style discovery.",
+            location="json",
+        )
+        self.style_parser.add_argument(
+            "models",
+            type=list,
+            required=False,
+            help="Tags describing this style. Can be used for style discovery.",
+            location="json",
+        )
+        self.style_parser.add_argument(
+            "sharedkey",
+            type=str,
+            required=False,
+            help="The UUID of a shared key which will be used to generate with this style if active.",
+            location="json",
+        )
+        self.style_parser_patch = reqparse.RequestParser()
+        self.style_parser_patch.add_argument(
+            "apikey",
+            type=str,
+            required=True,
+            help="The API Key corresponding to a registered user.",
+            location="headers",
+        )
+        self.style_parser_patch.add_argument(
+            "Client-Agent",
+            default="unknown:0:unknown",
+            type=str,
+            required=False,
+            help="The client name and version",
+            location="headers",
+        )
+        self.style_parser_patch.add_argument(
+            "name",
+            type=str,
+            required=False,
+            help="The name of the style.",
+            location="json",
+        )
+        self.style_parser_patch.add_argument(
+            "info",
+            type=str,
+            required=False,
+            help="Extra information about this style.",
+            location="json",
+        )
+        self.style_parser_patch.add_argument(
+            "prompt",
+            type=str,
+            required=False,
+            help="The prompt to generate from.",
+            location="json",
+        )
+        self.style_parser_patch.add_argument(
+            "params",
+            type=dict,
+            required=False,
+            help="Extra generate params to send to the worker.",
+            location="json",
+        )
+        self.style_parser_patch.add_argument(
+            "public",
+            type=bool,
+            default=True,
+            required=False,
+            location="json",
+        )
+        self.style_parser_patch.add_argument(
+            "nsfw",
+            type=bool,
+            default=False,
+            required=False,
+            location="json",
+        )
+        self.style_parser_patch.add_argument(
+            "tags",
+            type=list,
+            required=False,
+            help="Tags describing this style. Can be used for style discovery.",
+            location="json",
+        )
+        self.style_parser_patch.add_argument(
+            "models",
+            type=list,
+            required=False,
+            help="Tags describing this style. Can be used for style discovery.",
+            location="json",
+        )
+        self.style_parser.add_argument(
+            "sharedkey",
+            type=str,
+            required=False,
+            help="The UUID of a shared key which will be used to generate with this style if active.",
             location="json",
         )
 
@@ -296,6 +520,8 @@ class Models:
                 "worker_id": fields.String(
                     title="Worker ID",
                     description="The UUID of the worker which generated this image.",
+                    min_length=36,
+                    max_length=36,
                 ),
                 "worker_name": fields.String(
                     title="Worker Name",
@@ -413,6 +639,7 @@ class Models:
             {
                 "payload": fields.Nested(self.response_model_generation_payload, skip_none=True),
                 "id": fields.String(description="The UUID for this generation."),
+                "ttl": fields.Integer(description="The amount of seconds before this job is considered stale and aborted."),
                 "skipped": fields.Nested(self.response_model_generations_skipped, skip_none=True),
             },
         )
@@ -527,8 +754,65 @@ class Models:
                     min=1,
                     max=20,
                 ),
+                "extra_slow_worker": fields.Boolean(
+                    default=True,
+                    description=(
+                        "If True, marks the worker as very slow. You should only use this if your mps/s is lower than 0.1."
+                        "Extra slow workers are excluded from normal requests but users can opt in to use them."
+                    ),
+                ),
             },
         )
+
+        self.response_model_message = api.model(
+            "ResponseModelMessagePop",
+            {
+                "id": fields.String(
+                    description="The ID of this message",
+                    example="00000000-0000-0000-0000-000000000000",
+                    required=True,
+                ),
+                "message": fields.String(
+                    description="The message sent",
+                    example="Hello Worker!",
+                    required=True,
+                ),
+                "origin": fields.String(
+                    description="The origin of this message. Typically this will be the horde moderators.",
+                    example="moderator",
+                ),
+                "expiry": fields.DateTime(
+                    dt_format="rfc822",
+                    description="The date at which this message will expire.",
+                    required=True,
+                ),
+            },
+        )
+
+        self.response_model_message_full = api.inherit(
+            "ResponseModelMessage",
+            self.response_model_message,
+            {
+                "worker_id": fields.String(
+                    description="The ID of the worker this message is intended for.",
+                    example="00000000-0000-0000-0000-000000000000",
+                    required=True,
+                    min_length=36,
+                    max_length=36,
+                ),
+                "user_id": fields.String(
+                    description="The ID of owning user",
+                    example="00000000-0000-0000-0000-000000000000",
+                    required=True,
+                ),
+                "created": fields.DateTime(
+                    dt_format="rfc822",
+                    description="The date at which this message was created.",
+                    required=True,
+                ),
+            },
+        )
+
         self.response_model_worker_details = api.inherit(
             "WorkerDetails",
             self.response_model_worker_details_lite,
@@ -641,6 +925,7 @@ class Models:
                     description="The maximum tokens this worker can read.",
                 ),
                 "tokens_generated": fields.Float(description="How many tokens this worker has generated until now."),
+                "messages": fields.List(fields.Nested(self.response_model_message_full, skip_none=True)),
             },
         )
 
@@ -727,6 +1012,10 @@ class Models:
                 "awarded": fields.Float(
                     default=0,
                     description="The amount of Kudos this user has been awarded from things like rating images.",
+                ),
+                "styled": fields.Float(
+                    default=0,
+                    description="The amount of Kudos this user has been awarded for styling other people's requests.",
                 ),
             },
         )
@@ -856,11 +1145,11 @@ class Models:
             "UserAmountRecords",
             {
                 "image": fields.Integer(
-                    description="How many images this user has generated or requested.",
+                    description="How many images this user has generated, requested or styled.",
                     default=0,
                 ),
                 "text": fields.Integer(
-                    description="How many texts this user has generated or requested.",
+                    description="How many texts this user has generated, requested or styled.",
                     default=0,
                 ),
                 "interrogation": fields.Integer(
@@ -877,6 +1166,7 @@ class Models:
                 "contribution": fields.Nested(self.response_model_user_thing_records),
                 "fulfillment": fields.Nested(self.response_model_user_amount_records),
                 "request": fields.Nested(self.response_model_user_amount_records),
+                "style": fields.Nested(self.response_model_user_amount_records),
             },
         )
 
@@ -900,6 +1190,31 @@ class Models:
                         description="(Privileged) The list of active alchemy generation IDs requested by this user.",
                         example="00000000-0000-0000-0000-000000000000",
                     ),
+                ),
+            },
+        )
+
+        self.response_model_styles_short = api.model(
+            "ResponseModelStylesShort",
+            {
+                "name": fields.String(
+                    description="The unique name for this style",
+                    example="db0#1::style::my awesome style",
+                ),
+                "id": fields.String(
+                    description="The ID of this style",
+                    example="00000000-0000-0000-0000-000000000000",
+                ),
+            },
+        )
+
+        self.response_model_styles_user = api.inherit(
+            "ResponseModelStylesUser",
+            self.response_model_styles_short,
+            {
+                "type": fields.String(
+                    description="The style type, image or text",
+                    enum=["image", "text"],
                 ),
             },
         )
@@ -939,8 +1254,11 @@ class Models:
                     fields.String(
                         description="Privileged or public when the user has explicitly allows it to be public.",
                         example="00000000-0000-0000-0000-000000000000",
+                        min_length=36,
+                        max_length=36,
                     ),
                 ),
+                "styles": fields.List(fields.Nested(self.response_model_styles_user)),
                 "sharedkey_ids": fields.List(
                     fields.String(
                         description="(Privileged) The list of shared key IDs created by this user.",
@@ -1546,18 +1864,6 @@ class Models:
                 "markdown": fields.String(
                     required=False,
                     description="The document in markdown format.",
-                ),
-            },
-        )
-
-        self.response_model_auto_worker_type = api.model(
-            "AutoWorkerType",
-            {
-                "recommended_worker_type": fields.String(
-                    example="image",
-                    description="The recommended type of worker.",
-                    enum=["image", "text"],
-                    required=True,
                 ),
             },
         )

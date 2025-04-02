@@ -12,12 +12,12 @@ from sqlalchemy import Enum, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.hybrid import hybrid_property
 
-from horde import horde_redis as hr
 from horde import vars as hv
 from horde.countermeasures import CounterMeasures
 from horde.discord import send_problem_user_notification
 from horde.enums import UserRecordTypes, UserRoleTypes
 from horde.flask import SQLITE_MODE, db
+from horde.horde_redis import horde_redis as hr
 from horde.logger import logger
 from horde.patreon import patrons
 from horde.suspicions import SUSPICION_LOGS, Suspicions
@@ -143,6 +143,7 @@ class UserSharedKey(db.Model):
         passive_deletes=True,
         cascade="all, delete-orphan",
     )
+    styles = db.relationship("Style", back_populates="sharedkey")
     max_image_pixels = db.Column(db.Integer, default=-1, nullable=False)
     max_image_steps = db.Column(db.Integer, default=-1, nullable=False)
     max_text_tokens = db.Column(db.Integer, default=-1, nullable=False)
@@ -176,10 +177,18 @@ class UserSharedKey(db.Model):
     def is_valid(self):
         if self.kudos == 0:
             return False, "This shared key has run out of kudos.", "SharedKeyEmpty"
-        if self.expiry is not None and self.expiry < datetime.utcnow():
+        if self.is_expired():
             return False, "This shared key has expired", "SharedKeyExpired"
         else:
             return True, None, None
+
+    def is_expired(self) -> bool:
+        """Returns true if the key has expired"""
+        return self.expiry is not None and self.expiry < datetime.utcnow()
+
+    def is_adhoc(self) -> bool:
+        """Returns true if the key is not assigned to any styles"""
+        return len(self.styles) == 0
 
     def is_job_within_limits(
         self,
@@ -251,6 +260,8 @@ class User(db.Model):
 
     workers = db.relationship("Worker", back_populates="user", cascade="all, delete-orphan")
     teams = db.relationship("Team", back_populates="owner", cascade="all, delete-orphan")
+    styles = db.relationship("Style", back_populates="user", cascade="all, delete-orphan")
+    style_collections = db.relationship("StyleCollection", back_populates="user", cascade="all, delete-orphan")
     sharedkeys = db.relationship("UserSharedKey", back_populates="user", cascade="all, delete-orphan")
     suspicions = db.relationship("UserSuspicions", back_populates="user", cascade="all, delete-orphan")
     records = db.relationship("UserRecords", back_populates="user", cascade="all, delete-orphan")
@@ -259,6 +270,7 @@ class User(db.Model):
     problem_jobs = db.relationship("UserProblemJobs", back_populates="user", cascade="all, delete-orphan")
     waiting_prompts = db.relationship("WaitingPrompt", back_populates="user", cascade="all, delete-orphan")
     interrogations = db.relationship("Interrogation", back_populates="user", cascade="all, delete-orphan")
+    worker_messages = db.relationship("WorkerMessage", back_populates="user", cascade="all, delete-orphan")
     filters = db.relationship("Filter", back_populates="user")
 
     ## TODO: Figure out how to make the below work
@@ -612,6 +624,14 @@ class User(db.Model):
         else:
             self.modify_kudos(kudos, "accumulated")
 
+    def record_style(self, kudos, contrib_type):
+        self.update_user_record(
+            record_type=UserRecordTypes.STYLE,
+            record=contrib_type,
+            increment_value=1,
+        )
+        self.modify_kudos(kudos, "styled")
+
     def check_for_trust(self):
         """After a user passes the evaluation threshold (?? kudos)
         All the evaluating Kudos added to their total and they automatically become trusted
@@ -863,6 +883,17 @@ class User(db.Model):
             # unnecessary information, since the workers themselves wil be visible
             # "public_workers": self.public_workers,
         }
+        styles_array = []
+        for s in self.styles:
+            if s.public or details_privilege >= 1:
+                styles_array.append(
+                    {
+                        "name": s.get_unique_name(),
+                        "id": str(s.id),
+                        "type": str(s.style_type),
+                    },
+                )
+        ret_dict["styles"] = styles_array
         if self.public_workers or details_privilege >= 1:
             workers_array = []
             for worker in self.workers:
@@ -880,6 +911,9 @@ class User(db.Model):
             for wp in self.waiting_prompts:
                 if wp.wp_type not in ret_dict["active_generations"]:
                     ret_dict["active_generations"][wp.wp_type] = []
+                # We don't return anon list of gens
+                if self.is_anon():
+                    break
                 ret_dict["active_generations"][wp.wp_type].append(str(wp.id))
         if details_privilege >= 2:
             mk_dict = {

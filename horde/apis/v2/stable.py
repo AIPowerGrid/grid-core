@@ -2,18 +2,28 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import copy
+import random
+from collections import defaultdict
 from datetime import datetime
 
 import requests
 from flask import request
 from flask_restx import Resource, reqparse
+from loguru import logger
 
 import horde.apis.limiter_api as lim
 import horde.classes.base.stats as stats
 from horde import exceptions as e
 from horde.apis.models.stable_v2 import ImageModels, ImageParsers
-from horde.apis.v2.base import GenerateTemplate, JobPopTemplate, JobSubmitTemplate, api
+from horde.apis.v2.base import (
+    GenerateTemplate,
+    JobPopTemplate,
+    JobSubmitTemplate,
+    api,
+)
 from horde.classes.base import settings
+from horde.classes.base.style import StyleCollection
 from horde.classes.base.user import User
 from horde.classes.stable.genstats import (
     get_compiled_imagegen_stats_models,
@@ -23,17 +33,16 @@ from horde.classes.stable.interrogation import Interrogation
 from horde.classes.stable.interrogation_worker import InterrogationWorker
 from horde.classes.stable.waiting_prompt import ImageWaitingPrompt
 from horde.classes.stable.worker import ImageWorker
-from horde.consts import KNOWN_POST_PROCESSORS, KNOWN_UPSCALERS
 from horde.countermeasures import CounterMeasures
 from horde.database import functions as database
 from horde.enums import WarningMessage
 from horde.flask import HORDE, cache, db
 from horde.image import calculate_image_tiles, ensure_source_image_uploaded
 from horde.limiter import limiter
-from horde.logger import logger
 from horde.model_reference import model_reference
 from horde.patreon import patrons
 from horde.utils import does_extra_text_reference_exist, hash_dictionary
+from horde.validation import ParamValidator
 from horde.vars import horde_title
 
 models = ImageModels(api)
@@ -104,7 +113,13 @@ class ImageAsyncGenerate(GenerateTemplate):
         )
 
     def validate(self):
+        self.prompt = self.args.prompt
+        self.apikey = self.args.apikey
+        self.apply_style()
         super().validate()
+        param_validator = ParamValidator(prompt=self.prompt, models=self.args.models, params=self.params, user=self.user)
+        self.warnings = param_validator.validate_image_params()
+        param_validator.check_for_special()
         # During raids, we prevent VPNs
         if settings.mode_raid() and not self.user.trusted and not patrons.is_patron(self.user.id):
             self.safe_ip = CounterMeasures.is_ip_safe(self.user_ip)
@@ -116,48 +131,12 @@ class ImageAsyncGenerate(GenerateTemplate):
                 raise e.NotTrusted(rc="UntrustedUnsafeIP")
         if not self.user.special and self.params.get("special"):
             raise e.BadRequest("Only special users can send a special field.", "SpecialFieldNeedsSpecialUser")
-        for model in self.args.models:
-            if "horde_special" in model:
-                if not self.user.special:
-                    raise e.Forbidden("Only special users can request a special model.", "SpecialModelNeedsSpecialUser")
-                usermodel = model.split("::")
-                if len(usermodel) == 1:
-                    raise e.BadRequest(
-                        "Special models must always include the username, in the form of 'horde_special::user#id'",
-                        rc="SpecialMissingUsername",
-                    )
-                user_alias = usermodel[1]
-                if self.user.get_unique_alias() != user_alias:
-                    raise e.Forbidden(f"This model can only be requested by {user_alias}", "SpecialForbidden")
-                if not self.params.get("special"):
-                    raise e.BadRequest("Special models have to include a special payload", rc="SpecialMissingPayload")
         if not self.args.source_image and self.args.source_mask:
             raise e.SourceMaskUnnecessary
         if self.params.get("control_type") in ["normal", "mlsd", "hough"] and any(
             model_reference.get_model_baseline(model_name).startswith("stable diffusion 2") for model_name in self.args.models
         ):
             raise e.UnsupportedModel("No current model available for this particular ControlNet for SD2.x", rc="ControlNetUnsupported")
-        for model_req_dict in [model_reference.get_model_requirements(m) for m in self.args.models]:
-            if "clip_skip" in model_req_dict and model_req_dict["clip_skip"] != self.params.get("clip_skip", 1):
-                self.warnings.add(WarningMessage.ClipSkipMismatch)
-            if "min_steps" in model_req_dict and model_req_dict["min_steps"] > self.params.get("steps", 30):
-                self.warnings.add(WarningMessage.StepsTooFew)
-            if "max_steps" in model_req_dict and model_req_dict["max_steps"] < self.params.get("steps", 30):
-                self.warnings.add(WarningMessage.StepsTooMany)
-            if "cfg_scale" in model_req_dict and model_req_dict["cfg_scale"] != self.params.get("cfg_scale", 7.5):
-                self.warnings.add(WarningMessage.CfgScaleMismatch)
-            if "min_cfg_scale" in model_req_dict and model_req_dict["min_cfg_scale"] > self.params.get("cfg_scale", 7.5):
-                self.warnings.add(WarningMessage.CfgScaleTooSmall)
-            if "max_cfg_scale" in model_req_dict and model_req_dict["max_cfg_scale"] < self.params.get("cfg_scale", 7.5):
-                self.warnings.add(WarningMessage.CfgScaleTooLarge)
-            if "samplers" in model_req_dict and self.params.get("sampler_name", "k_euler_a") not in model_req_dict["samplers"]:
-                self.warnings.add(WarningMessage.SamplerMismatch)
-            # FIXME: Scheduler workaround until we support multiple schedulers
-            scheduler = "karras"
-            if not self.params.get("karras", True):
-                scheduler = "simple"
-            if "schedulers" in model_req_dict and scheduler not in model_req_dict["schedulers"]:
-                self.warnings.add(WarningMessage.SchedulerMismatch)
         if "control_type" in self.params and any(model_name in ["pix2pix"] for model_name in self.args.models):
             raise e.UnsupportedModel("You cannot use ControlNet with these models.", rc="ControlNetUnsupported")
         # if self.params.get("image_is_control"):
@@ -172,23 +151,10 @@ class ImageAsyncGenerate(GenerateTemplate):
         if any(model_reference.get_model_baseline(model_name).startswith("stable_cascade") for model_name in self.args.models):
             if "control_type" in self.params:
                 raise e.BadRequest("ControlNet does not work with Stable Cascade currently.", rc="ControlNetMismatch")
-        if "loras" in self.params:
-            if len(self.params["loras"]) > 5:
-                raise e.BadRequest("You cannot request more than 5 loras per generation.", rc="TooManyLoras")
-            for lora in self.params["loras"]:
-                if lora.get("is_version") and not lora["name"].isdigit():
-                    raise e.BadRequest("explicit LoRa version requests have to be a version ID (i.e integer).", rc="BadLoraVersion")
-        if "tis" in self.params and len(self.params["tis"]) > 20:
-            raise e.BadRequest("You cannot request more than 20 Textual Inversions per generation.", rc="TooManyTIs")
+        if any(model_reference.get_model_baseline(model_name).startswith("flux_1") for model_name in self.args.models):
+            if "control_type" in self.params:
+                raise e.BadRequest("ControlNet does not work with Flux currently.", rc="ControlNetMismatch")
         if self.params.get("transparent", False) is True:
-            if any(
-                model_reference.get_model_baseline(model_name) not in ["stable_diffusion_xl", "stable diffusion 1"]
-                for model_name in self.args.models
-            ):
-                raise e.BadRequest(
-                    "Generating Transparent images is only possible for Stable Diffusion 1.5 and XL models.",
-                    rc="InvalidTransparencyModel",
-                )
             if self.args.extra_source_images and len(self.args.extra_source_images) > 0:
                 raise e.BadRequest(
                     "Generating Transparent images is not supported during img2img workflows.",
@@ -212,11 +178,6 @@ class ImageAsyncGenerate(GenerateTemplate):
         if self.params.get("workflow") == "qr_code":
             # QR-code pipeline cannot do batching currently
             self.args["disable_batching"] = True
-            if not all(
-                model_reference.get_model_baseline(model_name) in ["stable diffusion 1", "stable_diffusion_xl"]
-                for model_name in self.args.models
-            ):
-                raise e.BadRequest("QR Code controlnet only works with SD 1.5 and SDXL models currently", rc="ControlNetMismatch.")
             if self.params.get("extra_texts") is None or len(self.params.get("extra_texts")) == 0:
                 raise e.BadRequest("This request requires you pass the required extra texts for this workflow.", rc="MissingExtraTexts.")
             if not does_extra_text_reference_exist(self.params.get("extra_texts"), "qr_code"):
@@ -241,26 +202,6 @@ class ImageAsyncGenerate(GenerateTemplate):
             self.params["n"] = 2
         #     if any(model_name.startswith("stable_diffusion_2") for model_name in self.args.models):
         #         raise e.UnsupportedModel
-        if len(self.args["prompt"].split()) > 7500:
-            raise e.InvalidPromptSize(self.username)
-        if any(model_name in KNOWN_POST_PROCESSORS for model_name in self.args.models):
-            raise e.UnsupportedModel(rc="UnexpectedModelName")
-        if self.args.params:
-            upscaler_count = len([pp for pp in self.args.params.get("post_processing", []) if pp in KNOWN_UPSCALERS])
-            if upscaler_count > 1:
-                raise e.BadRequest("Cannot use more than 1 upscaler at a time.", rc="TooManyUpscalers")
-
-            cfg_scale = self.args.params.get("cfg_scale")
-            if cfg_scale is not None:
-                try:
-                    rounded_cfg_scale = round(cfg_scale, 2)
-                    if rounded_cfg_scale != cfg_scale:
-                        raise e.BadRequest("cfg_scale must be rounded to 2 decimal places", rc="BadCFGDecimals")
-                except (TypeError, ValueError):
-                    logger.warning(
-                        f"Invalid cfg_scale: {cfg_scale} for user {self.username} when it should be already validated.",
-                    )
-                    raise e.BadRequest("cfg_scale must be a valid number", rc="BadCFGNumber")
 
         if self.args["Client-Agent"] in ["My-Project:v0.0.1:My-Contact"]:
             raise e.Forbidden(
@@ -286,21 +227,23 @@ class ImageAsyncGenerate(GenerateTemplate):
         self.wp = ImageWaitingPrompt(
             worker_ids=self.workers,
             models=self.models,
-            prompt=self.args.prompt,
+            prompt=self.prompt,
             user_id=self.user.id,
             params=self.params,
             nsfw=self.args.nsfw,
             censor_nsfw=self.args.censor_nsfw,
             trusted_workers=self.args.trusted_workers,
+            validated_backends=self.args.validated_backends,
             worker_blacklist=self.args.worker_blacklist,
             slow_workers=self.args.slow_workers,
+            extra_slow_workers=self.args.extra_slow_workers,
             source_processing=self.args.source_processing,
             ipaddr=self.user_ip,
             safe_ip=self.safe_ip,
             r2=self.args.r2,
             shared=shared,
             client_agent=self.args["Client-Agent"],
-            sharedkey_id=self.args.apikey if self.sharedkey else None,
+            sharedkey_id=self.sharedkey.id if self.sharedkey else None,
             proxied_account=self.args["proxied_account"],
             disable_batching=self.args["disable_batching"],
             webhook=self.args.webhook,
@@ -357,8 +300,11 @@ class ImageAsyncGenerate(GenerateTemplate):
                 image_steps=requested_steps,
             )
             if not is_in_limit:
-                self.wp.delete()
-                raise e.BadRequest(fail_message)
+                # If we are using the shared key assigned to a style, then we bypass the shared key requirements
+                # since its owner explicitly allowed to be used with a style exceeding them
+                if not (self.existing_style and self.existing_style.sharedkey and self.existing_style.sharedkey.id == self.sharedkey.id):
+                    self.wp.delete()
+                    raise e.BadRequest(fail_message)
 
     def extrapolate_dry_run_kudos(self):
         self.wp.source_image = self.args.source_image
@@ -413,7 +359,56 @@ class ImageAsyncGenerate(GenerateTemplate):
             source_image=self.source_image,
             source_mask=self.source_mask,
             extra_source_images=self.args.extra_source_images,
+            kudos_adjustment=2 if self.style_kudos is not None else 0,
         )
+
+    def apply_style(self):
+        if self.args.style is None:
+            return
+        # The super() ensures the common parts of applying a style
+        super().apply_style()
+        if self.existing_style.style_type != "image":
+            raise e.BadRequest("Text styles cannot be used on image requests", "StyleMismatch")
+        if isinstance(self.existing_style, StyleCollection):
+            colstyles = self.existing_style.styles
+            random.shuffle(colstyles)
+            self.existing_style = colstyles[0]
+            self.existing_style.use_count += 1
+        self.models = self.existing_style.get_model_names()
+        self.negprompt = ""
+        if "###" in self.prompt:
+            self.prompt, self.negprompt = self.prompt.split("###", 1)
+        if "###" not in self.existing_style.prompt and self.negprompt != "" and "###" not in self.negprompt:
+            self.negprompt = "###" + self.negprompt
+        # We need to use defaultdict to avoid getting keyerrors in case the style author added
+        # Erroneous keys in the string
+        # We have to do this sort of replacement to prevent randomized comfyUI strings from getting confused
+        # With the {p}/{np} prompt replacement areas
+        self.prompt = (
+            self.existing_style.prompt.replace("{", "{{")
+            .replace("}", "}}")
+            .replace("{{p}}", "{p}")
+            .replace("{{np}}", "{np}")
+            .format_map(defaultdict(str, p=self.prompt, np=self.negprompt))
+        )
+        # self.prompt = self.existing_style.prompt.format_map(defaultdict(str, p=self.prompt, np=self.negprompt))
+        requested_n = self.params.get("n", 1)
+        user_params = self.params
+        self.params = copy.deepcopy(self.existing_style.params)
+        self.params["n"] = requested_n
+        # This allows a style without specified width/height to receive these variables from the user.
+        default_params = {"width", "height"}
+        for default_param in default_params:
+            if default_param not in self.params and default_param in user_params:
+                self.params[default_param] = user_params[default_param]
+        self.nsfw = self.existing_style.nsfw
+        self.existing_style.use_count += 1
+        # We don't reward kudos to ourselves
+        if self.existing_style.user != self.user:
+            self.existing_style.user.record_style(2, "image")
+            self.style_kudos = True
+        db.session.commit()
+        logger.debug(f"Style '{self.args.style}' applied.")
 
 
 class ImageAsyncStatus(Resource):
@@ -429,7 +424,6 @@ class ImageAsyncStatus(Resource):
 
     decorators = [limiter.limit("10/minute", key_func=lim.get_request_path)]
 
-    # If I marshal it here, it overrides the marshalling of the child class unfortunately
     @api.expect(get_parser)
     @api.marshal_with(
         models.response_model_wp_status_full,
@@ -593,6 +587,10 @@ class ImageJobPop(JobPopTemplate):
                 db_skipped["kudos"] = post_ret["skipped"]["kudos"]
             if "blacklist" in post_ret.get("skipped", {}):
                 db_skipped["blacklist"] = post_ret["skipped"]["blacklist"]
+            if "step_count" in post_ret.get("skipped", {}):
+                db_skipped["step_count"] = post_ret["skipped"]["step_count"]
+            if "bridge_version" in post_ret.get("skipped", {}):
+                db_skipped["bridge_version"] = db_skipped.get("bridge_version", 0) + post_ret["skipped"]["bridge_version"]
             post_ret["skipped"] = db_skipped
         # logger.debug(post_ret)
         return post_ret, retcode
@@ -615,6 +613,8 @@ class ImageJobPop(JobPopTemplate):
             allow_controlnet=self.args.allow_controlnet,
             allow_sdxl_controlnet=self.args.allow_sdxl_controlnet,
             allow_lora=self.args.allow_lora,
+            extra_slow_worker=self.args.extra_slow_worker,
+            limit_max_steps=self.args.limit_max_steps,
             priority_usernames=self.priority_usernames,
         )
 
