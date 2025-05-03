@@ -1867,3 +1867,117 @@ class Models:
                 ),
             },
         )
+
+        self.input_model_message = api.model(
+            "ResponseModelMessage",
+            {
+                "worker_id": fields.String(
+                    description="The ID of the worker this message is intended for.",
+                    example="00000000-0000-0000-0000-000000000000",
+                    required=False,
+                    min_length=36,
+                    max_length=36,
+                ),
+                "message": fields.String(
+                    description="The message sent",
+                    example="Hello Worker!",
+                    min_length=1,
+                    max_length=1024 * 10,
+                    required=True,
+                ),
+                "origin": fields.String(
+                    description="The origin of this message. Typically this will be the horde moderators.",
+                    min_length=1,
+                    max_length=255,
+                    example="AI Horde Moderators",
+                ),
+                "expiry": fields.Integer(
+                    min=1,
+                    max=30 * 24,
+                    default=12,
+                    description="The number of hours after which this message expires.",
+                    required=False,
+                ),
+            },
+        )
+
+        # Styles
+        self.response_model_styles_post = api.model(
+            "StyleModify",
+            {
+                "id": fields.String(
+                    example="00000000-0000-0000-0000-000000000000",
+                    description="The UUID of the style. Use this to use this style of retrieve its information in the future.",
+                ),
+                "message": fields.String(
+                    default=None,
+                    description="Any extra information from the horde about this request.",
+                ),
+                "warnings": fields.List(fields.Nested(self.response_model_warning)),
+            },
+        )
+
+        # Collections
+
+        self.input_model_collection = api.model(
+            "InputModelCollection",
+            {
+                "name": fields.String(
+                    required=False,
+                    example="My Awesome Collection",
+                    description="The name for the collection. Case-sensitive and unique per user.",
+                    min_length=1,
+                    max_length=100,
+                ),
+                "info": fields.String(
+                    required=False,
+                    example="Collection of optimistic styles",
+                    description="Extra information about this collection.",
+                    min_length=1,
+                    max_length=1000,
+                ),
+                "public": fields.Boolean(
+                    default=True,
+                    description=(
+                        "When true this collection will be listed among all collections publicly."
+                        "When false, information about this collection can only be seen by people who know its ID or name."
+                    ),
+                ),
+                "styles": fields.List(fields.String(description="The styles to use in this collection.", min_length=1)),
+            },
+        )
+
+        self.response_model_collection = api.model(
+            "ResponseModelCollection",
+            {
+                "id": fields.String(
+                    description="The UUID of the collection. Use this to use this collection of retrieve its information in the future.",
+                ),
+                "name": fields.String(
+                    required=False,
+                    description="The name for the collection. Case-sensitive and unique per user.",
+                    min_length=1,
+                    max_length=100,
+                ),
+                "type": fields.String(
+                    required=False,
+                    description="The kind of styles stored in this collection.",
+                    enum=["image", "text"],
+                ),
+                "info": fields.String(
+                    required=False,
+                    description="Extra information about this collection.",
+                    min_length=1,
+                    max_length=1000,
+                ),
+                "public": fields.Boolean(
+                    default=True,
+                    description=(
+                        "When true this collection will be listed among all collection publicly."
+                        "When false, information about this collection can only be seen by people who know its ID or name."
+                    ),
+                ),
+                "styles": fields.List(fields.Nested(self.response_model_styles_short)),
+                "use_count": fields.Integer(description="The amount of times this collection has been used in generations."),
+            },
+        )
