@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 import regex as re
 from flask import render_template, request
-from flask_restx import Namespace, Resource, reqparse
+from flask_restx import Namespace, Resource, reqparse, fields
 from flask_restx.reqparse import ParseResult
 from markdownify import markdownify
 from sqlalchemy import or_, text
@@ -3399,7 +3399,13 @@ class AutoWorkerType(Resource):
 
     @api.expect(get_parser)
     @api.marshal_with(
-        models.response_model_auto_worker_type,
+        api.model("AutoWorkerTypeResponse", {
+            "recommended_worker_type": fields.String(
+                description="The recommended worker type ('image' or 'text')",
+                example="image",
+                required=True,
+            )
+        }),
         code=200,
         description="Recommended worker type details",
         skip_none=True,
