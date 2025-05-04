@@ -46,6 +46,14 @@ arg_parser.add_argument(
     help="Provide a different port to start with",
 )
 arg_parser.add_argument(
+    "--listen",
+    action="store",
+    default="0.0.0.0",
+    required=False,
+    type=str,
+    help="Provide a different listen IP to listen to",
+)
+arg_parser.add_argument(
     "--horde",
     action="store",
     default="stable",
@@ -72,7 +80,7 @@ arg_parser.add_argument(
 )
 arg_parser.add_argument("--disable_filters", action="store_true", help="Testing filter work")
 arg_parser.add_argument(
-    "--force_patreon",
+    "--force_subscription",
     action="store",
     required=False,
     type=int,
