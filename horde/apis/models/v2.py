@@ -6,6 +6,7 @@ from flask_restx import fields, reqparse
 
 from horde.enums import WarningMessage
 from horde.exceptions import KNOWN_RC
+from horde.classes.base import settings
 from horde.vars import horde_noun, horde_title
 
 
