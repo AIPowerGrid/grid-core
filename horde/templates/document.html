@@ -4,10 +4,190 @@ SPDX-FileCopyrightText: 2022 Konstantinos Thoukydidis <mail@dbzer0.com>
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 
-{% extends "master.html" %}
-{% block content %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ horde_title }} - {% if 'privacy' in doc %}Privacy Policy{% elif 'terms' in doc %}Terms of Service{% else %}Documentation{% endif %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        body {
+            background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+            color: #c9d1d9;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+            line-height: 1.7;
+            margin: 0;
+            padding: 40px 20px;
+            max-width: 1000px;
+            margin: 0 auto;
+            min-height: 100vh;
+        }
+        
+        h1 {
+            color: #f0f6fc;
+            font-weight: 700;
+            font-size: 2.5rem;
+            margin: 0 0 1rem 0;
+            border: none;
+            text-align: center;
+            background: linear-gradient(135deg, #58a6ff, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        h2 {
+            color: #f0f6fc;
+            font-weight: 600;
+            font-size: 1.8rem;
+            margin: 2rem 0 1rem 0;
+            border-bottom: none;
+            padding-bottom: 0.5rem;
+            position: relative;
+        }
+        
+        h3 {
+            color: #f0f6fc;
+            font-weight: 600;
+            font-size: 1.3rem;
+            margin: 1.5rem 0 1rem 0;
+            border-bottom: none;
+            padding-bottom: 0.5rem;
+        }
+        
+        h4, h5, h6 {
+            color: #f0f6fc;
+            font-weight: 600;
+            margin: 1.5rem 0 0.5rem 0;
+        }
+        
+        p {
+            margin: 1rem 0;
+            color: #c9d1d9;
+        }
+        
+        a {
+            color: #58a6ff;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            border-bottom: 1px solid transparent;
+        }
+        
+        a:hover {
+            color: #8b5cf6;
+            border-bottom: 1px solid #8b5cf6;
+            text-decoration: none;
+        }
+        
+        code {
+            background: rgba(22, 27, 34, 0.8);
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 3px 8px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            color: #c9d1d9;
+            font-size: 0.9em;
+            backdrop-filter: blur(10px);
+        }
+        
+        pre {
+            background: rgba(22, 27, 34, 0.9);
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 24px;
+            overflow-x: auto;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            margin: 1.5rem 0;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+        }
+        
+        pre code {
+            background: none;
+            border: none;
+            padding: 0;
+            color: #c9d1d9;
+        }
+        
+        hr {
+            border: none;
+            border-top: 1px solid #30363d;
+            margin: 3rem 0;
+            position: relative;
+        }
+        
+        hr::after {
+            content: '';
+            position: absolute;
+            top: -1px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100px;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, #58a6ff, transparent);
+        }
+        
+        ul, ol {
+            padding-left: 1.5rem;
+            margin: 1rem 0;
+        }
+        
+        li {
+            margin: 0.5rem 0;
+            color: #c9d1d9;
+        }
+        
+        strong {
+            color: #f0f6fc;
+            font-weight: 600;
+        }
+        
+        blockquote {
+            background: rgba(22, 27, 34, 0.5);
+            border-left: 4px solid #58a6ff;
+            margin: 1.5rem 0;
+            padding: 1rem 1.5rem;
+            border-radius: 0 8px 8px 0;
+            font-style: italic;
+            color: #8b949e;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-top: 2rem;
+            padding: 0.75rem 1.5rem;
+            background: rgba(22, 27, 34, 0.6);
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            color: #58a6ff;
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+        
+        .back-link:hover {
+            border-color: #58a6ff;
+            background: rgba(22, 27, 34, 0.8);
+            transform: translateY(-2px);
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 20px 15px;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            h2 {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
 {% include doc %}
 <br/>
 <br/>
-<p><a href="/">Back to Main page</a></p>
-{% endblock %}
+    <p><a href="/" class="back-link">← Back to Main page</a></p>
+</body>
+</html>

@@ -7,50 +7,49 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 {% extends "master.html" %}
 {% block content %}
     {% if oauth_id is none and pseudonymous is false %}
-    <div class="container">
-        <p style="color:#333;">You are not logged in, Click one of the below links to sign in.</p>
-        <div class="login-btn">
-            <a href="/google/register" class="google-btn">
-            <div class="login-icon-wrapper">
-                <img class="login-icon" src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg"/>
-            </div>
-            <p class="btn-text"><b>Sign in with google</b></p>
+    <div style="text-align: center; margin: 2rem 0;">
+        <h1>Join AI Power Grid</h1>
+        <p style="color: #8b949e; font-size: 1.1rem; margin-bottom: 2rem;">Sign in with one of the options below to get started</p>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem; margin: 2rem 0;">
+            <a href="/google/register" class="login-btn google-btn">
+                <div class="login-icon-wrapper">
+                    <img class="login-icon" src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" alt="Google"/>
+                </div>
+                <p class="btn-text">Sign in with Google</p>
             </a>
-            <a href="/discord/register" class="discord-btn">
-            <div class="login-icon-wrapper">
-                <img class="login-icon" src="https://assets-global.website-files.com/6257adef93867e50d84d30e2/62595384e89d1d54d704ece7_3437c10597c1526c3dbd98c737c2bcae.svg"/>
-            </div>
-            <p class="btn-text"><b>Sign in with discord</b></p>
+            <a href="/discord/register" class="login-btn discord-btn">
+                <div class="login-icon-wrapper">
+                    <img class="login-icon" src="https://assets-global.website-files.com/6257adef93867e50d84d30e2/62595384e89d1d54d704ece7_3437c10597c1526c3dbd98c737c2bcae.svg" alt="Discord" style="filter: brightness(0) invert(1);"/>
+                </div>
+                <p class="btn-text">Sign in with Discord</p>
             </a>
-            <a href="/github/register" class="github-btn">
-            <div class="login-icon-wrapper">
-                <img class="login-icon" src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"/>
-            </div>
-            <p class="btn-text"><b>Sign in with github</b></p>
+            <a href="/github/register" class="login-btn github-btn">
+                <div class="login-icon-wrapper">
+                    <img class="login-icon" src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" alt="GitHub" style="filter: brightness(0) invert(1);"/>
+                </div>
+                <p class="btn-text">Sign in with GitHub</p>
             </a>
-            <!-- <a href="/patreon/register" class="patreon-btn">
-            <div class="login-icon-wrapper">
-                <img class="login-icon" src="https://c5.patreon.com/external/logo/guidelines/logo-standard-lockups.png"/>
-            </div>
-            <p class="btn-text"><b>Sign in with patreon</b></p>
-            </a> -->
         </div>
     </div>
     {% endif %}
-   <div class="container">
+   <div style="max-width: 600px; margin: 2rem auto; padding: 2rem; background: rgba(22, 27, 34, 0.6); border: 1px solid #30363d; border-radius: 12px;">
         {% if oauth_id is not none and pseudonymous is not true %}
         <h1>{{ welcome }}</h1>
         <h2>Set Display Name</h2>
-        <p>Note: Changing your username will generate a new API key!</p>
+        <p style="color: #8b949e;">Note: Changing your username will generate a new API key!</p>
         {% else %}
         <h1>Welcome</h1>
         <h2>Set Display Name</h2>
-        <p style="background-color:Tomato;">WARNING: You are not logged in!</p>
-        <p>If you submit a username, it will create a new user with a random API key <b>which cannot be maintained by us!</b></p>
+        <div class="alert alert-warning">
+            <strong>WARNING:</strong> You are not logged in!
+        </div>
+        <p>If you submit a username, it will create a new user with a random API key <strong>which cannot be maintained by us!</strong></p>
         <p>If you forget/lose this API Key, there's nothing we can do to recover it. You'll have to create a new account.</p>
         <p>To ensure you avoid this fate, please login using one of the buttons above first!</p>
         {% endif %}
-        <p><strong>IMPORTANT:</strong> If you have been redirected here from a paid or ad-based client, please be aware that <strong>this is a fully volunteer-run service</strong>. You can always generate images for free here, without paying!</p>
+        <div class="alert alert-info">
+            <strong>IMPORTANT:</strong> If you have been redirected here from a paid or ad-based client, please be aware that <strong>this is a fully volunteer-run service</strong>. You can always generate images for free here, without paying!
+        </div>
         <form method="POST" id="main-form">
             <div class="form-group">
                 <label for="username">Display Name *</label>
@@ -65,17 +64,23 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                   document.getElementById("main-form").submit();
                 }
             </script>
-            <button type="submit" class="btn btn-default g-recaptcha" data-sitekey="{{ recaptcha_site }}" data-callback='onSubmit' data-action='submit'>Submit</button>
+            <button type="submit" class="btn g-recaptcha" data-sitekey="{{ recaptcha_site }}" data-callback='onSubmit' data-action='submit'>Submit</button>
         </form>
         {% if api_key is not none %}
-        <h2>API Key</h2>
-        <p>Your new API Key is below. It will not be displayed again. Submit this form to generate a new one. Use this key in your client and in your bridge to identify your user</p>
-        <p><b>Do not share this with anyone!</b></p>
-        <p style="background-color:darkorange;">{{ api_key }}</p>
+        <div style="margin-top: 2rem; padding: 1.5rem; background: rgba(22, 27, 34, 0.8); border: 1px solid #30363d; border-radius: 8px;">
+            <h2>API Key</h2>
+            <p>Your new API Key is below. It will not be displayed again. Submit this form to generate a new one. Use this key in your client and in your bridge to identify your user</p>
+            <p><strong>Do not share this with anyone!</strong></p>
+            <code style="display: block; padding: 1rem; margin: 1rem 0; background: rgba(13, 17, 23, 0.8); border: 1px solid #30363d; border-radius: 6px; word-break: break-all; font-size: 0.9rem;">{{ api_key }}</code>
+        </div>
         {% endif %}
-        <h2>Privacy Policy</h2>
-        <p>The only information we store from your account is your unique ID for uniqueness.</p>
-        <p>We do not other use your id for any purpose.</p>
+        <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid #30363d;">
+            <h2>Privacy Policy</h2>
+            <p>The only information we store from your account is your unique ID for uniqueness.</p>
+            <p>We do not use your id for any other purpose.</p>
+        </div>
    </div>
-<p><a href="/">Back to Main page</a></p>
+   <div style="text-align: center; margin: 2rem 0;">
+       <a href="/" style="color: #58a6ff;">← Back to Main page</a>
+   </div>
 {% endblock %}
