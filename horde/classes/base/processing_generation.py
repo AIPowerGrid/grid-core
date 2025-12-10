@@ -231,5 +231,6 @@ class ProcessingGeneration(db.Model):
         """Returns how many seconds each job request should stay waiting before considering it stale and cancelling it
         This function should be overriden by the invididual hordes depending on how the calculating ttl
         """
-        self.job_ttl = 150
+        # No timeout - allow jobs to run as long as needed (24 hours)
+        self.job_ttl = 86400
         db.session.commit()
