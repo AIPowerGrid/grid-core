@@ -1,0 +1,803 @@
+{
+    "stable_diffusion_2.1": {
+        "name": "stable_diffusion_2.1",
+        "baseline": "stable diffusion 2",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "Generalist AI image generating model. The baseline for all finetuned models.",
+        "showcases": [
+            "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/showcase/stable_diffusion_2.1/01_juice.webp",
+            "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/showcase/stable_diffusion_2.1/02_gigachad.webp"
+        ],
+        "version": "2.1",
+        "style": "generalist",
+        "nsfw": false,
+        "download_all": true,
+        "config": {
+            "files": [
+                {
+                    "path": "model_2_1.ckpt",
+                    "md5sum": "ce8ee5c53acb3a6540b44a71276c3d01",
+                    "sha256sum": "ad2a33c361c1f593c4a1fb32ea81afce2b5bb7d1983c6b94793a26a3b54b08a0"
+                },
+                {
+                    "path": "v2-inference-v.yaml"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "model_2_1.ckpt",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/mirroring/horde_models/resolve/main/model_2_1.ckpt?download=true"
+                }
+            ]
+        },
+        "available": false,
+        "size_on_disk_bytes": 5214865159
+    },
+    "stable_diffusion": {
+        "name": "stable_diffusion",
+        "baseline": "stable diffusion 1",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "Generalist AI image generating model. The baseline for all finetuned models.",
+        "showcases": [
+            "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/showcase/stable_diffusion/01_racebannin.webp",
+            "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/showcase/stable_diffusion/02_bigdowg.webp",
+            "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/showcase/stable_diffusion/03_executivebees24601.webp"
+        ],
+        "version": "1.5",
+        "style": "generalist",
+        "nsfw": false,
+        "download_all": true,
+        "config": {
+            "files": [
+                {
+                    "path": "model_1_5.ckpt",
+                    "md5sum": "76cce9b4e4410ff4fd1ec63d44cf7111",
+                    "sha256sum": "cc6cb27103417325ff94f52b7a5d2dde45a7515b25c255d8e396c90014281516"
+                },
+                {
+                    "path": "v1-inference.yaml"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "model_1_5.ckpt",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/mirroring/horde_models/resolve/main/model_1_5.ckpt?download=true"
+                }
+            ]
+        },
+        "available": false,
+        "size_on_disk_bytes": 4265380512
+    },
+    "Realistic Vision": {
+        "name": "Realistic Vision",
+        "baseline": "stable diffusion 1",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "Model for creating photorealistic humans",
+        "showcases": [
+            "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/showcase/realisticvision/01_realisticvision.webp"
+        ],
+        "version": "2.0",
+        "style": "realistic",
+        "homepage": "https://civitai.com/models/4201?modelVersionId=29460",
+        "nsfw": true,
+        "download_all": false,
+        "config": {
+            "files": [
+                {
+                    "path": "RealisticVision.ckpt",
+                    "sha256sum": "c6fe5d4a3e16c5dd476840a477e8a88d92e9c94d2e2822543040ecdd1ab60cae"
+                },
+                {
+                    "path": "v1-inference.yaml"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "RealisticVision.ckpt",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/mirroring/horde_models/resolve/main/RealisticVision.ckpt?download=true"
+                }
+            ]
+        },
+        "available": false,
+        "size_on_disk_bytes": 2132914476
+    },
+    "Epic Diffusion": {
+        "name": "Epic Diffusion",
+        "baseline": "stable diffusion 1",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "Epic Diffusion is a general purpose model based on Stable Diffusion 1.x intended to replace the official SD releases as your default model. It is focused on providing high quality output in a wide range of different styles, with support for NFSW content.",
+        "showcases": [
+            "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/showcase/epic_diffusion/01_epic.webp"
+        ],
+        "version": "1.1",
+        "style": "generalist",
+        "homepage": "https://civitai.com/models/3855/epic-diffusion",
+        "nsfw": false,
+        "download_all": false,
+        "config": {
+            "files": [
+                {
+                    "path": "EpicDiffusion.ckpt",
+                    "md5sum": "db7bad70b29fa7ed613d30ced9e5f26a",
+                    "sha256sum": "ee6266109f4060b9bf134bf670ea75e663ec356352db6140b86828917340b162"
+                },
+                {
+                    "path": "v1-inference.yaml"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "EpicDiffusion.ckpt",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/mirroring/horde_models/resolve/main/EpicDiffusion.ckpt?download=true"
+                }
+            ]
+        },
+        "available": false,
+        "size_on_disk_bytes": 2132863996
+    },
+    "Deliberate": {
+        "name": "Deliberate",
+        "baseline": "stable diffusion 1",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "This model provides you the ability to create anything you want. The more power of prompt knowledges you have, the better results you'll get. It basically means that you'll never get a perfect result with just a few words. You have to fill out your prompt line extremely detailed",
+        "showcases": [
+            "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/showcase/deliberate/01_deliberate.webp"
+        ],
+        "version": "2",
+        "style": "generalist",
+        "homepage": "https://civitai.com/models/4823/deliberate",
+        "nsfw": true,
+        "download_all": false,
+        "config": {
+            "files": [
+                {
+                    "path": "Deliberate.ckpt",
+                    "md5sum": "65621076b884a0debcae553aa142e935",
+                    "sha256sum": "b4391b7978d973427a4a2a3ed0e67b18ebe34e213904575043d6c9faec75c22d"
+                },
+                {
+                    "path": "v1-inference.yaml"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "Deliberate.ckpt",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/mirroring/horde_models/resolve/main/Deliberate.ckpt?download=true"
+                }
+            ]
+        },
+        "available": false,
+        "size_on_disk_bytes": 2132780730
+    },
+    "Unstable Ink Dream": {
+        "name": "Unstable Ink Dream",
+        "baseline": "stable diffusion 1",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "Create a variety of styles including realistic photos, realistic drawings, and animations like last three fig",
+        "showcases": [
+            "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/showcase/unstableinkdream/01_inkdream.webp"
+        ],
+        "version": "6.0",
+        "style": "artistic",
+        "trigger": [
+            "nvinkpunk",
+            "kuvshinov",
+            "dreamlikeart",
+            "samdoesart",
+            "analog style",
+            "modelshoot style"
+        ],
+        "homepage": "https://huggingface.co/Oosayam/UnstableSamInkDream",
+        "nsfw": false,
+        "download_all": false,
+        "config": {
+            "files": [
+                {
+                    "path": "unstableinkdream.ckpt",
+                    "md5sum": "20cad084326b84a0080c014811cd9c61",
+                    "sha256sum": "264966bd6cef691b2ae89240ceae6a9b15f9d5207a91b3cb3aa93cf418fe95fb"
+                },
+                {
+                    "path": "v1-inference.yaml"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "unstableinkdream.ckpt",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/mirroring/horde_models/resolve/main/unstableinkdream.ckpt?download=true"
+                }
+            ]
+        },
+        "available": false,
+        "size_on_disk_bytes": 4098327353
+    },
+    "Anything v3": {
+        "name": "Anything v3",
+        "baseline": "stable diffusion 1",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "The original horde Anything model with the VAE built in",
+        "tags": [
+            "anime",
+            "booru"
+        ],
+        "showcases": [
+            "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/showcase/anythingv3/01_anythingv3.webp"
+        ],
+        "version": "3",
+        "style": "anime",
+        "homepage": "https://huggingface.co/Linaqruf/anything-v3.0",
+        "nsfw": false,
+        "download_all": false,
+        "config": {
+            "files": [
+                {
+                    "path": "AnythingV3.ckpt",
+                    "md5sum": "b5b6c32d8800b5bba2270692c71902e7",
+                    "sha256sum": "786e34bf8ed2ce3c1d2dd2087089264f0cbc63748979048a9ecf7d75497788d6"
+                },
+                {
+                    "path": "v1-inference.yaml"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "AnythingV3.ckpt",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/mirroring/horde_models/resolve/main/AnythingV3.ckpt?download=true"
+                }
+            ]
+        },
+        "available": false,
+        "size_on_disk_bytes": 2132857198
+    },
+    "Movie Diffusion": {
+        "name": "Movie Diffusion",
+        "baseline": "stable diffusion 1",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "Movie Diffusion is SD 1.5 trained on 35mm film stills from popular movies.",
+        "version": "1.2",
+        "style": "realistic",
+        "homepage": "https://civitai.com/models/8067/movie-diffusion-v12",
+        "nsfw": false,
+        "download_all": false,
+        "config": {
+            "files": [
+                {
+                    "path": "movie-diffusion.ckpt",
+                    "md5sum": "6dd8835d5b2f9950c880124d2885a1b8",
+                    "sha256sum": "5a08f9d89c51cc5f0f43d27d6ff5c242679f5f1ada6e0f73a3aafe10c1cf4e1b"
+                },
+                {
+                    "path": "v1-inference.yaml"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "movie-diffusion.ckpt",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/mirroring/horde_models/resolve/main/movie-diffusion.ckpt?download=true"
+                }
+            ]
+        },
+        "available": false,
+        "size_on_disk_bytes": 2132860661
+    },
+    "ICBINP - I Can't Believe It's Not Photography": {
+        "name": "ICBINP - I Can't Believe It's Not Photography",
+        "baseline": "stable diffusion 1",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "Following on from Gorilla With A Brick, merged in 10 more photorealistic models at various weights, and some more noise offset to create something that when prompted for photorealism will make you go 'I Can't Believe It's Not Photography'. It will happily create CGI characters and awesome landscapes as well.",
+        "showcases": [
+            "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/showcase/icbinp-i-cant-believe-its-not-photography/image-grid.webp"
+        ],
+        "version": "New Year",
+        "style": "realistic",
+        "homepage": "https://civitai.com/models/28059?modelVersionId=306898",
+        "nsfw": false,
+        "download_all": false,
+        "config": {
+            "files": [
+                {
+                    "path": "icbinp.safetensors",
+                    "sha256sum": "6d3331c3d87b4f1b17adc37aac2fdbb5da1e61714e1dc4b19b7d16012f438c03"
+                },
+                {
+                    "path": "v1-inference.yaml"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "icbinp.safetensors",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/mirroring/horde_models/resolve/main/icbinpICantBelieveIts_newYear.safetensors?download=true"
+                }
+            ]
+        },
+        "available": false,
+        "size_on_disk_bytes": 2132857262
+    },
+    "SDXL 1.0": {
+        "name": "SDXL 1.0",
+        "baseline": "stable_diffusion_xl",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "The base SDXL 1.0 model.",
+        "version": "1.0",
+        "style": "generalist",
+        "homepage": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0",
+        "nsfw": false,
+        "download_all": false,
+        "config": {
+            "files": [
+                {
+                    "path": "sd_xl_base_1.0.safetensors",
+                    "sha256sum": "31e35c80fc4829d14f90153f4c74cd59c90b779f6afe05a74cd6120b893f7e5b"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "sd_xl_base_1.0.safetensors",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/mirroring/horde_models/resolve/main/sd_xl_base_1.0.safetensors?download=true"
+                }
+            ]
+        },
+        "features_not_supported": [
+            "hires_fix",
+            "inpainting",
+            "controlnet"
+        ],
+        "size_on_disk_bytes": 6938078334
+    },
+    "ICBINP XL": {
+        "name": "ICBINP XL",
+        "baseline": "stable_diffusion_xl",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "The SDXL follow up to ICBINP, now with higher resolution and better realism",
+        "version": "6",
+        "style": "realistic",
+        "homepage": "https://civitai.com/models/229002/icbinp-xl",
+        "nsfw": false,
+        "download_all": false,
+        "requirements": {
+            "clip_skip": 2
+        },
+        "config": {
+            "files": [
+                {
+                    "path": "icbinp_xl.safetensors",
+                    "sha256sum": "B54E38A6BDAF010179BCAF4CA8637598A5B0B7587BAB3B6EBD1CDFF699D8863D"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "icbinp_xl.safetensors",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/mirroring/horde_models/resolve/main/ICBINP_XL_v6.safetensors"
+                }
+            ]
+        },
+        "features_not_supported": [
+            "hires_fix",
+            "inpainting",
+            "controlnet"
+        ],
+        "size_on_disk_bytes": 6775430376
+    },
+    "Juggernaut XL": {
+        "name": "Juggernaut XL",
+        "baseline": "stable_diffusion_xl",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "Very popular realistic model",
+        "version": "9.0",
+        "style": "realistic",
+        "homepage": "https://civitai.com/models/133005?modelVersionId=348913",
+        "nsfw": true,
+        "download_all": false,
+        "config": {
+            "files": [
+                {
+                    "path": "juggernaut_xl.safetensors",
+                    "sha256sum": "c9e3e68f89b8e38689e1097d4be4573cf308de4e3fd044c64ca697bdb4aa8bca"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "juggernaut_xl.safetensors",
+                    "file_path": "",
+                    "file_url": "https://civitai.com/api/download/models/348913?format=SafeTensor"
+                }
+            ]
+        },
+        "features_not_supported": [
+            "hires_fix",
+            "inpainting",
+            "controlnet"
+        ],
+        "size_on_disk_bytes": 6938816589
+    },
+    "Animagine XL": {
+        "name": "Animagine XL",
+        "baseline": "stable_diffusion_xl",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "Animagine XL is the sophisticated open-source anime text-to-image model, building upon the capabilities of its predecessor, Animagine XL 2.0. Developed based on Stable Diffusion XL, this iteration boasts superior image generation with notable improvements in hand anatomy, efficient tag ordering, and enhanced knowledge about anime concepts. Unlike the previous iteration, we focused to make the model learn concepts rather than aesthetic.",
+        "version": "3.0",
+        "style": "anime",
+        "homepage": "https://huggingface.co/cagliostrolab/animagine-xl-3.0",
+        "nsfw": true,
+        "download_all": false,
+        "config": {
+            "files": [
+                {
+                    "path": "animagine_xl.safetensors",
+                    "sha256sum": "1449e5b0b9de87b0f414c5f29cb11ce3b3dc61fa2b320e784c9441720bf7b766"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "animagine_xl.safetensors",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/cagliostrolab/animagine-xl-3.0/resolve/main/animagine-xl-3.0.safetensors?download=true"
+                }
+            ]
+        },
+        "features_not_supported": [
+            "hires_fix",
+            "inpainting",
+            "controlnet"
+        ],
+        "size_on_disk_bytes": 6776583201
+    },
+    "DreamShaper XL": {
+        "name": "DreamShaper XL",
+        "baseline": "stable_diffusion_xl",
+        "optimization": "lightning",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "DreamShaper is a general purpose SD model that aims at doing everything well, photos, art, anime, manga. It's designed to go against other general purpose models and pipelines like Midjourney and DALL-E.",
+        "version": "3.0",
+        "style": "anime",
+        "homepage": "https://civitai.com/models/112902",
+        "nsfw": true,
+        "download_all": false,
+        "requirements": {
+            "min_steps": 3,
+            "max_steps": 6,
+            "cfg_scale": 2,
+            "samplers": [
+                "k_dpmpp_sde"
+            ],
+            "schedulers": [
+                "karras"
+            ]
+        },
+        "config": {
+            "files": [
+                {
+                    "path": "dreamshaper_xl.safetensors",
+                    "sha256sum": "fdbe56354b8f876b736f24d3ad867ecd4140c019f57642ec8ddd878088d44f64"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "dreamshaper_xl.safetensors",
+                    "file_path": "",
+                    "file_url": "https://civitai.com/api/download/models/354657?format=SafeTensor"
+                }
+            ]
+        },
+        "features_not_supported": [
+            "hires_fix",
+            "inpainting",
+            "controlnet"
+        ],
+        "size_on_disk_bytes": 6776583201
+    },
+    "Stable Cascade 1.0": {
+        "name": "Stable Cascade 1.0",
+        "baseline": "stable_cascade",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "This model is built upon the Wurstchen architecture and its main difference to other models like Stable Diffusion is that it is working at a much smaller latent space.",
+        "version": "1.0",
+        "style": "generalist",
+        "homepage": "https://github.com/Stability-AI/StableCascade",
+        "nsfw": false,
+        "download_all": false,
+        "requirements": {
+            "min_steps": 20,
+            "max_steps": 30
+        },
+        "config": {
+            "files": [
+                {
+                    "path": "stable_cascade_stage_b.safetensors",
+                    "sha256sum": "6c218dc948575e3b14b03dffe2014d7870ac505005770ce3abdc28e920a03c05",
+                    "file_type": "stable_cascade_stage_b"
+                },
+                {
+                    "path": "stable_cascade_stage_c.safetensors",
+                    "sha256sum": "088ddf1e444abf399007b2da2bac87791df165c69f477994f6b3c745a20904b0",
+                    "file_type": "stable_cascade_stage_c"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "stable_cascade_stage_b.safetensors",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/comfyui_checkpoints/stable_cascade_stage_b.safetensors?download=true"
+                },
+                {
+                    "file_name": "stable_cascade_stage_c.safetensors",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/comfyui_checkpoints/stable_cascade_stage_c.safetensors?download=true"
+                }
+            ]
+        },
+        "features_not_supported": [
+            "hires_fix",
+            "inpainting",
+            "controlnet"
+        ],
+        "size_on_disk_bytes": 13776906831
+    },
+    "Flux.1-Schnell fp8 (Compact)": {
+        "name": "Flux.1-Schnell fp8 (Compact)",
+        "baseline": "flux_1",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "FLUX.1 [schnell] is a 12 billion parameter rectified flow transformer capable of generating images from text descriptions. For more information, please read our blog post. https://blackforestlabs.ai/",
+        "version": "1.0",
+        "style": "generalist",
+        "homepage": "https://civitai.com/models/637170?modelVersionId=714945",
+        "nsfw": false,
+        "download_all": false,
+        "requirements": {
+            "min_steps": 3,
+            "max_steps": 8,
+            "min_cfg_scale": 1,
+            "max_cfg_scale": 4,
+            "clip_skip": 1,
+            "samplers": [
+                "k_euler"
+            ],
+            "schedulers": [
+                "karras"
+            ]
+        },
+        "config": {
+            "files": [
+                {
+                    "path": "flux1CompactCLIPAnd_Flux1SchnellFp8.safetensors",
+                    "sha256sum": "5C2C590E92ED47500092EF8E1A00FD1F8E61009DA93B89130A80940F5257DF17"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "flux1CompactCLIPAnd_Flux1SchnellFp8.safetensors",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/mirroring/horde_models/resolve/main/flux1CompactCLIPAnd_Flux1SchnellFp8.safetensors"
+                }
+            ]
+        },
+        "features_not_supported": [
+            "hires_fix",
+            "inpainting",
+            "controlnet"
+        ],
+        "size_on_disk_bytes": 17246524772
+    },
+    "FLUX.1-dev": {
+        "name": "FLUX.1-dev",
+        "baseline": "flux_1",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "FLUX.1-dev is a development version of the FLUX model for high-quality image generation.",
+        "version": "1.0",
+        "style": "generalist",
+        "nsfw": false,
+        "download_all": true,
+        "config": {
+            "download_url": "https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors",
+            "file_path": "flux1-dev.safetensors",
+            "file_name": "flux1-dev.safetensors",
+            "file_url": "https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors"
+        }
+    },
+    "FLUX.1-schnell": {
+        "name": "FLUX.1-schnell",
+        "baseline": "flux_1",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "FLUX.1-schnell is the fast version of the FLUX model for quick image generation.",
+        "version": "1.0",
+        "style": "generalist",
+        "nsfw": false,
+        "download_all": true,
+        "config": {
+            "download_url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors",
+            "file_path": "flux1-schnell.safetensors",
+            "file_name": "flux1-schnell.safetensors",
+            "file_url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors"
+        }
+    },
+    "FLUX.1-dev-Kontext-fp8-scaled": {
+        "name": "FLUX.1-dev-Kontext-fp8-scaled",
+        "baseline": "flux_1",
+        "type": "ckpt",
+        "inpainting": true,
+        "description": "FLUX.1-dev Kontext FP8 scaled is the optimized fp8 scaled version of the img2img model for FLUX.1-dev that enables precise image editing and transformation.",
+        "version": "1.0",
+        "style": "generalist",
+        "homepage": "https://huggingface.co/black-forest-labs/FLUX.1-Kontext",
+        "nsfw": false,
+        "download_all": true,
+        "requirements": {
+            "min_steps": 20,
+            "max_steps": 30,
+            "min_cfg_scale": 1,
+            "max_cfg_scale": 2.5,
+            "clip_skip": 1,
+            "samplers": [
+                "k_euler"
+            ],
+            "schedulers": [
+                "simple"
+            ]
+        },
+        "config": {
+            "files": [
+                {
+                    "path": "flux1-dev-kontext_fp8_scaled.safetensors"
+                }
+            ],
+            "download_url": "https://huggingface.co/black-forest-labs/FLUX.1-Kontext/resolve/main/flux1-dev-kontext_fp8_scaled.safetensors",
+            "file_path": "flux1-dev-kontext_fp8_scaled.safetensors",
+            "file_name": "flux1-dev-kontext_fp8_scaled.safetensors",
+            "file_url": "https://huggingface.co/black-forest-labs/FLUX.1-Kontext/resolve/main/flux1-dev-kontext_fp8_scaled.safetensors"
+        },
+        "features_not_supported": [
+            "hires_fix",
+            "controlnet"
+        ]
+    },
+    "flux.1-krea-dev": {
+        "name": "flux.1-krea-dev",
+        "baseline": "flux_1",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "FLUX.1-Krea-dev vanilla (non-uncensored) variant, same parameters as the uncensored entry.",
+        "version": "1.0",
+        "style": "generalist",
+        "homepage": "https://civitai.com/models/1830497?modelVersionId=2071474",
+        "nsfw": false,
+        "download_all": false,
+        "requirements": {
+            "min_steps": 28,
+            "max_steps": 32,
+            "min_cfg_scale": 3.5,
+            "max_cfg_scale": 5,
+            "clip_skip": 1,
+            "samplers": [
+                "k_euler"
+            ],
+            "schedulers": [
+                "karras"
+            ]
+        },
+        "config": {
+            "files": [
+                {
+                    "path": "flux1-krea-dev_fp8_scaled.safetensors",
+                    "sha256sum": "AD6185A8E9D0364417D5EFAF01CB44CEC04939098FF6429CD816674682815909"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "flux1-krea-dev_fp8_scaled.safetensors",
+                    "file_path": "",
+                    "file_url": "https://civitai.com/api/download/models/2071474"
+                }
+            ]
+        },
+        "features_not_supported": [
+            "hires_fix",
+            "inpainting",
+            "controlnet"
+        ],
+        "size_on_disk_bytes": 17206700956
+    },
+    "Chroma": {
+        "name": "Chroma",
+        "baseline": "flux_1",
+        "type": "ckpt",
+        "inpainting": false,
+        "description": "Chroma is a high-quality image generation model optimized for creating vibrant, detailed images with excellent color reproduction and artistic quality.",
+        "version": "3.9",
+        "style": "generalist",
+        "homepage": "https://huggingface.co/lodestones/Chroma",
+        "nsfw": false,
+        "download_all": false,
+        "requirements": {
+            "min_steps": 28,
+            "max_steps": 32,
+            "min_cfg_scale": 3.5,
+            "max_cfg_scale": 5,
+            "clip_skip": 1,
+            "samplers": [
+                "k_euler"
+            ],
+            "schedulers": [
+                "simple"
+            ]
+        },
+        "config": {
+            "files": [
+                {
+                    "path": "chroma-unlocked-v30.safetensors"
+                },
+                {
+                    "path": "chroma-unlocked-v31.safetensors"
+                },
+                {
+                    "path": "chroma-unlocked-v32.safetensors"
+                },
+                {
+                    "path": "chroma-unlocked-v33.safetensors"
+                },
+                {
+                    "path": "chroma-unlocked-v34.safetensors"
+                },
+                {
+                    "path": "chroma-unlocked-v35.safetensors"
+                },
+                {
+                    "path": "chroma-unlocked-v36.safetensors"
+                },
+                {
+                    "path": "chroma-unlocked-v37.safetensors"
+                },
+                {
+                    "path": "chroma-unlocked-v38.safetensors"
+                },
+                {
+                    "path": "chroma-unlocked-v39.safetensors"
+                },
+                {
+                    "path": "chroma-unlocked-v40.safetensors"
+                }
+            ],
+            "download": [
+                {
+                    "file_name": "chroma-unlocked-v39.safetensors",
+                    "file_path": "",
+                    "file_url": "https://huggingface.co/lodestones/Chroma/resolve/main/chroma-unlocked-v39.safetensors?download=true"
+                }
+            ]
+        },
+        "features_not_supported": [
+            "hires_fix",
+            "inpainting",
+            "controlnet"
+        ],
+        "size_on_disk_bytes": 17206700956
+    }
+}
