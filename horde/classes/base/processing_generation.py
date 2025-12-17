@@ -45,6 +45,12 @@ class ProcessingGeneration(db.Model):
         server_default=expression.literal(False),
     )
     job_ttl = db.Column(db.Integer, default=150, nullable=False, index=True)
+    
+    # Progress tracking fields for real-time updates
+    progress_percent = db.Column(db.Integer, default=0, nullable=False)
+    current_step = db.Column(db.Integer, default=0, nullable=False)
+    total_steps = db.Column(db.Integer, default=0, nullable=False)
+    progress_updated_at = db.Column(db.DateTime, nullable=True)
 
     wp_id = db.Column(
         uuid_column_type(),
@@ -197,6 +203,7 @@ class ProcessingGeneration(db.Model):
             "worker_name": self.worker.name,
             "model": self.model,
             "gen_metadata": self.gen_metadata if self.gen_metadata is not None else [],
+            "progress": self.get_progress(),
         }
         return ret_dict
 
@@ -234,3 +241,23 @@ class ProcessingGeneration(db.Model):
         # No timeout - allow jobs to run as long as needed (24 hours)
         self.job_ttl = 86400
         db.session.commit()
+
+    def update_progress(self, current_step: int, total_steps: int):
+        """Update the progress of this generation job"""
+        if self.is_completed() or self.is_faulted():
+            return False
+        self.current_step = current_step
+        self.total_steps = total_steps
+        self.progress_percent = int((current_step / max(total_steps, 1)) * 100)
+        self.progress_updated_at = datetime.utcnow()
+        db.session.commit()
+        return True
+
+    def get_progress(self):
+        """Get current progress info"""
+        return {
+            "progress_percent": self.progress_percent,
+            "current_step": self.current_step,
+            "total_steps": self.total_steps,
+            "progress_updated_at": self.progress_updated_at.isoformat() if self.progress_updated_at else None,
+        }

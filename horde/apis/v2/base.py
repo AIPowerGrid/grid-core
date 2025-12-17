@@ -651,6 +651,84 @@ class JobSubmitTemplate(Resource):
             raise e.BadRequest("Too many metadata fields. Max is 50.")
 
 
+class JobProgressUpdate(Resource):
+    """Endpoint for workers to report progress on active jobs"""
+    
+    parser = reqparse.RequestParser()
+    parser.add_argument(
+        "apikey",
+        type=str,
+        required=True,
+        help="The worker's API key.",
+        location="headers",
+    )
+    parser.add_argument(
+        "id",
+        type=str,
+        required=True,
+        help="The processing generation ID.",
+        location="json",
+    )
+    parser.add_argument(
+        "current_step",
+        type=int,
+        required=True,
+        help="Current step in the generation process.",
+        location="json",
+    )
+    parser.add_argument(
+        "total_steps",
+        type=int,
+        required=True,
+        help="Total steps for the generation.",
+        location="json",
+    )
+
+    decorators = [limiter.limit("30/second")]
+
+    @api.expect(parser)
+    @api.response(200, "Progress Updated")
+    @api.response(400, "Invalid Request", models.response_model_error)
+    @api.response(401, "Invalid API Key", models.response_model_error)
+    @api.response(404, "Job Not Found", models.response_model_error)
+    def post(self):
+        """Report progress on an active generation job.
+        
+        Workers can use this endpoint to report their progress during generation,
+        allowing clients to see real-time step progress.
+        """
+        self.args = self.parser.parse_args()
+        
+        # Validate API key
+        user = database.find_user_by_api_key(self.args["apikey"])
+        if not user:
+            raise e.InvalidAPIKey("progress update")
+        
+        # Find the processing generation
+        procgen = database.get_progen_by_id(self.args["id"])
+        if not procgen:
+            raise e.InvalidJobID(self.args["id"])
+        
+        # Verify the worker owns this job
+        if user != procgen.worker.user:
+            raise e.WrongCredentials(user.get_unique_alias(), procgen.worker.name)
+        
+        # Update progress
+        success = procgen.update_progress(
+            current_step=self.args["current_step"],
+            total_steps=self.args["total_steps"],
+        )
+        
+        if not success:
+            return {"message": "Job already completed or faulted"}, 400
+        
+        return {
+            "progress_percent": procgen.progress_percent,
+            "current_step": procgen.current_step,
+            "total_steps": procgen.total_steps,
+        }, 200
+
+
 class TransferKudos(Resource):
     parser = reqparse.RequestParser()
     parser.add_argument(

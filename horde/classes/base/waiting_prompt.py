@@ -334,7 +334,11 @@ class WaitingPrompt(db.Model):
             "finished": 0,
             "processing": 0,
             "restarted": 0,
+            "progress": None,  # Will contain progress info for the most recent active job
         }
+        latest_progress = None
+        latest_progress_time = None
+        
         for procgen in self.processing_gens:
             if procgen.fake:
                 continue
@@ -344,6 +348,16 @@ class WaitingPrompt(db.Model):
                 ret_dict["restarted"] += 1
             else:
                 ret_dict["processing"] += 1
+                # Track the most recent progress update
+                if procgen.progress_updated_at:
+                    if latest_progress_time is None or procgen.progress_updated_at > latest_progress_time:
+                        latest_progress_time = procgen.progress_updated_at
+                        latest_progress = procgen.get_progress()
+        
+        # Include progress from the most recently updated processing job
+        if latest_progress:
+            ret_dict["progress"] = latest_progress
+        
         return ret_dict
 
     # FIXME: Looks like this is not used anywhere
