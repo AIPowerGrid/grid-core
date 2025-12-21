@@ -61,6 +61,12 @@ class ModelReference(PrimaryTimedFunction):
                         "stable_diffusion_xl",
                         "stable_cascade",
                         "flux_1",
+                        # Video model baselines
+                        "wan_2_1",
+                        "wan_2_2",
+                        "ltxv",
+                        "cogvideo",
+                        "mochi",
                     }:
                         self.stable_diffusion_names.add(model)
                         if self.reference[model].get("nsfw"):
