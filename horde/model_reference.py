@@ -173,6 +173,26 @@ class ModelReference(PrimaryTimedFunction):
         #     return True
         return False
 
+    def is_video_model(self, model_name):
+        """Check if a model is a video generation model.
+        
+        Video models have "style": "video" in stable_diffusion.json.
+        Also checks for known video model baselines.
+        """
+        model_details = self.reference.get(model_name, {})
+        # Check style field
+        if model_details.get("style") == "video":
+            return True
+        # Check baseline for known video model architectures
+        baseline = model_details.get("baseline", "").lower()
+        if baseline in ["wan_2_2", "wan_2_1", "ltxv", "cogvideo", "mochi"]:
+            return True
+        # Check model name patterns for video models
+        name_lower = model_name.lower()
+        if any(vid in name_lower for vid in ["t2v", "ti2v", "i2v", "ltxv", "video"]):
+            return True
+        return False
+
 
 model_reference = ModelReference(3600, None)
 model_reference.call_function()

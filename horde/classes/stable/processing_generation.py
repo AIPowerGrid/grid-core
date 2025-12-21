@@ -154,7 +154,16 @@ class ImageProcessingGeneration(ProcessingGeneration):
         os.remove(filename)
 
     def set_job_ttl(self):
-        # No timeout - allow jobs to run as long as needed
-        # Set to 24 hours (86400 seconds) to effectively remove timeout
-        self.job_ttl = 86400
+        """Set the job time-to-live based on model type.
+        
+        Video models get a much longer TTL since they take 5-15+ minutes to generate.
+        Image models use the standard timeout.
+        """
+        # Check if this is a video model
+        if model_reference.is_video_model(self.model):
+            # Video models: 2 hours (7200 seconds) - video generation is much slower
+            self.job_ttl = 7200
+        else:
+            # Image models: 10 minutes (600 seconds) - plenty of time for images
+            self.job_ttl = 600
         db.session.commit()
