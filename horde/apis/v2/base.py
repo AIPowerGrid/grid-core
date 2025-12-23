@@ -493,17 +493,10 @@ class JobPopTemplate(Resource):
                 if not wp.needs_gen():  # this says if < 1
                     continue
                 worker_ret = self.start_worker(wp)
-<<<<<<< Updated upstream
                 worker_ret["messages"] = database.get_all_active_worker_messages(self.worker.id)
                 # logger.debug(worker_ret)
                 if worker_ret is None:
                     continue
-=======
-                # logger.debug(worker_ret)
-                if worker_ret is None:
-                    continue
-                worker_ret["messages"] = database.get_all_active_worker_messages(self.worker.id)
->>>>>>> Stashed changes
                 # logger.debug(worker_ret)
                 return worker_ret, 200
             db.session.commit()  # Unlock all locked wp rows before picking up new ones
@@ -533,22 +526,6 @@ class JobPopTemplate(Resource):
             ret = wp.fake_generation(self.worker)
         else:
             ret = wp.start_generation(self.worker, self.args.amount)
-<<<<<<< Updated upstream
-=======
-        
-        # Notify Discord about job being popped
-        if ret:
-            try:
-                from horde.discord import notify_job_popped
-                job_id = ret.get("id") or (ret.get("ids")[0] if ret.get("ids") else None)
-                model = ret.get("model") or (ret.get("payload", {}).get("model") if ret.get("payload") else None)
-                prompt = ret.get("payload", {}).get("prompt") if ret.get("payload") else None
-                if job_id:
-                    notify_job_popped(str(job_id), model, self.worker.name, prompt)
-            except Exception:
-                pass
-        
->>>>>>> Stashed changes
         return ret
 
     # We split this to its own function so that it can be extended with the specific vars needed to check in
@@ -609,15 +586,6 @@ class JobPopTemplate(Resource):
                 name=self.worker_name,
             )
             self.worker.create()
-<<<<<<< Updated upstream
-=======
-            # Notify Discord about new worker
-            try:
-                from horde.discord import notify_worker_created
-                notify_worker_created(self.worker_name, str(self.worker.id), self.user.get_unique_alias())
-            except Exception:
-                pass  # Don't let Discord errors break worker creation
->>>>>>> Stashed changes
         if self.user != self.worker.user:
             raise e.WrongCredentials(self.user.get_unique_alias(), self.worker_name)
 
@@ -645,20 +613,6 @@ class JobPopTemplate(Resource):
 class JobSubmitTemplate(Resource):
     def post(self):
         self.validate()
-<<<<<<< Updated upstream
-=======
-        # Notify Discord about job completion
-        try:
-            from horde.discord import notify_job_submitted
-            notify_job_submitted(
-                str(self.procgen.id),
-                self.procgen.model,
-                self.procgen.worker.name,
-                self.kudos
-            )
-        except Exception:
-            pass
->>>>>>> Stashed changes
         return ({"reward": self.kudos}, 200)
 
     def get_progen(self):
@@ -697,7 +651,6 @@ class JobSubmitTemplate(Resource):
             raise e.BadRequest("Too many metadata fields. Max is 50.")
 
 
-<<<<<<< Updated upstream
 class JobProgressUpdate(Resource):
     """Endpoint for workers to report progress on active jobs"""
     
@@ -776,8 +729,6 @@ class JobProgressUpdate(Resource):
         }, 200
 
 
-=======
->>>>>>> Stashed changes
 class TransferKudos(Resource):
     parser = reqparse.RequestParser()
     parser.add_argument(

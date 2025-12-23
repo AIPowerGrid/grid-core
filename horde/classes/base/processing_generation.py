@@ -45,15 +45,12 @@ class ProcessingGeneration(db.Model):
         server_default=expression.literal(False),
     )
     job_ttl = db.Column(db.Integer, default=150, nullable=False, index=True)
-<<<<<<< Updated upstream
     
     # Progress tracking fields for real-time updates
     progress_percent = db.Column(db.Integer, default=0, nullable=False)
     current_step = db.Column(db.Integer, default=0, nullable=False)
     total_steps = db.Column(db.Integer, default=0, nullable=False)
     progress_updated_at = db.Column(db.DateTime, nullable=True)
-=======
->>>>>>> Stashed changes
 
     wp_id = db.Column(
         uuid_column_type(),
@@ -156,19 +153,6 @@ class ProcessingGeneration(db.Model):
         self.faulted = True
         self.worker.log_aborted_job()
         self.log_aborted_generation()
-<<<<<<< Updated upstream
-=======
-        # Notify Discord about job abort
-        try:
-            from horde.discord import notify_job_aborted
-            notify_job_aborted(
-                str(self.id),
-                self.worker.name if self.worker else None,
-                f"Timed out after {self.job_ttl}s (model: {self.model})"
-            )
-        except Exception:
-            pass
->>>>>>> Stashed changes
         db.session.commit()
 
     def log_aborted_generation(self):
@@ -219,10 +203,7 @@ class ProcessingGeneration(db.Model):
             "worker_name": self.worker.name,
             "model": self.model,
             "gen_metadata": self.gen_metadata if self.gen_metadata is not None else [],
-<<<<<<< Updated upstream
             "progress": self.get_progress(),
-=======
->>>>>>> Stashed changes
         }
         return ret_dict
 
@@ -257,7 +238,6 @@ class ProcessingGeneration(db.Model):
         """Returns how many seconds each job request should stay waiting before considering it stale and cancelling it
         This function should be overriden by the invididual hordes depending on how the calculating ttl
         """
-<<<<<<< Updated upstream
         # No timeout - allow jobs to run as long as needed (24 hours)
         self.job_ttl = 86400
         db.session.commit()
@@ -281,7 +261,3 @@ class ProcessingGeneration(db.Model):
             "total_steps": self.total_steps,
             "progress_updated_at": self.progress_updated_at.isoformat() if self.progress_updated_at else None,
         }
-=======
-        self.job_ttl = 150
-        db.session.commit()
->>>>>>> Stashed changes
