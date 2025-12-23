@@ -161,7 +161,7 @@ class WaitingPrompt(db.Model):
     def set_models(self, model_names=None):
         if not model_names:
             model_names = []
-        # logger.debug(model_names)
+        logger.info(f"🔍 WaitingPrompt.set_models: wp_id={self.id}, model_names={model_names}")
         for model in model_names:
             model_entry = WPModels(model=model, wp_id=self.id)
             db.session.add(model_entry)

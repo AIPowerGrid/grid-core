@@ -76,9 +76,13 @@ class ProcessingGeneration(db.Model):
             # If we reached this point, it means there is at least 1 matching model between worker and client
             # so we pick the first one.
             wp_models = self.wp.get_model_names()
+            logger.info(f"🔍 ProcessingGeneration: wp_id={self.wp.id}, wp_models={wp_models}, worker_models={worker_models[:5]}...")
             matching_models = worker_models
             if len(wp_models) != 0:
                 matching_models = [model for model in self.wp.get_model_names() if model in worker_models]
+                logger.info(f"🔍 ProcessingGeneration: Found {len(matching_models)} matching models: {matching_models[:5]}...")
+            else:
+                logger.warning(f"🔍 ProcessingGeneration: WP has NO models! Will use worker's models randomly.")
             if len(matching_models) == 0:
                 logger.warning(
                     f"Unexpectedly No models matched between worker and request!: Worker Models: {worker_models}. "
@@ -87,8 +91,10 @@ class ProcessingGeneration(db.Model):
                 matching_models = worker_models
             random.shuffle(matching_models)
             self.model = matching_models[0]
+            logger.info(f"🔍 ProcessingGeneration: Selected model '{self.model}' from matching_models={matching_models[:5]} (worker_models={worker_models[:5]}, wp_models={wp_models[:5]})")
         else:
             self.model = kwargs["model"]
+            logger.info(f"🔍 ProcessingGeneration: Using explicit model '{self.model}'")
         self.set_job_ttl()
         db.session.commit()
 

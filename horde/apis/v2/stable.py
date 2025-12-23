@@ -83,6 +83,8 @@ class ImageAsyncGenerate(GenerateTemplate):
         Asynchronous requests live for 10 minutes before being considered stale and being deleted.
         """
         self.args = parsers.generate_parser.parse_args()
+        # Debug: Log the models being requested
+        logger.info(f"🔍 ImageAsyncGenerate: models from args = {self.args.models}")
         try:
             super().post()
         except KeyError:
