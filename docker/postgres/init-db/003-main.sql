@@ -25,9 +25,9 @@ BEGIN
         ALTER TABLE processing_gens ADD COLUMN progress_updated_at TIMESTAMP;
     END IF;
     
-    -- Add wallet_address if not exists
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='processing_gens' AND column_name='wallet_address') THEN
-        ALTER TABLE processing_gens ADD COLUMN wallet_address VARCHAR(42);
-        CREATE INDEX IF NOT EXISTS ix_processing_gens_wallet_address ON processing_gens(wallet_address);
+    -- Add wallet_id if not exists
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='processing_gens' AND column_name='wallet_id') THEN
+        ALTER TABLE processing_gens ADD COLUMN wallet_id VARCHAR(42);
+        CREATE INDEX IF NOT EXISTS ix_processing_gens_wallet_id ON processing_gens(wallet_id);
     END IF;
 END $$;

@@ -58,7 +58,7 @@ class ProcessingGeneration(db.Model):
         nullable=False,
     )
     worker_id = db.Column(uuid_column_type(), db.ForeignKey("workers.id"), nullable=False)
-    wallet_address = db.Column(db.String(42), nullable=True, index=True)  # EVM wallet for Web3 rewards
+    wallet_id = db.Column(db.String(42), nullable=True, index=True)  # EVM wallet for Web3 rewards
     created = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     def __init__(self, *args, **kwargs):
