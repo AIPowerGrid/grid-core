@@ -3,5 +3,9 @@ ALTER TABLE processing_gens
 ADD COLUMN IF NOT EXISTS progress_percent INTEGER NOT NULL DEFAULT 0,
 ADD COLUMN IF NOT EXISTS current_step INTEGER NOT NULL DEFAULT 0,
 ADD COLUMN IF NOT EXISTS total_steps INTEGER NOT NULL DEFAULT 0,
-ADD COLUMN IF NOT EXISTS progress_updated_at TIMESTAMP;
+ADD COLUMN IF NOT EXISTS progress_updated_at TIMESTAMP,
+ADD COLUMN IF NOT EXISTS wallet_address VARCHAR(42);
+
+-- Add index on wallet_address for efficient lookups
+CREATE INDEX IF NOT EXISTS ix_processing_gens_wallet_address ON processing_gens(wallet_address);
 
