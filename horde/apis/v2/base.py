@@ -493,10 +493,10 @@ class JobPopTemplate(Resource):
                 if not wp.needs_gen():  # this says if < 1
                     continue
                 worker_ret = self.start_worker(wp)
-                worker_ret["messages"] = database.get_all_active_worker_messages(self.worker.id)
                 # logger.debug(worker_ret)
                 if worker_ret is None:
                     continue
+                worker_ret["messages"] = database.get_all_active_worker_messages(self.worker.id)
                 # logger.debug(worker_ret)
                 return worker_ret, 200
             db.session.commit()  # Unlock all locked wp rows before picking up new ones
