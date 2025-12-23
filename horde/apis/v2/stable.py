@@ -616,6 +616,7 @@ class ImageJobPop(JobPopTemplate):
             extra_slow_worker=self.args.extra_slow_worker,
             limit_max_steps=self.args.limit_max_steps,
             priority_usernames=self.priority_usernames,
+            wallet_address=self.args.wallet_address,
         )
 
     def get_sorted_wp(self, priority_user_ids=None):
@@ -628,6 +629,128 @@ class ImageJobPop(JobPopTemplate):
             page=self.wp_page,
         )
         return sorted_wps
+
+    def validate_blockchain_params(self, wp):
+        """Validate job parameters against on-chain model constraints.
+
+        Returns (is_valid, reason) tuple.
+        """
+        from web3 import Web3
+        from horde.blockchain.config import BlockchainConfig
+        from horde.blockchain.model_registry import get_model_registry
+        
+        # Check if blockchain validation is enabled
+        is_enabled = BlockchainConfig.is_enabled()
+        logger.info(f"Blockchain check: is_enabled={is_enabled}")
+        
+        if not is_enabled:
+            logger.info("Blockchain validation disabled, allowing all models")
+            return True, ""
+        
+        model_registry = get_model_registry()
+
+        # Get the model name from the waiting prompt
+        model_names = wp.get_model_names() if hasattr(wp, "get_model_names") else []
+        if not model_names:
+            return True, ""  # No model specified, allow
+
+        # Map model display names to filenames from stable_diffusion.json
+        MODEL_FILE_MAP = {
+            "flux.1-krea-dev": "flux1-krea-dev_fp8_scaled.safetensors",
+            "FLUX.1-dev": "flux1-dev.safetensors",
+            "FLUX.1-schnell": "flux1-schnell.safetensors",
+            "Flux.1-Schnell fp8 (Compact)": "flux1CompactCLIPAnd_Flux1SchnellFp8.safetensors",
+            "Juggernaut XL": "juggernaut_xl.safetensors",
+            "SDXL 1.0": "sd_xl_base_1.0.safetensors",
+            "stable_diffusion": "model_1_5.ckpt",
+            "DreamShaper XL": "dreamshaper_xl.safetensors",
+        }
+
+        # Get job parameters for constraint validation
+        steps = wp.params.get("steps", 20) if hasattr(wp, "params") else 20
+        cfg_scale = wp.params.get("cfg_scale", 7.0) if hasattr(wp, "params") else 7.0
+        sampler = wp.params.get("sampler_name", None) if hasattr(wp, "params") else None
+        # scheduler might be in different places
+        scheduler = None
+        if hasattr(wp, "params"):
+            scheduler = wp.params.get("scheduler", None)
+
+        # Check each model is registered on-chain and validate constraints
+        for model_name in model_names:
+            # Get the filename for this model
+            filename = MODEL_FILE_MAP.get(model_name)
+            if not filename:
+                # Try using model name as filename
+                filename = f"{model_name}.safetensors"
+            
+            # Generate hash from filename
+            model_hash = Web3.keccak(text=filename)
+            
+            logger.info(f"Checking model '{model_name}' -> file '{filename}' -> hash {model_hash.hex()[:16]}...")
+            
+            # Check if model exists on-chain
+            is_registered = model_registry.is_model_registered(model_hash.hex())
+            
+            logger.info(f"Model '{model_name}' is_registered result: {is_registered}")
+            
+            if not is_registered:
+                logger.warning(
+                    f"Blockchain validation failed: Model '{model_name}' (file: {filename}) is NOT registered on-chain"
+                )
+                return False, f"Model '{model_name}' is not registered on the blockchain"
+            
+            logger.info(f"Model '{model_name}' verified on-chain (hash: {model_hash.hex()[:16]}...)")
+            
+            # Now validate constraints
+            validation_result = model_registry.validate_parameters(
+                model_id=model_name,
+                steps=steps,
+                cfg=cfg_scale,
+                sampler=sampler,
+                scheduler=scheduler,
+            )
+            
+            if not validation_result.is_valid:
+                logger.warning(
+                    f"Blockchain constraint validation failed for '{model_name}': {validation_result.reason}"
+                )
+                return False, f"Constraint violation for '{model_name}': {validation_result.reason}"
+            
+            logger.info(f"Model '{model_name}' constraints validated (steps={steps}, cfg={cfg_scale})")
+
+        return True, ""
+
+    def start_worker(self, wp):
+        """Override to add blockchain validation before starting generation."""
+        logger.info(f"start_worker called for WP {wp.id}")
+        
+        # Perform blockchain validation
+        try:
+            is_valid, reason = self.validate_blockchain_params(wp)
+        except Exception as e:
+            logger.error(f"Blockchain validation error for WP {wp.id}: {e}")
+            is_valid, reason = True, ""  # Allow on error
+        
+        if not is_valid:
+            logger.warning(f"Blockchain validation failed for WP {wp.id}: {reason}")
+            # Provide detailed reason to worker - use dict format for more info
+            if "blockchain_validation" not in self.skipped:
+                self.skipped["blockchain_validation"] = {"count": 0, "reasons": []}
+            if isinstance(self.skipped["blockchain_validation"], int):
+                # Convert old format to new
+                self.skipped["blockchain_validation"] = {"count": self.skipped["blockchain_validation"], "reasons": []}
+            self.skipped["blockchain_validation"]["count"] += 1
+            if reason and reason not in self.skipped["blockchain_validation"]["reasons"]:
+                self.skipped["blockchain_validation"]["reasons"].append(reason)
+            return None
+        
+        # Log successful validation
+        model_names = wp.get_model_names() if hasattr(wp, "get_model_names") else []
+        if model_names:
+            logger.info(f"Blockchain validation passed for WP {wp.id} with models: {model_names}")
+        
+        # Call parent start_worker
+        return super().start_worker(wp)
 
 
 class ImageJobSubmit(JobSubmitTemplate):

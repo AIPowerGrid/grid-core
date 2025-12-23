@@ -1,0 +1,38 @@
+{
+  "contractName": "RecipeVault",
+  "abi": [
+    "function totalRecipes() view returns (uint256)",
+    "function nextRecipeId() view returns (uint256)",
+    "function maxWorkflowBytes() view returns (uint256)",
+    "function getRecipe(uint256 recipeId) view returns (tuple(uint256 recipeId, bytes32 recipeRoot, bytes workflowData, address creator, bool canCreateNFTs, bool isPublic, uint8 compression, uint256 createdAt, string name, string description))",
+    "function getRecipeWorkflow(uint256 recipeId) view returns (bytes)",
+    "function getRecipeByRoot(bytes32 recipeRoot) view returns (tuple(uint256 recipeId, bytes32 recipeRoot, bytes workflowData, address creator, bool canCreateNFTs, bool isPublic, uint8 compression, uint256 createdAt, string name, string description))",
+    "function getCreatorRecipes(address creator) view returns (uint256[])",
+    "function getAllRecipes() view returns (tuple(uint256 recipeId, bytes32 recipeRoot, bytes workflowData, address creator, bool canCreateNFTs, bool isPublic, uint8 compression, uint256 createdAt, string name, string description)[])",
+    "function getPublicRecipes() view returns (tuple(uint256 recipeId, bytes32 recipeRoot, bytes workflowData, address creator, bool canCreateNFTs, bool isPublic, uint8 compression, uint256 createdAt, string name, string description)[])",
+    "function getNftEnabledRecipes() view returns (tuple(uint256 recipeId, bytes32 recipeRoot, bytes workflowData, address creator, bool canCreateNFTs, bool isPublic, uint8 compression, uint256 createdAt, string name, string description)[])",
+    "function isRecipeAllowed(uint256 recipeId) view returns (bool)",
+    "function recipeRootToId(bytes32 recipeRoot) view returns (uint256)",
+    "function addRecipe(bytes32 recipeRoot, bytes workflowData, address creator, string name, string description, bool canCreateNFTs, bool isPublic, uint8 compression) returns (uint256)",
+    "function updateRecipe(uint256 recipeId, bool canCreateNFTs, bool isPublic)",
+    "function setMaxWorkflowBytes(uint256 newMax)",
+    "function pause()",
+    "function unpause()",
+    "function hasRole(bytes32 role, address account) view returns (bool)",
+    "function grantRole(bytes32 role, address account)",
+    "function revokeRole(bytes32 role, address account)",
+    "event RecipeAdded(uint256 indexed recipeId, address indexed creator, bytes32 recipeRoot, string name, bool canCreateNFTs, bool isPublic)",
+    "event RecipeUpdated(uint256 indexed recipeId, bool canCreateNFTs, bool isPublic)",
+    "event MaxWorkflowBytesUpdated(uint256 newMax)"
+  ],
+  "roles": {
+    "DEFAULT_ADMIN_ROLE": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "PAUSER_ROLE": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a"
+  },
+  "compression": {
+    "None": 0,
+    "Gzip": 1,
+    "Brotli": 2
+  }
+}
+

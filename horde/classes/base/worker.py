@@ -11,7 +11,7 @@ from sqlalchemy.ext.hybrid import hybrid_property
 
 from horde import vars as hv
 from horde.classes.base import settings
-from horde.discord import send_pause_notification
+from horde.discord import send_pause_notification, notify_worker_online, notify_worker_offline, notify_worker_created
 from horde.flask import SQLITE_MODE, db
 from horde.horde_redis import horde_redis as hr
 from horde.logger import logger
@@ -139,6 +139,7 @@ class WorkerTemplate(db.Model):
     # The value of this column is dfferent per worker type
     max_power = db.Column(db.Integer, default=20, nullable=False)
     extra_slow_worker = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    wallet_address = db.Column(db.String(42), nullable=True, index=True)  # EVM wallet for Web3 rewards
 
     paused = db.Column(db.Boolean, default=False, nullable=False)
     maintenance = db.Column(db.Boolean, default=False, nullable=False)
@@ -294,7 +295,11 @@ class WorkerTemplate(db.Model):
         # we only record new uptime on the worker every 30 seconds
         if (datetime.utcnow() - self.last_check_in).total_seconds() < 30 and (datetime.utcnow() - self.created).total_seconds() > 30:
             return
-        if not self.is_stale() and not self.paused and not self.maintenance:
+        
+        # Check if worker was stale before this check-in (coming back online)
+        was_stale = self.is_stale()
+        
+        if not was_stale and not self.paused and not self.maintenance:
             self.uptime += (datetime.utcnow() - self.last_check_in).total_seconds()
             # Every 10 minutes of uptime gets 100 kudos rewarded
             if self.uptime - self.last_reward_uptime > self.uptime_reward_threshold:
@@ -311,6 +316,13 @@ class WorkerTemplate(db.Model):
             # If the worker comes back from being stale, we just reset their last_reward_uptime
             # So that they have to stay up at least 10 mins to get uptime kudos
             self.last_reward_uptime = self.uptime
+            # Notify Discord that worker came back online
+            if was_stale:
+                try:
+                    models = [m.model for m in self.models] if hasattr(self, 'models') else []
+                    notify_worker_online(self.name, str(self.id), models, self.user.get_unique_alias() if self.user else None)
+                except Exception:
+                    pass  # Don't let Discord errors break check-in
         self.last_check_in = datetime.utcnow()
 
     def get_human_readable_uptime(self):
@@ -487,6 +499,7 @@ class WorkerTemplate(db.Model):
             "online": not self.is_stale(),
             "team": {"id": str(self.team.id), "name": self.team.name} if self.team else "None",
             "bridge_agent": self.bridge_agent,
+            "wallet_address": self.wallet_address,
         }
         if details_privilege >= 2:
             ret_dict["paused"] = self.paused
@@ -547,6 +560,10 @@ class Worker(WorkerTemplate):
         self.nsfw = kwargs.get("nsfw", True)
         self.set_blacklist(kwargs.get("blacklist", []))
         self.extra_slow_worker = kwargs.get("extra_slow_worker", False)
+        # Update wallet address if provided (validate EVM format)
+        wallet = kwargs.get("wallet_address")
+        if wallet and isinstance(wallet, str) and len(wallet) == 42 and wallet.startswith("0x"):
+            self.wallet_address = wallet
         # Commit should happen on calling extensions
 
     def set_blacklist(self, blacklist):

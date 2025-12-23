@@ -1,0 +1,32 @@
+{
+  "contractName": "JobAnchor",
+  "abi": [
+    "function totalAnchoredJobs() view returns (uint256)",
+    "function totalAnchoredRewards() view returns (uint256)",
+    "function getCurrentDay() view returns (uint256)",
+    "function getDailyAnchor(uint256 day) view returns (tuple(uint256 day, bytes32 merkleRoot, uint256 totalJobs, uint256 totalRewards, uint256 timestamp, address anchorer))",
+    "function dailyAnchors(uint256 day) view returns (uint256 day, bytes32 merkleRoot, uint256 totalJobs, uint256 totalRewards, uint256 timestamp, address anchorer)",
+    "function isJobAnchored(bytes32 jobId) view returns (bool)",
+    "function anchoredJobIds(bytes32 jobId) view returns (bool)",
+    "function getWorkerJobDays(address worker) view returns (uint256[])",
+    "function getTotalJobsForDay(uint256 day) view returns (uint256)",
+    "function getTotalRewardsForDay(uint256 day) view returns (uint256)",
+    "function getDaysWithAnchors(uint256 startDay, uint256 endDay) view returns (uint256[])",
+    "function anchorJobReceipt(tuple(address worker, bytes32 jobId, bytes32 modelHash, bytes32 inputHash, bytes32 outputHash, uint256 timestamp, uint256 rewardAmount, bool isVerified) jobReceipt)",
+    "function anchorJobReceipts(tuple(address worker, bytes32 jobId, bytes32 modelHash, bytes32 inputHash, bytes32 outputHash, uint256 timestamp, uint256 rewardAmount, bool isVerified)[] jobReceipts)",
+    "function finalizeDailyAnchor(uint256 day, bytes32 merkleRoot)",
+    "function pause()",
+    "function unpause()",
+    "function hasRole(bytes32 role, address account) view returns (bool)",
+    "function grantRole(bytes32 role, address account)",
+    "function revokeRole(bytes32 role, address account)",
+    "event JobReceiptAnchored(uint256 indexed day, address indexed worker, bytes32 indexed jobId, bytes32 modelHash, uint256 rewardAmount)",
+    "event DailyAnchorCreated(uint256 indexed day, bytes32 merkleRoot, uint256 totalJobs, uint256 totalRewards)"
+  ],
+  "roles": {
+    "DEFAULT_ADMIN_ROLE": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "ADMIN_ROLE": "0xa49807205ce4d355092ef5a8a18f56e8913cf4a201fbe287825b095693c21775",
+    "ANCHOR_ROLE": "0x241ecf16d79d0f8dbfb92cbc07fe17840425976cf0667f022fe9877caa831b08"
+  }
+}
+

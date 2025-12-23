@@ -85,7 +85,8 @@ def sanitize_string(text):
 
 
 def hash_api_key(unhashed_api_key):
-    salt = os.getenv("secret_key", "s0m3s3cr3t")  # Note default here, just so it can run without env file #noqa SIM112
+    # Force using the default salt to match existing database entries
+    salt = "s0m3s3cr3t"  # Note hardcoded default to match existing database entries
     return hashlib.sha256(salt.encode() + unhashed_api_key.encode()).hexdigest()
 
 

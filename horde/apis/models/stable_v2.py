@@ -709,7 +709,7 @@ class ImageModels(v2.Models):
                 ),
                 "webhook": fields.String(
                     required=False,
-                    max_length=1024,
+                    max_length=2048,
                     min_length=10,
                     example="https://haidra.net/00000000-0000-0000-0000-000000000000",
                     description=(
@@ -719,7 +719,7 @@ class ImageModels(v2.Models):
                 ),
                 "style": fields.String(
                     required=False,
-                    max_length=1024,
+                    max_length=2048,
                     min_length=3,
                     example="00000000-0000-0000-0000-000000000000",
                     description=("A horde style ID or name to use for this generation"),
@@ -774,7 +774,7 @@ class ImageModels(v2.Models):
                 ),
                 "webhook": fields.String(
                     required=False,
-                    max_length=1024,
+                    max_length=2048,
                     min_length=10,
                     example="https://haidra.net/00000000-0000-0000-0000-000000000000",
                     description=(

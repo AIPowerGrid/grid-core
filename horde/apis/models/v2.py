@@ -258,6 +258,14 @@ class Parsers:
             required=False,
             location="json",
         )
+        self.job_pop_parser.add_argument(
+            "wallet_address",
+            type=str,
+            default=None,
+            required=False,
+            help="EVM wallet address for Web3 rewards (0x...)",
+            location="json",
+        )
 
         self.job_submit_parser = reqparse.RequestParser()
         self.job_submit_parser.add_argument(
@@ -762,6 +770,12 @@ class Models:
                         "Extra slow workers are excluded from normal requests but users can opt in to use them."
                     ),
                 ),
+                "wallet_address": fields.String(
+                    default=None,
+                    required=False,
+                    description="EVM wallet address for Web3 rewards tracking (0x...)",
+                    example="0x1234567890123456789012345678901234567890",
+                ),
             },
         )
 
@@ -885,6 +899,11 @@ class Models:
                     example="AI Horde Worker reGen:4.1.0:https://github.com/Haidra-Org/horde-worker-reGen",
                     description="The bridge agent name, version and website.",
                     max_length=1000,
+                ),
+                "wallet_address": fields.String(
+                    example="0x1234567890abcdef1234567890abcdef12345678",
+                    description="The EVM wallet address for Web3 reward payouts.",
+                    max_length=42,
                 ),
                 "max_pixels": fields.Integer(
                     example=262144,
@@ -1883,7 +1902,7 @@ class Models:
                     description="The message sent",
                     example="Hello Worker!",
                     min_length=1,
-                    max_length=1024 * 10,
+                    max_length=2048 * 10,
                     required=True,
                 ),
                 "origin": fields.String(

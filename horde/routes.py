@@ -143,8 +143,8 @@ def index():
         image_models_list = "<p style='color: #f85149;'>Unable to load models</p>"
         text_models_list = "<p style='color: #f85149;'>Unable to load models</p>"
         top_models_list = "<p style='color: #f85149;'>Unable to load models</p>"
-        image_models = []
-        text_models = []
+    image_models = []
+    text_models = []
     
     findex = index.format(
         page_title=horde_title,

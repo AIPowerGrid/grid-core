@@ -196,7 +196,7 @@ class TextModels(v2.Models):
                 ),
                 "max_length": fields.Integer(
                     min=16,
-                    max=1024,
+                    max=2048,
                     default=80,
                     description="Number of tokens to generate.",
                 ),
@@ -360,7 +360,7 @@ class TextModels(v2.Models):
                 ),
                 "style": fields.String(
                     required=False,
-                    max_length=1024,
+                    max_length=2048,
                     min_length=3,
                     example="00000000-0000-0000-0000-000000000000",
                     description=("A horde style ID or name to use for this generation"),

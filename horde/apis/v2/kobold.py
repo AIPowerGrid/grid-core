@@ -333,6 +333,7 @@ class TextJobPop(JobPopTemplate):
             ipaddr=self.worker_ip,
             threads=self.args.threads,
             bridge_agent=self.args.bridge_agent,
+            wallet_address=self.args.wallet_address,
         )
 
     def get_sorted_wp(self, priority_user_ids=None):

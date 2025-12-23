@@ -1,0 +1,39 @@
+{
+  "contractName": "ModelRegistry",
+  "abi": [
+    "function totalModels() view returns (uint256)",
+    "function getModel(uint256 modelId) view returns (tuple(bytes32 modelHash, uint8 modelType, string fileName, string name, string description, bool isNSFW, uint256 sizeBytes, uint256 timestamp, address creator, bool inpainting, bool img2img, bool controlnet, bool lora, string baseModel, string architecture))",
+    "function getModelByHash(bytes32 modelHash) view returns (tuple(bytes32 modelHash, uint8 modelType, string fileName, string name, string description, bool isNSFW, uint256 sizeBytes, uint256 timestamp, address creator, bool inpainting, bool img2img, bool controlnet, bool lora, string baseModel, string architecture))",
+    "function getAllModels() view returns (tuple(bytes32 modelHash, uint8 modelType, string fileName, string name, string description, bool isNSFW, uint256 sizeBytes, uint256 timestamp, address creator, bool inpainting, bool img2img, bool controlnet, bool lora, string baseModel, string architecture)[])",
+    "function getAllModelHashes() view returns (bytes32[])",
+    "function isModelExists(bytes32 modelHash) view returns (bool)",
+    "function batchCheckExists(bytes32[] modelHashes) view returns (bool[])",
+    "function hashToModelId(bytes32 modelHash) view returns (uint256)",
+    "function getModelConstraints(string modelId) view returns (bool exists, uint16 stepsMin, uint16 stepsMax, uint16 cfgMinTenths, uint16 cfgMaxTenths, uint8 clipSkip, bytes32[] allowedSamplers, bytes32[] allowedSchedulers)",
+    "function validateModelParams(string modelId, string sampler, string scheduler, uint16 steps, uint16 cfgTenths, uint8 clipSkip) view returns (bool isValid, string reason)",
+    "function registerModel(bytes32 modelHash, uint8 modelType, string fileName, string displayName, string description, bool isNSFW, uint256 sizeBytes, bool inpainting, bool img2img, bool controlnet, bool lora, string baseModel, string architecture) returns (uint256)",
+    "function setModelNumericConstraints(string modelId, uint16 stepsMin, uint16 stepsMax, uint16 cfgMinTenths, uint16 cfgMaxTenths, uint8 clipSkip)",
+    "function setModelAllowedSamplers(string modelId, bytes32[] samplerHashes)",
+    "function setModelAllowedSchedulers(string modelId, bytes32[] schedulerHashes)",
+    "function pause()",
+    "function unpause()",
+    "function hasRole(bytes32 role, address account) view returns (bool)",
+    "function grantRole(bytes32 role, address account)",
+    "function revokeRole(bytes32 role, address account)",
+    "event ModelRegistered(uint256 indexed modelId, address indexed creator, bytes32 modelHash, uint8 modelType, string name)",
+    "event ModelConstraintsSet(string indexed modelId, uint16 stepsMin, uint16 stepsMax, uint16 cfgMinTenths, uint16 cfgMaxTenths, uint8 clipSkip)",
+    "event ModelConstraintsSamplersSet(string indexed modelId, bytes32[] samplerHashes)",
+    "event ModelConstraintsSchedulersSet(string indexed modelId, bytes32[] schedulerHashes)"
+  ],
+  "roles": {
+    "DEFAULT_ADMIN_ROLE": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "ADMIN_ROLE": "0xa49807205ce4d355092ef5a8a18f56e8913cf4a201fbe287825b095693c21775",
+    "REGISTRAR_ROLE": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6"
+  },
+  "modelTypes": {
+    "TEXT_MODEL": 0,
+    "IMAGE_MODEL": 1,
+    "VIDEO_MODEL": 2
+  }
+}
+
