@@ -733,15 +733,8 @@ class ImageJobPop(JobPopTemplate):
         
         if not is_valid:
             logger.warning(f"Blockchain validation failed for WP {wp.id}: {reason}")
-            # Provide detailed reason to worker - use dict format for more info
-            if "blockchain_validation" not in self.skipped:
-                self.skipped["blockchain_validation"] = {"count": 0, "reasons": []}
-            if isinstance(self.skipped["blockchain_validation"], int):
-                # Convert old format to new
-                self.skipped["blockchain_validation"] = {"count": self.skipped["blockchain_validation"], "reasons": []}
-            self.skipped["blockchain_validation"]["count"] += 1
-            if reason and reason not in self.skipped["blockchain_validation"]["reasons"]:
-                self.skipped["blockchain_validation"]["reasons"].append(reason)
+            # Keep skipped as simple integer count (API response model expects integers)
+            self.skipped["blockchain_validation"] = self.skipped.get("blockchain_validation", 0) + 1
             return None
         
         # Log successful validation
