@@ -961,6 +961,20 @@ def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_us
             ImageWaitingPrompt.expiry > datetime.utcnow(),
         )
     )
+    # Count jobs that match our models but are filtered by max_pixels
+    if models_list:
+        matching_models_wp = open_wp_list.filter(
+            or_(
+                WPModels.model.in_(models_list),
+                WPModels.id.is_(None),
+            ),
+        )
+        skipped_max_pixels_for_our_models = matching_models_wp.filter(
+            ImageWaitingPrompt.width * ImageWaitingPrompt.height > worker.max_pixels,
+        ).count()
+        if skipped_max_pixels_for_our_models > 0:
+            ret_dict["max_pixels_our_models"] = skipped_max_pixels_for_our_models
+    
     skipped_models = open_wp_list.filter(
         and_(
             WPModels.model.not_in(models_list),
@@ -969,6 +983,17 @@ def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_us
     ).count()
     if skipped_models > 0:
         ret_dict["models"] = skipped_models
+    
+    # Count how many jobs exist for our models (helps debug when jobs exist but aren't matched)
+    if models_list:
+        matching_model_jobs = open_wp_list.filter(
+            or_(
+                WPModels.model.in_(models_list),
+                WPModels.id.is_(None),
+            ),
+        ).count()
+        if matching_model_jobs > 0:
+            ret_dict["_debug_matching_model_jobs"] = matching_model_jobs
     skipped_workers = open_wp_list.filter(
         or_(
             WPAllowedWorkers.id != None,  # noqa E712
@@ -1076,6 +1101,17 @@ def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_us
         ).count()
         if skipped_wps > 0:
             ret_dict["performance"] = skipped_wps
+        # Also count how many of OUR model jobs are being skipped due to speed
+        if models_list:
+            our_models_slow_skip = open_wp_list.filter(
+                or_(
+                    WPModels.model.in_(models_list),
+                    WPModels.id.is_(None),
+                ),
+                ImageWaitingPrompt.slow_workers == False,  # noqa E712
+            ).count()
+            if our_models_slow_skip > 0:
+                ret_dict["performance_our_models"] = our_models_slow_skip
     if worker.extra_slow_worker is True:
         skipped_wps = open_wp_list.filter(
             ImageWaitingPrompt.extra_slow_workers == False,  # noqa E712

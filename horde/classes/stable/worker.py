@@ -222,6 +222,7 @@ class ImageWorker(Worker):
         # We don't allow more workers to claim they can server more than 100 models atm (to prevent abuse)
         del unchecked_models[300:]
         models = set()
+        rejected_models = []
         for model in unchecked_models:
             usermodel = model.split("::")
             if self.user.special and len(usermodel) == 2:
@@ -232,7 +233,14 @@ class ImageWorker(Worker):
             elif model in model_reference.stable_diffusion_names or self.user.customizer or model in model_reference.testing_models:
                 models.add(model)
             else:
+                rejected_models.append(model)
                 logger.debug(f"Rejecting unknown model '{model}' from {self.name} ({self.id})")
+        # Log summary of rejected models at info level so it's visible
+        if rejected_models:
+            logger.info(
+                f"Worker {self.name} ({self.id}): Rejected {len(rejected_models)} unknown models: {rejected_models[:10]}"
+                + (f"... and {len(rejected_models) - 10} more" if len(rejected_models) > 10 else "")
+            )
         if len(models) == 0:
             raise e.BadRequest("Unfortunately we cannot accept workers serving unrecognised models at this time")
         return models
