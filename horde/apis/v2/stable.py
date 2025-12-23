@@ -635,16 +635,21 @@ class ImageJobPop(JobPopTemplate):
 
         Returns (is_valid, reason) tuple.
         """
-        from web3 import Web3
         from horde.blockchain.config import BlockchainConfig
-        from horde.blockchain.model_registry import get_model_registry
         
-        # Check if blockchain validation is enabled
+        # Check if blockchain validation is enabled FIRST before any web3 imports
         is_enabled = BlockchainConfig.is_enabled()
-        logger.info(f"Blockchain check: is_enabled={is_enabled}")
+        logger.debug(f"Blockchain check: is_enabled={is_enabled}")
         
         if not is_enabled:
-            logger.info("Blockchain validation disabled, allowing all models")
+            return True, ""
+        
+        # Only import web3 if blockchain is enabled
+        try:
+            from web3 import Web3
+            from horde.blockchain.model_registry import get_model_registry
+        except ImportError:
+            logger.warning("web3 not installed, blockchain validation skipped")
             return True, ""
         
         model_registry = get_model_registry()

@@ -3,8 +3,6 @@ Model Registry Client for AIPG Blockchain Integration.
 """
 
 from typing import Optional, Dict, Any, List
-from web3.contract import Contract
-from web3.types import TxReceipt
 
 from horde.blockchain.config import BlockchainConfig
 from horde.logger import logger
