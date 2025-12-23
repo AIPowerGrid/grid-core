@@ -975,17 +975,18 @@ def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_us
         if skipped_max_pixels_for_our_models > 0:
             ret_dict["max_pixels_our_models"] = skipped_max_pixels_for_our_models
     
-    skipped_models = open_wp_list.filter(
-        and_(
-            WPModels.model.not_in(models_list),
-            WPModels.id != None,  # noqa E712
-        ),
-    ).count()
-    if skipped_models > 0:
-        ret_dict["models"] = skipped_models
-    
-    # Count how many jobs exist for our models (helps debug when jobs exist but aren't matched)
+    # Count skipped models (only if models_list is provided)
     if models_list:
+        skipped_models = open_wp_list.filter(
+            and_(
+                WPModels.model.not_in(models_list),
+                WPModels.id != None,  # noqa E712
+            ),
+        ).count()
+        if skipped_models > 0:
+            ret_dict["models"] = skipped_models
+    
+        # Count how many jobs exist for our models (helps debug when jobs exist but aren't matched)
         matching_model_jobs = open_wp_list.filter(
             or_(
                 WPModels.model.in_(models_list),
