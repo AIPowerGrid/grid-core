@@ -224,6 +224,36 @@ class ImageAsyncGenerate(GenerateTemplate):
             shared = True
         else:
             shared = False
+        
+        # Determine media_type: auto-detect from model if not specified
+        media_type = self.args.media_type
+        if not media_type:
+            # Check if any of the requested models is a video model
+            for model_name in self.models:
+                if model_reference.is_video_model(model_name):
+                    media_type = "video"
+                    break
+            if not media_type:
+                media_type = "image"
+        
+        # Validate source_processing matches media_type
+        source_processing = self.args.source_processing or "txt2img"
+        video_modes = ["txt2video", "img2video"]
+        image_modes = ["txt2img", "img2img", "inpainting", "outpainting", "remix"]
+        
+        if media_type == "video" and source_processing in image_modes:
+            # Auto-correct to video mode
+            if source_processing == "txt2img":
+                source_processing = "txt2video"
+            elif source_processing == "img2img":
+                source_processing = "img2video"
+            # Other modes don't have video equivalents
+        elif media_type == "image" and source_processing in video_modes:
+            raise e.BadRequest(
+                f"Cannot use video mode '{source_processing}' with image models.",
+                rc="VideoModeWithImageModel"
+            )
+        
         self.wp = ImageWaitingPrompt(
             worker_ids=self.workers,
             models=self.models,
@@ -237,7 +267,8 @@ class ImageAsyncGenerate(GenerateTemplate):
             worker_blacklist=self.args.worker_blacklist,
             slow_workers=self.args.slow_workers,
             extra_slow_workers=self.args.extra_slow_workers,
-            source_processing=self.args.source_processing,
+            source_processing=source_processing,
+            media_type=media_type,
             ipaddr=self.user_ip,
             safe_ip=self.safe_ip,
             r2=self.args.r2,

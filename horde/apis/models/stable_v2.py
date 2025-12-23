@@ -32,9 +32,17 @@ class ImageParsers(v2.Parsers):
         self.generate_parser.add_argument(
             "source_processing",
             type=str,
-            default="img2img",
+            default="txt2img",
             required=False,
-            help="If source_image is provided, specifies how to process it.",
+            help="Generation mode: txt2img, img2img, inpainting, outpainting, remix for images; txt2video, img2video for video.",
+            location="json",
+        )
+        self.generate_parser.add_argument(
+            "media_type",
+            type=str,
+            default=None,
+            required=False,
+            help="Media type: 'image' or 'video'. If not specified, auto-detected from model type.",
             location="json",
         )
         self.generate_parser.add_argument(
@@ -518,13 +526,19 @@ class ImageModels(v2.Models):
                 "source_image": fields.String(description="The Base64-encoded webp to use for img2img."),
                 "source_processing": fields.String(
                     required=False,
-                    default="img2img",
-                    enum=["img2img", "inpainting", "outpainting", "remix"],
-                    description="If source_image is provided, specifies how to process it.",
+                    default="txt2img",
+                    enum=["txt2img", "img2img", "inpainting", "outpainting", "remix", "txt2video", "img2video"],
+                    description="Generation mode. For images: txt2img, img2img, inpainting, outpainting, remix. For video: txt2video, img2video.",
+                ),
+                "media_type": fields.String(
+                    required=False,
+                    default="image",
+                    enum=["image", "video"],
+                    description="Media type being generated. Auto-detected from model if not specified.",
                 ),
                 "source_mask": fields.String(
                     description=(
-                        "If img_processing is set to 'inpainting' or 'outpainting', "
+                        "If source_processing is set to 'inpainting' or 'outpainting', "
                         "this parameter can be optionally provided as the mask of the areas to inpaint. "
                         "If this arg is not passed, the inpainting/outpainting mask has to be embedded as alpha channel."
                     ),
@@ -656,9 +670,15 @@ class ImageModels(v2.Models):
                 ),
                 "source_processing": fields.String(
                     required=False,
-                    default="img2img",
-                    enum=["img2img", "inpainting", "outpainting", "remix"],
-                    description="If source_image is provided, specifies how to process it.",
+                    default="txt2img",
+                    enum=["txt2img", "img2img", "inpainting", "outpainting", "remix", "txt2video", "img2video"],
+                    description="Generation mode. For images: txt2img, img2img, inpainting, outpainting, remix. For video: txt2video, img2video.",
+                ),
+                "media_type": fields.String(
+                    required=False,
+                    default="image",
+                    enum=["image", "video"],
+                    description="Media type being generated. Auto-detected from model if not specified.",
                 ),
                 "source_mask": fields.String(
                     description=(

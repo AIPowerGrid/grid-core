@@ -15,3 +15,20 @@ ADD COLUMN IF NOT EXISTS wallet_id VARCHAR(42);
 
 CREATE INDEX IF NOT EXISTS ix_waiting_prompts_wallet_id ON waiting_prompts(wallet_id);
 
+-- Add media_type to waiting_prompts for image vs video tracking
+ALTER TABLE waiting_prompts
+ADD COLUMN IF NOT EXISTS media_type VARCHAR(10) NOT NULL DEFAULT 'image';
+
+CREATE INDEX IF NOT EXISTS ix_waiting_prompts_media_type ON waiting_prompts(media_type);
+
+-- Add media_type to processing_gens for job-level tracking
+ALTER TABLE processing_gens
+ADD COLUMN IF NOT EXISTS media_type VARCHAR(10) NOT NULL DEFAULT 'image';
+
+CREATE INDEX IF NOT EXISTS ix_processing_gens_media_type ON processing_gens(media_type);
+
+-- Extend source_processing to support video modes (txt2video, img2video)
+-- The column already exists, just widening the size
+ALTER TABLE waiting_prompts
+ALTER COLUMN source_processing TYPE VARCHAR(15);
+

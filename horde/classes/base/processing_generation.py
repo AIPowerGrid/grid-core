@@ -59,6 +59,7 @@ class ProcessingGeneration(db.Model):
     )
     worker_id = db.Column(uuid_column_type(), db.ForeignKey("workers.id"), nullable=False)
     wallet_id = db.Column(db.String(42), nullable=True, index=True)  # EVM wallet for Web3 rewards
+    media_type = db.Column(db.String(10), default="image", nullable=False, index=True)  # "image" or "video"
     created = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     def __init__(self, *args, **kwargs):

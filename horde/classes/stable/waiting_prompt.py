@@ -40,7 +40,10 @@ class ImageWaitingPrompt(WaitingPrompt):
     width = db.Column(db.Integer, default=512, nullable=False, server_default=expression.literal(512))
     height = db.Column(db.Integer, default=512, nullable=False, server_default=expression.literal(512))
     source_image = db.Column(db.Text, default=None)
-    source_processing = db.Column(db.String(10), default="img2img", nullable=False, server_default="img2img")
+    # Extended to support video: txt2img, img2img, inpainting, outpainting, remix, txt2video, img2video
+    source_processing = db.Column(db.String(15), default="txt2img", nullable=False, server_default="txt2img")
+    # Media type: "image" or "video" - determined by model type
+    media_type = db.Column(db.String(10), default="image", nullable=False, server_default="image", index=True)
     source_mask = db.Column(db.Text, default=None)
     censor_nsfw = db.Column(
         db.Boolean,

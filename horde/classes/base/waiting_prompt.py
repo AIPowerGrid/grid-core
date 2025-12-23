@@ -251,7 +251,8 @@ class WaitingPrompt(db.Model):
         while safe_amount >= 1:
             safe_amount -= 1
             current_n -= 1
-            new_gen = procgen_class(wp_id=self.id, worker_id=worker.id, model=model, wallet_id=self.wallet_id)
+            media_type = getattr(self, 'media_type', 'image')
+            new_gen = procgen_class(wp_id=self.id, worker_id=worker.id, model=model, wallet_id=self.wallet_id, media_type=media_type)
             # For batched requests, we need all procgens to use the same model
             model = new_gen.model
             logger.info(
@@ -267,7 +268,8 @@ class WaitingPrompt(db.Model):
     def fake_generation(self, worker):
         payload = self.get_job_payload(self.n)
         procgen_class = procgen_classes[self.wp_type]
-        new_gen = procgen_class(wp_id=self.id, worker_id=worker.id, fake=True, wallet_id=self.wallet_id)
+        media_type = getattr(self, 'media_type', 'image')
+        new_gen = procgen_class(wp_id=self.id, worker_id=worker.id, fake=True, wallet_id=self.wallet_id, media_type=media_type)
         new_trick = WPTrickedWorkers(wp_id=self.id, worker_id=worker.id)
         db.session.add(new_trick)
         db.session.commit()

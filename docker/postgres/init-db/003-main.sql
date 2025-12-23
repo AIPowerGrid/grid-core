@@ -36,4 +36,16 @@ BEGIN
         ALTER TABLE waiting_prompts ADD COLUMN wallet_id VARCHAR(42);
         CREATE INDEX IF NOT EXISTS ix_waiting_prompts_wallet_id ON waiting_prompts(wallet_id);
     END IF;
+    
+    -- Add media_type to waiting_prompts for image vs video tracking
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='waiting_prompts' AND column_name='media_type') THEN
+        ALTER TABLE waiting_prompts ADD COLUMN media_type VARCHAR(10) NOT NULL DEFAULT 'image';
+        CREATE INDEX IF NOT EXISTS ix_waiting_prompts_media_type ON waiting_prompts(media_type);
+    END IF;
+    
+    -- Add media_type to processing_gens for job-level tracking
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='processing_gens' AND column_name='media_type') THEN
+        ALTER TABLE processing_gens ADD COLUMN media_type VARCHAR(10) NOT NULL DEFAULT 'image';
+        CREATE INDEX IF NOT EXISTS ix_processing_gens_media_type ON processing_gens(media_type);
+    END IF;
 END $$;
