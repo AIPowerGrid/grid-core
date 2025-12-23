@@ -83,8 +83,9 @@ class ImageAsyncGenerate(GenerateTemplate):
         Asynchronous requests live for 10 minutes before being considered stale and being deleted.
         """
         self.args = parsers.generate_parser.parse_args()
-        # Debug: Log the models being requested
+        # Debug: Log the models and wallet being requested
         logger.info(f"🔍 ImageAsyncGenerate: models from args = {self.args.models}")
+        logger.info(f"🔍 ImageAsyncGenerate: wallet_id from args = {self.args.wallet_id}")
         try:
             super().post()
         except KeyError:

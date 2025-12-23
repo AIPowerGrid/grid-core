@@ -141,8 +141,12 @@ class WaitingPrompt(db.Model):
 
     def __init__(self, worker_ids, models, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Debug: Log wallet_id assignment
+        wallet_id = kwargs.get('wallet_id')
+        logger.info(f"🔍 WaitingPrompt.__init__: wallet_id from kwargs = {wallet_id}, self.wallet_id = {getattr(self, 'wallet_id', 'NOT SET')}")
         db.session.add(self)
         db.session.commit()
+        logger.info(f"🔍 WaitingPrompt.__init__: After commit, self.wallet_id = {self.wallet_id}")
         self.set_workers(worker_ids)
         self.set_models(models)
         self.extract_params()
@@ -252,7 +256,9 @@ class WaitingPrompt(db.Model):
             safe_amount -= 1
             current_n -= 1
             media_type = getattr(self, 'media_type', 'image')
+            logger.info(f"🔍 start_generation: Creating procgen with wallet_id={self.wallet_id}, media_type={media_type}")
             new_gen = procgen_class(wp_id=self.id, worker_id=worker.id, model=model, wallet_id=self.wallet_id, media_type=media_type)
+            logger.info(f"🔍 start_generation: Created procgen {new_gen.id} with wallet_id={new_gen.wallet_id}")
             # For batched requests, we need all procgens to use the same model
             model = new_gen.model
             logger.info(
