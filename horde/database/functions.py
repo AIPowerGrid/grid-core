@@ -792,6 +792,9 @@ def get_sorted_wp_filtered_to_worker(worker, models_list=None, blacklist=None, p
     # TODO: Filter by ImageWorker not in WP.tricked_worker
     # TODO: If any word in the prompt is in the WP.blacklist rows, then exclude it (L293 in base.worker.ImageWorker.gan_generate())
     PER_PAGE = 3  # how many requests we're picking up to filter further
+    # Ensure models_list is never None to avoid SQLAlchemy errors
+    if models_list is None:
+        models_list = []
     final_wp_list = (
         db.session.query(ImageWaitingPrompt)
         .options(noload(ImageWaitingPrompt.processing_gens))
@@ -804,7 +807,7 @@ def get_sorted_wp_filtered_to_worker(worker, models_list=None, blacklist=None, p
             ImageWaitingPrompt.expiry > datetime.utcnow(),
             ImageWaitingPrompt.width * ImageWaitingPrompt.height <= worker.max_pixels,
             or_(
-                WPModels.model.in_(models_list),
+                WPModels.model.in_(models_list) if models_list else False,
                 and_(
                     WPModels.id.is_(None),
                     not any("horde_special" in mname for mname in models_list),
