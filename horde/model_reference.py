@@ -43,14 +43,20 @@ class ModelReference(PrimaryTimedFunction):
                     ),
                     timeout=2,
                 ).json()
-                diffusers = requests.get(
-                    os.getenv(
+                # Try to load diffusers reference, but don't fail if it's unavailable
+                try:
+                    diffusers_url = os.getenv(
                         "HORDE_IMAGE_DIFFUSERS_REFERENCE",
                         "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/diffusers.json",
-                    ),
-                    timeout=2,
-                ).json()
-                self.reference.update(diffusers)
+                    )
+                    diffusers_response = requests.get(diffusers_url, timeout=2)
+                    if diffusers_response.status_code == 200:
+                        diffusers = diffusers_response.json()
+                        self.reference.update(diffusers)
+                    else:
+                        logger.warning(f"Diffusers reference returned {diffusers_response.status_code}, skipping")
+                except Exception as diffusers_err:
+                    logger.warning(f"Could not load diffusers reference: {diffusers_err}")
                 # logger.debug(self.reference)
                 self.stable_diffusion_names = set()
                 for model in self.reference:
