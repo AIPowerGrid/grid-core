@@ -371,6 +371,12 @@ class TextModels(v2.Models):
                         "When True, allows very slower workers to pick up this request. " "Use this when you don't mind waiting a lot."
                     ),
                 ),
+                "wallet_id": fields.String(
+                    required=False,
+                    max_length=42,
+                    example="0xe2dddDDf4dD22e98265BBf0E6bDC1cB3A4Bb26a8",
+                    description="EVM wallet address to associate with this generation for gallery tracking.",
+                ),
             },
         )
         self.response_model_contrib_details = api.inherit(

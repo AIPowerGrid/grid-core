@@ -724,6 +724,12 @@ class ImageModels(v2.Models):
                     example="00000000-0000-0000-0000-000000000000",
                     description=("A horde style ID or name to use for this generation"),
                 ),
+                "wallet_id": fields.String(
+                    required=False,
+                    max_length=42,
+                    example="0xe2dddDDf4dD22e98265BBf0E6bDC1cB3A4Bb26a8",
+                    description="EVM wallet address to associate with this generation for gallery tracking.",
+                ),
             },
         )
         self.response_model_team_details = api.inherit(

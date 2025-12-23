@@ -247,6 +247,7 @@ class ImageAsyncGenerate(GenerateTemplate):
             proxied_account=self.args["proxied_account"],
             disable_batching=self.args["disable_batching"],
             webhook=self.args.webhook,
+            wallet_id=self.args.wallet_id,
         )
         _, total_threads = database.count_active_workers("image")
         needs_kudos, resolution, disable_downgrade = self.wp.require_upfront_kudos(database.retrieve_totals(), total_threads)

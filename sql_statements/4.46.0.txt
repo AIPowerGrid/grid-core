@@ -9,3 +9,9 @@ ADD COLUMN IF NOT EXISTS wallet_id VARCHAR(42);
 -- Add index on wallet_id for efficient lookups
 CREATE INDEX IF NOT EXISTS ix_processing_gens_wallet_id ON processing_gens(wallet_id);
 
+-- Add wallet_id to waiting_prompts table for tracking requester's wallet
+ALTER TABLE waiting_prompts
+ADD COLUMN IF NOT EXISTS wallet_id VARCHAR(42);
+
+CREATE INDEX IF NOT EXISTS ix_waiting_prompts_wallet_id ON waiting_prompts(wallet_id);
+

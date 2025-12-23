@@ -181,6 +181,14 @@ class Parsers:
         )
         self.generate_parser.add_argument("webhook", type=str, required=False, location="json")
         self.generate_parser.add_argument("style", type=str, required=False, location="json")
+        self.generate_parser.add_argument(
+            "wallet_id",
+            type=str,
+            default=None,
+            required=False,
+            help="EVM wallet address (0x...) to associate with this generation for gallery tracking.",
+            location="json",
+        )
 
         # The parser for RequestPop
         self.job_pop_parser = reqparse.RequestParser()

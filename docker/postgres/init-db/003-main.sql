@@ -30,4 +30,10 @@ BEGIN
         ALTER TABLE processing_gens ADD COLUMN wallet_id VARCHAR(42);
         CREATE INDEX IF NOT EXISTS ix_processing_gens_wallet_id ON processing_gens(wallet_id);
     END IF;
+    
+    -- Add wallet_id to waiting_prompts if not exists
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='waiting_prompts' AND column_name='wallet_id') THEN
+        ALTER TABLE waiting_prompts ADD COLUMN wallet_id VARCHAR(42);
+        CREATE INDEX IF NOT EXISTS ix_waiting_prompts_wallet_id ON waiting_prompts(wallet_id);
+    END IF;
 END $$;

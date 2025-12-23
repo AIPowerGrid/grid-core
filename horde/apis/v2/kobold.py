@@ -110,6 +110,7 @@ class TextAsyncGenerate(GenerateTemplate):
             sharedkey_id=self.sharedkey.id if self.sharedkey else None,
             proxied_account=self.args["proxied_account"],
             webhook=self.args.webhook,
+            wallet_id=self.args.wallet_id,
         )
         _, total_threads = database.count_active_workers("text")
         highest_multiplier = 0
