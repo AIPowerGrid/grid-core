@@ -223,9 +223,11 @@ class ImageWorker(Worker):
         del unchecked_models[300:]
         models = set()
         rejected_models = []
-        # Debug: Log what models we're checking against
-        logger.info(f"Checking {len(unchecked_models)} models against {len(model_reference.stable_diffusion_names)} known models")
-        logger.debug(f"Known models sample: {list(model_reference.stable_diffusion_names)[:20]}")
+        # Debug: Log what models we're checking against - using WARNING for visibility
+        logger.warning(f"[WORKER] Checking {len(unchecked_models)} worker models against {len(model_reference.stable_diffusion_names)} known models")
+        logger.warning(f"[WORKER] Worker models: {unchecked_models}")
+        logger.warning(f"[WORKER] Known models (all): {list(model_reference.stable_diffusion_names)}")
+        logger.warning(f"[WORKER] User customizer role: {self.user.customizer}")
         for model in unchecked_models:
             usermodel = model.split("::")
             if self.user.special and len(usermodel) == 2:
@@ -235,9 +237,10 @@ class ImageWorker(Worker):
                 models.add(model)
             elif model in model_reference.stable_diffusion_names or self.user.customizer or model in model_reference.testing_models:
                 models.add(model)
+                logger.warning(f"[WORKER] Accepted model: {model}")
             else:
                 rejected_models.append(model)
-                logger.debug(f"Rejecting unknown model '{model}' from {self.name} ({self.id})")
+                logger.warning(f"[WORKER] Rejected model '{model}' - not in stable_diffusion_names")
         # Log summary of rejected models at info level so it's visible
         if rejected_models:
             logger.info(

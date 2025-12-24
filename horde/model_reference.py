@@ -28,6 +28,11 @@ class ModelReference(PrimaryTimedFunction):
         """Retrieves to image and text model reference and stores in it a var"""
         # If it's running in SQLITE_MODE, it means it's a test and we never want to grab the quorum
         # We don't want to report on any random model name a client might request
+        ref_url = os.getenv(
+            "HORDE_IMAGE_COMPVIS_REFERENCE",
+            "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/stable_diffusion.json"
+        )
+        logger.warning(f"[MODEL_REFERENCE] Starting model reference load from: {ref_url}")
         for _riter in range(10):
             try:
                 ref_json = "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/stable_diffusion.json"
@@ -43,6 +48,7 @@ class ModelReference(PrimaryTimedFunction):
                     ),
                     timeout=2,
                 ).json()
+                logger.warning(f"[MODEL_REFERENCE] Loaded {len(self.reference)} models from JSON")
                 # Try to load diffusers reference, but don't fail if it's unavailable
                 try:
                     diffusers_url = os.getenv(
@@ -80,17 +86,22 @@ class ModelReference(PrimaryTimedFunction):
                         if self.reference[model].get("type") == "controlnet":
                             self.controlnet_models.add(model)
                 
-                # Debug: Log recognized models
-                logger.info(f"Loaded {len(self.stable_diffusion_names)} models from reference")
+                # Debug: Log recognized models - using WARNING to ensure visibility
+                logger.warning(f"[MODEL_REFERENCE] Recognized {len(self.stable_diffusion_names)} models with valid baselines")
                 flux_models = [m for m in self.stable_diffusion_names if 'flux' in m.lower() or 'FLUX' in m]
                 wan_models = [m for m in self.stable_diffusion_names if 'wan' in m.lower()]
-                if flux_models:
-                    logger.info(f"Recognized FLUX models: {flux_models}")
-                if wan_models:
-                    logger.info(f"Recognized WAN models: {wan_models}")
+                logger.warning(f"[MODEL_REFERENCE] FLUX models ({len(flux_models)}): {flux_models}")
+                logger.warning(f"[MODEL_REFERENCE] WAN models ({len(wan_models)}): {wan_models}")
+                # Log baselines found in reference
+                baselines_found = set()
+                for model in self.reference:
+                    baseline = self.reference[model].get("baseline")
+                    if baseline:
+                        baselines_found.add(baseline)
+                logger.warning(f"[MODEL_REFERENCE] Baselines in reference: {baselines_found}")
                 break
             except Exception as e:
-                logger.error(f"Error when downloading nataili models list: {e}")
+                logger.error(f"[MODEL_REFERENCE] Error loading models (attempt {_riter + 1}/10): {e}")
 
         for _riter in range(10):
             try:
