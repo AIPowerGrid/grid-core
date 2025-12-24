@@ -10,6 +10,10 @@ import requests
 from horde.logger import logger
 from horde.threads import PrimaryTimedFunction
 
+# This prints at import time to verify code version
+print("[MODEL_REFERENCE] Module loading - version 2024-12-24-v2")
+logger.warning("[MODEL_REFERENCE] Module imported - code version 2024-12-24-v2")
+
 
 class ModelReference(PrimaryTimedFunction):
     quorum = None
@@ -227,3 +231,9 @@ class ModelReference(PrimaryTimedFunction):
 
 model_reference = ModelReference(3600, None)
 model_reference.call_function()
+
+# Log final state after initialization
+print(f"[MODEL_REFERENCE] Init complete. {len(model_reference.stable_diffusion_names)} models recognized")
+print(f"[MODEL_REFERENCE] Models: {list(model_reference.stable_diffusion_names)[:10]}...")
+logger.warning(f"[MODEL_REFERENCE] Init complete. {len(model_reference.stable_diffusion_names)} models recognized")
+logger.warning(f"[MODEL_REFERENCE] Sample models: {list(model_reference.stable_diffusion_names)[:10]}")
