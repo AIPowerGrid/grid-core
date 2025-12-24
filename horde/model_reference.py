@@ -76,7 +76,7 @@ class ModelReference(PrimaryTimedFunction):
                         # Video model baselines
                         "wan_2_1",
                         "wan_2_2",
-                        "ltxv",
+                        "ltx_video",  # ltxv model uses ltx_video baseline
                         "cogvideo",
                         "mochi",
                     }:
@@ -216,7 +216,7 @@ class ModelReference(PrimaryTimedFunction):
             return True
         # Check baseline for known video model architectures
         baseline = model_details.get("baseline", "").lower()
-        if baseline in ["wan_2_2", "wan_2_1", "ltxv", "cogvideo", "mochi"]:
+        if baseline in ["wan_2_2", "wan_2_1", "ltx_video", "cogvideo", "mochi"]:
             return True
         # Check model name patterns for video models
         name_lower = model_name.lower()
