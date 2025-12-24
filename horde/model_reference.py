@@ -79,7 +79,15 @@ class ModelReference(PrimaryTimedFunction):
                             self.nsfw_models.add(model)
                         if self.reference[model].get("type") == "controlnet":
                             self.controlnet_models.add(model)
-
+                
+                # Debug: Log recognized models
+                logger.info(f"Loaded {len(self.stable_diffusion_names)} models from reference")
+                flux_models = [m for m in self.stable_diffusion_names if 'flux' in m.lower() or 'FLUX' in m]
+                wan_models = [m for m in self.stable_diffusion_names if 'wan' in m.lower()]
+                if flux_models:
+                    logger.info(f"Recognized FLUX models: {flux_models}")
+                if wan_models:
+                    logger.info(f"Recognized WAN models: {wan_models}")
                 break
             except Exception as e:
                 logger.error(f"Error when downloading nataili models list: {e}")

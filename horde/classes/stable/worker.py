@@ -223,6 +223,9 @@ class ImageWorker(Worker):
         del unchecked_models[300:]
         models = set()
         rejected_models = []
+        # Debug: Log what models we're checking against
+        logger.info(f"Checking {len(unchecked_models)} models against {len(model_reference.stable_diffusion_names)} known models")
+        logger.debug(f"Known models sample: {list(model_reference.stable_diffusion_names)[:20]}")
         for model in unchecked_models:
             usermodel = model.split("::")
             if self.user.special and len(usermodel) == 2:
