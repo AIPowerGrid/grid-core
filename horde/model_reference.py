@@ -48,34 +48,21 @@ class ModelReference(PrimaryTimedFunction):
         """Retrieves to image and text model reference and stores in it a var"""
         # If it's running in SQLITE_MODE, it means it's a test and we never want to grab the quorum
         # We don't want to report on any random model name a client might request
-        ref_url = os.getenv(
-            "HORDE_IMAGE_COMPVIS_REFERENCE",
-            "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/stable_diffusion.json"
-        )
+        # Default to AIPowerGrid reference (not Haidra-Org)
+        default_ref = "https://raw.githubusercontent.com/AIPowerGrid/grid-image-model-reference/main/stable_diffusion.json"
+        ref_url = os.getenv("HORDE_IMAGE_COMPVIS_REFERENCE", default_ref)
         write_debug_log(f"Starting model reference load from: {ref_url}")
         logger.warning(f"[MODEL_REFERENCE] Starting model reference load from: {ref_url}")
         for _riter in range(10):
             try:
-                ref_json = "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/stable_diffusion.json"
-                if datetime.utcnow() <= datetime(2024, 9, 30):  # Flux Beta
-                    ref_json = (
-                        "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/refs/heads/flux/stable_diffusion.json"
-                    )
-                    logger.debug("Using flux beta model reference...")
-                self.reference = requests.get(
-                    os.getenv(
-                        "HORDE_IMAGE_COMPVIS_REFERENCE",
-                        ref_json,
-                    ),
-                    timeout=2,
-                ).json()
+                self.reference = requests.get(ref_url, timeout=5).json()
                 write_debug_log(f"Loaded {len(self.reference)} models from JSON")
                 logger.warning(f"[MODEL_REFERENCE] Loaded {len(self.reference)} models from JSON")
                 # Try to load diffusers reference, but don't fail if it's unavailable
                 try:
                     diffusers_url = os.getenv(
                         "HORDE_IMAGE_DIFFUSERS_REFERENCE",
-                        "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/diffusers.json",
+                        "https://raw.githubusercontent.com/AIPowerGrid/grid-image-model-reference/main/diffusers.json",
                     )
                     diffusers_response = requests.get(diffusers_url, timeout=2)
                     if diffusers_response.status_code == 200:
