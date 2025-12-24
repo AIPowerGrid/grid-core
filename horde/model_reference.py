@@ -11,8 +11,17 @@ from horde.logger import logger
 from horde.threads import PrimaryTimedFunction
 
 # This prints at import time to verify code version
-print("[MODEL_REFERENCE] Module loading - version 2024-12-24-v2")
-logger.warning("[MODEL_REFERENCE] Module imported - code version 2024-12-24-v2")
+print("[MODEL_REFERENCE] Module loading - version 2024-12-24-v3")
+logger.warning("[MODEL_REFERENCE] Module imported - code version 2024-12-24-v3")
+
+def write_debug_log(message: str):
+    """Write debug info to a file for troubleshooting."""
+    try:
+        log_path = os.path.join(os.path.dirname(__file__), "..", "model_reference_debug.log")
+        with open(log_path, "a") as f:
+            f.write(f"{datetime.utcnow().isoformat()} - {message}\n")
+    except Exception as e:
+        print(f"[MODEL_REFERENCE] Could not write debug log: {e}")
 
 
 class ModelReference(PrimaryTimedFunction):
@@ -36,6 +45,7 @@ class ModelReference(PrimaryTimedFunction):
             "HORDE_IMAGE_COMPVIS_REFERENCE",
             "https://raw.githubusercontent.com/Haidra-Org/AI-Horde-image-model-reference/main/stable_diffusion.json"
         )
+        write_debug_log(f"Starting model reference load from: {ref_url}")
         logger.warning(f"[MODEL_REFERENCE] Starting model reference load from: {ref_url}")
         for _riter in range(10):
             try:
@@ -52,6 +62,7 @@ class ModelReference(PrimaryTimedFunction):
                     ),
                     timeout=2,
                 ).json()
+                write_debug_log(f"Loaded {len(self.reference)} models from JSON")
                 logger.warning(f"[MODEL_REFERENCE] Loaded {len(self.reference)} models from JSON")
                 # Try to load diffusers reference, but don't fail if it's unavailable
                 try:
@@ -91,9 +102,12 @@ class ModelReference(PrimaryTimedFunction):
                             self.controlnet_models.add(model)
                 
                 # Debug: Log recognized models - using WARNING to ensure visibility
+                write_debug_log(f"Recognized {len(self.stable_diffusion_names)} models with valid baselines")
                 logger.warning(f"[MODEL_REFERENCE] Recognized {len(self.stable_diffusion_names)} models with valid baselines")
                 flux_models = [m for m in self.stable_diffusion_names if 'flux' in m.lower() or 'FLUX' in m]
                 wan_models = [m for m in self.stable_diffusion_names if 'wan' in m.lower()]
+                write_debug_log(f"FLUX models ({len(flux_models)}): {flux_models}")
+                write_debug_log(f"WAN models ({len(wan_models)}): {wan_models}")
                 logger.warning(f"[MODEL_REFERENCE] FLUX models ({len(flux_models)}): {flux_models}")
                 logger.warning(f"[MODEL_REFERENCE] WAN models ({len(wan_models)}): {wan_models}")
                 # Log baselines found in reference
@@ -102,9 +116,12 @@ class ModelReference(PrimaryTimedFunction):
                     baseline = self.reference[model].get("baseline")
                     if baseline:
                         baselines_found.add(baseline)
+                write_debug_log(f"Baselines in reference: {baselines_found}")
+                write_debug_log(f"ALL recognized models: {list(self.stable_diffusion_names)}")
                 logger.warning(f"[MODEL_REFERENCE] Baselines in reference: {baselines_found}")
                 break
             except Exception as e:
+                write_debug_log(f"Error loading models (attempt {_riter + 1}/10): {e}")
                 logger.error(f"[MODEL_REFERENCE] Error loading models (attempt {_riter + 1}/10): {e}")
 
         for _riter in range(10):
@@ -233,6 +250,9 @@ model_reference = ModelReference(3600, None)
 model_reference.call_function()
 
 # Log final state after initialization
+write_debug_log(f"=== INIT COMPLETE ===")
+write_debug_log(f"Total models recognized: {len(model_reference.stable_diffusion_names)}")
+write_debug_log(f"All models: {list(model_reference.stable_diffusion_names)}")
 print(f"[MODEL_REFERENCE] Init complete. {len(model_reference.stable_diffusion_names)} models recognized")
 print(f"[MODEL_REFERENCE] Models: {list(model_reference.stable_diffusion_names)[:10]}...")
 logger.warning(f"[MODEL_REFERENCE] Init complete. {len(model_reference.stable_diffusion_names)} models recognized")
