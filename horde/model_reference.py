@@ -48,9 +48,13 @@ class ModelReference(PrimaryTimedFunction):
         """Retrieves to image and text model reference and stores in it a var"""
         # If it's running in SQLITE_MODE, it means it's a test and we never want to grab the quorum
         # We don't want to report on any random model name a client might request
-        # Default to AIPowerGrid reference (not Haidra-Org)
-        default_ref = "https://raw.githubusercontent.com/AIPowerGrid/grid-image-model-reference/main/stable_diffusion.json"
-        ref_url = os.getenv("HORDE_IMAGE_COMPVIS_REFERENCE", default_ref)
+        # ALWAYS use AIPowerGrid reference - ignore any env var override
+        # This ensures we always use our own model reference, not Haidra-Org's
+        ref_url = "https://raw.githubusercontent.com/AIPowerGrid/grid-image-model-reference/main/stable_diffusion.json"
+        env_override = os.getenv("HORDE_IMAGE_COMPVIS_REFERENCE")
+        if env_override:
+            write_debug_log(f"WARNING: HORDE_IMAGE_COMPVIS_REFERENCE env var is set to '{env_override}' but IGNORING it!")
+            logger.warning(f"[MODEL_REFERENCE] Ignoring HORDE_IMAGE_COMPVIS_REFERENCE env var ({env_override})")
         write_debug_log(f"Starting model reference load from: {ref_url}")
         logger.warning(f"[MODEL_REFERENCE] Starting model reference load from: {ref_url}")
         for _riter in range(10):
@@ -60,10 +64,8 @@ class ModelReference(PrimaryTimedFunction):
                 logger.warning(f"[MODEL_REFERENCE] Loaded {len(self.reference)} models from JSON")
                 # Try to load diffusers reference, but don't fail if it's unavailable
                 try:
-                    diffusers_url = os.getenv(
-                        "HORDE_IMAGE_DIFFUSERS_REFERENCE",
-                        "https://raw.githubusercontent.com/AIPowerGrid/grid-image-model-reference/main/diffusers.json",
-                    )
+                    # ALWAYS use AIPowerGrid reference - ignore any env var override
+                    diffusers_url = "https://raw.githubusercontent.com/AIPowerGrid/grid-image-model-reference/main/diffusers.json"
                     diffusers_response = requests.get(diffusers_url, timeout=2)
                     if diffusers_response.status_code == 200:
                         diffusers = diffusers_response.json()
