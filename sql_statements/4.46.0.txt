@@ -32,3 +32,16 @@ CREATE INDEX IF NOT EXISTS ix_processing_gens_media_type ON processing_gens(medi
 ALTER TABLE waiting_prompts
 ALTER COLUMN source_processing TYPE VARCHAR(15);
 
+-- Add file storage and metadata columns to processing_gens
+ALTER TABLE processing_gens
+ADD COLUMN IF NOT EXISTS tags JSONB,
+ADD COLUMN IF NOT EXISTS r2_download_url TEXT,
+ADD COLUMN IF NOT EXISTS file_size BIGINT;
+
+-- Add index on file_size for efficient queries
+CREATE INDEX IF NOT EXISTS ix_processing_gens_file_size ON processing_gens(file_size);
+
+-- Add tags column to waiting_prompts for user-provided categorization
+ALTER TABLE waiting_prompts
+ADD COLUMN IF NOT EXISTS tags JSONB;
+

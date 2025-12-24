@@ -189,6 +189,14 @@ class Parsers:
             help="EVM wallet address (0x...) to associate with this generation for gallery tracking.",
             location="json",
         )
+        self.generate_parser.add_argument(
+            "tags",
+            type=list,
+            default=None,
+            required=False,
+            help="Array of string tags for categorizing this generation.",
+            location="json",
+        )
 
         # The parser for RequestPop
         self.job_pop_parser = reqparse.RequestParser()
@@ -310,6 +318,27 @@ class Parsers:
             type=list,
             required=False,
             help="Metadata about this job such as defaulted components due to failures.",
+            location="json",
+        )
+        self.job_submit_parser.add_argument(
+            "tags",
+            type=list,
+            required=False,
+            help="Array of string tags for categorizing this generation.",
+            location="json",
+        )
+        self.job_submit_parser.add_argument(
+            "r2_download_url",
+            type=str,
+            required=False,
+            help="Direct download URL for the generated file in R2/cloud storage.",
+            location="json",
+        )
+        self.job_submit_parser.add_argument(
+            "file_size",
+            type=int,
+            required=False,
+            help="File size in bytes of the generated file.",
             location="json",
         )
 

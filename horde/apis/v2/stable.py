@@ -282,6 +282,7 @@ class ImageAsyncGenerate(GenerateTemplate):
             disable_batching=self.args["disable_batching"],
             webhook=self.args.webhook,
             wallet_id=self.args.wallet_id,
+            tags=self.args.tags,
         )
         _, total_threads = database.count_active_workers("image")
         needs_kudos, resolution, disable_downgrade = self.wp.require_upfront_kudos(database.retrieve_totals(), total_threads)
@@ -817,6 +818,9 @@ class ImageJobSubmit(JobSubmitTemplate):
             censored=self.args.censored,
             state=self.args.state,
             gen_metadata=self.args.gen_metadata,
+            tags=self.args.tags,
+            r2_download_url=self.args.r2_download_url,
+            file_size=self.args.file_size,
         )
 
 

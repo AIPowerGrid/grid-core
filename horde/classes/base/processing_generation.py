@@ -61,6 +61,11 @@ class ProcessingGeneration(db.Model):
     wallet_id = db.Column(db.String(42), nullable=True, index=True)  # EVM wallet for Web3 rewards
     media_type = db.Column(db.String(10), default="image", nullable=False, index=True)  # "image" or "video"
     created = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    
+    # File storage and metadata
+    tags = db.Column(json_column_type, nullable=True)  # JSON array of strings for categorization
+    r2_download_url = db.Column(db.Text, nullable=True)  # Direct download URL for the generated file
+    file_size = db.Column(db.BigInteger, nullable=True)  # File size in bytes
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -109,6 +114,10 @@ class ProcessingGeneration(db.Model):
         # Support for two typical properties
         self.seed = kwargs.get("seed", None)
         self.gen_metadata = kwargs.get("gen_metadata", None)
+        # File storage and metadata
+        self.tags = kwargs.get("tags", None)
+        self.r2_download_url = kwargs.get("r2_download_url", None)
+        self.file_size = kwargs.get("file_size", None)
         kudos = self.get_gen_kudos()
         self.cancelled = False
         self.record(things_per_sec, kudos)
@@ -212,6 +221,9 @@ class ProcessingGeneration(db.Model):
             "model": self.model,
             "gen_metadata": self.gen_metadata if self.gen_metadata is not None else [],
             "progress": self.get_progress(),
+            "tags": self.tags if self.tags is not None else [],
+            "r2_download_url": self.r2_download_url,
+            "file_size": self.file_size,
         }
         return ret_dict
 

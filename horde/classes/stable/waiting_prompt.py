@@ -225,6 +225,9 @@ class ImageWaitingPrompt(WaitingPrompt):
             # If they send it back as b64 anyway, we upload it outselves
             prompt_payload["r2_upload"] = generate_procgen_upload_url(str(procgen.id), self.shared)
             prompt_payload["r2_uploads"] = [generate_procgen_upload_url(str(p.id), self.shared) for p in procgen_list]
+            # Include tags if provided for worker to pass back with result
+            if self.tags:
+                prompt_payload["tags"] = self.tags
         else:
             prompt_payload = {}
             self.faulted = True

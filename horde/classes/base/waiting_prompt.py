@@ -120,6 +120,7 @@ class WaitingPrompt(db.Model):
     sharedkey = db.relationship("UserSharedKey", back_populates="waiting_prompts")
     proxied_account = db.Column(db.String(255), nullable=True)
     wallet_id = db.Column(db.String(42), nullable=True, index=True)  # Requester's EVM wallet for gallery
+    tags = db.Column(json_column_type, nullable=True)  # JSON array of strings for categorization
 
     tricked_workers = db.relationship(
         "WPTrickedWorkers",

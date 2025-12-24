@@ -48,4 +48,25 @@ BEGIN
         ALTER TABLE processing_gens ADD COLUMN media_type VARCHAR(10) NOT NULL DEFAULT 'image';
         CREATE INDEX IF NOT EXISTS ix_processing_gens_media_type ON processing_gens(media_type);
     END IF;
+    
+    -- Add tags column for categorization
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='processing_gens' AND column_name='tags') THEN
+        ALTER TABLE processing_gens ADD COLUMN tags JSONB;
+    END IF;
+    
+    -- Add r2_download_url for direct file download links
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='processing_gens' AND column_name='r2_download_url') THEN
+        ALTER TABLE processing_gens ADD COLUMN r2_download_url TEXT;
+    END IF;
+    
+    -- Add file_size for tracking generated file sizes
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='processing_gens' AND column_name='file_size') THEN
+        ALTER TABLE processing_gens ADD COLUMN file_size BIGINT;
+        CREATE INDEX IF NOT EXISTS ix_processing_gens_file_size ON processing_gens(file_size);
+    END IF;
+    
+    -- Add tags to waiting_prompts for user-provided categorization
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='waiting_prompts' AND column_name='tags') THEN
+        ALTER TABLE waiting_prompts ADD COLUMN tags JSONB;
+    END IF;
 END $$;
