@@ -15,13 +15,20 @@ print("[MODEL_REFERENCE] Module loading - version 2024-12-24-v3")
 logger.warning("[MODEL_REFERENCE] Module imported - code version 2024-12-24-v3")
 
 def write_debug_log(message: str):
-    """Write debug info to a file for troubleshooting."""
+    """Write debug info to a file for troubleshooting.
+    
+    Writes to model_reference_debug.log in the same directory as horde.log
+    (the current working directory when the app runs).
+    """
     try:
-        log_path = os.path.join(os.path.dirname(__file__), "..", "model_reference_debug.log")
+        # Write to current working directory (same as horde.log)
+        log_path = "model_reference_debug.log"
         with open(log_path, "a") as f:
             f.write(f"{datetime.utcnow().isoformat()} - {message}\n")
+        # Also print to stdout/stderr to ensure visibility
+        print(f"[MODEL_REF_DEBUG] {message}")
     except Exception as e:
-        print(f"[MODEL_REFERENCE] Could not write debug log: {e}")
+        print(f"[MODEL_REFERENCE] Could not write debug log to {log_path}: {e}")
 
 
 class ModelReference(PrimaryTimedFunction):
