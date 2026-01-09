@@ -227,7 +227,7 @@ class ImageAsyncGenerate(GenerateTemplate):
             shared = True
         else:
             shared = False
-        
+
         # Determine media_type: auto-detect from model if not specified
         media_type = self.args.media_type
         if not media_type:
@@ -238,12 +238,12 @@ class ImageAsyncGenerate(GenerateTemplate):
                     break
             if not media_type:
                 media_type = "image"
-        
+
         # Validate source_processing matches media_type
         source_processing = self.args.source_processing or "txt2img"
         video_modes = ["txt2video", "img2video"]
         image_modes = ["txt2img", "img2img", "inpainting", "outpainting", "remix"]
-        
+
         if media_type == "video" and source_processing in image_modes:
             # Auto-correct to video mode
             if source_processing == "txt2img":
@@ -252,11 +252,8 @@ class ImageAsyncGenerate(GenerateTemplate):
                 source_processing = "img2video"
             # Other modes don't have video equivalents
         elif media_type == "image" and source_processing in video_modes:
-            raise e.BadRequest(
-                f"Cannot use video mode '{source_processing}' with image models.",
-                rc="VideoModeWithImageModel"
-            )
-        
+            raise e.BadRequest(f"Cannot use video mode '{source_processing}' with image models.", rc="VideoModeWithImageModel")
+
         self.wp = ImageWaitingPrompt(
             worker_ids=self.workers,
             models=self.models,
@@ -673,11 +670,11 @@ class ImageJobPop(JobPopTemplate):
         Returns (is_valid, reason) tuple.
         """
         from horde.blockchain.config import BlockchainConfig
-        
+
         # Check if blockchain validation is enabled
         is_enabled = BlockchainConfig.is_enabled()
         logger.debug(f"Blockchain validation: is_enabled={is_enabled}")
-        
+
         if not is_enabled:
             return True, ""
 
@@ -691,13 +688,11 @@ class ImageJobPop(JobPopTemplate):
         for model_name in model_names:
             # Use the model_reference which is populated from Grid Diamond contract
             is_registered = model_reference.is_known_image_model(model_name)
-            
+
             if not is_registered:
-                logger.warning(
-                    f"Blockchain validation failed: Model '{model_name}' is NOT in Grid Diamond registry"
-                )
+                logger.warning(f"Blockchain validation failed: Model '{model_name}' is NOT in Grid Diamond registry")
                 return False, f"Model '{model_name}' is not registered on the blockchain"
-            
+
             logger.debug(f"Model '{model_name}' verified in Grid Diamond registry")
 
         return True, ""
@@ -705,25 +700,25 @@ class ImageJobPop(JobPopTemplate):
     def start_worker(self, wp):
         """Override to add blockchain validation before starting generation."""
         logger.info(f"start_worker called for WP {wp.id}")
-        
+
         # Perform blockchain validation
         try:
             is_valid, reason = self.validate_blockchain_params(wp)
         except Exception as e:
             logger.error(f"Blockchain validation error for WP {wp.id}: {e}")
             is_valid, reason = True, ""  # Allow on error
-        
+
         if not is_valid:
             logger.warning(f"Blockchain validation failed for WP {wp.id}: {reason}")
             # Keep skipped as simple integer count (API response model expects integers)
             self.skipped["blockchain_validation"] = self.skipped.get("blockchain_validation", 0) + 1
             return None
-        
+
         # Log successful validation
         model_names = wp.get_model_names() if hasattr(wp, "get_model_names") else []
         if model_names:
             logger.info(f"Blockchain validation passed for WP {wp.id} with models: {model_names}")
-        
+
         # Call parent start_worker
         return super().start_worker(wp)
 

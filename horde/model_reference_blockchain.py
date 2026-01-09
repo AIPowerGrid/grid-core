@@ -36,33 +36,35 @@ GRID_ABI = [
     {
         "inputs": [{"type": "uint256", "name": "modelId"}],
         "name": "getModel",
-        "outputs": [{
-            "type": "tuple",
-            "components": [
-                {"name": "modelHash", "type": "bytes32"},
-                {"name": "modelType", "type": "uint8"},
-                {"name": "fileName", "type": "string"},
-                {"name": "name", "type": "string"},
-                {"name": "version", "type": "string"},
-                {"name": "ipfsCid", "type": "string"},
-                {"name": "downloadUrl", "type": "string"},
-                {"name": "sizeBytes", "type": "uint256"},
-                {"name": "quantization", "type": "string"},
-                {"name": "format", "type": "string"},
-                {"name": "vramMB", "type": "uint32"},
-                {"name": "baseModel", "type": "string"},
-                {"name": "inpainting", "type": "bool"},
-                {"name": "img2img", "type": "bool"},
-                {"name": "controlnet", "type": "bool"},
-                {"name": "lora", "type": "bool"},
-                {"name": "isActive", "type": "bool"},
-                {"name": "isNSFW", "type": "bool"},
-                {"name": "timestamp", "type": "uint256"},
-                {"name": "creator", "type": "address"},
-            ]
-        }],
+        "outputs": [
+            {
+                "type": "tuple",
+                "components": [
+                    {"name": "modelHash", "type": "bytes32"},
+                    {"name": "modelType", "type": "uint8"},
+                    {"name": "fileName", "type": "string"},
+                    {"name": "name", "type": "string"},
+                    {"name": "version", "type": "string"},
+                    {"name": "ipfsCid", "type": "string"},
+                    {"name": "downloadUrl", "type": "string"},
+                    {"name": "sizeBytes", "type": "uint256"},
+                    {"name": "quantization", "type": "string"},
+                    {"name": "format", "type": "string"},
+                    {"name": "vramMB", "type": "uint32"},
+                    {"name": "baseModel", "type": "string"},
+                    {"name": "inpainting", "type": "bool"},
+                    {"name": "img2img", "type": "bool"},
+                    {"name": "controlnet", "type": "bool"},
+                    {"name": "lora", "type": "bool"},
+                    {"name": "isActive", "type": "bool"},
+                    {"name": "isNSFW", "type": "bool"},
+                    {"name": "timestamp", "type": "uint256"},
+                    {"name": "creator", "type": "address"},
+                ],
+            }
+        ],
         "stateMutability": "view",
-        "type": "function"
+        "type": "function",
     },
 ]
 
@@ -75,7 +77,7 @@ MODEL_TYPE_VIDEO = 2
 def _fetch_models_from_chain() -> Dict[str, Dict[str, Any]]:
     """
     Fetch all models from the Grid Diamond contract.
-    
+
     Returns dict in legacy reference format for compatibility.
     This is the ONLY function that makes blockchain calls.
     """
@@ -84,37 +86,34 @@ def _fetch_models_from_chain() -> Dict[str, Dict[str, Any]]:
     except ImportError:
         logger.error("[MODEL_REF_CHAIN] web3 not installed")
         return {}
-    
+
     try:
-        w3 = Web3(Web3.HTTPProvider(GRID_RPC, request_kwargs={'timeout': 30}))
-        contract = w3.eth.contract(
-            address=Web3.to_checksum_address(GRID_CONTRACT),
-            abi=GRID_ABI
-        )
-        
+        w3 = Web3(Web3.HTTPProvider(GRID_RPC, request_kwargs={"timeout": 30}))
+        contract = w3.eth.contract(address=Web3.to_checksum_address(GRID_CONTRACT), abi=GRID_ABI)
+
         count = contract.functions.getModelCount().call()
         logger.info(f"[MODEL_REF_CHAIN] Fetching {count} models from chain...")
-        
+
         models = {}
         for i in range(1, count + 1):
             for attempt in range(3):
                 try:
                     m = contract.functions.getModel(i).call()
-                    
+
                     # Skip inactive models
                     if not m[16]:  # isActive
                         break
-                    
+
                     name = m[3]  # display name
                     model_type = m[1]
                     base_model = m[11]
-                    
+
                     # Determine baseline
                     baseline = base_model if base_model else _infer_baseline(name, model_type)
-                    
+
                     # Determine style
                     style = "video" if model_type == MODEL_TYPE_VIDEO else "generalist"
-                    
+
                     # Determine type string
                     if m[14]:  # controlnet
                         type_str = "controlnet"
@@ -124,7 +123,7 @@ def _fetch_models_from_chain() -> Dict[str, Dict[str, Any]]:
                         type_str = "video"
                     else:
                         type_str = "checkpoint"
-                    
+
                     models[name] = {
                         "name": name,
                         "baseline": baseline,
@@ -145,20 +144,20 @@ def _fetch_models_from_chain() -> Dict[str, Dict[str, Any]]:
                         "_download_url": m[6],
                     }
                     break
-                    
+
                 except Exception as e:
                     if "429" in str(e):
                         time.sleep(1.0)  # Rate limit backoff
                     else:
                         logger.warning(f"[MODEL_REF_CHAIN] Error fetching model {i}: {e}")
                         break
-            
+
             # Rate limiting for public RPC
             time.sleep(0.2)
-        
+
         logger.info(f"[MODEL_REF_CHAIN] Fetched {len(models)} active models from chain")
         return models
-        
+
     except Exception as e:
         logger.error(f"[MODEL_REF_CHAIN] Chain fetch failed: {e}")
         return {}
@@ -167,7 +166,7 @@ def _fetch_models_from_chain() -> Dict[str, Dict[str, Any]]:
 def _infer_baseline(name: str, model_type: int) -> str:
     """Infer baseline from model name if not provided."""
     name_lower = name.lower()
-    
+
     if model_type == MODEL_TYPE_VIDEO:
         if "wan" in name_lower:
             if "2.1" in name_lower:
@@ -180,7 +179,7 @@ def _infer_baseline(name: str, model_type: int) -> str:
         elif "mochi" in name_lower:
             return "mochi"
         return "wan_2_2"
-    
+
     # Image models
     if "flux" in name_lower:
         return "flux_1"
@@ -190,7 +189,7 @@ def _infer_baseline(name: str, model_type: int) -> str:
         return "stable diffusion 2"
     elif "cascade" in name_lower:
         return "stable_cascade"
-    
+
     return "stable diffusion 1"
 
 
@@ -231,10 +230,10 @@ def _load_cache() -> Optional[Dict[str, Dict[str, Any]]]:
 class ModelReference(PrimaryTimedFunction):
     """
     Model reference backed by blockchain with local caching.
-    
+
     All lookups use in-memory dicts - NO blockchain calls during requests.
     """
-    
+
     quorum = None
     reference: Dict[str, Dict[str, Any]] = {}
     text_reference: Dict[str, Dict[str, Any]] = {}
@@ -248,14 +247,14 @@ class ModelReference(PrimaryTimedFunction):
     def call_function(self):
         """
         Refresh models from blockchain and update local cache.
-        
+
         Called on startup and every hour by PrimaryTimedFunction.
         """
         logger.info("[MODEL_REF_CHAIN] Starting model refresh...")
-        
+
         # Try to fetch fresh from chain
         chain_models = _fetch_models_from_chain()
-        
+
         if chain_models:
             # Success - use chain data and update cache
             _save_cache(chain_models)
@@ -270,12 +269,12 @@ class ModelReference(PrimaryTimedFunction):
                 logger.error("[MODEL_REF_CHAIN] No cache available, models empty!")
                 self.reference = {}
                 self.stable_diffusion_names = set()
-        
+
         # Load text models (still from legacy source)
         self._load_text_models()
-        
+
         logger.info(f"[MODEL_REF_CHAIN] Refresh complete: {len(self.stable_diffusion_names)} image models")
-    
+
     def _populate_from_dict(self, models: Dict[str, Dict[str, Any]]):
         """Populate internal data structures from model dict."""
         self.reference = models
@@ -284,7 +283,7 @@ class ModelReference(PrimaryTimedFunction):
         self.controlnet_models = set()
         # Case-insensitive lookup: maps lowercase name -> actual name
         self._name_lookup: Dict[str, str] = {}
-        
+
         valid_baselines = {
             "stable diffusion 1",
             "stable diffusion 2",
@@ -298,29 +297,29 @@ class ModelReference(PrimaryTimedFunction):
             "cogvideo",
             "mochi",
         }
-        
+
         for name, model in models.items():
             baseline = model.get("baseline", "")
             if baseline in valid_baselines:
                 self.stable_diffusion_names.add(name)
                 # Build case-insensitive lookup
                 self._name_lookup[name.lower()] = name
-            
+
             if model.get("nsfw"):
                 self.nsfw_models.add(name)
-            
+
             if model.get("controlnet") or model.get("type") == "controlnet":
                 self.controlnet_models.add(name)
-        
+
         # Log stats
-        flux_count = len([m for m in self.stable_diffusion_names if 'flux' in m.lower()])
+        flux_count = len([m for m in self.stable_diffusion_names if "flux" in m.lower()])
         video_count = len([m for m in self.stable_diffusion_names if models.get(m, {}).get("type") == "video"])
         logger.info(f"[MODEL_REF_CHAIN] Models: {len(self.stable_diffusion_names)} total, {flux_count} FLUX, {video_count} video")
-    
+
     def _load_text_models(self):
         """Load text models from legacy source."""
         import requests
-        
+
         for _riter in range(10):
             try:
                 self.text_reference = requests.get(
@@ -330,7 +329,7 @@ class ModelReference(PrimaryTimedFunction):
                     ),
                     timeout=5,
                 ).json()
-                
+
                 self.text_model_names = set()
                 for model in self.text_reference:
                     self.text_model_names.add(model)
@@ -342,7 +341,7 @@ class ModelReference(PrimaryTimedFunction):
 
     # ========== All methods below use in-memory dicts only ==========
     # NO blockchain calls happen here - pure dict lookups
-    
+
     def get_image_model_names(self):
         return set(self.reference.keys())
 
@@ -400,7 +399,7 @@ class ModelReference(PrimaryTimedFunction):
 
     def normalize_model_name(self, model_name: str) -> Optional[str]:
         """Return the canonical model name for case-insensitive matching.
-        
+
         E.g., 'Ltxv' -> 'ltxv', 'FLUX.1-DEV' -> 'FLUX.1-dev'
         Returns None if model not found.
         """
@@ -409,7 +408,7 @@ class ModelReference(PrimaryTimedFunction):
             return model_name
         # Then try case-insensitive lookup
         return self._name_lookup.get(model_name.lower())
-    
+
     def is_known_image_model(self, model_name):
         # Case-insensitive check
         return self.normalize_model_name(model_name) is not None

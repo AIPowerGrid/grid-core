@@ -14,9 +14,10 @@ from horde.threads import PrimaryTimedFunction
 print("[MODEL_REFERENCE] Module loading - version 2024-12-24-v3")
 logger.warning("[MODEL_REFERENCE] Module imported - code version 2024-12-24-v3")
 
+
 def write_debug_log(message: str):
     """Write debug info to a file for troubleshooting.
-    
+
     Writes to model_reference_debug.log in the same directory as horde.log
     (the current working directory when the app runs).
     """
@@ -96,12 +97,12 @@ class ModelReference(PrimaryTimedFunction):
                             self.nsfw_models.add(model)
                         if self.reference[model].get("type") == "controlnet":
                             self.controlnet_models.add(model)
-                
+
                 # Debug: Log recognized models - using WARNING to ensure visibility
                 write_debug_log(f"Recognized {len(self.stable_diffusion_names)} models with valid baselines")
                 logger.warning(f"[MODEL_REFERENCE] Recognized {len(self.stable_diffusion_names)} models with valid baselines")
-                flux_models = [m for m in self.stable_diffusion_names if 'flux' in m.lower() or 'FLUX' in m]
-                wan_models = [m for m in self.stable_diffusion_names if 'wan' in m.lower()]
+                flux_models = [m for m in self.stable_diffusion_names if "flux" in m.lower() or "FLUX" in m]
+                wan_models = [m for m in self.stable_diffusion_names if "wan" in m.lower()]
                 write_debug_log(f"FLUX models ({len(flux_models)}): {flux_models}")
                 write_debug_log(f"WAN models ({len(wan_models)}): {wan_models}")
                 logger.warning(f"[MODEL_REFERENCE] FLUX models ({len(flux_models)}): {flux_models}")
@@ -223,7 +224,7 @@ class ModelReference(PrimaryTimedFunction):
 
     def is_video_model(self, model_name):
         """Check if a model is a video generation model.
-        
+
         Video models have "style": "video" in stable_diffusion.json.
         Also checks for known video model baselines.
         """

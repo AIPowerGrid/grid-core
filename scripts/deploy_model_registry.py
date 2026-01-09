@@ -22,19 +22,13 @@ CHAIN_ID = 84532
 
 # ModelRegistry ABI for write operations
 MODEL_REGISTRY_ABI = [
-    {
-        "inputs": [],
-        "name": "totalModels",
-        "outputs": [{"type": "uint256"}],
-        "stateMutability": "view",
-        "type": "function"
-    },
+    {"inputs": [], "name": "totalModels", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
     {
         "inputs": [{"type": "bytes32", "name": "modelHash"}],
         "name": "isModelExists",
         "outputs": [{"type": "bool"}],
         "stateMutability": "view",
-        "type": "function"
+        "type": "function",
     },
     {
         "inputs": [
@@ -50,12 +44,12 @@ MODEL_REGISTRY_ABI = [
             {"type": "bool", "name": "controlnet"},
             {"type": "bool", "name": "lora"},
             {"type": "string", "name": "baseModel"},
-            {"type": "string", "name": "architecture"}
+            {"type": "string", "name": "architecture"},
         ],
         "name": "registerModel",
         "outputs": [{"type": "uint256"}],
         "stateMutability": "nonpayable",
-        "type": "function"
+        "type": "function",
     },
     {
         "inputs": [
@@ -64,37 +58,29 @@ MODEL_REGISTRY_ABI = [
             {"type": "uint16", "name": "stepsMax"},
             {"type": "uint16", "name": "cfgMinTenths"},
             {"type": "uint16", "name": "cfgMaxTenths"},
-            {"type": "uint8", "name": "clipSkip"}
+            {"type": "uint8", "name": "clipSkip"},
         ],
         "name": "setModelNumericConstraints",
         "outputs": [],
         "stateMutability": "nonpayable",
-        "type": "function"
+        "type": "function",
     },
     {
-        "inputs": [
-            {"type": "string", "name": "modelId"},
-            {"type": "bytes32[]", "name": "samplerHashes"}
-        ],
+        "inputs": [{"type": "string", "name": "modelId"}, {"type": "bytes32[]", "name": "samplerHashes"}],
         "name": "setModelAllowedSamplers",
         "outputs": [],
         "stateMutability": "nonpayable",
-        "type": "function"
+        "type": "function",
     },
     {
-        "inputs": [
-            {"type": "string", "name": "modelId"},
-            {"type": "bytes32[]", "name": "schedulerHashes"}
-        ],
+        "inputs": [{"type": "string", "name": "modelId"}, {"type": "bytes32[]", "name": "schedulerHashes"}],
         "name": "setModelAllowedSchedulers",
         "outputs": [],
         "stateMutability": "nonpayable",
-        "type": "function"
+        "type": "function",
     },
     {
-        "inputs": [
-            {"type": "string", "name": "modelId"}
-        ],
+        "inputs": [{"type": "string", "name": "modelId"}],
         "name": "getModelConstraints",
         "outputs": [
             {"type": "bool", "name": "exists"},
@@ -104,10 +90,10 @@ MODEL_REGISTRY_ABI = [
             {"type": "uint16", "name": "cfgMaxTenths"},
             {"type": "uint8", "name": "clipSkip"},
             {"type": "bytes32[]", "name": "allowedSamplers"},
-            {"type": "bytes32[]", "name": "allowedSchedulers"}
+            {"type": "bytes32[]", "name": "allowedSchedulers"},
         ],
         "stateMutability": "view",
-        "type": "function"
+        "type": "function",
     },
     {
         "inputs": [{"type": "uint256", "name": "modelId"}],
@@ -130,13 +116,13 @@ MODEL_REGISTRY_ABI = [
                     {"type": "bool", "name": "controlnet"},
                     {"type": "bool", "name": "lora"},
                     {"type": "string", "name": "baseModel"},
-                    {"type": "string", "name": "architecture"}
-                ]
+                    {"type": "string", "name": "architecture"},
+                ],
             }
         ],
         "stateMutability": "view",
-        "type": "function"
-    }
+        "type": "function",
+    },
 ]
 
 # Model definitions from stable_diffusion.json
@@ -161,8 +147,8 @@ MODELS = {
             "cfgMaxTenths": 50,  # 5.0 * 10
             "clipSkip": 1,
             "samplers": ["k_euler"],
-            "schedulers": ["karras"]
-        }
+            "schedulers": ["karras"],
+        },
     },
     "Juggernaut XL": {
         "fileName": "juggernaut_xl.safetensors",
@@ -184,8 +170,8 @@ MODELS = {
             "cfgMaxTenths": 100,
             "clipSkip": 1,
             "samplers": ["k_euler", "k_dpmpp_2m", "k_dpmpp_sde"],
-            "schedulers": ["karras", "simple"]
-        }
+            "schedulers": ["karras", "simple"],
+        },
     },
     "Flux.1-Schnell fp8 (Compact)": {
         "fileName": "flux1CompactCLIPAnd_Flux1SchnellFp8.safetensors",
@@ -207,8 +193,8 @@ MODELS = {
             "cfgMaxTenths": 40,
             "clipSkip": 1,
             "samplers": ["k_euler"],
-            "schedulers": ["karras"]
-        }
+            "schedulers": ["karras"],
+        },
     },
     "stable_diffusion": {
         "fileName": "model_1_5.ckpt",
@@ -230,8 +216,8 @@ MODELS = {
             "cfgMaxTenths": 300,
             "clipSkip": 1,
             "samplers": ["k_euler", "k_euler_a", "k_dpmpp_2m", "k_dpmpp_sde", "k_lms"],
-            "schedulers": ["karras", "simple", "normal"]
-        }
+            "schedulers": ["karras", "simple", "normal"],
+        },
     },
     "SDXL 1.0": {
         "fileName": "sd_xl_base_1.0.safetensors",
@@ -253,9 +239,9 @@ MODELS = {
             "cfgMaxTenths": 100,
             "clipSkip": 1,
             "samplers": ["k_euler", "k_dpmpp_2m", "k_dpmpp_sde"],
-            "schedulers": ["karras", "simple"]
-        }
-    }
+            "schedulers": ["karras", "simple"],
+        },
+    },
 }
 
 
@@ -272,16 +258,16 @@ def get_sampler_hash(sampler: str) -> bytes:
 def check_balance(w3: Web3, address: str):
     """Check ETH balance."""
     balance = w3.eth.get_balance(address)
-    return w3.from_wei(balance, 'ether')
+    return w3.from_wei(balance, "ether")
 
 
 def register_model(w3: Web3, contract, account, model_name: str, model_data: dict):
     """Register a model on-chain."""
     print(f"\n📝 Registering model: {model_name}")
-    
+
     model_hash = get_model_hash(model_data["fileName"])
     print(f"   Model hash: {model_hash.hex()}")
-    
+
     # Check if already registered
     try:
         exists = contract.functions.isModelExists(model_hash).call()
@@ -290,7 +276,7 @@ def register_model(w3: Web3, contract, account, model_name: str, model_data: dic
             return None
     except Exception as e:
         print(f"   Note: Could not check existence: {e}")
-    
+
     # Build transaction
     tx = contract.functions.registerModel(
         model_hash,
@@ -305,23 +291,25 @@ def register_model(w3: Web3, contract, account, model_name: str, model_data: dic
         model_data["controlnet"],
         model_data["lora"],
         model_data["baseModel"],
-        model_data["architecture"]
-    ).build_transaction({
-        'from': account.address,
-        'nonce': w3.eth.get_transaction_count(account.address),
-        'gas': 500000,
-        'gasPrice': w3.eth.gas_price,
-        'chainId': CHAIN_ID
-    })
-    
+        model_data["architecture"],
+    ).build_transaction(
+        {
+            "from": account.address,
+            "nonce": w3.eth.get_transaction_count(account.address),
+            "gas": 500000,
+            "gasPrice": w3.eth.gas_price,
+            "chainId": CHAIN_ID,
+        }
+    )
+
     # Sign and send
     signed_tx = account.sign_transaction(tx)
     tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
     print(f"   📤 TX sent: {tx_hash.hex()}")
-    
+
     # Wait for confirmation
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
-    if receipt['status'] == 1:
+    if receipt["status"] == 1:
         print(f"   ✅ Model registered successfully!")
         return receipt
     else:
@@ -335,9 +323,9 @@ def set_model_constraints(w3: Web3, contract, account, model_name: str, model_da
     if not constraints:
         print(f"   No constraints defined for {model_name}")
         return
-    
+
     print(f"\n⚙️  Setting constraints for: {model_name}")
-    
+
     # Set numeric constraints
     tx = contract.functions.setModelNumericConstraints(
         model_data["fileName"],
@@ -345,60 +333,60 @@ def set_model_constraints(w3: Web3, contract, account, model_name: str, model_da
         constraints["stepsMax"],
         constraints["cfgMinTenths"],
         constraints["cfgMaxTenths"],
-        constraints["clipSkip"]
-    ).build_transaction({
-        'from': account.address,
-        'nonce': w3.eth.get_transaction_count(account.address),
-        'gas': 200000,
-        'gasPrice': w3.eth.gas_price,
-        'chainId': CHAIN_ID
-    })
-    
+        constraints["clipSkip"],
+    ).build_transaction(
+        {
+            "from": account.address,
+            "nonce": w3.eth.get_transaction_count(account.address),
+            "gas": 200000,
+            "gasPrice": w3.eth.gas_price,
+            "chainId": CHAIN_ID,
+        }
+    )
+
     signed_tx = account.sign_transaction(tx)
     tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
     print(f"   📤 Numeric constraints TX: {tx_hash.hex()}")
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
-    
-    if receipt['status'] != 1:
+
+    if receipt["status"] != 1:
         print(f"   ❌ Failed to set numeric constraints!")
         return
-    
+
     # Set samplers
     if constraints.get("samplers"):
         sampler_hashes = [get_sampler_hash(s) for s in constraints["samplers"]]
-        tx = contract.functions.setModelAllowedSamplers(
-            model_data["fileName"],
-            sampler_hashes
-        ).build_transaction({
-            'from': account.address,
-            'nonce': w3.eth.get_transaction_count(account.address),
-            'gas': 200000,
-            'gasPrice': w3.eth.gas_price,
-            'chainId': CHAIN_ID
-        })
+        tx = contract.functions.setModelAllowedSamplers(model_data["fileName"], sampler_hashes).build_transaction(
+            {
+                "from": account.address,
+                "nonce": w3.eth.get_transaction_count(account.address),
+                "gas": 200000,
+                "gasPrice": w3.eth.gas_price,
+                "chainId": CHAIN_ID,
+            }
+        )
         signed_tx = account.sign_transaction(tx)
         tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
         print(f"   📤 Samplers TX: {tx_hash.hex()}")
         w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
-    
+
     # Set schedulers
     if constraints.get("schedulers"):
         scheduler_hashes = [get_sampler_hash(s) for s in constraints["schedulers"]]
-        tx = contract.functions.setModelAllowedSchedulers(
-            model_data["fileName"],
-            scheduler_hashes
-        ).build_transaction({
-            'from': account.address,
-            'nonce': w3.eth.get_transaction_count(account.address),
-            'gas': 200000,
-            'gasPrice': w3.eth.gas_price,
-            'chainId': CHAIN_ID
-        })
+        tx = contract.functions.setModelAllowedSchedulers(model_data["fileName"], scheduler_hashes).build_transaction(
+            {
+                "from": account.address,
+                "nonce": w3.eth.get_transaction_count(account.address),
+                "gas": 200000,
+                "gasPrice": w3.eth.gas_price,
+                "chainId": CHAIN_ID,
+            }
+        )
         signed_tx = account.sign_transaction(tx)
         tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
         print(f"   📤 Schedulers TX: {tx_hash.hex()}")
         w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
-    
+
     print(f"   ✅ Constraints set!")
 
 
@@ -413,31 +401,32 @@ def main():
         for name in MODELS.keys():
             print(f"  - {name}")
         sys.exit(1)
-    
+
     command = sys.argv[1]
-    
+
     # Connect to Base Sepolia
     w3 = Web3(Web3.HTTPProvider(RPC_URL))
     if not w3.is_connected():
         print("❌ Failed to connect to Base Sepolia")
         sys.exit(1)
     print(f"✅ Connected to Base Sepolia (Chain ID: {CHAIN_ID})")
-    
+
     # Load private key from environment or prompt
     import os
+
     pk = os.environ.get("DEPLOYER_PK")
     if not pk:
         pk = input("Enter private key (0x...): ").strip()
-    
+
     account = Account.from_key(pk)
     print(f"📍 Wallet: {account.address}")
-    
+
     balance = check_balance(w3, account.address)
     print(f"💰 Balance: {balance} ETH")
-    
+
     if command == "balance":
         sys.exit(0)
-    
+
     # Check for contract address
     contract_address = os.environ.get("MODEL_REGISTRY_ADDRESS")
     if not contract_address:
@@ -445,13 +434,10 @@ def main():
         print("   You need to deploy the ModelRegistry contract first.")
         print("   Set the address: export MODEL_REGISTRY_ADDRESS=0x...")
         sys.exit(1)
-    
-    contract = w3.eth.contract(
-        address=Web3.to_checksum_address(contract_address),
-        abi=MODEL_REGISTRY_ABI
-    )
+
+    contract = w3.eth.contract(address=Web3.to_checksum_address(contract_address), abi=MODEL_REGISTRY_ABI)
     print(f"📋 ModelRegistry: {contract_address}")
-    
+
     if command == "list":
         try:
             total = contract.functions.totalModels().call()
@@ -461,29 +447,29 @@ def main():
                 print(f"   {i}: {model[3]} ({model[2]})")
         except Exception as e:
             print(f"Error listing models: {e}")
-    
+
     elif command == "register":
         if len(sys.argv) < 3:
             print("Usage: register <model_name>")
             sys.exit(1)
-        
+
         model_name = sys.argv[2]
         if model_name not in MODELS:
             print(f"Unknown model: {model_name}")
             print("Available models:", list(MODELS.keys()))
             sys.exit(1)
-        
+
         model_data = MODELS[model_name]
         receipt = register_model(w3, contract, account, model_name, model_data)
         if receipt:
             set_model_constraints(w3, contract, account, model_name, model_data)
-    
+
     elif command == "register-all":
         for model_name, model_data in MODELS.items():
             receipt = register_model(w3, contract, account, model_name, model_data)
             if receipt:
                 set_model_constraints(w3, contract, account, model_name, model_data)
-    
+
     else:
         print(f"Unknown command: {command}")
         sys.exit(1)
@@ -491,4 +477,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

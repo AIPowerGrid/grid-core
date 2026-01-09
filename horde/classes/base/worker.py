@@ -295,10 +295,10 @@ class WorkerTemplate(db.Model):
         # we only record new uptime on the worker every 30 seconds
         if (datetime.utcnow() - self.last_check_in).total_seconds() < 30 and (datetime.utcnow() - self.created).total_seconds() > 30:
             return
-        
+
         # Check if worker was stale before this check-in (coming back online)
         was_stale = self.is_stale()
-        
+
         if not was_stale and not self.paused and not self.maintenance:
             self.uptime += (datetime.utcnow() - self.last_check_in).total_seconds()
             # Every 10 minutes of uptime gets 100 kudos rewarded
@@ -319,7 +319,7 @@ class WorkerTemplate(db.Model):
             # Notify Discord that worker came back online
             if was_stale:
                 try:
-                    models = [m.model for m in self.models] if hasattr(self, 'models') else []
+                    models = [m.model for m in self.models] if hasattr(self, "models") else []
                     notify_worker_online(self.name, str(self.id), models, self.user.get_unique_alias() if self.user else None)
                 except Exception:
                     pass  # Don't let Discord errors break check-in

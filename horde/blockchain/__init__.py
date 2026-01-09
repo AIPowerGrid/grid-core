@@ -8,4 +8,3 @@ from horde.blockchain.config import BlockchainConfig
 from horde.blockchain.model_registry import ModelRegistryClient
 
 __all__ = ["BlockchainConfig", "ModelRegistryClient"]
-

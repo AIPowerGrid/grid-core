@@ -10,6 +10,7 @@ echo "🚀 Starting horde processes on ports 7001-7008..."
 for port in {7001..7008}; do
     echo "Starting horde on port $port..."
     sudo -u aipg nohup /usr/bin/python /home/aipg/aipg/server.py -vv --horde stable -p $port > /dev/null 2>&1 &
+    sleep 2
 done
 
 echo "✅ All horde processes restarted!"

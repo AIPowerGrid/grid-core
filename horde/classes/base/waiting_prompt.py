@@ -143,8 +143,10 @@ class WaitingPrompt(db.Model):
     def __init__(self, worker_ids, models, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Debug: Log wallet_id assignment
-        wallet_id = kwargs.get('wallet_id')
-        logger.info(f"🔍 WaitingPrompt.__init__: wallet_id from kwargs = {wallet_id}, self.wallet_id = {getattr(self, 'wallet_id', 'NOT SET')}")
+        wallet_id = kwargs.get("wallet_id")
+        logger.info(
+            f"🔍 WaitingPrompt.__init__: wallet_id from kwargs = {wallet_id}, self.wallet_id = {getattr(self, 'wallet_id', 'NOT SET')}"
+        )
         db.session.add(self)
         db.session.commit()
         logger.info(f"🔍 WaitingPrompt.__init__: After commit, self.wallet_id = {self.wallet_id}")
@@ -258,7 +260,7 @@ class WaitingPrompt(db.Model):
         while safe_amount >= 1:
             safe_amount -= 1
             current_n -= 1
-            media_type = getattr(self, 'media_type', 'image')
+            media_type = getattr(self, "media_type", "image")
             logger.info(f"🔍 start_generation: Creating procgen with wallet_id={self.wallet_id}, media_type={media_type}")
             new_gen = procgen_class(wp_id=self.id, worker_id=worker.id, model=model, wallet_id=self.wallet_id, media_type=media_type)
             logger.info(f"🔍 start_generation: Created procgen {new_gen.id} with wallet_id={new_gen.wallet_id}")
@@ -277,7 +279,7 @@ class WaitingPrompt(db.Model):
     def fake_generation(self, worker):
         payload = self.get_job_payload(self.n)
         procgen_class = procgen_classes[self.wp_type]
-        media_type = getattr(self, 'media_type', 'image')
+        media_type = getattr(self, "media_type", "image")
         new_gen = procgen_class(wp_id=self.id, worker_id=worker.id, fake=True, wallet_id=self.wallet_id, media_type=media_type)
         new_trick = WPTrickedWorkers(wp_id=self.id, worker_id=worker.id)
         db.session.add(new_trick)
@@ -350,7 +352,7 @@ class WaitingPrompt(db.Model):
         }
         latest_progress = None
         latest_progress_time = None
-        
+
         for procgen in self.processing_gens:
             if procgen.fake:
                 continue
@@ -365,11 +367,11 @@ class WaitingPrompt(db.Model):
                     if latest_progress_time is None or procgen.progress_updated_at > latest_progress_time:
                         latest_progress_time = procgen.progress_updated_at
                         latest_progress = procgen.get_progress()
-        
+
         # Include progress from the most recently updated processing job
         if latest_progress:
             ret_dict["progress"] = latest_progress
-        
+
         return ret_dict
 
     # FIXME: Looks like this is not used anywhere

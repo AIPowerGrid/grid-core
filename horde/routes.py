@@ -77,14 +77,10 @@ def index():
     text_worker_count, text_worker_thread_count = database.count_active_workers("text")
     # Calculate average performance - use reasonable estimates when no workers are active
     avg_performance = (
-        ConvertAmount(database.get_request_avg() * image_worker_thread_count)
-        if image_worker_thread_count > 0
-        else ConvertAmount(5.0)
+        ConvertAmount(database.get_request_avg() * image_worker_thread_count) if image_worker_thread_count > 0 else ConvertAmount(5.0)
     )
     avg_text_performance = (
-        ConvertAmount(database.get_request_avg("text") * text_worker_thread_count)
-        if text_worker_thread_count > 0
-        else ConvertAmount(50.0)
+        ConvertAmount(database.get_request_avg("text") * text_worker_thread_count) if text_worker_thread_count > 0 else ConvertAmount(50.0)
     )
     # We multiple with the divisor again, to get the raw amount, which we can convert to prefix accurately
     total_image_things = ConvertAmount(totals[hv.thing_names["image"]] * hv.thing_divisors["image"])
@@ -100,37 +96,41 @@ def index():
     total_forms = ConvertAmount(totals["forms"])
     total_threads = image_worker_thread_count + text_worker_thread_count + interrogation_worker_thread_count
     total_workers = image_worker_count + text_worker_count
-    
+
     # Get logo from environment
     logo_url = os.getenv("HORDE_LOGO", "https://aipowergrid.io/aipg-main.png")
-    
+
     # Get available models (with error handling)
     try:
         available_models = database.get_available_models()
         image_models = [model for model in available_models if model["type"] == "image"]
         text_models = [model for model in available_models if model["type"] == "text"]
-        
+
         # Create model lists as HTML
         image_models_list = "<ul style='list-style: none; padding: 0; margin: 0;'>\n"
         for model in image_models[:10]:  # Show top 10
             image_models_list += f"<li style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'><strong>{model['name']}</strong> <span style='color: #8b949e;'>({model['count']} workers)</span></li>\n"
         if len(image_models) > 10:
-            image_models_list += f"<li style='padding: 4px 0; color: #8b949e; font-style: italic;'>... and {len(image_models) - 10} more models</li>\n"
+            image_models_list += (
+                f"<li style='padding: 4px 0; color: #8b949e; font-style: italic;'>... and {len(image_models) - 10} more models</li>\n"
+            )
         image_models_list += "</ul>"
         if not image_models:
             image_models_list = "<p style='color: #8b949e;'>No image models currently available</p>"
-        
+
         text_models_list = "<ul style='list-style: none; padding: 0; margin: 0;'>\n"
         for model in text_models[:10]:  # Show top 10
             text_models_list += f"<li style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'><strong>{model['name']}</strong> <span style='color: #8b949e;'>({model['count']} workers)</span></li>\n"
         if len(text_models) > 10:
-            text_models_list += f"<li style='padding: 4px 0; color: #8b949e; font-style: italic;'>... and {len(text_models) - 10} more models</li>\n"
+            text_models_list += (
+                f"<li style='padding: 4px 0; color: #8b949e; font-style: italic;'>... and {len(text_models) - 10} more models</li>\n"
+            )
         text_models_list += "</ul>"
         if not text_models:
             text_models_list = "<p style='color: #8b949e;'>No text models currently available</p>"
-        
+
         # Get top models by worker count
-        top_models = sorted(available_models, key=lambda x: x.get('count', 0), reverse=True)[:5]
+        top_models = sorted(available_models, key=lambda x: x.get("count", 0), reverse=True)[:5]
         top_models_list = "<ul style='list-style: none; padding: 0; margin: 0;'>\n"
         for model in top_models:
             top_models_list += f"<li style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'><strong>{model['name']}</strong> <span style='color: #8b949e;'>({model['count']} workers)</span></li>\n"
@@ -145,7 +145,7 @@ def index():
         top_models_list = "<p style='color: #f85149;'>Unable to load models</p>"
     image_models = []
     text_models = []
-    
+
     findex = index.format(
         page_title=horde_title,
         horde_img_url=img_url,
@@ -737,7 +737,7 @@ def _clean_doc_name(env_var_name: str, default: str) -> str:
     """
     raw = os.getenv(env_var_name, default) or default
     # Strip common quote characters from both ends
-    return raw.strip(' "\'“”‘’')
+    return raw.strip(" \"'“”‘’")
 
 
 @HORDE.route("/privacy")
@@ -790,9 +790,6 @@ def serviceinfo():
     }, 200
 
 
-
-
-
 @HORDE.route("/test-proxy")
 def test_proxy():
     """Simple test route to verify routing is working."""
@@ -826,13 +823,13 @@ def proxy_api(subpath: str):
         api_key = request.headers.get("apikey")
         if api_key:
             headers["apikey"] = api_key
-        
+
         if request.method == "POST":
             payload = request.get_json(force=True, silent=True)
             resp = requests.post(target, headers=headers, json=payload, timeout=60)
         else:
             resp = requests.get(target, headers=headers, timeout=60)
-        
+
         content_type = resp.headers.get("Content-Type", "application/json")
         return resp.text, resp.status_code, {"Content-Type": content_type}
     except Exception as exc:

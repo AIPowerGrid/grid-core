@@ -146,6 +146,7 @@ logger.add("horde.log", retention="7 days", rotation="1d", compression="bz2", le
 # Add Discord webhook sink for ERROR and CRITICAL logs
 try:
     from horde.discord import discord_log_sink
+
     logger.add(discord_log_sink, level="ERROR")
 except ImportError:
     pass  # Discord module not available yet during initial import

@@ -12,8 +12,26 @@ NEW_REGISTRAR = "0xe2dddddf4dd22e98265bbf0e6bdc1cb3a4bb26a8"
 REGISTRAR_ROLE = Web3.keccak(text="REGISTRAR_ROLE")
 
 ABI = [
-    {"inputs":[{"internalType":"bytes32","name":"role","type":"bytes32"},{"internalType":"address","name":"account","type":"address"}],"name":"grantRole","outputs":[],"stateMutability":"nonpayable","type":"function"},
-    {"inputs":[{"internalType":"bytes32","name":"role","type":"bytes32"},{"internalType":"address","name":"account","type":"address"}],"name":"hasRole","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"}
+    {
+        "inputs": [
+            {"internalType": "bytes32", "name": "role", "type": "bytes32"},
+            {"internalType": "address", "name": "account", "type": "address"},
+        ],
+        "name": "grantRole",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [
+            {"internalType": "bytes32", "name": "role", "type": "bytes32"},
+            {"internalType": "address", "name": "account", "type": "address"},
+        ],
+        "name": "hasRole",
+        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
 ]
 
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
@@ -34,20 +52,19 @@ has_role = contract.functions.hasRole(REGISTRAR_ROLE, Web3.to_checksum_address(N
 if has_role:
     print("Wallet already has REGISTRAR_ROLE!")
 else:
-    tx = contract.functions.grantRole(
-        REGISTRAR_ROLE,
-        Web3.to_checksum_address(NEW_REGISTRAR)
-    ).build_transaction({
-        'from': account.address,
-        'nonce': w3.eth.get_transaction_count(account.address),
-        'gas': 100000,
-        'gasPrice': w3.eth.gas_price,
-    })
-    
+    tx = contract.functions.grantRole(REGISTRAR_ROLE, Web3.to_checksum_address(NEW_REGISTRAR)).build_transaction(
+        {
+            "from": account.address,
+            "nonce": w3.eth.get_transaction_count(account.address),
+            "gas": 100000,
+            "gasPrice": w3.eth.gas_price,
+        }
+    )
+
     signed = account.sign_transaction(tx)
     tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
     print(f"TX sent: {tx_hash.hex()}")
-    
+
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
     print(f"Status: {'SUCCESS' if receipt['status'] == 1 else 'FAILED'}")
     print(f"Explorer: https://sepolia.basescan.org/tx/{tx_hash.hex()}")

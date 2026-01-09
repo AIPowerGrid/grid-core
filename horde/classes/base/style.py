@@ -153,7 +153,9 @@ class Style(db.Model):
     user = db.relationship("User", back_populates="styles")
     sharedkey_id = db.Column(uuid_column_type(), db.ForeignKey("user_sharedkeys.id"), nullable=True)
     sharedkey = db.relationship("UserSharedKey", back_populates="styles")
-    collections: Mapped[list["StyleCollection"]] = db.relationship("StyleCollection", secondary="style_collection_mapping", back_populates="styles")
+    collections: Mapped[list["StyleCollection"]] = db.relationship(
+        "StyleCollection", secondary="style_collection_mapping", back_populates="styles"
+    )
     models = db.relationship("StyleModel", back_populates="style", cascade="all, delete-orphan")
     tags = db.relationship("StyleTag", back_populates="style", cascade="all, delete-orphan")
     examples = db.relationship("StyleExample", back_populates="style", cascade="all, delete-orphan")

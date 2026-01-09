@@ -653,7 +653,7 @@ class JobSubmitTemplate(Resource):
 
 class JobProgressUpdate(Resource):
     """Endpoint for workers to report progress on active jobs"""
-    
+
     parser = reqparse.RequestParser()
     parser.add_argument(
         "apikey",
@@ -693,35 +693,35 @@ class JobProgressUpdate(Resource):
     @api.response(404, "Job Not Found", models.response_model_error)
     def post(self):
         """Report progress on an active generation job.
-        
+
         Workers can use this endpoint to report their progress during generation,
         allowing clients to see real-time step progress.
         """
         self.args = self.parser.parse_args()
-        
+
         # Validate API key
         user = database.find_user_by_api_key(self.args["apikey"])
         if not user:
             raise e.InvalidAPIKey("progress update")
-        
+
         # Find the processing generation
         procgen = database.get_progen_by_id(self.args["id"])
         if not procgen:
             raise e.InvalidJobID(self.args["id"])
-        
+
         # Verify the worker owns this job
         if user != procgen.worker.user:
             raise e.WrongCredentials(user.get_unique_alias(), procgen.worker.name)
-        
+
         # Update progress
         success = procgen.update_progress(
             current_step=self.args["current_step"],
             total_steps=self.args["total_steps"],
         )
-        
+
         if not success:
             return {"message": "Job already completed or faulted"}, 400
-        
+
         return {
             "progress_percent": procgen.progress_percent,
             "current_step": procgen.current_step,
@@ -3460,6 +3460,7 @@ class SingleWorkerMessage(Resource):
         db.session.commit()
         return {"message": "OK"}, 200
 
+
 class AutoWorkerType(Resource):
     get_parser = reqparse.RequestParser()
     get_parser.add_argument(
@@ -3480,13 +3481,16 @@ class AutoWorkerType(Resource):
 
     @api.expect(get_parser)
     @api.marshal_with(
-        api.model("AutoWorkerTypeResponse", {
-            "recommended_worker_type": fields.String(
-                description="The recommended worker type ('image' or 'text')",
-                example="image",
-                required=True,
-            )
-        }),
+        api.model(
+            "AutoWorkerTypeResponse",
+            {
+                "recommended_worker_type": fields.String(
+                    description="The recommended worker type ('image' or 'text')",
+                    example="image",
+                    required=True,
+                )
+            },
+        ),
         code=200,
         description="Recommended worker type details",
         skip_none=True,

@@ -30,7 +30,6 @@ from horde.classes.stable.interrogation import Interrogation, InterrogationForms
 from horde.classes.stable.interrogation_worker import InterrogationWorker
 from horde.classes.stable.processing_generation import ImageProcessingGeneration
 from horde.classes.stable.waiting_prompt import ImageWaitingPrompt
-from horde.classes.stable.video_waiting_prompt import VideoWaitingPrompt
 from horde.classes.stable.worker import ImageWorker
 from horde.database.classes import FakeWPRow
 from horde.enums import State
@@ -49,7 +48,7 @@ WORKER_CLASS_MAP = {
 WP_CLASS_MAP = {
     "image": ImageWaitingPrompt,
     "text": TextWaitingPrompt,
-    "video": VideoWaitingPrompt,
+    "video": ImageWaitingPrompt,  # Video uses ImageWaitingPrompt
 }
 
 
@@ -524,7 +523,7 @@ def count_waiting_requests(user, models=None, request_type="image"):
     if request_type == "text":
         wp_class = TextWaitingPrompt
     elif request_type == "video":
-        wp_class = VideoWaitingPrompt
+        wp_class = ImageWaitingPrompt  # Video uses ImageWaitingPrompt
 
     if not models:
         models = []
@@ -985,7 +984,7 @@ def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_us
         ).count()
         if skipped_max_pixels_for_our_models > 0:
             ret_dict["max_pixels_our_models"] = skipped_max_pixels_for_our_models
-    
+
     # Count skipped models (only if models_list is provided)
     if models_list_lower:
         skipped_models = open_wp_list.filter(
@@ -996,7 +995,7 @@ def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_us
         ).count()
         if skipped_models > 0:
             ret_dict["models"] = skipped_models
-    
+
         # Count how many jobs exist for our models (helps debug when jobs exist but aren't matched)
         matching_model_jobs = open_wp_list.filter(
             or_(

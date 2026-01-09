@@ -224,11 +224,13 @@ class ImageWorker(Worker):
         models = set()
         rejected_models = []
         # Debug: Log what models we're checking against - using WARNING for visibility
-        logger.warning(f"[WORKER] Checking {len(unchecked_models)} worker models against {len(model_reference.stable_diffusion_names)} known models")
+        logger.warning(
+            f"[WORKER] Checking {len(unchecked_models)} worker models against {len(model_reference.stable_diffusion_names)} known models"
+        )
         logger.warning(f"[WORKER] Worker models: {unchecked_models}")
         logger.warning(f"[WORKER] Known models (all): {list(model_reference.stable_diffusion_names)}")
         logger.warning(f"[WORKER] User customizer role: {self.user.customizer}")
-        
+
         # Check RecipeVault for model names (RecipeVault is now the source of truth)
         recipevault_models = set()
         try:
@@ -236,7 +238,7 @@ class ImageWorker(Worker):
             import sys
             import os
             from pathlib import Path
-            
+
             # Try multiple paths to find comfy-bridge RecipeVault client
             possible_paths = [
                 # Path relative to system-core (if comfy-bridge is sibling)
@@ -246,20 +248,21 @@ class ImageWorker(Worker):
                 # Current working directory
                 os.path.join(os.getcwd(), "comfy-bridge"),
             ]
-            
+
             recipe_client = None
             for comfy_bridge_path in possible_paths:
                 if os.path.exists(comfy_bridge_path) and comfy_bridge_path not in sys.path:
                     sys.path.insert(0, comfy_bridge_path)
                     try:
                         from comfy_bridge.recipevault_client import get_recipevault_client
+
                         recipe_client = get_recipevault_client()
                         logger.info(f"[WORKER] RecipeVault client loaded from {comfy_bridge_path}")
                         break
                     except ImportError:
                         sys.path.remove(comfy_bridge_path)
                         continue
-            
+
             if recipe_client and recipe_client.enabled:
                 all_recipes = recipe_client.fetch_all_recipes()
                 # Extract model names from recipe names (recipes are indexed by name)
@@ -269,10 +272,10 @@ class ImageWorker(Worker):
                 logger.debug("[WORKER] RecipeVault client available but not enabled")
             else:
                 logger.debug("[WORKER] RecipeVault client not available - models will only be validated against stable_diffusion_names")
-        except Exception as e:
-            logger.debug(f"[WORKER] Could not check RecipeVault: {e}")
+        except Exception as exc:
+            logger.debug(f"[WORKER] Could not check RecipeVault: {exc}")
             logger.debug(f"[WORKER] RecipeVault check failed, falling back to stable_diffusion_names only")
-        
+
         for model in unchecked_models:
             usermodel = model.split("::")
             if self.user.special and len(usermodel) == 2:
@@ -280,7 +283,12 @@ class ImageWorker(Worker):
                 if self.user.get_unique_alias() != user_alias:
                     raise e.BadRequest(f"This model can only be hosted by {user_alias}")
                 models.add(model)
-            elif model in model_reference.stable_diffusion_names or self.user.customizer or model in model_reference.testing_models or model in recipevault_models:
+            elif (
+                model in model_reference.stable_diffusion_names
+                or self.user.customizer
+                or model in model_reference.testing_models
+                or model in recipevault_models
+            ):
                 models.add(model)
                 if model in recipevault_models:
                     logger.warning(f"[WORKER] Accepted model '{model}' from RecipeVault")

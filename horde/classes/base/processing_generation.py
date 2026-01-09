@@ -45,7 +45,7 @@ class ProcessingGeneration(db.Model):
         server_default=expression.literal(False),
     )
     job_ttl = db.Column(db.Integer, default=150, nullable=False, index=True)
-    
+
     # Progress tracking fields for real-time updates
     progress_percent = db.Column(db.Integer, default=0, nullable=False)
     current_step = db.Column(db.Integer, default=0, nullable=False)
@@ -61,7 +61,7 @@ class ProcessingGeneration(db.Model):
     wallet_id = db.Column(db.String(42), nullable=True, index=True)  # EVM wallet for Web3 rewards
     media_type = db.Column(db.String(10), default="image", nullable=False, index=True)  # "image" or "video"
     created = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    
+
     # File storage and metadata
     tags = db.Column(json_column_type, nullable=True)  # JSON array of strings for categorization
     r2_download_url = db.Column(db.Text, nullable=True)  # Direct download URL for the generated file
@@ -96,7 +96,9 @@ class ProcessingGeneration(db.Model):
                 matching_models = worker_models
             random.shuffle(matching_models)
             self.model = matching_models[0]
-            logger.info(f"🔍 ProcessingGeneration: Selected model '{self.model}' from matching_models={matching_models[:5]} (worker_models={worker_models[:5]}, wp_models={wp_models[:5]})")
+            logger.info(
+                f"🔍 ProcessingGeneration: Selected model '{self.model}' from matching_models={matching_models[:5]} (worker_models={worker_models[:5]}, wp_models={wp_models[:5]})"
+            )
         else:
             self.model = kwargs["model"]
             logger.info(f"🔍 ProcessingGeneration: Using explicit model '{self.model}'")
@@ -110,7 +112,7 @@ class ProcessingGeneration(db.Model):
         if self.is_faulted():
             return -1
         # Sanitize NUL char away from string literal we store in the DB
-        self.generation = generation.replace("\x00", "\uFFFD")
+        self.generation = generation.replace("\x00", "\ufffd")
         # Support for two typical properties
         self.seed = kwargs.get("seed", None)
         self.gen_metadata = kwargs.get("gen_metadata", None)

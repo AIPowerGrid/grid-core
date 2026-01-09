@@ -155,7 +155,7 @@ class ImageProcessingGeneration(ProcessingGeneration):
 
     def set_job_ttl(self):
         """Set the job time-to-live based on model type.
-        
+
         Video models get a much longer TTL since they take 5-15+ minutes to generate.
         Image models use the standard timeout.
         """

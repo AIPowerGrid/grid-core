@@ -7,7 +7,7 @@ import os
 
 class BlockchainConfig:
     """Configuration for blockchain connections.
-    
+
     NOTE: Grid Diamond contract is the primary model registry.
     This config is for legacy ModelRegistry (file hash validation) - mostly deprecated.
     See model_reference_blockchain.py for Grid Diamond integration.
@@ -23,7 +23,7 @@ class BlockchainConfig:
 
     # Grid Diamond contract (Base Mainnet) - PRIMARY MODEL REGISTRY
     GRID_DIAMOND_CONTRACT = "0x79F39f2a0eA476f53994812e6a8f3C8CFe08c609"
-    
+
     # Legacy ModelRegistry (Sepolia) - DEPRECATED, file hash validation
     MODEL_REGISTRY_SEPOLIA = "0xe660455D4A83bbbbcfDCF4219ad82447a831c8A1"
 
@@ -50,7 +50,7 @@ class BlockchainConfig:
     @classmethod
     def is_enabled(cls) -> bool:
         """Check if blockchain validation is enabled (for model checking).
-        
+
         When true, validates that models are registered in Grid Diamond contract.
         """
         return os.getenv("BLOCKCHAIN_ENABLED", "false").lower() == "true"
@@ -62,4 +62,3 @@ class BlockchainConfig:
         if "sepolia" in rpc:
             return cls.SEPOLIA_CHAIN_ID
         return cls.MAINNET_CHAIN_ID
-

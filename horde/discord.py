@@ -80,6 +80,7 @@ def send_problem_user_notification(message: str):
 # Core Log Notifications (Worker Events, Errors, etc.)
 # ============================================================================
 
+
 def _get_core_webhook():
     """Get the core log webhook URL."""
     return os.getenv("DISCORD_CORE_LOG_WEBHOOK")
@@ -90,11 +91,11 @@ def notify_worker_online(worker_name: str, worker_id: str, models: list = None, 
     webhook_url = _get_core_webhook()
     if not webhook_url:
         return
-    
+
     models_str = ", ".join(models[:5]) if models else "None"
     if models and len(models) > 5:
         models_str += f" (+{len(models) - 5} more)"
-    
+
     embed = {
         "title": "🟢 Worker Online",
         "color": 0x00FF00,  # Green
@@ -114,7 +115,7 @@ def notify_worker_offline(worker_name: str, worker_id: str, user_name: str = Non
     webhook_url = _get_core_webhook()
     if not webhook_url:
         return
-    
+
     embed = {
         "title": "🔴 Worker Offline",
         "color": 0xFF0000,  # Red
@@ -133,11 +134,11 @@ def notify_worker_created(worker_name: str, worker_id: str, user_name: str = Non
     webhook_url = _get_core_webhook()
     if not webhook_url:
         return
-    
+
     models_str = ", ".join(models[:5]) if models else "None"
     if models and len(models) > 5:
         models_str += f" (+{len(models) - 5} more)"
-    
+
     embed = {
         "title": "✨ New Worker Created",
         "color": 0x00BFFF,  # Deep Sky Blue
@@ -157,7 +158,7 @@ def notify_job_aborted(job_id: str, worker_name: str = None, reason: str = None)
     webhook_url = _get_core_webhook()
     if not webhook_url:
         return
-    
+
     embed = {
         "title": "⚠️ Job Aborted",
         "color": 0xFFA500,  # Orange
@@ -176,16 +177,16 @@ def notify_error(error_type: str, message: str, context: dict = None):
     webhook_url = _get_core_webhook()
     if not webhook_url:
         return
-    
+
     fields = [
         {"name": "Type", "value": error_type, "inline": True},
         {"name": "Message", "value": message[:1000], "inline": False},
     ]
-    
+
     if context:
         for key, value in list(context.items())[:5]:
             fields.append({"name": key, "value": str(value)[:200], "inline": True})
-    
+
     embed = {
         "title": "❌ Error",
         "color": 0xFF0000,  # Red
@@ -200,13 +201,13 @@ def notify_blockchain_event(event_type: str, details: dict = None):
     webhook_url = _get_core_webhook()
     if not webhook_url:
         return
-    
+
     fields = [{"name": "Event", "value": event_type, "inline": False}]
-    
+
     if details:
         for key, value in list(details.items())[:6]:
             fields.append({"name": key, "value": str(value)[:200], "inline": True})
-    
+
     embed = {
         "title": "⛓️ Blockchain Event",
         "color": 0x9B59B6,  # Purple
@@ -226,9 +227,9 @@ def notify_job_popped(job_id: str, model: str, worker_name: str, prompt: str = N
     webhook_url = _get_jobs_webhook()
     if not webhook_url:
         return
-    
+
     prompt_preview = (prompt[:200] + "...") if prompt and len(prompt) > 200 else (prompt or "N/A")
-    
+
     embed = {
         "title": "📤 Job Popped",
         "color": 0x3498DB,  # Blue
@@ -248,7 +249,7 @@ def notify_job_submitted(job_id: str, model: str, worker_name: str, kudos: float
     webhook_url = _get_jobs_webhook()
     if not webhook_url:
         return
-    
+
     embed = {
         "title": "✅ Job Complete",
         "color": 0x00FF00,  # Green
@@ -261,7 +262,7 @@ def notify_job_submitted(job_id: str, model: str, worker_name: str, kudos: float
     }
     if kudos is not None:
         embed["fields"].append({"name": "Kudos", "value": f"{kudos:.1f}", "inline": False})
-    
+
     send_embed(webhook_url, embed)
 
 
@@ -270,7 +271,7 @@ def notify_generation_complete(job_id: str, model: str, worker_name: str = None,
     webhook_url = os.getenv("DISCORD_GENERATION_WEBHOOK")  # Separate webhook for generations
     if not webhook_url:
         return
-    
+
     embed = {
         "title": "✅ Generation Complete",
         "color": 0x00FF00,  # Green
@@ -283,13 +284,14 @@ def notify_generation_complete(job_id: str, model: str, worker_name: str = None,
     }
     if time_seconds:
         embed["fields"].append({"name": "Time", "value": f"{time_seconds:.1f}s", "inline": True})
-    
+
     send_embed(webhook_url, embed)
 
 
 # ============================================================================
 # Loguru Integration - Add as a log sink
 # ============================================================================
+
 
 def discord_log_sink(message):
     """
@@ -299,16 +301,16 @@ def discord_log_sink(message):
     webhook_url = _get_core_webhook()
     if not webhook_url:
         return
-    
+
     record = message.record
     level = record["level"].name
-    
+
     # Only send ERROR and CRITICAL
     if level not in ("ERROR", "CRITICAL"):
         return
-    
+
     msg_text = str(record["message"])
-    
+
     # Filter out expected messages that happen on every restart
     ignore_patterns = [
         "Quorum changed to port",  # Normal on restart
@@ -316,12 +318,12 @@ def discord_log_sink(message):
     for pattern in ignore_patterns:
         if pattern in msg_text:
             return
-    
+
     color = 0xFF0000 if level == "CRITICAL" else 0xFFA500  # Red for critical, orange for error
-    
+
     # Truncate message if too long
     msg_text = msg_text[:1500]
-    
+
     embed = {
         "title": f"{'🔥' if level == 'CRITICAL' else '❌'} {level}",
         "color": color,
@@ -331,10 +333,10 @@ def discord_log_sink(message):
         ],
         "timestamp": datetime.utcnow().isoformat(),
     }
-    
+
     # Add exception info if present
     if record["exception"]:
         exc_text = str(record["exception"])[:500]
         embed["fields"].append({"name": "Exception", "value": f"```\n{exc_text}\n```", "inline": False})
-    
+
     send_embed(webhook_url, embed)

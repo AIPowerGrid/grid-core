@@ -37,10 +37,18 @@ MODEL_REGISTRY_ABI = [
 
 class ModelConstraints:
     """Model constraints from on-chain data."""
-    
-    def __init__(self, exists: bool, steps_min: int, steps_max: int, 
-                 cfg_min_tenths: int, cfg_max_tenths: int, clip_skip: int,
-                 sampler_hashes: List[bytes], scheduler_hashes: List[bytes]):
+
+    def __init__(
+        self,
+        exists: bool,
+        steps_min: int,
+        steps_max: int,
+        cfg_min_tenths: int,
+        cfg_max_tenths: int,
+        clip_skip: int,
+        sampler_hashes: List[bytes],
+        scheduler_hashes: List[bytes],
+    ):
         self.exists = exists
         self.steps_min = steps_min
         self.steps_max = steps_max
@@ -50,7 +58,7 @@ class ModelConstraints:
         self.clip_skip = clip_skip
         self.sampler_hashes = sampler_hashes
         self.scheduler_hashes = scheduler_hashes
-    
+
     def has_constraints(self) -> bool:
         """Check if any constraints are set (non-zero values)."""
         return self.steps_min > 0 or self.steps_max > 0 or self.cfg_min > 0 or self.cfg_max > 0
@@ -150,7 +158,9 @@ class ModelRegistryClient:
                 sampler_hashes=result[6],
                 scheduler_hashes=result[7],
             )
-            logger.info(f"Got constraints for '{model_id}': steps={constraints.steps_min}-{constraints.steps_max}, cfg={constraints.cfg_min}-{constraints.cfg_max}")
+            logger.info(
+                f"Got constraints for '{model_id}': steps={constraints.steps_min}-{constraints.steps_max}, cfg={constraints.cfg_min}-{constraints.cfg_max}"
+            )
             return constraints
         except Exception as e:
             logger.warning(f"Could not get constraints for {model_id}: {e}")
@@ -175,7 +185,7 @@ class ModelRegistryClient:
             return ValidationResult(False, f"Steps {steps} < min {constraints.steps_min}")
         if constraints.steps_max > 0 and steps > constraints.steps_max:
             return ValidationResult(False, f"Steps {steps} > max {constraints.steps_max}")
-        
+
         # Check CFG
         if constraints.cfg_min > 0 and cfg < constraints.cfg_min:
             return ValidationResult(False, f"CFG {cfg} < min {constraints.cfg_min}")
@@ -185,6 +195,7 @@ class ModelRegistryClient:
         # Check sampler (compare hashes)
         if sampler and constraints.sampler_hashes:
             from web3 import Web3
+
             sampler_hash = Web3.keccak(text=sampler)
             if sampler_hash not in constraints.sampler_hashes:
                 return ValidationResult(False, f"Sampler '{sampler}' not allowed for this model")
@@ -192,6 +203,7 @@ class ModelRegistryClient:
         # Check scheduler (compare hashes)
         if scheduler and constraints.scheduler_hashes:
             from web3 import Web3
+
             scheduler_hash = Web3.keccak(text=scheduler)
             if scheduler_hash not in constraints.scheduler_hashes:
                 return ValidationResult(False, f"Scheduler '{scheduler}' not allowed for this model")
