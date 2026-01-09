@@ -23,7 +23,7 @@ from horde.consts import (
 from horde.flask import db
 from horde.image import convert_pil_to_b64
 from horde.logger import logger
-from horde.model_reference import model_reference
+from horde.model_reference_blockchain import model_reference
 from horde.r2 import (
     download_source_image,
     download_source_mask,

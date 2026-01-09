@@ -15,7 +15,7 @@ from horde.database.functions import compile_regex_filter, retrieve_regex_replac
 from horde.flask import HORDE, SQLITE_MODE  # Local Testing
 from horde.horde_redis import horde_redis as hr
 from horde.logger import logger
-from horde.model_reference import model_reference
+from horde.model_reference_blockchain import model_reference
 
 
 class PromptChecker:

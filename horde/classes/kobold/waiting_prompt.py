@@ -11,7 +11,7 @@ from horde import vars as hv
 from horde.classes.base.waiting_prompt import WaitingPrompt
 from horde.flask import db
 from horde.logger import logger
-from horde.model_reference import model_reference
+from horde.model_reference_blockchain import model_reference
 
 
 class TextWaitingPrompt(WaitingPrompt):

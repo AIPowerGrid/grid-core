@@ -23,7 +23,7 @@ from horde.database.functions import query_prioritized_wps
 from horde.flask import SQLITE_MODE, db
 from horde.horde_redis import horde_redis as hr
 from horde.logger import logger
-from horde.model_reference import model_reference
+from horde.model_reference_blockchain import model_reference
 
 
 # Should be overriden

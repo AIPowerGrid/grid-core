@@ -8,7 +8,7 @@ from horde import exceptions as e
 from horde.classes.base.user import User
 from horde.consts import KNOWN_POST_PROCESSORS, KNOWN_UPSCALERS
 from horde.enums import WarningMessage
-from horde.model_reference import model_reference
+from horde.model_reference_blockchain import model_reference
 
 
 class ParamValidator:

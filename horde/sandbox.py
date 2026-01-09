@@ -19,7 +19,7 @@ from horde.detection import prompt_checker
 from horde.discord import send_pause_notification, send_problem_user_notification
 from horde.flask import HORDE, db
 from horde.logger import logger
-from horde.model_reference import model_reference
+from horde.model_reference_blockchain import model_reference
 from horde.patreon import patrons
 from horde.suspicions import Suspicions
 

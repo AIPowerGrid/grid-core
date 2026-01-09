@@ -10,7 +10,7 @@ from horde.classes.stable.genstats import record_image_statistic
 from horde.flask import db
 from horde.image import convert_b64_to_pil, convert_pil_to_b64
 from horde.logger import logger
-from horde.model_reference import model_reference
+from horde.model_reference_blockchain import model_reference
 from horde.r2 import (
     check_shared_image,
     download_procgen_image,

@@ -460,7 +460,7 @@ def store_known_image_models():
         add_known_image_models_from_json,
         delete_any_unspecified_image_models,
     )
-    from horde.model_reference import model_reference
+    from horde.model_reference_blockchain import model_reference
 
     with HORDE.app_context():
         if model_reference.reference is not None:

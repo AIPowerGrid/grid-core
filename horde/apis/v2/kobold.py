@@ -31,7 +31,7 @@ from horde.database import text_functions as text_database
 from horde.flask import cache, db
 from horde.limiter import limiter
 from horde.logger import logger
-from horde.model_reference import model_reference
+from horde.model_reference_blockchain import model_reference
 from horde.utils import hash_dictionary
 from horde.validation import ParamValidator
 from horde.vars import horde_title
