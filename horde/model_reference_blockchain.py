@@ -266,9 +266,16 @@ class ModelReference(PrimaryTimedFunction):
             if cached_models:
                 self._populate_from_dict(cached_models)
             else:
-                logger.error("[MODEL_REF_CHAIN] No cache available, models empty!")
-                self.reference = {}
-                self.stable_diffusion_names = set()
+                # Try fallback to legacy JSON file (for CI/testing environments)
+                logger.warning("[MODEL_REF_CHAIN] No cache available, trying legacy JSON fallback...")
+                legacy_models = self._load_legacy_json()
+                if legacy_models:
+                    self._populate_from_dict(legacy_models)
+                    logger.info(f"[MODEL_REF_CHAIN] Loaded {len(legacy_models)} models from legacy JSON")
+                else:
+                    logger.error("[MODEL_REF_CHAIN] No models available from any source!")
+                    self.reference = {}
+                    self.stable_diffusion_names = set()
 
         # Load text models (still from legacy source)
         self._load_text_models()
@@ -338,6 +345,17 @@ class ModelReference(PrimaryTimedFunction):
                 break
             except Exception as err:
                 logger.error(f"[MODEL_REF_CHAIN] Error loading text models: {err}")
+
+    def _load_legacy_json(self) -> Dict[str, Dict[str, Any]]:
+        """Load models from legacy stable_diffusion.json file as fallback."""
+        try:
+            legacy_path = Path(__file__).parent.parent / "stable_diffusion.json"
+            if legacy_path.exists():
+                with open(legacy_path) as f:
+                    return json.load(f)
+        except Exception as err:
+            logger.error(f"[MODEL_REF_CHAIN] Error loading legacy JSON: {err}")
+        return {}
 
     # ========== All methods below use in-memory dicts only ==========
     # NO blockchain calls happen here - pure dict lookups
