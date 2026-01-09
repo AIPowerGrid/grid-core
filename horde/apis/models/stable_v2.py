@@ -529,8 +529,7 @@ class ImageModels(v2.Models):
                     default="txt2img",
                     enum=["txt2img", "img2img", "inpainting", "outpainting", "remix", "txt2video", "img2video"],
                     description=(
-                        "Generation mode. For images: txt2img, img2img, inpainting, outpainting, remix. "
-                        "For video: txt2video, img2video."
+                        "Generation mode. For images: txt2img, img2img, inpainting, outpainting, remix. " "For video: txt2video, img2video."
                     ),
                 ),
                 "media_type": fields.String(
@@ -676,8 +675,7 @@ class ImageModels(v2.Models):
                     default="txt2img",
                     enum=["txt2img", "img2img", "inpainting", "outpainting", "remix", "txt2video", "img2video"],
                     description=(
-                        "Generation mode. For images: txt2img, img2img, inpainting, outpainting, remix. "
-                        "For video: txt2video, img2video."
+                        "Generation mode. For images: txt2img, img2img, inpainting, outpainting, remix. " "For video: txt2video, img2video."
                     ),
                 ),
                 "media_type": fields.String(
