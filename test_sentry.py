@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+
+# SPDX-FileCopyrightText: 2026 AI Power Grid
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """
 Payment Sentry Test - Polls API and calculates reward distributions
 """

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 AI Power Grid
+//
+// SPDX-License-Identifier: MIT
+
 /**
  * AIPG JobAnchor SDK
  * Interface for anchoring job receipts and tracking worker activity on-chain

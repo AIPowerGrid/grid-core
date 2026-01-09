@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 AI Power Grid
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """
 Blockchain configuration for AIPG Web3 integration.
 """

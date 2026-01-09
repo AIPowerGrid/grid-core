@@ -150,3 +150,14 @@ apikey.txt
 .vscode/
 
 horde_sdk**
+model_cache_blockchain.json
+
+# Temp files and directories
+_tmp_openai_bridge/
+*.swp
+*.swo
+"# Grid Diamond Contract - Query Cheat Sh.md"
+GRID_FIX_SUMMARY.md
+IMAGE_GEN_ANALYSIS.md
+"JSON is valid"
+horde/modelvault/

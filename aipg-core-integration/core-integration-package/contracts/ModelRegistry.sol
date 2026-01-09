@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2026 AI Power Grid
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 // Active Contract (Base Mainnet): see docs/ADDRESSES.md
 // SPDX-License-Identifier: MIT
 // Deployed at: 0x21943952F673185f91C6b90472E5c7E0e751Eeb7 (Base Sepolia)

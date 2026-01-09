@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 AI Power Grid
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+
 <div class="logo-section">
 <img src="{logo_url}" alt="AI Power Grid Logo" class="logo">
 <h2>API</h2>

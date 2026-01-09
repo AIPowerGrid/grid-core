@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 AI Power Grid
+
+SPDX-License-Identifier: MIT
+-->
+
 # AIPG Core Blockchain Integration Package
 
 Contracts and SDKs for integrating AIPG Core with on-chain model validation, workflow storage, and job tracking.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 AI Power Grid
+//
+// SPDX-License-Identifier: MIT
+
 /**
  * Example: Worker Integration with AIPG Blockchain
  * 

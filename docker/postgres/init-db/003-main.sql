@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 AI Power Grid
+--
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+
 CREATE EXTENSION pg_cron;
 
 -- Add progress tracking and wallet columns to processing_gens (idempotent)

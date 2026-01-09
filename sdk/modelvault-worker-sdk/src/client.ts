@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 AI Power Grid
+//
+// SPDX-License-Identifier: MIT
+
 import { createPublicClient, http, keccak256, toHex, toBytes, fromHex } from 'viem';
 import { baseSepolia, base } from 'viem/chains';
 import { MODEL_REGISTRY_ABI } from './abi';

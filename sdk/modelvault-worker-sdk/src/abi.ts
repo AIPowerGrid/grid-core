@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 AI Power Grid
+//
+// SPDX-License-Identifier: MIT
+
 // ModelRegistry Contract ABI (subset for worker operations)
 
 export const MODEL_REGISTRY_ABI = [

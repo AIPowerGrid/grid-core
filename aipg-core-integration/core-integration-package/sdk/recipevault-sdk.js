@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 AI Power Grid
+//
+// SPDX-License-Identifier: MIT
+
 /**
  * AIPG RecipeVault SDK
  * Interface for storing and retrieving ComfyUI workflows on-chain

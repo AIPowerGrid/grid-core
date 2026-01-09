@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 AI Power Grid
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 FROM postgres:15.3
 RUN apt-get update && apt-get install -y postgresql-15-cron
 

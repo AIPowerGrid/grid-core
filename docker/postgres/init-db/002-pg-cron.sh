@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# SPDX-FileCopyrightText: 2026 AI Power Grid
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # use same db as the one from env
 dbname="postgres"
 

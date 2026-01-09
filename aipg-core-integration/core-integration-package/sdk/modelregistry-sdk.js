@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 AI Power Grid
+//
+// SPDX-License-Identifier: MIT
+
 /**
  * AIPG ModelRegistry SDK
  * Simple interface for workers and apps to interact with ModelRegistry contract

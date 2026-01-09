@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2026 AI Power Grid
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 

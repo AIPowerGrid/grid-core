@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 AI Power Grid
+
+SPDX-License-Identifier: MIT
+-->
+
 # ModelVault Worker SDK
 
 TypeScript SDK for querying the on-chain ModelRegistry. No wallet required for reads.
