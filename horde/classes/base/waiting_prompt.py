@@ -145,7 +145,7 @@ class WaitingPrompt(db.Model):
         # Debug: Log wallet_id assignment
         wallet_id = kwargs.get("wallet_id")
         logger.info(
-            f"🔍 WaitingPrompt.__init__: wallet_id from kwargs = {wallet_id}, self.wallet_id = {getattr(self, 'wallet_id', 'NOT SET')}"
+            f"🔍 WaitingPrompt.__init__: wallet_id from kwargs = {wallet_id}, self.wallet_id = {getattr(self, 'wallet_id', 'NOT SET')}",
         )
         db.session.add(self)
         db.session.commit()

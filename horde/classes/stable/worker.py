@@ -225,7 +225,7 @@ class ImageWorker(Worker):
         rejected_models = []
         # Debug: Log what models we're checking against - using WARNING for visibility
         logger.warning(
-            f"[WORKER] Checking {len(unchecked_models)} worker models against {len(model_reference.stable_diffusion_names)} known models"
+            f"[WORKER] Checking {len(unchecked_models)} worker models against {len(model_reference.stable_diffusion_names)} known models",
         )
         logger.warning(f"[WORKER] Worker models: {unchecked_models}")
         logger.warning(f"[WORKER] Known models (all): {list(model_reference.stable_diffusion_names)}")
@@ -235,9 +235,8 @@ class ImageWorker(Worker):
         recipevault_models = set()
         try:
             # Try to import RecipeVault client (may not be available in server)
-            import sys
             import os
-            from pathlib import Path
+            import sys
 
             # Try multiple paths to find comfy-bridge RecipeVault client
             possible_paths = [
@@ -274,7 +273,7 @@ class ImageWorker(Worker):
                 logger.debug("[WORKER] RecipeVault client not available - models will only be validated against stable_diffusion_names")
         except Exception as exc:
             logger.debug(f"[WORKER] Could not check RecipeVault: {exc}")
-            logger.debug(f"[WORKER] RecipeVault check failed, falling back to stable_diffusion_names only")
+            logger.debug("[WORKER] RecipeVault check failed, falling back to stable_diffusion_names only")
 
         for model in unchecked_models:
             usermodel = model.split("::")
@@ -301,7 +300,7 @@ class ImageWorker(Worker):
         if rejected_models:
             logger.info(
                 f"Worker {self.name} ({self.id}): Rejected {len(rejected_models)} unknown models: {rejected_models[:10]}"
-                + (f"... and {len(rejected_models) - 10} more" if len(rejected_models) > 10 else "")
+                + (f"... and {len(rejected_models) - 10} more" if len(rejected_models) > 10 else ""),
             )
         if len(models) == 0:
             raise e.BadRequest("Unfortunately we cannot accept workers serving unrecognised models at this time")

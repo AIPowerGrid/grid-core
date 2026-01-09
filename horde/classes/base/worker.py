@@ -11,7 +11,7 @@ from sqlalchemy.ext.hybrid import hybrid_property
 
 from horde import vars as hv
 from horde.classes.base import settings
-from horde.discord import send_pause_notification, notify_worker_online, notify_worker_offline, notify_worker_created
+from horde.discord import notify_worker_online, send_pause_notification
 from horde.flask import SQLITE_MODE, db
 from horde.horde_redis import horde_redis as hr
 from horde.logger import logger

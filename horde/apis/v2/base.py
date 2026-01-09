@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 import regex as re
 from flask import render_template, request
-from flask_restx import Namespace, Resource, reqparse, fields
+from flask_restx import Namespace, Resource, fields, reqparse
 from flask_restx.reqparse import ParseResult
 from markdownify import markdownify
 from sqlalchemy import or_, text
@@ -3488,7 +3488,7 @@ class AutoWorkerType(Resource):
                     description="The recommended worker type ('image' or 'text')",
                     example="image",
                     required=True,
-                )
+                ),
             },
         ),
         code=200,

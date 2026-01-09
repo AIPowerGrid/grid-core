@@ -247,7 +247,7 @@ model_reference = ModelReference(3600, None)
 model_reference.call_function()
 
 # Log final state after initialization
-write_debug_log(f"=== INIT COMPLETE ===")
+write_debug_log("=== INIT COMPLETE ===")
 write_debug_log(f"Total models recognized: {len(model_reference.stable_diffusion_names)}")
 write_debug_log(f"All models: {list(model_reference.stable_diffusion_names)}")
 print(f"[MODEL_REFERENCE] Init complete. {len(model_reference.stable_diffusion_names)} models recognized")

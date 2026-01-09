@@ -4,8 +4,9 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-import os
 import hashlib
+import os
+
 from dotenv import load_dotenv
 
 # First try to load from .env file

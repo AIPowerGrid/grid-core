@@ -48,7 +48,7 @@ class StyleCollection(db.Model):
 
     user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     user = db.relationship("User", back_populates="style_collections")
-    styles: Mapped[list["Style"]] = db.relationship("Style", secondary="style_collection_mapping", back_populates="collections")
+    styles: Mapped[list[Style]] = db.relationship("Style", secondary="style_collection_mapping", back_populates="collections")
 
     def create(self, styles):
         for st in styles:
@@ -153,8 +153,8 @@ class Style(db.Model):
     user = db.relationship("User", back_populates="styles")
     sharedkey_id = db.Column(uuid_column_type(), db.ForeignKey("user_sharedkeys.id"), nullable=True)
     sharedkey = db.relationship("UserSharedKey", back_populates="styles")
-    collections: Mapped[list["StyleCollection"]] = db.relationship(
-        "StyleCollection", secondary="style_collection_mapping", back_populates="styles"
+    collections: Mapped[list[StyleCollection]] = db.relationship(
+        "StyleCollection", secondary="style_collection_mapping", back_populates="styles",
     )
     models = db.relationship("StyleModel", back_populates="style", cascade="all, delete-orphan")
     tags = db.relationship("StyleTag", back_populates="style", cascade="all, delete-orphan")

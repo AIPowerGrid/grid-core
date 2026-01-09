@@ -6,7 +6,7 @@
 Model Registry Client for AIPG Blockchain Integration.
 """
 
-from typing import Optional, Dict, Any, List
+from typing import Optional
 
 from horde.blockchain.config import BlockchainConfig
 from horde.logger import logger
@@ -50,8 +50,8 @@ class ModelConstraints:
         cfg_min_tenths: int,
         cfg_max_tenths: int,
         clip_skip: int,
-        sampler_hashes: List[bytes],
-        scheduler_hashes: List[bytes],
+        sampler_hashes: list[bytes],
+        scheduler_hashes: list[bytes],
     ):
         self.exists = exists
         self.steps_min = steps_min
@@ -163,7 +163,9 @@ class ModelRegistryClient:
                 scheduler_hashes=result[7],
             )
             logger.info(
-                f"Got constraints for '{model_id}': steps={constraints.steps_min}-{constraints.steps_max}, cfg={constraints.cfg_min}-{constraints.cfg_max}"
+                f"Got constraints for '{model_id}': "
+                f"steps={constraints.steps_min}-{constraints.steps_max}, "
+                f"cfg={constraints.cfg_min}-{constraints.cfg_max}",
             )
             return constraints
         except Exception as e:

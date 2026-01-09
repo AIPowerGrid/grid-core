@@ -18,7 +18,7 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Set
+from typing import Any, Optional
 
 from horde.logger import logger
 from horde.threads import PrimaryTimedFunction
@@ -61,7 +61,7 @@ GRID_ABI = [
                     {"name": "timestamp", "type": "uint256"},
                     {"name": "creator", "type": "address"},
                 ],
-            }
+            },
         ],
         "stateMutability": "view",
         "type": "function",
@@ -74,7 +74,7 @@ MODEL_TYPE_IMAGE = 1
 MODEL_TYPE_VIDEO = 2
 
 
-def _fetch_models_from_chain() -> Dict[str, Dict[str, Any]]:
+def _fetch_models_from_chain() -> dict[str, dict[str, Any]]:
     """
     Fetch all models from the Grid Diamond contract.
 
@@ -193,7 +193,7 @@ def _infer_baseline(name: str, model_type: int) -> str:
     return "stable diffusion 1"
 
 
-def _save_cache(models: Dict[str, Dict[str, Any]]) -> bool:
+def _save_cache(models: dict[str, dict[str, Any]]) -> bool:
     """Save models to local cache file."""
     try:
         cache_data = {
@@ -211,7 +211,7 @@ def _save_cache(models: Dict[str, Dict[str, Any]]) -> bool:
         return False
 
 
-def _load_cache() -> Optional[Dict[str, Dict[str, Any]]]:
+def _load_cache() -> Optional[dict[str, dict[str, Any]]]:
     """Load models from local cache file."""
     try:
         if not CACHE_FILE.exists():
@@ -235,14 +235,14 @@ class ModelReference(PrimaryTimedFunction):
     """
 
     quorum = None
-    reference: Dict[str, Dict[str, Any]] = {}
-    text_reference: Dict[str, Dict[str, Any]] = {}
-    stable_diffusion_names: Set[str] = set()
-    text_model_names: Set[str] = set()
-    nsfw_models: Set[str] = set()
-    controlnet_models: Set[str] = set()
+    reference: dict[str, dict[str, Any]] = {}
+    text_reference: dict[str, dict[str, Any]] = {}
+    stable_diffusion_names: set[str] = set()
+    text_model_names: set[str] = set()
+    nsfw_models: set[str] = set()
+    controlnet_models: set[str] = set()
     testing_models = {}
-    _name_lookup: Dict[str, str] = {}  # lowercase -> canonical name
+    _name_lookup: dict[str, str] = {}  # lowercase -> canonical name
 
     def call_function(self):
         """
@@ -282,14 +282,14 @@ class ModelReference(PrimaryTimedFunction):
 
         logger.info(f"[MODEL_REF_CHAIN] Refresh complete: {len(self.stable_diffusion_names)} image models")
 
-    def _populate_from_dict(self, models: Dict[str, Dict[str, Any]]):
+    def _populate_from_dict(self, models: dict[str, dict[str, Any]]):
         """Populate internal data structures from model dict."""
         self.reference = models
         self.stable_diffusion_names = set()
         self.nsfw_models = set()
         self.controlnet_models = set()
         # Case-insensitive lookup: maps lowercase name -> actual name
-        self._name_lookup: Dict[str, str] = {}
+        self._name_lookup: dict[str, str] = {}
 
         valid_baselines = {
             "stable diffusion 1",
@@ -346,7 +346,7 @@ class ModelReference(PrimaryTimedFunction):
             except Exception as err:
                 logger.error(f"[MODEL_REF_CHAIN] Error loading text models: {err}")
 
-    def _load_legacy_json(self) -> Dict[str, Dict[str, Any]]:
+    def _load_legacy_json(self) -> dict[str, dict[str, Any]]:
         """Load models from legacy stable_diffusion.json file as fallback."""
         try:
             legacy_path = Path(__file__).parent.parent / "stable_diffusion.json"

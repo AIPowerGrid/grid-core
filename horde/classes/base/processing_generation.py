@@ -87,7 +87,7 @@ class ProcessingGeneration(db.Model):
                 matching_models = [model for model in self.wp.get_model_names() if model in worker_models]
                 logger.info(f"🔍 ProcessingGeneration: Found {len(matching_models)} matching models: {matching_models[:5]}...")
             else:
-                logger.warning(f"🔍 ProcessingGeneration: WP has NO models! Will use worker's models randomly.")
+                logger.warning("🔍 ProcessingGeneration: WP has NO models! Will use worker's models randomly.")
             if len(matching_models) == 0:
                 logger.warning(
                     f"Unexpectedly No models matched between worker and request!: Worker Models: {worker_models}. "
@@ -97,7 +97,9 @@ class ProcessingGeneration(db.Model):
             random.shuffle(matching_models)
             self.model = matching_models[0]
             logger.info(
-                f"🔍 ProcessingGeneration: Selected model '{self.model}' from matching_models={matching_models[:5]} (worker_models={worker_models[:5]}, wp_models={wp_models[:5]})"
+                f"🔍 ProcessingGeneration: Selected model '{self.model}' from "
+                f"matching_models={matching_models[:5]} "
+                f"(worker_models={worker_models[:5]}, wp_models={wp_models[:5]})",
             )
         else:
             self.model = kwargs["model"]

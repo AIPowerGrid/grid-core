@@ -2,9 +2,10 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-from web3 import Web3
-from eth_account import Account
 import os
+
+from eth_account import Account
+from web3 import Web3
 
 RPC_URL = "https://sepolia.base.org"
 CONTRACT_ADDRESS = "0xe660455D4A83bbbbcfDCF4219ad82447a831c8A1"
@@ -62,7 +63,7 @@ else:
             "nonce": w3.eth.get_transaction_count(account.address),
             "gas": 100000,
             "gasPrice": w3.eth.gas_price,
-        }
+        },
     )
 
     signed = account.sign_transaction(tx)
