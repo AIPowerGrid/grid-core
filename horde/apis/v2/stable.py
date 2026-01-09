@@ -39,7 +39,7 @@ from horde.enums import WarningMessage
 from horde.flask import HORDE, cache, db
 from horde.image import calculate_image_tiles, ensure_source_image_uploaded
 from horde.limiter import limiter
-from horde.model_reference import model_reference
+from horde.model_reference_blockchain import model_reference
 from horde.patreon import patrons
 from horde.utils import does_extra_text_reference_exist, hash_dictionary
 from horde.validation import ParamValidator
@@ -667,97 +667,38 @@ class ImageJobPop(JobPopTemplate):
         return sorted_wps
 
     def validate_blockchain_params(self, wp):
-        """Validate job parameters against on-chain model constraints.
+        """Validate that models are registered in Grid Diamond contract.
 
+        Uses the hourly-refreshed model_reference from blockchain (no per-request blockchain calls).
         Returns (is_valid, reason) tuple.
         """
         from horde.blockchain.config import BlockchainConfig
         
-        # Check if blockchain validation is enabled FIRST before any web3 imports
+        # Check if blockchain validation is enabled
         is_enabled = BlockchainConfig.is_enabled()
-        logger.debug(f"Blockchain check: is_enabled={is_enabled}")
+        logger.debug(f"Blockchain validation: is_enabled={is_enabled}")
         
         if not is_enabled:
             return True, ""
-        
-        # Only import web3 if blockchain is enabled
-        try:
-            from web3 import Web3
-            from horde.blockchain.model_registry import get_model_registry
-        except ImportError:
-            logger.warning("web3 not installed, blockchain validation skipped")
-            return True, ""
-        
-        model_registry = get_model_registry()
 
-        # Get the model name from the waiting prompt
+        # Get the model names from the waiting prompt
         model_names = wp.get_model_names() if hasattr(wp, "get_model_names") else []
         if not model_names:
             return True, ""  # No model specified, allow
 
-        # Map model display names to filenames from stable_diffusion.json
-        MODEL_FILE_MAP = {
-            "flux.1-krea-dev": "flux1-krea-dev_fp8_scaled.safetensors",
-            "FLUX.1-dev": "flux1-dev.safetensors",
-            "FLUX.1-schnell": "flux1-schnell.safetensors",
-            "Flux.1-Schnell fp8 (Compact)": "flux1CompactCLIPAnd_Flux1SchnellFp8.safetensors",
-            "Juggernaut XL": "juggernaut_xl.safetensors",
-            "SDXL 1.0": "sd_xl_base_1.0.safetensors",
-            "stable_diffusion": "model_1_5.ckpt",
-            "DreamShaper XL": "dreamshaper_xl.safetensors",
-        }
-
-        # Get job parameters for constraint validation
-        steps = wp.params.get("steps", 20) if hasattr(wp, "params") else 20
-        cfg_scale = wp.params.get("cfg_scale", 7.0) if hasattr(wp, "params") else 7.0
-        sampler = wp.params.get("sampler_name", None) if hasattr(wp, "params") else None
-        # scheduler might be in different places
-        scheduler = None
-        if hasattr(wp, "params"):
-            scheduler = wp.params.get("scheduler", None)
-
-        # Check each model is registered on-chain and validate constraints
+        # Check each model against the blockchain-backed model_reference
+        # (already loaded from Grid Diamond contract, no blockchain call needed here)
         for model_name in model_names:
-            # Get the filename for this model
-            filename = MODEL_FILE_MAP.get(model_name)
-            if not filename:
-                # Try using model name as filename
-                filename = f"{model_name}.safetensors"
-            
-            # Generate hash from filename
-            model_hash = Web3.keccak(text=filename)
-            
-            logger.info(f"Checking model '{model_name}' -> file '{filename}' -> hash {model_hash.hex()[:16]}...")
-            
-            # Check if model exists on-chain
-            is_registered = model_registry.is_model_registered(model_hash.hex())
-            
-            logger.info(f"Model '{model_name}' is_registered result: {is_registered}")
+            # Use the model_reference which is populated from Grid Diamond contract
+            is_registered = model_reference.is_known_image_model(model_name)
             
             if not is_registered:
                 logger.warning(
-                    f"Blockchain validation failed: Model '{model_name}' (file: {filename}) is NOT registered on-chain"
+                    f"Blockchain validation failed: Model '{model_name}' is NOT in Grid Diamond registry"
                 )
                 return False, f"Model '{model_name}' is not registered on the blockchain"
             
-            logger.info(f"Model '{model_name}' verified on-chain (hash: {model_hash.hex()[:16]}...)")
-            
-            # Now validate constraints
-            validation_result = model_registry.validate_parameters(
-                model_id=model_name,
-                steps=steps,
-                cfg=cfg_scale,
-                sampler=sampler,
-                scheduler=scheduler,
-            )
-            
-            if not validation_result.is_valid:
-                logger.warning(
-                    f"Blockchain constraint validation failed for '{model_name}': {validation_result.reason}"
-                )
-                return False, f"Constraint violation for '{model_name}': {validation_result.reason}"
-            
-            logger.info(f"Model '{model_name}' constraints validated (steps={steps}, cfg={cfg_scale})")
+            logger.debug(f"Model '{model_name}' verified in Grid Diamond registry")
 
         return True, ""
 
