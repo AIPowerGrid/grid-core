@@ -14,7 +14,7 @@ from horde.classes.base.worker import Worker
 from horde.consts import KNOWN_POST_PROCESSORS
 from horde.flask import db
 from horde.logger import logger
-from horde.model_reference import model_reference
+from horde.model_reference_blockchain import model_reference
 from horde.suspicions import Suspicions
 
 

@@ -37,7 +37,7 @@ from horde.enums import State
 from horde.flask import SQLITE_MODE, db
 from horde.horde_redis import horde_redis as hr
 from horde.logger import logger
-from horde.model_reference import model_reference
+from horde.model_reference_blockchain import model_reference
 from horde.utils import hash_api_key, validate_regex
 
 ALLOW_ANONYMOUS = True
