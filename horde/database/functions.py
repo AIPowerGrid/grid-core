@@ -30,6 +30,7 @@ from horde.classes.stable.interrogation import Interrogation, InterrogationForms
 from horde.classes.stable.interrogation_worker import InterrogationWorker
 from horde.classes.stable.processing_generation import ImageProcessingGeneration
 from horde.classes.stable.waiting_prompt import ImageWaitingPrompt
+from horde.classes.stable.video_waiting_prompt import VideoWaitingPrompt
 from horde.classes.stable.worker import ImageWorker
 from horde.database.classes import FakeWPRow
 from horde.enums import State
@@ -48,6 +49,7 @@ WORKER_CLASS_MAP = {
 WP_CLASS_MAP = {
     "image": ImageWaitingPrompt,
     "text": TextWaitingPrompt,
+    "video": VideoWaitingPrompt,
 }
 
 
@@ -521,6 +523,8 @@ def count_waiting_requests(user, models=None, request_type="image"):
     wp_class = ImageWaitingPrompt
     if request_type == "text":
         wp_class = TextWaitingPrompt
+    elif request_type == "video":
+        wp_class = VideoWaitingPrompt
 
     if not models:
         models = []
@@ -795,6 +799,8 @@ def get_sorted_wp_filtered_to_worker(worker, models_list=None, blacklist=None, p
     # Ensure models_list is never None to avoid SQLAlchemy errors
     if models_list is None:
         models_list = []
+    # Normalize models_list to lowercase for case-insensitive matching
+    models_list_lower = [m.lower() for m in models_list] if models_list else []
     final_wp_list = (
         db.session.query(ImageWaitingPrompt)
         .options(noload(ImageWaitingPrompt.processing_gens))
@@ -807,7 +813,7 @@ def get_sorted_wp_filtered_to_worker(worker, models_list=None, blacklist=None, p
             ImageWaitingPrompt.expiry > datetime.utcnow(),
             ImageWaitingPrompt.width * ImageWaitingPrompt.height <= worker.max_pixels,
             or_(
-                WPModels.model.in_(models_list) if models_list else False,
+                func.lower(WPModels.model).in_(models_list_lower) if models_list_lower else False,
                 and_(
                     WPModels.id.is_(None),
                     not any("horde_special" in mname for mname in models_list),
@@ -952,6 +958,8 @@ def get_sorted_wp_filtered_to_worker(worker, models_list=None, blacklist=None, p
 def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_user_ids=None):
     ## FIXME: Massively costly approach, doing 1 new query per count. Not sure about it.
     ret_dict = {}
+    # Normalize models_list to lowercase for case-insensitive matching
+    models_list_lower = [m.lower() for m in models_list] if models_list else []
     open_wp_list = (
         db.session.query(ImageWaitingPrompt)
         .options(noload(ImageWaitingPrompt.processing_gens))
@@ -965,10 +973,10 @@ def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_us
         )
     )
     # Count jobs that match our models but are filtered by max_pixels
-    if models_list:
+    if models_list_lower:
         matching_models_wp = open_wp_list.filter(
             or_(
-                WPModels.model.in_(models_list),
+                func.lower(WPModels.model).in_(models_list_lower),
                 WPModels.id.is_(None),
             ),
         )
@@ -979,10 +987,10 @@ def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_us
             ret_dict["max_pixels_our_models"] = skipped_max_pixels_for_our_models
     
     # Count skipped models (only if models_list is provided)
-    if models_list:
+    if models_list_lower:
         skipped_models = open_wp_list.filter(
             and_(
-                WPModels.model.not_in(models_list),
+                func.lower(WPModels.model).not_in(models_list_lower),
                 WPModels.id != None,  # noqa E712
             ),
         ).count()
@@ -992,7 +1000,7 @@ def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_us
         # Count how many jobs exist for our models (helps debug when jobs exist but aren't matched)
         matching_model_jobs = open_wp_list.filter(
             or_(
-                WPModels.model.in_(models_list),
+                func.lower(WPModels.model).in_(models_list_lower),
                 WPModels.id.is_(None),
             ),
         ).count()
@@ -1107,9 +1115,10 @@ def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_us
             ret_dict["performance"] = skipped_wps
         # Also count how many of OUR model jobs are being skipped due to speed
         if models_list:
+            models_list_lower = [m.lower() for m in models_list]
             our_models_slow_skip = open_wp_list.filter(
                 or_(
-                    WPModels.model.in_(models_list),
+                    func.lower(WPModels.model).in_(models_list_lower),
                     WPModels.id.is_(None),
                 ),
                 ImageWaitingPrompt.slow_workers == False,  # noqa E712

@@ -611,7 +611,9 @@ class Worker(WorkerTemplate):
 
     def set_models(self, models):
         models = self.parse_models(models)
-        existing_model_names = set(self.get_model_names())
+        # Normalize model names to lowercase for consistent matching
+        models = {m.lower() for m in models}
+        existing_model_names = {m.lower() for m in self.get_model_names()}
         if existing_model_names == models:
             return
         # logger.debug([existing_model_names,models, existing_model_names == models])

@@ -167,8 +167,10 @@ class WaitingPrompt(db.Model):
         if not model_names:
             model_names = []
         logger.info(f"🔍 WaitingPrompt.set_models: wp_id={self.id}, model_names={model_names}")
+        # Normalize model names to lowercase for consistent matching with worker models
         for model in model_names:
-            model_entry = WPModels(model=model, wp_id=self.id)
+            model_normalized = model.lower()
+            model_entry = WPModels(model=model_normalized, wp_id=self.id)
             db.session.add(model_entry)
 
     def activate(self, downgrade_wp_priority=False, extra_source_images=None, kudos_adjustment=0):
