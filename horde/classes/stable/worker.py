@@ -228,6 +228,51 @@ class ImageWorker(Worker):
         logger.warning(f"[WORKER] Worker models: {unchecked_models}")
         logger.warning(f"[WORKER] Known models (all): {list(model_reference.stable_diffusion_names)}")
         logger.warning(f"[WORKER] User customizer role: {self.user.customizer}")
+        
+        # Check RecipeVault for model names (RecipeVault is now the source of truth)
+        recipevault_models = set()
+        try:
+            # Try to import RecipeVault client (may not be available in server)
+            import sys
+            import os
+            from pathlib import Path
+            
+            # Try multiple paths to find comfy-bridge RecipeVault client
+            possible_paths = [
+                # Path relative to system-core (if comfy-bridge is sibling)
+                os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "comfy-bridge"),
+                # Absolute path from workspace root
+                os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "comfy-bridge"),
+                # Current working directory
+                os.path.join(os.getcwd(), "comfy-bridge"),
+            ]
+            
+            recipe_client = None
+            for comfy_bridge_path in possible_paths:
+                if os.path.exists(comfy_bridge_path) and comfy_bridge_path not in sys.path:
+                    sys.path.insert(0, comfy_bridge_path)
+                    try:
+                        from comfy_bridge.recipevault_client import get_recipevault_client
+                        recipe_client = get_recipevault_client()
+                        logger.info(f"[WORKER] RecipeVault client loaded from {comfy_bridge_path}")
+                        break
+                    except ImportError:
+                        sys.path.remove(comfy_bridge_path)
+                        continue
+            
+            if recipe_client and recipe_client.enabled:
+                all_recipes = recipe_client.fetch_all_recipes()
+                # Extract model names from recipe names (recipes are indexed by name)
+                recipevault_models = {recipe.name for recipe in all_recipes.values()}
+                logger.warning(f"[WORKER] RecipeVault models found ({len(recipevault_models)}): {list(recipevault_models)}")
+            elif recipe_client:
+                logger.debug("[WORKER] RecipeVault client available but not enabled")
+            else:
+                logger.debug("[WORKER] RecipeVault client not available - models will only be validated against stable_diffusion_names")
+        except Exception as e:
+            logger.debug(f"[WORKER] Could not check RecipeVault: {e}")
+            logger.debug(f"[WORKER] RecipeVault check failed, falling back to stable_diffusion_names only")
+        
         for model in unchecked_models:
             usermodel = model.split("::")
             if self.user.special and len(usermodel) == 2:
@@ -235,12 +280,15 @@ class ImageWorker(Worker):
                 if self.user.get_unique_alias() != user_alias:
                     raise e.BadRequest(f"This model can only be hosted by {user_alias}")
                 models.add(model)
-            elif model in model_reference.stable_diffusion_names or self.user.customizer or model in model_reference.testing_models:
+            elif model in model_reference.stable_diffusion_names or self.user.customizer or model in model_reference.testing_models or model in recipevault_models:
                 models.add(model)
-                logger.warning(f"[WORKER] Accepted model: {model}")
+                if model in recipevault_models:
+                    logger.warning(f"[WORKER] Accepted model '{model}' from RecipeVault")
+                else:
+                    logger.warning(f"[WORKER] Accepted model: {model}")
             else:
                 rejected_models.append(model)
-                logger.warning(f"[WORKER] Rejected model '{model}' - not in stable_diffusion_names")
+                logger.warning(f"[WORKER] Rejected model '{model}' - not in stable_diffusion_names or RecipeVault")
         # Log summary of rejected models at info level so it's visible
         if rejected_models:
             logger.info(
