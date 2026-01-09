@@ -7,9 +7,10 @@
 """
 Sentry Test - Run this to watch for kudos changes
 """
-import requests
 import time
 from datetime import datetime
+
+import requests
 
 API_URL = "https://api.aipowergrid.io/api/v2/workers"
 WORK_WEIGHT = 0.90
@@ -33,7 +34,7 @@ while True:
 
     try:
         new_data = requests.get(API_URL).json()
-    except:
+    except Exception:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] API error, retrying...")
         continue
 

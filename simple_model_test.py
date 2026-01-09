@@ -12,11 +12,11 @@ Simple test to debug model validation issues
 - Can simulate server failure (e.g., empty reference) to reproduce 400 BadRequest
 """
 
+import json
 import os
 import sys
-import json
+
 import requests
-from typing import List, Set
 
 # Defaults
 REF_URL_DEFAULT = "https://raw.githubusercontent.com/AIPowerGrid/grid-image-model-reference/main/stable_diffusion.json"
@@ -51,7 +51,7 @@ def download_reference() -> dict:
     return ref
 
 
-def build_stable_names(reference: dict) -> Set[str]:
+def build_stable_names(reference: dict) -> set[str]:
     stable = set()
     for name, info in reference.items():
         baseline = info.get("baseline")
@@ -61,8 +61,12 @@ def build_stable_names(reference: dict) -> Set[str]:
 
 
 def simulate_parse_models(
-    worker_models: List[str], stable_names: Set[str], user_special=False, user_customizer=False, testing_models: Set[str] = None
-) -> Set[str]:
+    worker_models: list[str],
+    stable_names: set[str],
+    user_special=False,
+    user_customizer=False,
+    testing_models: set[str] = None,
+) -> set[str]:
     if testing_models is None:
         testing_models = set()
     accepted = set()
@@ -77,7 +81,7 @@ def simulate_parse_models(
     return accepted
 
 
-def run_scenario(worker_models: List[str], simulate_ref_failure: bool = False):
+def run_scenario(worker_models: list[str], simulate_ref_failure: bool = False):
     print("=== Scenario ===")
     print(f"Worker advertises: {worker_models}")
     reference = {}

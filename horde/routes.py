@@ -2,8 +2,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-import os
 import json
+import os
 import random
 import secrets
 from uuid import uuid4
@@ -109,7 +109,11 @@ def index():
         # Create model lists as HTML
         image_models_list = "<ul style='list-style: none; padding: 0; margin: 0;'>\n"
         for model in image_models[:10]:  # Show top 10
-            image_models_list += f"<li style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'><strong>{model['name']}</strong> <span style='color: #8b949e;'>({model['count']} workers)</span></li>\n"
+            image_models_list += (
+                f"<li style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'>"
+                f"<strong>{model['name']}</strong> "
+                f"<span style='color: #8b949e;'>({model['count']} workers)</span></li>\n"
+            )
         if len(image_models) > 10:
             image_models_list += (
                 f"<li style='padding: 4px 0; color: #8b949e; font-style: italic;'>... and {len(image_models) - 10} more models</li>\n"
@@ -120,7 +124,11 @@ def index():
 
         text_models_list = "<ul style='list-style: none; padding: 0; margin: 0;'>\n"
         for model in text_models[:10]:  # Show top 10
-            text_models_list += f"<li style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'><strong>{model['name']}</strong> <span style='color: #8b949e;'>({model['count']} workers)</span></li>\n"
+            text_models_list += (
+                f"<li style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'>"
+                f"<strong>{model['name']}</strong> "
+                f"<span style='color: #8b949e;'>({model['count']} workers)</span></li>\n"
+            )
         if len(text_models) > 10:
             text_models_list += (
                 f"<li style='padding: 4px 0; color: #8b949e; font-style: italic;'>... and {len(text_models) - 10} more models</li>\n"
@@ -133,7 +141,11 @@ def index():
         top_models = sorted(available_models, key=lambda x: x.get("count", 0), reverse=True)[:5]
         top_models_list = "<ul style='list-style: none; padding: 0; margin: 0;'>\n"
         for model in top_models:
-            top_models_list += f"<li style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'><strong>{model['name']}</strong> <span style='color: #8b949e;'>({model['count']} workers)</span></li>\n"
+            top_models_list += (
+                f"<li style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'>"
+                f"<strong>{model['name']}</strong> "
+                f"<span style='color: #8b949e;'>({model['count']} workers)</span></li>\n"
+            )
         top_models_list += "</ul>"
         if not top_models:
             top_models_list = "<p style='color: #8b949e;'>No models currently available</p>"
@@ -201,7 +213,7 @@ def index():
             margin: 0 auto;
             min-height: 100vh;
         }
-        
+
         h1 {
             color: #f0f6fc;
             font-weight: 700;
@@ -214,7 +226,7 @@ def index():
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
-        
+
         h2 {
             color: #f0f6fc;
             font-weight: 600;
@@ -225,7 +237,7 @@ def index():
             position: relative;
             text-align: center;
         }
-        
+
         h3 {
             color: #f0f6fc;
             font-weight: 600;
@@ -235,32 +247,32 @@ def index():
             padding-bottom: 0.5rem;
             text-align: center;
         }
-        
+
         h4, h5, h6 {
             color: #f0f6fc;
             font-weight: 600;
             margin: 1.5rem 0 0.5rem 0;
             text-align: center;
         }
-        
+
         p {
             margin: 1rem 0;
             color: #c9d1d9;
         }
-        
+
         a {
             color: #58a6ff;
             text-decoration: none;
             transition: all 0.2s ease;
             border-bottom: 1px solid transparent;
         }
-        
+
         a:hover {
             color: #8b5cf6;
             border-bottom: 1px solid #8b5cf6;
             text-decoration: none;
         }
-        
+
         code {
             background: rgba(22, 27, 34, 0.8);
             border: 1px solid #30363d;
@@ -271,7 +283,7 @@ def index():
             font-size: 0.9em;
             backdrop-filter: blur(10px);
         }
-        
+
         pre {
             background: rgba(22, 27, 34, 0.9);
             border: 1px solid #30363d;
@@ -283,21 +295,21 @@ def index():
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
             backdrop-filter: blur(10px);
         }
-        
+
         pre code {
             background: none;
             border: none;
             padding: 0;
             color: #c9d1d9;
         }
-        
+
         hr {
             border: none;
             border-top: 1px solid #30363d;
             margin: 3rem 0;
             position: relative;
         }
-        
+
         hr::after {
             content: '';
             position: absolute;
@@ -308,22 +320,22 @@ def index():
             height: 1px;
             background: linear-gradient(90deg, transparent, #58a6ff, transparent);
         }
-        
+
         ul, ol {
             padding-left: 1.5rem;
             margin: 1rem 0;
         }
-        
+
         li {
             margin: 0.5rem 0;
             color: #c9d1d9;
         }
-        
+
         strong {
             color: #f0f6fc;
             font-weight: 600;
         }
-        
+
         blockquote {
             background: rgba(22, 27, 34, 0.5);
             border-left: 4px solid #58a6ff;
@@ -333,7 +345,7 @@ def index():
             font-style: italic;
             color: #8b949e;
         }
-        
+
         .highlight {
             background: linear-gradient(135deg, rgba(88, 166, 255, 0.1), rgba(139, 92, 246, 0.1));
             border: 1px solid rgba(88, 166, 255, 0.2);
@@ -341,7 +353,7 @@ def index():
             padding: 1.5rem;
             margin: 1.5rem 0;
         }
-        
+
         .card {
             background: rgba(22, 27, 34, 0.6);
             border: 1px solid #30363d;
@@ -351,27 +363,27 @@ def index():
             transition: all 0.3s ease;
             backdrop-filter: blur(10px);
         }
-        
+
         .card:hover {
             border-color: #58a6ff;
             box-shadow: 0 8px 32px rgba(88, 166, 255, 0.1);
             transform: translateY(-2px);
         }
-        
+
         .grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 1.5rem;
             margin: 2rem 0;
         }
-        
+
         .grid-2 {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
             gap: 1.5rem;
             margin: 2rem 0;
         }
-        
+
         .stat {
             background: rgba(22, 27, 34, 0.7);
             border: 1px solid #30363d;
@@ -381,31 +393,31 @@ def index():
             transition: all 0.3s ease;
             backdrop-filter: blur(10px);
         }
-        
+
         .stat:hover {
             border-color: #8b5cf6;
             transform: translateY(-2px);
         }
-        
+
         .stat-value {
             font-size: 1.5rem;
             font-weight: 700;
             color: #58a6ff;
             margin-bottom: 0.5rem;
         }
-        
+
         .stat-label {
             color: #8b949e;
             font-size: 0.9rem;
         }
-        
+
         details {
             margin: 1rem 0;
             border: 1px solid #30363d;
             border-radius: 8px;
             background: rgba(22, 27, 34, 0.5);
         }
-        
+
         details summary {
             padding: 1rem;
             cursor: pointer;
@@ -415,16 +427,16 @@ def index():
             border-radius: 8px 8px 0 0;
             transition: background-color 0.2s ease;
         }
-        
+
         details summary:hover {
             background: rgba(22, 27, 34, 0.9);
         }
-        
+
         details[open] summary {
             border-bottom: 1px solid #30363d;
             border-radius: 8px 8px 0 0;
         }
-        
+
         .model-list {
             padding: 1rem;
             font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
@@ -434,54 +446,54 @@ def index():
             background: rgba(22, 27, 34, 0.3);
             border-radius: 0 0 8px 8px;
         }
-        
+
         .model-list ul {
             margin: 0;
             padding-left: 1rem;
         }
-        
+
         .model-list li {
             margin: 0.3rem 0;
             padding: 0.2rem 0;
         }
-        
+
         @media (max-width: 768px) {
             body {
                 padding: 20px 15px;
             }
-            
+
             h1 {
                 font-size: 2rem;
             }
-            
+
             h2 {
                 font-size: 1.5rem;
             }
-            
+
             .grid {
                 grid-template-columns: 1fr;
             }
-            
+
             .grid-2 {
                 grid-template-columns: 1fr;
             }
-            
+
             details summary {
                 padding: 0.8rem;
                 font-size: 0.9rem;
             }
-            
+
                         .model-list {
                 padding: 0.8rem;
                 font-size: 0.8rem;
             }
         }
-        
+
         .logo-section {
             text-align: center;
             margin-bottom: 2rem;
         }
-        
+
         .logo {
             max-width: 100px;
             height: auto;

@@ -14,9 +14,8 @@ Usage:
 """
 
 import sys
-import json
-import hashlib
-from web3 import Web3, Account
+
+from web3 import Account, Web3
 
 # Base Sepolia config
 RPC_URL = "https://sepolia.base.org"
@@ -123,7 +122,7 @@ MODEL_REGISTRY_ABI = [
                     {"type": "string", "name": "baseModel"},
                     {"type": "string", "name": "architecture"},
                 ],
-            }
+            },
         ],
         "stateMutability": "view",
         "type": "function",
@@ -277,7 +276,7 @@ def register_model(w3: Web3, contract, account, model_name: str, model_data: dic
     try:
         exists = contract.functions.isModelExists(model_hash).call()
         if exists:
-            print(f"   ⚠️  Model already registered!")
+            print("   ⚠️  Model already registered!")
             return None
     except Exception as e:
         print(f"   Note: Could not check existence: {e}")
@@ -304,7 +303,7 @@ def register_model(w3: Web3, contract, account, model_name: str, model_data: dic
             "gas": 500000,
             "gasPrice": w3.eth.gas_price,
             "chainId": CHAIN_ID,
-        }
+        },
     )
 
     # Sign and send
@@ -315,10 +314,10 @@ def register_model(w3: Web3, contract, account, model_name: str, model_data: dic
     # Wait for confirmation
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
     if receipt["status"] == 1:
-        print(f"   ✅ Model registered successfully!")
+        print("   ✅ Model registered successfully!")
         return receipt
     else:
-        print(f"   ❌ Transaction failed!")
+        print("   ❌ Transaction failed!")
         return None
 
 
@@ -346,7 +345,7 @@ def set_model_constraints(w3: Web3, contract, account, model_name: str, model_da
             "gas": 200000,
             "gasPrice": w3.eth.gas_price,
             "chainId": CHAIN_ID,
-        }
+        },
     )
 
     signed_tx = account.sign_transaction(tx)
@@ -355,7 +354,7 @@ def set_model_constraints(w3: Web3, contract, account, model_name: str, model_da
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
 
     if receipt["status"] != 1:
-        print(f"   ❌ Failed to set numeric constraints!")
+        print("   ❌ Failed to set numeric constraints!")
         return
 
     # Set samplers
@@ -368,7 +367,7 @@ def set_model_constraints(w3: Web3, contract, account, model_name: str, model_da
                 "gas": 200000,
                 "gasPrice": w3.eth.gas_price,
                 "chainId": CHAIN_ID,
-            }
+            },
         )
         signed_tx = account.sign_transaction(tx)
         tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
@@ -385,14 +384,14 @@ def set_model_constraints(w3: Web3, contract, account, model_name: str, model_da
                 "gas": 200000,
                 "gasPrice": w3.eth.gas_price,
                 "chainId": CHAIN_ID,
-            }
+            },
         )
         signed_tx = account.sign_transaction(tx)
         tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
         print(f"   📤 Schedulers TX: {tx_hash.hex()}")
         w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
 
-    print(f"   ✅ Constraints set!")
+    print("   ✅ Constraints set!")
 
 
 def main():

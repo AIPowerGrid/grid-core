@@ -4,7 +4,6 @@
 
 import hashlib
 import json
-import os
 import random
 import secrets
 import uuid

@@ -7,10 +7,10 @@
 """
 Payment Sentry Test - Polls API and calculates reward distributions
 """
-import requests
-import json
 import time
 from datetime import datetime
+
+import requests
 
 # Configuration
 API_URL = "https://api.aipowergrid.io/api/v2/workers"
@@ -85,7 +85,7 @@ def main():
             print("  No kudos changes detected")
         else:
             total_score = sum(c["score"] for c in changes.values())
-            print(f"\n  KUDOS CHANGES DETECTED:")
+            print("\n  KUDOS CHANGES DETECTED:")
             print("-" * 60)
 
             for wid, c in sorted(changes.items(), key=lambda x: x[1]["score"], reverse=True):
