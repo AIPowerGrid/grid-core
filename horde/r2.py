@@ -13,17 +13,14 @@ from PIL import Image
 
 from horde.logger import logger
 
-r2_transient_account = os.getenv(
-    "R2_TRANSIENT_ACCOUNT",
-    "https://a223539ccf6caa2d76459c9727d276e6.r2.cloudflarestorage.com",
-)
-r2_permanent_account = os.getenv(
-    "R2_PERMANENT_ACCOUNT",
-    "https://a223539ccf6caa2d76459c9727d276e6.r2.cloudflarestorage.com",
-)
-r2_transient_bucket = os.getenv("R2_TRANSIENT_BUCKET", "stable-horde")
-r2_permanent_bucket = os.getenv("R2_PERMANENT_BUCKET", "stable-horde")
-r2_source_image_bucket = os.getenv("R2_SOURCE_IMAGE_BUCKET", "stable-horde-source-images")
+_DEFAULT_R2_ENDPOINT = "https://a223539ccf6caa2d76459c9727d276e6.r2.cloudflarestorage.com"
+
+# Use default when env is unset or empty (e.g. CI where secrets are not configured)
+r2_transient_account = os.getenv("R2_TRANSIENT_ACCOUNT") or _DEFAULT_R2_ENDPOINT
+r2_permanent_account = os.getenv("R2_PERMANENT_ACCOUNT") or _DEFAULT_R2_ENDPOINT
+r2_transient_bucket = os.getenv("R2_TRANSIENT_BUCKET") or "stable-horde"
+r2_permanent_bucket = os.getenv("R2_PERMANENT_BUCKET") or "stable-horde"
+r2_source_image_bucket = os.getenv("R2_SOURCE_IMAGE_BUCKET") or "stable-horde-source-images"
 
 s3_client = boto3.client("s3", endpoint_url=r2_transient_account)
 s3_client_shared = boto3.client(
