@@ -457,8 +457,14 @@ class ImageModels(v2.Models):
                     description="The prompt which will be sent to Stable Diffusion to generate an image.",
                 ),
                 "ddim_steps": fields.Integer(default=30),
-                "n_iter": fields.Integer(default=1, description="(Legacy) The amount of images to generate. Use batch_size instead for native ComfyUI batching."),
-                "batch_size": fields.Integer(default=1, description="The number of images to generate in a single batch. Workers should use this for native ComfyUI batching."),
+                "n_iter": fields.Integer(
+                    default=1,
+                    description="(Legacy) The amount of images to generate. Use batch_size instead for native ComfyUI batching.",
+                ),
+                "batch_size": fields.Integer(
+                    default=1,
+                    description="The number of images to generate in a single batch. Workers should use this for native ComfyUI batching.",
+                ),
                 "seeds": fields.List(
                     fields.Integer(description="Seed for image generation"),
                     description="Array of seeds, one for each image in the batch. Length matches batch_size.",
@@ -529,7 +535,7 @@ class ImageModels(v2.Models):
                 "skipped": fields.Nested(self.response_model_generations_skipped, skip_none=True),
                 "model": fields.String(description="Which of the available models to use for this request."),
                 "source_image": fields.String(
-                    description="For img2img: HTTP/HTTPS URL (core fetches the image), data URL (data:image/png;base64,...), or raw base64.",
+                    description=("For img2img: HTTP/HTTPS URL (core fetches), " "data URL (data:image/png;base64,...), or raw base64."),
                 ),
                 "source_processing": fields.String(
                     required=False,

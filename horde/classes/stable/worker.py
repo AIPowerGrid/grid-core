@@ -323,13 +323,13 @@ class ImageWorker(Worker):
         # Workers know their own VRAM capabilities and batch limits
         # The old calculation assumed sequential generation, but native batching
         # has sub-linear VRAM scaling, so we let workers decide their batch size
-        
+
         # Only check if the image dimensions fit within max_pixels (single image capability)
         mps = wp.get_amount_calculation_things()  # width * height
         if mps > self.max_pixels:
             # Image too large for this worker - shouldn't happen as filtered earlier
             return 0
-        
+
         # Return the requested amount - worker knows what they can batch
         if amount <= 0:
             amount = 1

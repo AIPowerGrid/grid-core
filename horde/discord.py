@@ -328,11 +328,13 @@ def notify_stuck_jobs_alert(stuck_count: int, oldest_age_minutes: float, details
     if details_str:
         embed["fields"].append({"name": "By Model", "value": details_str, "inline": False})
 
-    embed["fields"].append({
-        "name": "Action Required",
-        "value": "Run queue cleanup or check worker connectivity",
-        "inline": False,
-    })
+    embed["fields"].append(
+        {
+            "name": "Action Required",
+            "value": "Run queue cleanup or check worker connectivity",
+            "inline": False,
+        },
+    )
 
     send_embed(webhook_url, embed)
 
@@ -376,11 +378,13 @@ def notify_queue_health(
     }
 
     if stuck_count > 0:
-        embed["fields"].append({
-            "name": "⚠️ Stuck Jobs",
-            "value": f"**{stuck_count}** (blocking new jobs!)",
-            "inline": False,
-        })
+        embed["fields"].append(
+            {
+                "name": "⚠️ Stuck Jobs",
+                "value": f"**{stuck_count}** (blocking new jobs!)",
+                "inline": False,
+            },
+        )
 
     send_embed(webhook_url, embed)
 
@@ -407,8 +411,7 @@ def notify_worker_not_receiving_jobs(
         "title": "⚠️ Worker Not Receiving Jobs",
         "color": 0xFFA500,  # Orange
         "description": (
-            f"Worker **{worker_name}** is online but not getting jobs.\n"
-            "This may indicate stuck processing_gens or model mismatch."
+            f"Worker **{worker_name}** is online but not getting jobs.\n" "This may indicate stuck processing_gens or model mismatch."
         ),
         "fields": [
             {"name": "Worker", "value": worker_name, "inline": True},

@@ -241,7 +241,7 @@ class WaitingPrompt(db.Model):
         # if not myself_refresh:
         #     return None
         # myself_refresh.n -= 1
-        
+
         # ATOMIC BATCHING: Worker must be able to handle ALL remaining images
         # This ensures batches stay together for native ComfyUI batching
         if not self.disable_batching:
@@ -256,7 +256,7 @@ class WaitingPrompt(db.Model):
         else:
             # disable_batching=True: Single image at a time (e.g., for QR codes, seed-specific work)
             safe_amount = 1
-            logger.info(f"🔧 BATCHING: disable_batching=True, single image mode")
+            logger.info("🔧 BATCHING: disable_batching=True, single image mode")
         # We use a local var to avoid touching the DB through self.n
         # due to all the commits clearing row lock,
         # can we can't ensure a race-condition won't have changed self.n between iterations

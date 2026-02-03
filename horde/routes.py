@@ -107,13 +107,13 @@ def index():
     image_models = []
     text_models = []
     video_models = []
-    
+
     try:
         available_models = database.get_available_models()
         image_models = [model for model in available_models if model["type"] == "image"]
         text_models = [model for model in available_models if model["type"] == "text"]
         video_models = [model for model in available_models if model["type"] == "video"]
-        
+
         # Count video workers from video models (workers serving at least one video model)
         video_worker_count = sum(model.get("count", 0) for model in video_models) if video_models else 0
 

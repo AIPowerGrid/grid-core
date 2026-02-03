@@ -612,7 +612,10 @@ class ImageJobPop(JobPopTemplate):
             self.blacklist = self.args.blacklist
         post_ret, retcode = super().post()
         if post_ret.get("ids"):
-            logger.warning(f"🔧 POP RESPONSE: batch_size={post_ret.get('payload', {}).get('batch_size')}, ids_count={len(post_ret.get('ids', []))}")
+            logger.warning(
+                f"🔧 POP RESPONSE: batch_size={post_ret.get('payload', {}).get('batch_size')}, "
+                f"ids_count={len(post_ret.get('ids', []))}",
+            )
         if "ids" not in post_ret or len(post_ret["ids"]) == 0:
             db_skipped = database.count_skipped_image_wp(
                 self.worker,

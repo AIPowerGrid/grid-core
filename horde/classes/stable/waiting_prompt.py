@@ -203,7 +203,7 @@ class ImageWaitingPrompt(WaitingPrompt):
             # n_iter kept for backward compatibility with older workers
             # New workers should use batch_size and ignore n_iter
             payload["n_iter"] = batch_size
-            
+
             # Generate seeds array for batched generation
             # Each image in the batch gets its own seed for reproducibility
             seeds = []
@@ -224,7 +224,7 @@ class ImageWaitingPrompt(WaitingPrompt):
             payload["seeds"] = seeds
             # Keep single seed for backward compatibility
             payload["seed"] = seeds[0] if seeds else base_seed
-            
+
             prompt_payload = {
                 "payload": payload,
                 "id": procgen.id,
@@ -401,7 +401,9 @@ class ImageWaitingPrompt(WaitingPrompt):
             max_res = 768
         # We allow everyone to use SDXL up to 1024
         if max_res < 1024 and any(
-            model_reference.get_model_baseline(mn) in ["stable_diffusion_xl", "stable_cascade"] or model_reference.get_model_baseline(mn).startswith("flux") for mn in model_names
+            model_reference.get_model_baseline(mn) in ["stable_diffusion_xl", "stable_cascade"]
+            or model_reference.get_model_baseline(mn).startswith("flux")
+            for mn in model_names
         ):
             max_res = 1024
         if max_res > 1024:
