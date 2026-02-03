@@ -71,7 +71,7 @@ class ParamValidator:
                 scheduler = "simple"
             if "schedulers" in model_req_dict and scheduler not in model_req_dict["schedulers"]:
                 self.warnings.add(WarningMessage.SchedulerMismatch)
-        if any(model_reference.get_model_baseline(model_name).startswith("flux_1") for model_name in self.models):
+        if any(model_reference.get_model_baseline(model_name).startswith("flux") for model_name in self.models):
             if self.params.get("hires_fix", False) is True:
                 raise e.BadRequest("HiRes Fix does not work with Flux currently.", rc="HiResMismatch")
         if "loras" in self.params:
@@ -84,7 +84,7 @@ class ParamValidator:
             raise e.BadRequest("You cannot request more than 20 Textual Inversions per generation.", rc="TooManyTIs")
         if self.params.get("transparent", False) is True:
             if any(
-                model_reference.get_model_baseline(model_name) not in ["stable_diffusion_xl", "stable diffusion 1"]
+                model_reference.get_model_baseline(model_name) not in ["stable_diffusion_xl", "stable_diffusion_1"]
                 for model_name in self.models
             ):
                 raise e.BadRequest(
@@ -93,7 +93,7 @@ class ParamValidator:
                 )
         if self.params.get("workflow") == "qr_code":
             if not all(
-                model_reference.get_model_baseline(model_name) in ["stable diffusion 1", "stable_diffusion_xl"]
+                model_reference.get_model_baseline(model_name) in ["stable_diffusion_1", "stable_diffusion_xl"]
                 for model_name in self.models
             ):
                 raise e.BadRequest("QR Code controlnet only works with SD 1.5 and SDXL models currently", rc="ControlNetMismatch.")

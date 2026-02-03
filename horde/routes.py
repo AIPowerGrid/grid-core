@@ -75,6 +75,8 @@ def index():
     ) = database.count_active_workers("interrogation")
     image_worker_count, image_worker_thread_count = database.count_active_workers("image")
     text_worker_count, text_worker_thread_count = database.count_active_workers("text")
+    # Video workers are image workers serving video models - count will be determined from available models
+    video_worker_count = 0
     # Calculate average performance - use reasonable estimates when no workers are active
     avg_performance = (
         ConvertAmount(database.get_request_avg() * image_worker_thread_count) if image_worker_thread_count > 0 else ConvertAmount(5.0)
@@ -101,12 +103,21 @@ def index():
     logo_url = os.getenv("HORDE_LOGO", "https://aipowergrid.io/aipg-main.png")
 
     # Get available models (with error handling)
+    # Initialize model lists
+    image_models = []
+    text_models = []
+    video_models = []
+    
     try:
         available_models = database.get_available_models()
         image_models = [model for model in available_models if model["type"] == "image"]
         text_models = [model for model in available_models if model["type"] == "text"]
+        video_models = [model for model in available_models if model["type"] == "video"]
+        
+        # Count video workers from video models (workers serving at least one video model)
+        video_worker_count = sum(model.get("count", 0) for model in video_models) if video_models else 0
 
-        # Create model lists as HTML
+        # Create image model list as HTML
         image_models_list = "<ul style='list-style: none; padding: 0; margin: 0;'>\n"
         for model in image_models[:10]:  # Show top 10
             image_models_list += (
@@ -122,6 +133,7 @@ def index():
         if not image_models:
             image_models_list = "<p style='color: #8b949e;'>No image models currently available</p>"
 
+        # Create text model list as HTML
         text_models_list = "<ul style='list-style: none; padding: 0; margin: 0;'>\n"
         for model in text_models[:10]:  # Show top 10
             text_models_list += (
@@ -136,6 +148,22 @@ def index():
         text_models_list += "</ul>"
         if not text_models:
             text_models_list = "<p style='color: #8b949e;'>No text models currently available</p>"
+
+        # Create video model list as HTML
+        video_models_list = "<ul style='list-style: none; padding: 0; margin: 0;'>\n"
+        for model in video_models[:10]:  # Show top 10
+            video_models_list += (
+                f"<li style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'>"
+                f"<strong>{model['name']}</strong> "
+                f"<span style='color: #8b949e;'>({model['count']} workers)</span></li>\n"
+            )
+        if len(video_models) > 10:
+            video_models_list += (
+                f"<li style='padding: 4px 0; color: #8b949e; font-style: italic;'>... and {len(video_models) - 10} more models</li>\n"
+            )
+        video_models_list += "</ul>"
+        if not video_models:
+            video_models_list = "<p style='color: #8b949e;'>No video models currently available</p>"
 
         # Get top models by worker count
         top_models = sorted(available_models, key=lambda x: x.get("count", 0), reverse=True)[:5]
@@ -154,9 +182,9 @@ def index():
         logger.warning(f"Failed to load models for index page: {e}")
         image_models_list = "<p style='color: #f85149;'>Unable to load models</p>"
         text_models_list = "<p style='color: #f85149;'>Unable to load models</p>"
+        video_models_list = "<p style='color: #f85149;'>Unable to load models</p>"
         top_models_list = "<p style='color: #f85149;'>Unable to load models</p>"
-    image_models = []
-    text_models = []
+        video_worker_count = 0
 
     findex = index.format(
         page_title=horde_title,
@@ -196,9 +224,12 @@ def index():
         news=news,
         image_models_count=len(image_models),
         text_models_count=len(text_models),
+        video_models_count=len(video_models),
         image_models_list=image_models_list,
         text_models_list=text_models_list,
+        video_models_list=video_models_list,
         top_models_list=top_models_list,
+        video_workers=video_worker_count,
     )
 
     style = """<style>
@@ -498,6 +529,44 @@ def index():
             max-width: 100px;
             height: auto;
             margin-bottom: 0.5rem;
+        }
+
+        .cta-section {
+            text-align: center;
+            margin: 2.5rem 0;
+            padding: 2rem;
+            background: linear-gradient(135deg, rgba(88, 166, 255, 0.1), rgba(139, 92, 246, 0.1));
+            border: 1px solid rgba(88, 166, 255, 0.3);
+            border-radius: 16px;
+        }
+
+        .cta-button {
+            display: inline-block;
+            padding: 16px 40px;
+            background: linear-gradient(135deg, #58a6ff, #8b5cf6);
+            color: #fff !important;
+            font-size: 1.2rem;
+            font-weight: 700;
+            text-decoration: none !important;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 20px rgba(88, 166, 255, 0.3);
+        }
+
+        .cta-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 30px rgba(88, 166, 255, 0.4);
+            color: #fff !important;
+            border-bottom: none !important;
+        }
+
+        .cta-subtext {
+            color: #8b949e;
+            font-size: 0.95rem;
+            margin-top: 1rem;
+            margin-bottom: 0;
         }
         </style>
     """

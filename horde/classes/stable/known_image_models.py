@@ -16,7 +16,7 @@ class KnownImageModel(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(128), nullable=False)
     baseline = db.Column(db.String(128), nullable=False)
-    """The baseline of the model. For example, 'stable diffusion 1' or 'stable_diffusion_xl`."""
+    """The baseline of the model. For example, 'stable_diffusion_1' or 'stable_diffusion_xl'."""
     inpainting = db.Column(db.Boolean, nullable=False)
     description = db.Column(db.String(512), nullable=True)
     version = db.Column(db.String(16), nullable=False)

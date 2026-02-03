@@ -15,23 +15,18 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 <div class="grid">
 
 <div class="stat">
-<div class="stat-value">Online</div>
-<div class="stat-label">All Systems Operational</div>
-</div>
-
-<div class="stat">
 <div class="stat-value">{image_workers}</div>
 <div class="stat-label">Image Workers</div>
 </div>
 
 <div class="stat">
-<div class="stat-value">{text_workers}</div>
-<div class="stat-label">Text Workers</div>
+<div class="stat-value">{video_workers}</div>
+<div class="stat-label">Video Workers</div>
 </div>
 
 <div class="stat">
-<div class="stat-value">{interrogation_workers}</div>
-<div class="stat-label">Interrogation Workers</div>
+<div class="stat-value">{text_workers}</div>
+<div class="stat-label">Text Workers</div>
 </div>
 
 <div class="stat">
@@ -42,6 +37,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 <div class="stat">
 <div class="stat-value">{total_threads}</div>
 <div class="stat-label">Total Threads</div>
+</div>
+
+<div class="stat">
+<div class="stat-value">{interrogation_workers}</div>
+<div class="stat-label">Interrogation Workers</div>
 </div>
 
 </div>
@@ -128,6 +128,21 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 <div class="card">
 
 <details>
+<summary><strong>Video Models ({video_models_count})</strong></summary>
+
+<div class="model-list">
+
+{video_models_list}
+
+</div>
+
+</details>
+
+</div>
+
+<div class="card">
+
+<details>
 <summary><strong>Text Models ({text_models_count})</strong></summary>
 
 <div class="model-list">
@@ -157,48 +172,52 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 </div>
 
+## Get Started
+
+<div class="cta-section">
+<a href="/register" class="cta-button">Create Account & Get API Key</a>
+<p class="cta-subtext">Free to use. No credit card required.</p>
+</div>
+
 ## API Documentation & Resources
 
 <div class="grid">
 
 <div class="card">
-
-### API Docs
-Interactive API reference and Swagger UI
-
-<a href="https://test.aipowergrid.io/api/docs">test.aipowergrid.io/api/docs</a>
-
+<h3>API Dashboard</h3>
+<p>Interactive API reference with Scalar UI</p>
+<a href="https://dashboard.aipowergrid.io/api-doc">dashboard.aipowergrid.io/api-doc</a>
 </div>
 
 <div class="card">
+<h3>Swagger / OpenAPI</h3>
+<p>Raw OpenAPI specification for integrations</p>
+<a href="https://api.aipowergrid.io/api/swagger.json">api.aipowergrid.io/api/swagger.json</a>
+</div>
 
-### Source Code
-Open source repositories and examples
+<div class="card">
+<h3>Legacy API Docs</h3>
+<p>Classic Swagger UI documentation</p>
+<a href="https://api.aipowergrid.io/api/docs">api.aipowergrid.io/api/docs</a>
+</div>
 
+<div class="card">
+<h3>Source Code</h3>
+<p>Open source repositories and examples</p>
 <a href="https://github.com/aipowergrid">github.com/aipowergrid</a>
-
 </div>
 
 <div class="card">
-
-### Community
-Developer support and discussions
-
+<h3>Community</h3>
+<p>Developer support and discussions</p>
 <a href="https://discord.gg/aipowergrid">Discord Server</a>
-
 </div>
 
+<div class="card">
+<h3>Official SDK</h3>
+<p>Python client library for AI Power Grid</p>
+<a href="https://github.com/AIPowerGrid/grid-sdk">Grid SDK on GitHub</a>
 </div>
-
-## Integration Tools
-
-<div style="text-align: center;">
-
-### Official SDKs
-
-- **<a href="https://github.com/Haidra-Org/horde-sdk">Python SDK</a>**: Official Python client library
-
-- **<a href="https://www.npmjs.com/package/@zeldafan0225/ai_horde">Node.js SDK</a>**: Official JavaScript client library
 
 </div>
 

@@ -8,6 +8,13 @@ from horde.consts import KNOWN_POST_PROCESSORS
 from horde.logger import logger
 
 BRIDGE_CAPABILITIES = {
+    "ComfyUI Bridge": {
+        1: {
+            "r2",  # ComfyUI Bridge supports R2 uploads
+            "img2img",
+            "inpainting",
+        },
+    },
     "AI Horde Worker reGen": {
         9: {"flux"},
         8: {"layer_diffuse"},

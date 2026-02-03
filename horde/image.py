@@ -13,6 +13,14 @@ from horde.logger import logger
 from horde.r2 import upload_source_image
 
 
+def _normalize_source_image_b64(source_image_b64):
+    """Strip data URL prefix if present (e.g. data:image/png;base64,) so we only decode the base64 payload."""
+    s = source_image_b64.strip()
+    if s.startswith("data:") and ";base64," in s:
+        s = s.split(";base64,", 1)[1]
+    return s
+
+
 def convert_b64_to_pil(source_image_b64):
     base64_bytes = source_image_b64.encode("utf-8")
     try:
@@ -35,6 +43,7 @@ def convert_pil_to_b64(source_image, quality=95):
 
 # TODO: Merge with convert_b64_to_pil()
 def convert_source_image_to_pil(source_image_b64):
+    source_image_b64 = _normalize_source_image_b64(source_image_b64)
     base64_bytes = source_image_b64.encode("utf-8")
     img_bytes = base64.b64decode(base64_bytes)
     image = Image.open(BytesIO(img_bytes))
@@ -105,6 +114,7 @@ def upload_source_image_to_r2(source_image_b64, uuid_string):
 
 
 def ensure_source_image_uploaded(source_image_string, uuid_string, force_r2=False):
+    # HTTP/HTTPS URL: core fetches the image
     if source_image_string.startswith("http"):
         try:
             with requests.get(source_image_string, stream=True, timeout=2) as r:
@@ -138,6 +148,7 @@ def ensure_source_image_uploaded(source_image_string, uuid_string, force_r2=Fals
                 raise err
             raise ImageValidationFailed("Something went wrong when retrieving image url.")
         return (source_image_string, img, False)
+    # Data URL (data:image/png;base64,...) or raw base64: strip prefix if needed, then upload
     download_url, img = upload_source_image_to_r2(source_image_string, uuid_string)
     return (download_url, img, True)
 

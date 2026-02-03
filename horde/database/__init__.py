@@ -25,6 +25,8 @@ priority_increaser = PrimaryTimedFunction(10, threads.increment_extra_priority, 
 compiled_filter_cacher = PrimaryTimedFunction(10, threads.store_compiled_filter_regex, quorum=quorum)
 regex_replacements_cacher = PrimaryTimedFunction(10, threads.store_compiled_filter_regex_replacements, quorum=quorum)
 known_image_models_cacher = PrimaryTimedFunction(300, threads.store_known_image_models, quorum=quorum)
+# Queue monitoring - checks for stuck jobs and sends Discord alerts
+queue_monitor = PrimaryTimedFunction(300, threads.monitor_queue_health, quorum=quorum)  # Every 5 minutes
 
 if args.reload_all_caches:
     logger.info("store_prioritized_wp_queue()")

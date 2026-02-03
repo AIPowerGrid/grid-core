@@ -289,6 +289,163 @@ def notify_generation_complete(job_id: str, model: str, worker_name: str = None,
 
 
 # ============================================================================
+# Queue Monitoring Alerts (HIGH PRIORITY)
+# ============================================================================
+
+
+def notify_stuck_jobs_alert(stuck_count: int, oldest_age_minutes: float, details: list = None):
+    """
+    CRITICAL ALERT: Stuck processing_gens detected.
+    These block workers from receiving new jobs.
+    """
+    webhook_url = _get_core_webhook()
+    if not webhook_url:
+        return
+
+    # Build details string
+    details_str = ""
+    if details:
+        for d in details[:5]:
+            details_str += f"• {d['model']}: {d['count']} jobs ({d['oldest_minutes']:.0f}m old)\n"
+        if len(details) > 5:
+            details_str += f"• ... and {len(details) - 5} more models"
+
+    embed = {
+        "title": "🚨 STUCK JOBS DETECTED",
+        "color": 0xFF0000,  # Red - critical
+        "description": (
+            f"**{stuck_count} processing jobs are stuck!**\n"
+            f"Oldest job: **{oldest_age_minutes:.0f} minutes** old\n\n"
+            "Workers cannot receive new jobs until these are cleared."
+        ),
+        "fields": [
+            {"name": "Stuck Jobs", "value": str(stuck_count), "inline": True},
+            {"name": "Oldest Age", "value": f"{oldest_age_minutes:.0f} min", "inline": True},
+        ],
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+    if details_str:
+        embed["fields"].append({"name": "By Model", "value": details_str, "inline": False})
+
+    embed["fields"].append({
+        "name": "Action Required",
+        "value": "Run queue cleanup or check worker connectivity",
+        "inline": False,
+    })
+
+    send_embed(webhook_url, embed)
+
+
+def notify_queue_health(
+    processing_count: int,
+    waiting_count: int,
+    waiting_images: int,
+    active_workers: int,
+    stuck_count: int = 0,
+):
+    """
+    Queue health status update (can be periodic).
+    Only sends if there are issues or on request.
+    """
+    webhook_url = _get_core_webhook()
+    if not webhook_url:
+        return
+
+    # Determine status color
+    if stuck_count > 0:
+        color = 0xFF0000  # Red
+        status = "🔴 UNHEALTHY"
+    elif processing_count > waiting_count * 2:
+        color = 0xFFA500  # Orange
+        status = "🟡 WARNING"
+    else:
+        color = 0x00FF00  # Green
+        status = "🟢 HEALTHY"
+
+    embed = {
+        "title": f"Queue Status: {status}",
+        "color": color,
+        "fields": [
+            {"name": "Active Workers", "value": str(active_workers), "inline": True},
+            {"name": "Processing", "value": str(processing_count), "inline": True},
+            {"name": "Queued Jobs", "value": str(waiting_count), "inline": True},
+            {"name": "Queued Images", "value": str(waiting_images), "inline": True},
+        ],
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+    if stuck_count > 0:
+        embed["fields"].append({
+            "name": "⚠️ Stuck Jobs",
+            "value": f"**{stuck_count}** (blocking new jobs!)",
+            "inline": False,
+        })
+
+    send_embed(webhook_url, embed)
+
+
+def notify_worker_not_receiving_jobs(
+    worker_name: str,
+    worker_id: str,
+    models: list,
+    stuck_jobs: int = 0,
+    queued_jobs: int = 0,
+):
+    """
+    Alert when a worker appears online but isn't receiving jobs.
+    """
+    webhook_url = _get_core_webhook()
+    if not webhook_url:
+        return
+
+    models_str = ", ".join(models[:3]) if models else "None"
+    if models and len(models) > 3:
+        models_str += f" (+{len(models) - 3} more)"
+
+    embed = {
+        "title": "⚠️ Worker Not Receiving Jobs",
+        "color": 0xFFA500,  # Orange
+        "description": (
+            f"Worker **{worker_name}** is online but not getting jobs.\n"
+            "This may indicate stuck processing_gens or model mismatch."
+        ),
+        "fields": [
+            {"name": "Worker", "value": worker_name, "inline": True},
+            {"name": "Models", "value": models_str, "inline": True},
+            {"name": "Stuck Jobs", "value": str(stuck_jobs), "inline": True},
+            {"name": "Queued Jobs", "value": str(queued_jobs), "inline": True},
+        ],
+        "footer": {"text": f"ID: {worker_id}"},
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+    send_embed(webhook_url, embed)
+
+
+def notify_jobs_cleared(cleared_processing: int, cleared_waiting: int, reason: str = "manual"):
+    """
+    Notification that stuck jobs were cleared.
+    """
+    webhook_url = _get_core_webhook()
+    if not webhook_url:
+        return
+
+    embed = {
+        "title": "🧹 Queue Cleaned",
+        "color": 0x00FF00,  # Green
+        "fields": [
+            {"name": "Processing Cleared", "value": str(cleared_processing), "inline": True},
+            {"name": "Waiting Cleared", "value": str(cleared_waiting), "inline": True},
+            {"name": "Reason", "value": reason, "inline": False},
+        ],
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+    send_embed(webhook_url, embed)
+
+
+# ============================================================================
 # Loguru Integration - Add as a log sink
 # ============================================================================
 

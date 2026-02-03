@@ -139,8 +139,8 @@ class ImageWaitingPrompt(WaitingPrompt):
             initial_dict = {}
         self.gen_payload = initial_dict.copy()
         self.gen_payload["prompt"] = self.prompt
-        # We always send only 1 iteration to Stable Diffusion
-        self.gen_payload["batch_size"] = 1
+        # batch_size will be set dynamically in get_pop_payload() based on actual batch size
+        # This enables native ComfyUI batching on workers
         self.gen_payload["ddim_steps"] = self.params["steps"]
         self.gen_payload["seed"] = self.seed
         # If they want the seed randomized and also a seed variation, we randomize the seed in advance
@@ -196,7 +196,35 @@ class ImageWaitingPrompt(WaitingPrompt):
         if payload:
             # They're all the same, so we pick up the first to extract some var
             procgen = procgen_list[0]
-            payload["n_iter"] = len(procgen_list)
+            batch_size = len(procgen_list)
+            # Set batch_size for native ComfyUI batching - workers should use this
+            # to generate all images in a single batch operation
+            payload["batch_size"] = batch_size
+            # n_iter kept for backward compatibility with older workers
+            # New workers should use batch_size and ignore n_iter
+            payload["n_iter"] = batch_size
+            
+            # Generate seeds array for batched generation
+            # Each image in the batch gets its own seed for reproducibility
+            seeds = []
+            base_seed = payload.get("seed")
+            for i in range(batch_size):
+                if base_seed is None:
+                    # Random seed for each image
+                    seeds.append(self.seed_to_int(None))
+                elif self.seed_variation:
+                    # Apply seed variation for each image in batch
+                    seed = base_seed + (self.seed_variation * (batch_size - i))
+                    while seed >= 2**32:
+                        seed = seed >> 32
+                    seeds.append(seed)
+                else:
+                    # Same seed for all (ComfyUI will add internal variation)
+                    seeds.append(base_seed)
+            payload["seeds"] = seeds
+            # Keep single seed for backward compatibility
+            payload["seed"] = seeds[0] if seeds else base_seed
+            
             prompt_payload = {
                 "payload": payload,
                 "id": procgen.id,
@@ -373,7 +401,7 @@ class ImageWaitingPrompt(WaitingPrompt):
             max_res = 768
         # We allow everyone to use SDXL up to 1024
         if max_res < 1024 and any(
-            model_reference.get_model_baseline(mn) in ["stable_diffusion_xl", "stable_cascade", "flux_1"] for mn in model_names
+            model_reference.get_model_baseline(mn) in ["stable_diffusion_xl", "stable_cascade"] or model_reference.get_model_baseline(mn).startswith("flux") for mn in model_names
         ):
             max_res = 1024
         if max_res > 1024:
@@ -478,7 +506,7 @@ class ImageWaitingPrompt(WaitingPrompt):
             return (self.calculate_extra_kudos_burn(kudos) * self.n * 2) + 1
         if model_reference.get_model_baseline(model_name) in ["stable_cascade"]:
             return (self.calculate_extra_kudos_burn(kudos) * self.n * 4) + 1
-        if model_reference.get_model_baseline(model_name) in ["flux_1"]:
+        if model_reference.get_model_baseline(model_name).startswith("flux"):
             return (self.calculate_extra_kudos_burn(kudos) * self.n * 8) + 1
         # The +1 is the extra kudos burn per request
         return (self.calculate_extra_kudos_burn(kudos) * self.n) + 1

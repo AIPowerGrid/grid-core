@@ -44,6 +44,7 @@ HEAVY_POST_PROCESSORS = {
 # at a time when these models are used.
 BASELINE_BATCHING_MULTIPLIERS = {
     "flux_1": 5,
+    "flux_2": 3,  # FLUX.2 models like Klein are smaller/faster
 }
 
 

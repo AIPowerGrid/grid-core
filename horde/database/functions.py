@@ -327,7 +327,11 @@ def get_available_models(filter_model_name: str = None):
             models_dict[model_name] = {}
             models_dict[model_name]["name"] = model_name
             models_dict[model_name]["count"] = model_row.total_threads
-            models_dict[model_name]["type"] = model_type
+            # Check if this is a video model
+            if model_type == "image" and model_reference.is_video_model(model_name):
+                models_dict[model_name]["type"] = "video"
+            else:
+                models_dict[model_name]["type"] = model_type
 
             models_dict[model_name]["queued"] = 0
             models_dict[model_name]["jobs"] = 0
@@ -358,7 +362,11 @@ def get_available_models(filter_model_name: str = None):
             models_dict[model_name]["count"] = 0
             models_dict[model_name]["queued"] = 0
             models_dict[model_name]["jobs"] = 0
-            models_dict[model_name]["type"] = model_type
+            # Check if this is a video model
+            if model_type == "image" and model_reference.is_video_model(model_name):
+                models_dict[model_name]["type"] = "video"
+            else:
+                models_dict[model_name]["type"] = model_type
             models_dict[model_name]["eta"] = 0
             models_dict[model_name]["performance"] = stats.get_model_avg(model_name)
             models_dict[model_name]["workers"] = []
@@ -800,6 +808,30 @@ def get_sorted_wp_filtered_to_worker(worker, models_list=None, blacklist=None, p
         models_list = []
     # Normalize models_list to lowercase for case-insensitive matching
     models_list_lower = [m.lower() for m in models_list] if models_list else []
+    
+    # Debug logging
+    logger.warning(f"[DB_MATCH] Worker={worker.name}, models={models_list_lower}, max_pixels={worker.max_pixels}, speed={worker.speed}")
+    
+    # First check what active jobs exist with ANY model
+    if 'z-image-turbo' in models_list_lower:
+        all_active_wps = db.session.query(ImageWaitingPrompt).join(WPModels).filter(
+            ImageWaitingPrompt.active == True,
+            ImageWaitingPrompt.faulted == False,
+            func.lower(WPModels.model) == 'z-image-turbo'
+        ).limit(5).all()
+        logger.warning(f"[DB_MATCH] Found {len(all_active_wps)} active z-image-turbo jobs in DB")
+        for wp in all_active_wps:
+            logger.warning(f"[DB_MATCH]   WP {wp.id}: {wp.width}x{wp.height}={wp.width*wp.height}px, expiry={wp.expiry}")
+            has_loras = 'loras' in (wp.params or {})
+            has_tis = 'tis' in (wp.params or {})
+            has_pp = 'post-processing' in (wp.params or {})
+            has_cn = 'control_type' in (wp.params or {})
+            logger.warning(f"[DB_MATCH]     nsfw={wp.nsfw}, safe_ip={wp.safe_ip}, r2={wp.r2}, slow_workers={wp.slow_workers}")
+            r2_capable = check_bridge_capability("r2", worker.bridge_agent)
+            logger.warning(f"[DB_MATCH]     params: loras={has_loras}, tis={has_tis}, post-proc={has_pp}, controlnet={has_cn}")
+            logger.warning(f"[DB_MATCH]     Worker: nsfw={worker.nsfw}, unsafe_ip={worker.allow_unsafe_ipaddr}, speed={worker.speed}, r2_capable={r2_capable}")
+            logger.warning(f"[DB_MATCH]     bridge_agent={worker.bridge_agent}")
+    
     final_wp_list = (
         db.session.query(ImageWaitingPrompt)
         .options(noload(ImageWaitingPrompt.processing_gens))
@@ -951,7 +983,15 @@ def get_sorted_wp_filtered_to_worker(worker, models_list=None, blacklist=None, p
         .offset(PER_PAGE * page)
         .limit(PER_PAGE)
     )
-    return final_wp_list.populate_existing().with_for_update(skip_locked=True, of=ImageWaitingPrompt).all()
+    results = final_wp_list.populate_existing().with_for_update(skip_locked=True, of=ImageWaitingPrompt).all()
+    
+    # Debug logging
+    logger.warning(f"[DB_MATCH] Query returned {len(results)} results for worker={worker.name}")
+    if results:
+        for wp in results:
+            logger.warning(f"[DB_MATCH]   WP {wp.id}: {wp.width}x{wp.height}={wp.width*wp.height}px")
+    
+    return results
 
 
 def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_user_ids=None):

@@ -496,6 +496,10 @@ class JobPopTemplate(Resource):
                 # logger.debug(worker_ret)
                 if worker_ret is None:
                     continue
+                # Handle batch_mismatch - worker can't handle full batch
+                if worker_ret == "batch_mismatch":
+                    self.skipped["batch_size"] = self.skipped.get("batch_size", 0) + 1
+                    continue
                 worker_ret["messages"] = database.get_all_active_worker_messages(self.worker.id)
                 # logger.debug(worker_ret)
                 return worker_ret, 200

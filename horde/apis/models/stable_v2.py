@@ -26,7 +26,7 @@ class ImageParsers(v2.Parsers):
             "source_image",
             type=str,
             required=False,
-            help="The Base64-encoded webp to use for img2img.",
+            help="For img2img: URL, data:image/...;base64,..., or raw base64.",
             location="json",
         )
         self.generate_parser.add_argument(
@@ -457,7 +457,12 @@ class ImageModels(v2.Models):
                     description="The prompt which will be sent to Stable Diffusion to generate an image.",
                 ),
                 "ddim_steps": fields.Integer(default=30),
-                "n_iter": fields.Integer(default=1, description="The amount of images to generate."),
+                "n_iter": fields.Integer(default=1, description="(Legacy) The amount of images to generate. Use batch_size instead for native ComfyUI batching."),
+                "batch_size": fields.Integer(default=1, description="The number of images to generate in a single batch. Workers should use this for native ComfyUI batching."),
+                "seeds": fields.List(
+                    fields.Integer(description="Seed for image generation"),
+                    description="Array of seeds, one for each image in the batch. Length matches batch_size.",
+                ),
                 "use_nsfw_censor": fields.Boolean(
                     description="When true will apply NSFW censoring model on the generation.",
                 ),
@@ -523,7 +528,9 @@ class ImageModels(v2.Models):
                 "ttl": fields.Integer(description="The amount of seconds before this job is considered stale and aborted."),
                 "skipped": fields.Nested(self.response_model_generations_skipped, skip_none=True),
                 "model": fields.String(description="Which of the available models to use for this request."),
-                "source_image": fields.String(description="The Base64-encoded webp to use for img2img."),
+                "source_image": fields.String(
+                    description="For img2img: HTTP/HTTPS URL (core fetches the image), data URL (data:image/png;base64,...), or raw base64.",
+                ),
                 "source_processing": fields.String(
                     required=False,
                     default="txt2img",

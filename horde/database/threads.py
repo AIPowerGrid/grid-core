@@ -470,3 +470,112 @@ def store_known_image_models():
 
         else:
             logger.debug("No known image models to store from the model reference")
+
+
+# ============================================================================
+# Queue Monitoring - Detects and alerts on stuck jobs
+# ============================================================================
+
+# Configuration
+STUCK_JOB_THRESHOLD_MINUTES = 15  # Jobs older than this are considered stuck
+STUCK_JOB_ALERT_THRESHOLD = 5  # Alert if more than this many stuck jobs
+AUTO_CLEANUP_THRESHOLD_MINUTES = 60  # Auto-cleanup jobs older than this
+_last_stuck_alert_time = None  # Track last alert to avoid spam
+
+
+@logger.catch(reraise=True)
+def monitor_queue_health():
+    """
+    Monitor queue health and send Discord alerts for stuck jobs.
+    Run this every few minutes via the thread scheduler.
+    """
+    global _last_stuck_alert_time
+    
+    with HORDE.app_context():
+        from horde.discord import notify_stuck_jobs_alert, notify_jobs_cleared
+        
+        # Query stuck processing_gens
+        stuck_query = db.session.execute(
+            f"""
+            SELECT 
+                model,
+                COUNT(*) as count,
+                EXTRACT(EPOCH FROM (NOW() - MIN(created)))/60 as oldest_minutes
+            FROM processing_gens
+            WHERE created < NOW() - INTERVAL '{STUCK_JOB_THRESHOLD_MINUTES} minutes'
+            GROUP BY model
+            ORDER BY count DESC
+            """
+        )
+        
+        stuck_by_model = []
+        total_stuck = 0
+        oldest_age = 0
+        
+        for row in stuck_query:
+            model, count, oldest = row
+            stuck_by_model.append({
+                "model": model,
+                "count": count,
+                "oldest_minutes": float(oldest) if oldest else 0,
+            })
+            total_stuck += count
+            if oldest and float(oldest) > oldest_age:
+                oldest_age = float(oldest)
+        
+        # Log status
+        if total_stuck > 0:
+            logger.warning(f"Queue Monitor: {total_stuck} stuck processing_gens (oldest: {oldest_age:.0f}m)")
+        else:
+            logger.debug("Queue Monitor: No stuck jobs detected")
+        
+        # Send alert if threshold exceeded (but not too frequently)
+        if total_stuck >= STUCK_JOB_ALERT_THRESHOLD:
+            now = datetime.utcnow()
+            # Only alert once per 10 minutes to avoid spam
+            if _last_stuck_alert_time is None or (now - _last_stuck_alert_time).total_seconds() > 600:
+                logger.error(f"ALERT: {total_stuck} stuck jobs detected! Sending Discord notification.")
+                notify_stuck_jobs_alert(total_stuck, oldest_age, stuck_by_model)
+                _last_stuck_alert_time = now
+        
+        # Auto-cleanup very old jobs (older than AUTO_CLEANUP_THRESHOLD_MINUTES)
+        if total_stuck > 0 and oldest_age > AUTO_CLEANUP_THRESHOLD_MINUTES:
+            logger.warning(f"Auto-cleaning stuck jobs older than {AUTO_CLEANUP_THRESHOLD_MINUTES} minutes")
+            
+            # Delete very old processing_gens
+            deleted_pgs = db.session.execute(
+                f"""
+                DELETE FROM processing_gens 
+                WHERE created < NOW() - INTERVAL '{AUTO_CLEANUP_THRESHOLD_MINUTES} minutes'
+                RETURNING id
+                """
+            )
+            deleted_pg_count = deleted_pgs.rowcount
+            
+            # Clean orphaned waiting_prompts (n=0 with no processing_gens)
+            db.session.execute(
+                """
+                DELETE FROM wp_models 
+                WHERE wp_id IN (
+                    SELECT wp.id FROM waiting_prompts wp
+                    LEFT JOIN processing_gens pg ON pg.wp_id = wp.id
+                    WHERE pg.id IS NULL AND wp.n = 0
+                )
+                """
+            )
+            
+            deleted_wps = db.session.execute(
+                """
+                DELETE FROM waiting_prompts wp
+                WHERE NOT EXISTS (SELECT 1 FROM processing_gens pg WHERE pg.wp_id = wp.id)
+                AND wp.n = 0
+                RETURNING id
+                """
+            )
+            deleted_wp_count = deleted_wps.rowcount
+            
+            db.session.commit()
+            
+            if deleted_pg_count > 0 or deleted_wp_count > 0:
+                logger.info(f"Auto-cleaned: {deleted_pg_count} processing_gens, {deleted_wp_count} waiting_prompts")
+                notify_jobs_cleared(deleted_pg_count, deleted_wp_count, "automatic (stale job cleanup)")

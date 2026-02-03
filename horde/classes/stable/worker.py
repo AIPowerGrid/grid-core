@@ -141,7 +141,8 @@ class ImageWorker(Worker):
             and not check_bridge_capability("stable_cascade_2pass", self.bridge_agent)
         ):
             return [False, "bridge_version"]
-        if "flux_1" in model_reference.get_all_model_baselines(self.get_model_names()) and not check_bridge_capability(
+        baselines = model_reference.get_all_model_baselines(self.get_model_names())
+        if any(b.startswith("flux") for b in baselines) and not check_bridge_capability(
             "flux",
             self.bridge_agent,
         ):
@@ -318,18 +319,18 @@ class ImageWorker(Worker):
         return 1
 
     def get_safe_amount(self, amount, wp):
-        safe_generations = (self.max_pixels / 3.5) * amount
-        mps = wp.get_amount_calculation_things()
-        # If the job has upscalers, we increase the amount of MPS in our calculations
-        # As currently the upscaling happens serially on the worker
-        pp_multiplier = 1 + (wp.count_pp() * 0.4)
-        if wp.has_heavy_operations():
-            pp_multiplier *= 1.8
-        mps *= pp_multiplier
-        mps *= wp.get_highest_model_batching_multiplier()
-        safe_amount = round(safe_generations / mps)
-        if safe_amount > amount:
-            safe_amount = amount
-        if safe_amount <= 0:
-            safe_amount = 1
-        return safe_amount
+        # For native ComfyUI batching, trust the worker's requested amount
+        # Workers know their own VRAM capabilities and batch limits
+        # The old calculation assumed sequential generation, but native batching
+        # has sub-linear VRAM scaling, so we let workers decide their batch size
+        
+        # Only check if the image dimensions fit within max_pixels (single image capability)
+        mps = wp.get_amount_calculation_things()  # width * height
+        if mps > self.max_pixels:
+            # Image too large for this worker - shouldn't happen as filtered earlier
+            return 0
+        
+        # Return the requested amount - worker knows what they can batch
+        if amount <= 0:
+            amount = 1
+        return amount

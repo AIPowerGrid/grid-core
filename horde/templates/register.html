@@ -6,11 +6,43 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 {% extends "master.html" %}
 {% block content %}
-    {% if oauth_id is none and pseudonymous is false %}
-    <div style="text-align: center; margin: 2rem 0;">
+
+<div class="register-page">
+    <!-- Hero Section -->
+    <div class="hero-section">
+        <div class="logo-container">
+            <img src="https://aipowergrid.io/logo.png" alt="AI Power Grid Logo" class="hero-logo" onerror="this.style.display='none'">
+        </div>
         <h1>Join AI Power Grid</h1>
-        <p style="color: #8b949e; font-size: 1.1rem; margin-bottom: 2rem;">Sign in with one of the options below to get started</p>
-        <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem; margin: 2rem 0;">
+        <p class="hero-subtitle">Access powerful AI models through our decentralized inference network</p>
+    </div>
+
+    <!-- Features Grid -->
+    <div class="features-grid">
+        <div class="feature-card">
+            <div class="feature-icon">&#9889;</div>
+            <h4>Fast Generation</h4>
+            <p>Distributed workers for rapid AI inference</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">&#128274;</div>
+            <h4>Free to Use</h4>
+            <p>No credit card or payment required</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">&#127760;</div>
+            <h4>Open Source</h4>
+            <p>Community-driven and transparent</p>
+        </div>
+    </div>
+
+    {% if oauth_id is none and pseudonymous is false %}
+    <!-- OAuth Login Section -->
+    <div class="auth-section">
+        <h2>Sign In to Get Started</h2>
+        <p class="auth-subtitle">Choose your preferred sign-in method</p>
+        
+        <div class="oauth-buttons">
             <a href="/google/register" class="login-btn google-btn">
                 <div class="login-icon-wrapper">
                     <img class="login-icon" src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" alt="Google"/>
@@ -32,55 +64,312 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         </div>
     </div>
     {% endif %}
-   <div style="max-width: 600px; margin: 2rem auto; padding: 2rem; background: rgba(22, 27, 34, 0.6); border: 1px solid #30363d; border-radius: 12px;">
+
+    <!-- Registration Form -->
+    <div class="form-section">
         {% if oauth_id is not none and pseudonymous is not true %}
-        <h1>{{ welcome }}</h1>
-        <h2>Set Display Name</h2>
-        <p style="color: #8b949e;">Note: Changing your username will generate a new API key!</p>
+        <div class="welcome-banner">
+            <h2>{{ welcome }}</h2>
+            <p>You're signed in! Set your display name below to complete registration.</p>
+        </div>
         {% else %}
-        <h1>Welcome</h1>
-        <h2>Set Display Name</h2>
-        <div class="alert alert-warning">
-            <strong>WARNING:</strong> You are not logged in!
+        <div class="warning-section">
+            <div class="alert alert-warning">
+                <strong>&#9888; Not Logged In</strong>
+            </div>
+            <p>You can create an account without signing in, but:</p>
+            <ul class="warning-list">
+                <li>Your API key cannot be recovered if lost</li>
+                <li>No way to reset or maintain your account</li>
+                <li>We recommend signing in above first!</li>
+            </ul>
         </div>
-        <p>If you submit a username, it will create a new user with a random API key <strong>which cannot be maintained by us!</strong></p>
-        <p>If you forget/lose this API Key, there's nothing we can do to recover it. You'll have to create a new account.</p>
-        <p>To ensure you avoid this fate, please login using one of the buttons above first!</p>
         {% endif %}
+
         <div class="alert alert-info">
-            <strong>IMPORTANT:</strong> If you have been redirected here from a paid or ad-based client, please be aware that <strong>this is a fully volunteer-run service</strong>. You can always generate images for free here, without paying!
+            <strong>&#128161; Note:</strong> This is a volunteer-run service. Image generation is always free!
         </div>
-        <form method="POST" id="main-form">
+
+        <form method="POST" id="main-form" class="register-form">
             <div class="form-group">
-                <label for="username">Display Name *</label>
+                <label for="username">Display Name</label>
                 {% if username is none %}
-                <input type="text" class="form-control" id="username" name="username" placeholder="Enter Display Name" required>
+                <input type="text" class="form-control" id="username" name="username" placeholder="Choose a display name" required>
                 {% else %}
-                <input type="text" class="form-control" id="username" name="username" placeholder="Enter Display Name" value="{{ username }}" required>
+                <input type="text" class="form-control" id="username" name="username" placeholder="Choose a display name" value="{{ username }}" required>
                 {% endif %}
+                <span class="form-hint">This will be visible to others. Pick something memorable!</span>
             </div>
             <script>
                 function onSubmit(token) {
                   document.getElementById("main-form").submit();
                 }
             </script>
-            <button type="submit" class="btn g-recaptcha" data-sitekey="{{ recaptcha_site }}" data-callback='onSubmit' data-action='submit'>Submit</button>
+            <button type="submit" class="btn submit-btn g-recaptcha" data-sitekey="{{ recaptcha_site }}" data-callback='onSubmit' data-action='submit'>
+                Create Account
+            </button>
         </form>
+
         {% if api_key is not none %}
-        <div style="margin-top: 2rem; padding: 1.5rem; background: rgba(22, 27, 34, 0.8); border: 1px solid #30363d; border-radius: 8px;">
-            <h2>API Key</h2>
-            <p>Your new API Key is below. It will not be displayed again. Submit this form to generate a new one. Use this key in your client and in your bridge to identify your user</p>
-            <p><strong>Do not share this with anyone!</strong></p>
-            <code style="display: block; padding: 1rem; margin: 1rem 0; background: rgba(13, 17, 23, 0.8); border: 1px solid #30363d; border-radius: 6px; word-break: break-all; font-size: 0.9rem;">{{ api_key }}</code>
+        <div class="api-key-section">
+            <div class="success-banner">
+                <h3>&#127881; Success! Your API Key</h3>
+            </div>
+            <p class="key-warning">Save this key now - it will not be shown again!</p>
+            <code class="api-key-display">{{ api_key }}</code>
+            <button class="copy-btn" onclick="navigator.clipboard.writeText('{{ api_key }}'); this.textContent='Copied!';">
+                Copy to Clipboard
+            </button>
+            <p class="key-info">Use this key in your API requests to authenticate.</p>
         </div>
         {% endif %}
-        <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid #30363d;">
-            <h2>Privacy Policy</h2>
-            <p>The only information we store from your account is your unique ID for uniqueness.</p>
-            <p>We do not use your id for any other purpose.</p>
+
+        <div class="privacy-section">
+            <h4>Privacy</h4>
+            <p>We only store your unique ID for authentication. Your data is never shared or used for other purposes.</p>
         </div>
-   </div>
-   <div style="text-align: center; margin: 2rem 0;">
-       <a href="/" style="color: #58a6ff;">← Back to Main page</a>
-   </div>
+    </div>
+
+    <!-- Navigation -->
+    <div class="nav-section">
+        <a href="/" class="back-link">&#8592; Back to API Dashboard</a>
+    </div>
+</div>
+
+<style>
+    .register-page {
+        max-width: 700px;
+        margin: 0 auto;
+    }
+
+    .hero-section {
+        text-align: center;
+        margin-bottom: 2.5rem;
+        padding: 2rem 0;
+    }
+
+    .logo-container {
+        margin-bottom: 1.5rem;
+    }
+
+    .hero-logo {
+        width: 80px;
+        height: 80px;
+        border-radius: 16px;
+        box-shadow: 0 8px 32px rgba(88, 166, 255, 0.3);
+    }
+
+    .hero-subtitle {
+        color: #8b949e;
+        font-size: 1.15rem;
+        margin-top: 0.5rem;
+    }
+
+    .features-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1rem;
+        margin-bottom: 2.5rem;
+    }
+
+    @media (max-width: 600px) {
+        .features-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .feature-card {
+        background: rgba(22, 27, 34, 0.6);
+        border: 1px solid #30363d;
+        border-radius: 12px;
+        padding: 1.25rem;
+        text-align: center;
+        transition: all 0.3s ease;
+    }
+
+    .feature-card:hover {
+        border-color: #58a6ff;
+        transform: translateY(-2px);
+    }
+
+    .feature-icon {
+        font-size: 1.75rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .feature-card h4 {
+        color: #f0f6fc;
+        font-size: 0.95rem;
+        margin: 0 0 0.25rem 0;
+    }
+
+    .feature-card p {
+        color: #8b949e;
+        font-size: 0.8rem;
+        margin: 0;
+    }
+
+    .auth-section {
+        background: rgba(22, 27, 34, 0.6);
+        border: 1px solid #30363d;
+        border-radius: 16px;
+        padding: 2rem;
+        margin-bottom: 2rem;
+        text-align: center;
+    }
+
+    .auth-section h2 {
+        margin-top: 0;
+        font-size: 1.5rem;
+    }
+
+    .auth-subtitle {
+        color: #8b949e;
+        margin-bottom: 1.5rem;
+    }
+
+    .oauth-buttons {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .form-section {
+        background: rgba(22, 27, 34, 0.6);
+        border: 1px solid #30363d;
+        border-radius: 16px;
+        padding: 2rem;
+        margin-bottom: 2rem;
+    }
+
+    .welcome-banner {
+        text-align: center;
+        margin-bottom: 1.5rem;
+    }
+
+    .welcome-banner h2 {
+        margin-top: 0;
+        color: #58a6ff;
+    }
+
+    .warning-section {
+        margin-bottom: 1.5rem;
+    }
+
+    .warning-list {
+        color: #8b949e;
+        padding-left: 1.5rem;
+        margin: 0.5rem 0;
+    }
+
+    .warning-list li {
+        margin: 0.25rem 0;
+    }
+
+    .register-form {
+        margin: 1.5rem 0;
+    }
+
+    .form-hint {
+        display: block;
+        color: #8b949e;
+        font-size: 0.85rem;
+        margin-top: 0.5rem;
+    }
+
+    .submit-btn {
+        width: 100%;
+        padding: 14px 24px;
+        font-size: 1.1rem;
+    }
+
+    .api-key-section {
+        margin-top: 2rem;
+        padding: 1.5rem;
+        background: rgba(46, 160, 67, 0.1);
+        border: 1px solid rgba(46, 160, 67, 0.4);
+        border-radius: 12px;
+        text-align: center;
+    }
+
+    .success-banner h3 {
+        color: #3fb950;
+        margin: 0 0 1rem 0;
+    }
+
+    .key-warning {
+        color: #f0883e;
+        font-weight: 600;
+        margin-bottom: 1rem;
+    }
+
+    .api-key-display {
+        display: block;
+        padding: 1rem;
+        margin: 1rem 0;
+        background: rgba(13, 17, 23, 0.9);
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        word-break: break-all;
+        font-size: 1rem;
+        color: #58a6ff;
+    }
+
+    .copy-btn {
+        padding: 10px 20px;
+        background: #238636;
+        border: none;
+        border-radius: 8px;
+        color: #fff;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .copy-btn:hover {
+        background: #2ea043;
+    }
+
+    .key-info {
+        color: #8b949e;
+        font-size: 0.9rem;
+        margin-top: 1rem;
+        margin-bottom: 0;
+    }
+
+    .privacy-section {
+        margin-top: 2rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid #30363d;
+    }
+
+    .privacy-section h4 {
+        color: #f0f6fc;
+        margin: 0 0 0.5rem 0;
+    }
+
+    .privacy-section p {
+        color: #8b949e;
+        font-size: 0.9rem;
+        margin: 0;
+    }
+
+    .nav-section {
+        text-align: center;
+        margin: 2rem 0;
+    }
+
+    .back-link {
+        color: #58a6ff;
+        font-size: 1rem;
+        transition: all 0.2s ease;
+    }
+
+    .back-link:hover {
+        color: #8b5cf6;
+    }
+</style>
+
 {% endblock %}

@@ -79,18 +79,22 @@ class ModelReference(PrimaryTimedFunction):
                 self.stable_diffusion_names = set()
                 for model in self.reference:
                     if self.reference[model].get("baseline") in {
-                        "stable diffusion 1",
-                        "stable diffusion 2",
-                        "stable diffusion 2 512",
+                        # Image models
+                        "stable_diffusion_1",
+                        "stable_diffusion_2",
                         "stable_diffusion_xl",
                         "stable_cascade",
                         "flux_1",
-                        # Video model baselines
+                        "flux_2",
+                        "z_image_turbo",
+                        # Video models
                         "wan_2_1",
                         "wan_2_2",
-                        "ltx_video",  # ltxv model uses ltx_video baseline
+                        "ltx_video",
+                        "ltx_video_2",
                         "cogvideo",
                         "mochi",
+                        "hunyuan_video",
                     }:
                         self.stable_diffusion_names.add(model)
                         if self.reference[model].get("nsfw"):
@@ -152,13 +156,13 @@ class ModelReference(PrimaryTimedFunction):
             return "stable_diffusion_xl"
         if not model_details and "[Flux]" in model_name:
             return "flux_1"
-        return model_details.get("baseline", "stable diffusion 1")
+        return model_details.get("baseline", "stable_diffusion_1")
 
     def get_all_model_baselines(self, model_names):
         baselines = set()
         for model_name in model_names:
             model_details = self.reference.get(model_name, {})
-            baselines.add(model_details.get("baseline", "stable diffusion 1"))
+            baselines.add(model_details.get("baseline", "stable_diffusion_1"))
         return baselines
 
     def get_model_requirements(self, model_name):

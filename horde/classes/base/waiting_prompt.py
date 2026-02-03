@@ -241,11 +241,22 @@ class WaitingPrompt(db.Model):
         # if not myself_refresh:
         #     return None
         # myself_refresh.n -= 1
-        safe_amount = worker.get_safe_amount(amount, self)
-        if safe_amount > self.n:
+        
+        # ATOMIC BATCHING: Worker must be able to handle ALL remaining images
+        # This ensures batches stay together for native ComfyUI batching
+        if not self.disable_batching:
+            if amount < self.n:
+                # Worker can't handle full batch - skip this job
+                # Return "batch_size" as skip reason so it can be tracked
+                logger.info(f"🔧 BATCHING: Skipping WP {self.id} - worker amount={amount} < wp.n={self.n} (need full batch)")
+                return "batch_mismatch"
+            # Worker can handle full batch - give them all remaining images
             safe_amount = self.n
-        if self.disable_batching:
+            logger.info(f"🔧 BATCHING: Worker gets FULL BATCH of {safe_amount} images from WP {self.id}")
+        else:
+            # disable_batching=True: Single image at a time (e.g., for QR codes, seed-specific work)
             safe_amount = 1
+            logger.info(f"🔧 BATCHING: disable_batching=True, single image mode")
         # We use a local var to avoid touching the DB through self.n
         # due to all the commits clearing row lock,
         # can we can't ensure a race-condition won't have changed self.n between iterations

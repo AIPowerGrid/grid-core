@@ -182,15 +182,17 @@ def _infer_baseline(name: str, model_type: int) -> str:
 
     # Image models
     if "flux" in name_lower:
+        if "flux.2" in name_lower or "flux2" in name_lower:
+            return "flux_2"
         return "flux_1"
     elif "sdxl" in name_lower or "xl" in name_lower:
         return "stable_diffusion_xl"
     elif "sd2" in name_lower or "2.1" in name_lower:
-        return "stable diffusion 2"
+        return "stable_diffusion_2"
     elif "cascade" in name_lower:
         return "stable_cascade"
 
-    return "stable diffusion 1"
+    return "stable_diffusion_1"
 
 
 def _save_cache(models: dict[str, dict[str, Any]]) -> bool:
@@ -292,17 +294,22 @@ class ModelReference(PrimaryTimedFunction):
         self._name_lookup: dict[str, str] = {}
 
         valid_baselines = {
-            "stable diffusion 1",
-            "stable diffusion 2",
-            "stable diffusion 2 512",
+            # Image models
+            "stable_diffusion_1",
+            "stable_diffusion_2",
             "stable_diffusion_xl",
             "stable_cascade",
             "flux_1",
+            "flux_2",
+            "z_image_turbo",
+            # Video models
             "wan_2_1",
             "wan_2_2",
             "ltx_video",
+            "ltx_video_2",
             "cogvideo",
             "mochi",
+            "hunyuan_video",
         }
 
         for name, model in models.items():
@@ -372,13 +379,13 @@ class ModelReference(PrimaryTimedFunction):
             return "stable_diffusion_xl"
         if not model_details and "[Flux]" in model_name:
             return "flux_1"
-        return model_details.get("baseline", "stable diffusion 1")
+        return model_details.get("baseline", "stable_diffusion_1")
 
     def get_all_model_baselines(self, model_names):
         baselines = set()
         for model_name in model_names:
             model_details = self.reference.get(model_name, {})
-            baselines.add(model_details.get("baseline", "stable diffusion 1"))
+            baselines.add(model_details.get("baseline", "stable_diffusion_1"))
         return baselines
 
     def get_model_requirements(self, model_name):

@@ -137,7 +137,7 @@ class ImageAsyncGenerate(GenerateTemplate):
         if not self.args.source_image and self.args.source_mask:
             raise e.SourceMaskUnnecessary
         if self.params.get("control_type") in ["normal", "mlsd", "hough"] and any(
-            model_reference.get_model_baseline(model_name).startswith("stable diffusion 2") for model_name in self.args.models
+            model_reference.get_model_baseline(model_name).startswith("stable_diffusion_2") for model_name in self.args.models
         ):
             raise e.UnsupportedModel("No current model available for this particular ControlNet for SD2.x", rc="ControlNetUnsupported")
         if "control_type" in self.params and any(model_name in ["pix2pix"] for model_name in self.args.models):
@@ -154,7 +154,7 @@ class ImageAsyncGenerate(GenerateTemplate):
         if any(model_reference.get_model_baseline(model_name).startswith("stable_cascade") for model_name in self.args.models):
             if "control_type" in self.params:
                 raise e.BadRequest("ControlNet does not work with Stable Cascade currently.", rc="ControlNetMismatch")
-        if any(model_reference.get_model_baseline(model_name).startswith("flux_1") for model_name in self.args.models):
+        if any(model_reference.get_model_baseline(model_name).startswith("flux") for model_name in self.args.models):
             if "control_type" in self.params:
                 raise e.BadRequest("ControlNet does not work with Flux currently.", rc="ControlNetMismatch")
         if self.params.get("transparent", False) is True:
@@ -606,10 +606,13 @@ class ImageJobPop(JobPopTemplate):
         # TODO: self.args is set on the extending methods.
         # When ImageJobPopSingle is removed, I'll merge back into one method
         self.args = parsers.job_pop_parser.parse_args()
+        logger.warning(f"🔧 POP REQUEST: amount={self.args.amount}, worker={self.args.name}")
         self.blacklist = []
         if self.args.blacklist:
             self.blacklist = self.args.blacklist
         post_ret, retcode = super().post()
+        if post_ret.get("ids"):
+            logger.warning(f"🔧 POP RESPONSE: batch_size={post_ret.get('payload', {}).get('batch_size')}, ids_count={len(post_ret.get('ids', []))}")
         if "ids" not in post_ret or len(post_ret["ids"]) == 0:
             db_skipped = database.count_skipped_image_wp(
                 self.worker,
