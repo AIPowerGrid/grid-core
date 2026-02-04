@@ -6,7 +6,7 @@ SPDX-FileCopyrightText: 2026 AI Power Grid
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 
-# AIPG — The Grid
+# AI Power Grid - Decentralized AI Worker Network - The Grid
 
 Community-powered AI generation backend. Users submit jobs; workers run models; the Grid coordinates. Image (Stable Diffusion, FLUX, etc.) and text (LLM) generation via REST API.
 
