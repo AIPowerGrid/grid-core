@@ -4,13 +4,19 @@
 
 import base64
 from io import BytesIO
+from pathlib import Path
 
 import requests
 from PIL import Image
 
 
 def load_image_as_b64(image_path):
-    final_src_img = Image.open(image_path)
+    # Resolve path from repo root so it works in CI regardless of cwd
+    p = Path(image_path)
+    if not p.is_absolute():
+        repo_root = Path(__file__).resolve().parent.parent
+        p = repo_root / image_path
+    final_src_img = Image.open(p)
     buffer = BytesIO()
     final_src_img.save(buffer, format="Webp", quality=50, exact=True)
     return base64.b64encode(buffer.getvalue()).decode("utf8")

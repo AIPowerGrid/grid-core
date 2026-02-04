@@ -7,7 +7,8 @@ import time
 
 import requests
 
-TEST_MODELS = ["Fustercluck", "AlbedoBase XL (SDXL)"]
+# Use models that exist in blockchain model ref (CI fetches from chain; no custom models in runner)
+TEST_MODELS = ["stable_diffusion", "SDXL 1.0"]
 
 
 def test_simple_image_gen(api_key: str, HORDE_URL: str, CIVERSION: str) -> None:

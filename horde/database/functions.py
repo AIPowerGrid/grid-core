@@ -1045,15 +1045,6 @@ def count_skipped_image_wp(worker, models_list=None, blacklist=None, priority_us
         if skipped_models > 0:
             ret_dict["models"] = skipped_models
 
-        # Count how many jobs exist for our models (helps debug when jobs exist but aren't matched)
-        matching_model_jobs = open_wp_list.filter(
-            or_(
-                func.lower(WPModels.model).in_(models_list_lower),
-                WPModels.id.is_(None),
-            ),
-        ).count()
-        if matching_model_jobs > 0:
-            ret_dict["_debug_matching_model_jobs"] = matching_model_jobs
     skipped_workers = open_wp_list.filter(
         or_(
             WPAllowedWorkers.id != None,  # noqa E712

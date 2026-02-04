@@ -1,35 +1,20 @@
 # SPDX-FileCopyrightText: 2022 Konstantinos Thoukydidis <mail@dbzer0.com>
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# DEPRECATED: This module is unused in production. All code imports
+# model_reference_blockchain instead. Kept for fallback/tests only.
 
 import os
-from datetime import datetime
 
 import requests
 
 from horde.logger import logger
 from horde.threads import PrimaryTimedFunction
 
-# This prints at import time to verify code version
-print("[MODEL_REFERENCE] Module loading - version 2024-12-24-v3")
-logger.warning("[MODEL_REFERENCE] Module imported - code version 2024-12-24-v3")
 
-
-def write_debug_log(message: str):
-    """Write debug info to a file for troubleshooting.
-
-    Writes to model_reference_debug.log in the same directory as horde.log
-    (the current working directory when the app runs).
-    """
-    try:
-        # Write to current working directory (same as horde.log)
-        log_path = "model_reference_debug.log"
-        with open(log_path, "a") as f:
-            f.write(f"{datetime.utcnow().isoformat()} - {message}\n")
-        # Also print to stdout/stderr to ensure visibility
-        print(f"[MODEL_REF_DEBUG] {message}")
-    except Exception as e:
-        print(f"[MODEL_REFERENCE] Could not write debug log to {log_path}: {e}")
+def write_debug_log(message: str) -> None:
+    """No-op; kept for compatibility. Use logger if debugging."""
 
 
 class ModelReference(PrimaryTimedFunction):
@@ -249,12 +234,3 @@ class ModelReference(PrimaryTimedFunction):
 
 model_reference = ModelReference(3600, None)
 model_reference.call_function()
-
-# Log final state after initialization
-write_debug_log("=== INIT COMPLETE ===")
-write_debug_log(f"Total models recognized: {len(model_reference.stable_diffusion_names)}")
-write_debug_log(f"All models: {list(model_reference.stable_diffusion_names)}")
-print(f"[MODEL_REFERENCE] Init complete. {len(model_reference.stable_diffusion_names)} models recognized")
-print(f"[MODEL_REFERENCE] Models: {list(model_reference.stable_diffusion_names)[:10]}...")
-logger.warning(f"[MODEL_REFERENCE] Init complete. {len(model_reference.stable_diffusion_names)} models recognized")
-logger.warning(f"[MODEL_REFERENCE] Sample models: {list(model_reference.stable_diffusion_names)[:10]}")
