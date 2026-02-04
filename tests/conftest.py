@@ -8,6 +8,21 @@ import pytest
 import requests
 
 
+class _MaskedApiKey:
+    """Wraps API key so pytest/CI never prints it in parameter display or logs."""
+
+    __slots__ = ("_key",)
+
+    def __init__(self, key: str) -> None:
+        self._key = key
+
+    def __repr__(self) -> str:
+        return "<api_key redacted>"
+
+    def __str__(self) -> str:
+        return self._key
+
+
 @pytest.fixture(scope="session")
 def CIVERSION() -> str:
     return "0.1.1"
@@ -19,10 +34,10 @@ def HORDE_URL() -> str:
 
 
 @pytest.fixture(scope="session")
-def api_key() -> str:
+def api_key() -> _MaskedApiKey:
     key_file = pathlib.Path(__file__).parent / "apikey.txt"
     if key_file.exists():
-        return key_file.read_text().strip()
+        return _MaskedApiKey(key_file.read_text().strip())
 
     raise ValueError("No api key file found")
 

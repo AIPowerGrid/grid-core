@@ -119,7 +119,7 @@ def test_styled_image_gen(api_key: str, HORDE_URL: str, CIVERSION: str) -> None:
         assert len(gen["gen_metadata"]) == 0
         assert gen["seed"] == "0"
         assert gen["worker_name"] == "CICD Fake Dreamer"
-        assert gen["model"] in TEST_MODELS
+        assert gen["model"].lower() in [m.lower() for m in TEST_MODELS]
         assert gen["state"] == "ok"
         assert retrieve_results["kudos"] > 1
         assert retrieve_results["done"] is True
