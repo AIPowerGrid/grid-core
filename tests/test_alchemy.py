@@ -6,7 +6,7 @@ import requests
 
 
 def test_simple_alchemy(api_key: str, HORDE_URL: str, CIVERSION: str) -> None:
-    headers = {"apikey": api_key, "Client-Agent": f"aihorde_ci_client:{CIVERSION}:(discord)db0#1625"}  # ci/cd user
+    headers = {"apikey": str(api_key), "Client-Agent": f"aihorde_ci_client:{CIVERSION}:(discord)db0#1625"}  # ci/cd user
     async_dict = {
         "forms": [
             {"name": "caption"},

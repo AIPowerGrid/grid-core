@@ -11,7 +11,7 @@ TEST_MODELS = ["stable_diffusion", "SDXL 1.0"]
 
 def test_styled_image_gen(api_key: str, HORDE_URL: str, CIVERSION: str) -> None:
     print("test_styled_image_gen")
-    headers = {"apikey": api_key, "Client-Agent": f"aihorde_ci_client:{CIVERSION}:(discord)db0#1625"}  # ci/cd user
+    headers = {"apikey": str(api_key), "Client-Agent": f"aihorde_ci_client:{CIVERSION}:(discord)db0#1625"}  # ci/cd user
     style_dict = {
         "name": "impasto test",
         "info": "impasto test",

@@ -8,7 +8,7 @@ TEST_MODELS = ["elinas/chronos-70b-v2"]
 
 
 def test_simple_text_gen(api_key: str, HORDE_URL: str, CIVERSION: str) -> None:
-    headers = {"apikey": api_key, "Client-Agent": f"aihorde_ci_client:{CIVERSION}:(discord)db0#1625"}  # ci/cd user
+    headers = {"apikey": str(api_key), "Client-Agent": f"aihorde_ci_client:{CIVERSION}:(discord)db0#1625"}  # ci/cd user
     async_dict = {
         "prompt": "a horde of cute stable robots in a sprawling server room repairing a massive mainframe",
         "trusted_workers": True,
