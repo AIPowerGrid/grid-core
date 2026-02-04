@@ -6,7 +6,8 @@ pytest==8.0.2
 black==24.4.2
 ruff==0.4.2
 tox~=4.14.1
-horde_sdk>=0.7.29
+# AIPowerGrid grid-sdk; sync with core API
+git+https://github.com/AIPowerGrid/grid-sdk.git
 
 pytest-asyncio
 reuse
