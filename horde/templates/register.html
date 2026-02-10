@@ -1,375 +1,411 @@
 <!--
 SPDX-FileCopyrightText: 2022 Konstantinos Thoukydidis <mail@dbzer0.com>
+SPDX-FileCopyrightText: 2026 AI Power Grid
 
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
-
 {% extends "master.html" %}
 {% block content %}
-
-<div class="register-page">
-    <!-- Hero Section -->
-    <div class="hero-section">
-        <div class="logo-container">
-            <img src="https://aipowergrid.io/logo.png" alt="AI Power Grid Logo" class="hero-logo" onerror="this.style.display='none'">
-        </div>
-        <h1>Join AI Power Grid</h1>
-        <p class="hero-subtitle">Access powerful AI models through our decentralized inference network</p>
-    </div>
-
-    <!-- Features Grid -->
-    <div class="features-grid">
-        <div class="feature-card">
-            <div class="feature-icon">&#9889;</div>
-            <h4>Fast Generation</h4>
-            <p>Distributed workers for rapid AI inference</p>
-        </div>
-        <div class="feature-card">
-            <div class="feature-icon">&#128274;</div>
-            <h4>Free to Use</h4>
-            <p>No credit card or payment required</p>
-        </div>
-        <div class="feature-card">
-            <div class="feature-icon">&#127760;</div>
-            <h4>Open Source</h4>
-            <p>Community-driven and transparent</p>
-        </div>
-    </div>
-
-    {% if oauth_id is none and pseudonymous is false %}
-    <!-- OAuth Login Section -->
-    <div class="auth-section">
-        <h2>Sign In to Get Started</h2>
-        <p class="auth-subtitle">Choose your preferred sign-in method</p>
-        
-        <div class="oauth-buttons">
-            <a href="/google/register" class="login-btn google-btn">
-                <div class="login-icon-wrapper">
-                    <img class="login-icon" src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" alt="Google"/>
-                </div>
-                <p class="btn-text">Sign in with Google</p>
-            </a>
-            <a href="/discord/register" class="login-btn discord-btn">
-                <div class="login-icon-wrapper">
-                    <img class="login-icon" src="https://assets-global.website-files.com/6257adef93867e50d84d30e2/62595384e89d1d54d704ece7_3437c10597c1526c3dbd98c737c2bcae.svg" alt="Discord" style="filter: brightness(0) invert(1);"/>
-                </div>
-                <p class="btn-text">Sign in with Discord</p>
-            </a>
-            <a href="/github/register" class="login-btn github-btn">
-                <div class="login-icon-wrapper">
-                    <img class="login-icon" src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" alt="GitHub" style="filter: brightness(0) invert(1);"/>
-                </div>
-                <p class="btn-text">Sign in with GitHub</p>
-            </a>
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- Registration Form -->
-    <div class="form-section">
-        {% if oauth_id is not none and pseudonymous is not true %}
-        <div class="welcome-banner">
-            <h2>{{ welcome }}</h2>
-            <p>You're signed in! Set your display name below to complete registration.</p>
-        </div>
-        {% else %}
-        <div class="warning-section">
-            <div class="alert alert-warning">
-                <strong>&#9888; Not Logged In</strong>
-            </div>
-            <p>You can create an account without signing in, but:</p>
-            <ul class="warning-list">
-                <li>Your API key cannot be recovered if lost</li>
-                <li>No way to reset or maintain your account</li>
-                <li>We recommend signing in above first!</li>
-            </ul>
-        </div>
-        {% endif %}
-
-        <div class="alert alert-info">
-            <strong>&#128161; Note:</strong> This is a volunteer-run service. Image generation is always free!
-        </div>
-
-        <form method="POST" id="main-form" class="register-form">
-            <div class="form-group">
-                <label for="username">Display Name</label>
-                {% if username is none %}
-                <input type="text" class="form-control" id="username" name="username" placeholder="Choose a display name" required>
-                {% else %}
-                <input type="text" class="form-control" id="username" name="username" placeholder="Choose a display name" value="{{ username }}" required>
-                {% endif %}
-                <span class="form-hint">This will be visible to others. Pick something memorable!</span>
-            </div>
-            <script>
-                function onSubmit(token) {
-                  document.getElementById("main-form").submit();
-                }
-            </script>
-            <button type="submit" class="btn submit-btn g-recaptcha" data-sitekey="{{ recaptcha_site }}" data-callback='onSubmit' data-action='submit'>
-                Create Account
-            </button>
-        </form>
-
-        {% if api_key is not none %}
-        <div class="api-key-section">
-            <div class="success-banner">
-                <h3>&#127881; Success! Your API Key</h3>
-            </div>
-            <p class="key-warning">Save this key now - it will not be shown again!</p>
-            <code class="api-key-display">{{ api_key }}</code>
-            <button class="copy-btn" onclick="navigator.clipboard.writeText('{{ api_key }}'); this.textContent='Copied!';">
-                Copy to Clipboard
-            </button>
-            <p class="key-info">Use this key in your API requests to authenticate.</p>
-        </div>
-        {% endif %}
-
-        <div class="privacy-section">
-            <h4>Privacy</h4>
-            <p>We only store your unique ID for authentication. Your data is never shared or used for other purposes.</p>
-        </div>
-    </div>
-
-    <!-- Navigation -->
-    <div class="nav-section">
-        <a href="/" class="back-link">&#8592; Back to API Dashboard</a>
-    </div>
-</div>
-
 <style>
-    .register-page {
-        max-width: 700px;
-        margin: 0 auto;
-    }
+  .reg {
+    max-width: 440px;
+    margin: 3rem auto;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 2rem 1.75rem;
+  }
 
-    .hero-section {
-        text-align: center;
-        margin-bottom: 2.5rem;
-        padding: 2rem 0;
-    }
+  .reg h1 {
+    font-size: 1.5rem;
+    color: #f0f6fc;
+    font-weight: 600;
+    text-align: center;
+    margin: 0 0 0.25rem 0;
+    background: none;
+    -webkit-text-fill-color: #f0f6fc;
+  }
 
-    .logo-container {
-        margin-bottom: 1.5rem;
-    }
+  .reg .sub {
+    text-align: center;
+    color: #8b949e;
+    font-size: 0.85rem;
+    margin: 0 0 1.75rem 0;
+  }
 
-    .hero-logo {
-        width: 80px;
-        height: 80px;
-        border-radius: 16px;
-        box-shadow: 0 8px 32px rgba(88, 166, 255, 0.3);
-    }
+  /* ── OAuth ── */
+  .reg .oauth-label {
+    font-size: 0.7rem;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    text-align: center;
+    margin: 0 0 0.6rem 0;
+    font-weight: 600;
+  }
 
-    .hero-subtitle {
-        color: #8b949e;
-        font-size: 1.15rem;
-        margin-top: 0.5rem;
-    }
+  .oauth-row {
+    display: flex;
+    gap: 0.5rem;
+  }
 
-    .features-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 1rem;
-        margin-bottom: 2.5rem;
-    }
+  .oauth-row a {
+    flex: 1;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 40px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff !important;
+    text-decoration: none !important;
+    transition: opacity 0.15s;
+  }
 
-    @media (max-width: 600px) {
-        .features-grid {
-            grid-template-columns: 1fr;
-        }
-    }
+  .oauth-row a:hover { opacity: 0.85; }
 
-    .feature-card {
-        background: rgba(22, 27, 34, 0.6);
-        border: 1px solid #30363d;
-        border-radius: 12px;
-        padding: 1.25rem;
-        text-align: center;
-        transition: all 0.3s ease;
-    }
+  .oauth-row a svg { width: 18px; height: 18px; flex-shrink: 0; }
 
-    .feature-card:hover {
-        border-color: #58a6ff;
-        transform: translateY(-2px);
-    }
+  .o-google  { background: #4285f4; }
+  .o-discord { background: #5865f2; }
+  .o-github  { background: #24292e; border: 1px solid #30363d; }
+  /* ── Wallet section ── */
+  .wallet-section {
+    margin-top: 1rem;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+  }
 
-    .feature-icon {
-        font-size: 1.75rem;
-        margin-bottom: 0.5rem;
-    }
+  .wallet-section a {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 40px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #f7931a, #e2720a);
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff !important;
+    text-decoration: none !important;
+    transition: opacity 0.15s;
+  }
 
-    .feature-card h4 {
-        color: #f0f6fc;
-        font-size: 0.95rem;
-        margin: 0 0 0.25rem 0;
-    }
+  .wallet-section a:hover { opacity: 0.85; }
+  .wallet-section a svg { width: 18px; height: 18px; flex-shrink: 0; }
 
-    .feature-card p {
-        color: #8b949e;
-        font-size: 0.8rem;
-        margin: 0;
-    }
+  .wallet-tiers {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.6rem;
+  }
 
-    .auth-section {
-        background: rgba(22, 27, 34, 0.6);
-        border: 1px solid #30363d;
-        border-radius: 16px;
-        padding: 2rem;
-        margin-bottom: 2rem;
-        text-align: center;
-    }
+  .wallet-tier {
+    flex: 1;
+    text-align: center;
+    padding: 0.5rem 0.25rem;
+    border-radius: 6px;
+    background: #161b22;
+    border: 1px solid #21262d;
+  }
 
-    .auth-section h2 {
-        margin-top: 0;
-        font-size: 1.5rem;
-    }
+  .wallet-tier .tier-kudos {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #f7931a;
+  }
 
-    .auth-subtitle {
-        color: #8b949e;
-        margin-bottom: 1.5rem;
-    }
+  .wallet-tier .tier-desc {
+    font-size: 0.7rem;
+    color: #8b949e;
+    margin-top: 0.15rem;
+  }
 
-    .oauth-buttons {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 0.75rem;
-    }
+  /* ── Divider ── */
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 1.25rem 0;
+    font-size: 0.75rem;
+    color: #484f58;
+  }
 
-    .form-section {
-        background: rgba(22, 27, 34, 0.6);
-        border: 1px solid #30363d;
-        border-radius: 16px;
-        padding: 2rem;
-        margin-bottom: 2rem;
-    }
+  .divider::before,
+  .divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #21262d;
+  }
 
-    .welcome-banner {
-        text-align: center;
-        margin-bottom: 1.5rem;
-    }
+  /* ── Form ── */
+  .reg label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #c9d1d9;
+    margin: 0 0 0.35rem 0;
+  }
 
-    .welcome-banner h2 {
-        margin-top: 0;
-        color: #58a6ff;
-    }
+  .reg input[type="text"] {
+    width: 100%;
+    padding: 9px 12px;
+    background: #0d1117 !important;
+    border: 1px solid #30363d !important;
+    border-radius: 8px;
+    color: #c9d1d9 !important;
+    font-size: 14px;
+    box-shadow: none !important;
+    -webkit-box-shadow: none !important;
+    transition: border-color 0.15s;
+    box-sizing: border-box;
+  }
 
-    .warning-section {
-        margin-bottom: 1.5rem;
-    }
+  .reg input[type="text"]:focus {
+    outline: none;
+    border-color: #58a6ff !important;
+    box-shadow: 0 0 0 2px rgba(88,166,255,0.15) !important;
+  }
 
-    .warning-list {
-        color: #8b949e;
-        padding-left: 1.5rem;
-        margin: 0.5rem 0;
-    }
+  .reg input[type="text"]::placeholder { color: #484f58; }
 
-    .warning-list li {
-        margin: 0.25rem 0;
-    }
+  .reg .hint {
+    font-size: 0.75rem;
+    color: #484f58;
+    margin: 0.25rem 0 0 0;
+  }
 
-    .register-form {
-        margin: 1.5rem 0;
-    }
+  .reg .submit-btn {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    margin-top: 0.85rem;
+    background: #238636 !important;
+    border: 1px solid rgba(240,246,252,0.1) !important;
+    border-radius: 8px;
+    color: #fff !important;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
 
-    .form-hint {
-        display: block;
-        color: #8b949e;
-        font-size: 0.85rem;
-        margin-top: 0.5rem;
-    }
+  .reg .submit-btn:hover { background: #2ea043 !important; }
 
-    .submit-btn {
-        width: 100%;
-        padding: 14px 24px;
-        font-size: 1.1rem;
-    }
+  /* ── API key result ── */
+  .reg .result { text-align: center; }
 
-    .api-key-section {
-        margin-top: 2rem;
-        padding: 1.5rem;
-        background: rgba(46, 160, 67, 0.1);
-        border: 1px solid rgba(46, 160, 67, 0.4);
-        border-radius: 12px;
-        text-align: center;
-    }
+  .reg .result h2 {
+    font-size: 1.15rem;
+    color: #3fb950;
+    font-weight: 600;
+    margin: 0 0 0.4rem 0;
+    text-align: center;
+  }
 
-    .success-banner h3 {
-        color: #3fb950;
-        margin: 0 0 1rem 0;
-    }
+  .reg .result .warn {
+    color: #d29922;
+    font-size: 0.85rem;
+    margin: 0 0 0.85rem 0;
+  }
 
-    .key-warning {
-        color: #f0883e;
-        font-weight: 600;
-        margin-bottom: 1rem;
-    }
+  .key-box {
+    display: flex;
+    align-items: center;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 8px 10px;
+    gap: 6px;
+    margin: 0 0 0.75rem 0;
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+  }
 
-    .api-key-display {
-        display: block;
-        padding: 1rem;
-        margin: 1rem 0;
-        background: rgba(13, 17, 23, 0.9);
-        border: 1px solid #30363d;
-        border-radius: 8px;
-        word-break: break-all;
-        font-size: 1rem;
-        color: #58a6ff;
-    }
+  .key-box .kt {
+    flex: 1;
+    color: #c9d1d9;
+    font-size: 0.85rem;
+    word-break: break-all;
+    text-align: left;
+    user-select: none;
+  }
 
-    .copy-btn {
-        padding: 10px 20px;
-        background: #238636;
-        border: none;
-        border-radius: 8px;
-        color: #fff;
-        font-size: 0.95rem;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.2s ease;
-    }
+  .key-box button {
+    background: #21262d !important;
+    border: 1px solid #30363d !important;
+    border-radius: 6px;
+    color: #8b949e !important;
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    font-family: inherit;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
 
-    .copy-btn:hover {
-        background: #2ea043;
-    }
+  .key-box button:hover {
+    color: #c9d1d9 !important;
+    border-color: #484f58 !important;
+  }
 
-    .key-info {
-        color: #8b949e;
-        font-size: 0.9rem;
-        margin-top: 1rem;
-        margin-bottom: 0;
-    }
+  .key-box button.ok {
+    color: #3fb950 !important;
+    border-color: #3fb950 !important;
+  }
 
-    .privacy-section {
-        margin-top: 2rem;
-        padding-top: 1.5rem;
-        border-top: 1px solid #30363d;
-    }
+  .reg .result .note {
+    font-size: 0.8rem;
+    color: #8b949e;
+    margin: 0 0 1rem 0;
+  }
 
-    .privacy-section h4 {
-        color: #f0f6fc;
-        margin: 0 0 0.5rem 0;
-    }
+  .reg .result .note code {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 0.8em;
+    color: #c9d1d9;
+  }
 
-    .privacy-section p {
-        color: #8b949e;
-        font-size: 0.9rem;
-        margin: 0;
-    }
+  .reg .result .links {
+    font-size: 0.85rem;
+  }
 
-    .nav-section {
-        text-align: center;
-        margin: 2rem 0;
-    }
+  .reg .result .links a { color: #58a6ff; margin: 0 0.35rem; }
 
-    .back-link {
-        color: #58a6ff;
-        font-size: 1rem;
-        transition: all 0.2s ease;
-    }
+  /* ── Alert ── */
+  .reg .alert {
+    border-radius: 8px;
+    font-size: 0.85rem;
+    margin: 0 0 1.25rem 0;
+    padding: 8px 12px;
+    background: rgba(210, 153, 34, 0.1);
+    border: 1px solid rgba(210, 153, 34, 0.3);
+    color: #d29922;
+  }
 
-    .back-link:hover {
-        color: #8b5cf6;
-    }
+  /* ── Footer ── */
+  .reg .foot {
+    text-align: center;
+    margin-top: 1.25rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid #21262d;
+    font-size: 0.78rem;
+    color: #484f58;
+  }
+
+  .reg .foot a { color: #8b949e; margin: 0 0.35rem; }
+  .reg .foot a:hover { color: #58a6ff; }
+
+  /* ── Mobile ── */
+  @media (max-width: 480px) {
+    .reg { margin: 1rem auto; padding: 1.5rem 1.25rem; }
+    .oauth-row { flex-direction: column; }
+  }
 </style>
 
+<div class="reg">
+  <h1>Join the Grid</h1>
+  <p class="sub">Get an API key for {{ horde_title }}</p>
+
+  {% if error %}
+  <div class="alert" role="alert">{{ error }}</div>
+  {% endif %}
+
+  {% if api_key %}
+  <div class="result">
+    <h2>API Key Created</h2>
+    <p class="warn">Save it now — you won't see it again.</p>
+    <div class="key-box" autocomplete="off">
+      <span class="kt" id="kd"></span>
+      <button type="button" id="tb">Show</button>
+      <button type="button" id="cb">Copy</button>
+    </div>
+    <p class="note">Use as the <code>apikey</code> header when calling the API.</p>
+    <div class="links">
+      <a href="{{ horde_url }}/api">API docs</a>
+      <span style="color:#30363d">&middot;</span>
+      <a href="{{ horde_url }}/register">New key</a>
+    </div>
+  </div>
+  <script>
+  (function(){
+    var k={{ api_key|tojson }},
+        m=k.slice(0,4)+Array(Math.max(0,k.length-7)).join('\u2022')+k.slice(-4),
+        r=false,
+        d=document.getElementById('kd'),
+        t=document.getElementById('tb'),
+        c=document.getElementById('cb');
+    d.textContent=m;
+    t.addEventListener('click',function(){r=!r;d.textContent=r?k:m;t.textContent=r?'Hide':'Show';});
+    c.addEventListener('click',function(){navigator.clipboard.writeText(k).then(function(){c.textContent='Copied!';c.classList.add('ok');setTimeout(function(){c.textContent='Copy';c.classList.remove('ok');},2000);});});
+  })();
+  </script>
+
+  {% else %}
+  <p class="oauth-label">Sign in with</p>
+  <div class="oauth-row">
+    <a href="/google" class="o-google">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+      <span>Google</span>
+    </a>
+    <a href="/discord" class="o-discord">
+      <svg viewBox="0 0 24 24" fill="#fff"><path d="M20.32 4.37a19.8 19.8 0 0 0-4.89-1.52.07.07 0 0 0-.08.04c-.21.38-.45.87-.61 1.25a18.27 18.27 0 0 0-5.49 0 12.64 12.64 0 0 0-.62-1.25.07.07 0 0 0-.08-.04 19.74 19.74 0 0 0-4.89 1.52.07.07 0 0 0-.03.03C1.07 8.42.32 12.33.7 16.2a.08.08 0 0 0 .03.05 19.9 19.9 0 0 0 5.99 3.03.08.08 0 0 0 .08-.03c.46-.63.87-1.3 1.22-2a.08.08 0 0 0-.04-.1 13.1 13.1 0 0 1-1.87-.9.08.08 0 0 1 0-.12c.13-.09.25-.19.37-.29a.07.07 0 0 1 .07-.01c3.93 1.8 8.18 1.8 12.07 0a.07.07 0 0 1 .08.01c.12.1.24.2.37.29a.08.08 0 0 1 0 .12c-.6.35-1.22.65-1.87.9a.08.08 0 0 0-.04.1c.36.7.77 1.37 1.22 2a.07.07 0 0 0 .08.03 19.83 19.83 0 0 0 6-3.03.08.08 0 0 0 .03-.05c.44-4.54-.73-8.49-3.1-11.99a.06.06 0 0 0-.03-.03zM8.02 13.97c-1.04 0-1.89-.95-1.89-2.12s.84-2.12 1.89-2.12c1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.04 0-1.89-.95-1.89-2.12s.84-2.12 1.89-2.12c1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z"/></svg>
+      <span>Discord</span>
+    </a>
+    <a href="/github" class="o-github">
+      <svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2C6.48 2 2 6.48 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.93 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.56 9.56 0 0 1 12 6.8c.85.004 1.71.11 2.51.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.16.59.67.5A10.02 10.02 0 0 0 22 12c0-5.52-4.48-10-10-10z"/></svg>
+      <span>GitHub</span>
+    </a>
+  </div>
+
+  <div class="wallet-section">
+    <a href="/wallet">
+      <svg viewBox="0 0 24 24" fill="#fff"><path d="M21 7H3a1 1 0 0 1-1-1V5a3 3 0 0 1 3-3h13a3 3 0 0 1 3 3v2zM2 9v9a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3V9H2zm14 5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/></svg>
+      <span>Connect AIPG Wallet</span>
+    </a>
+    <div class="wallet-tiers">
+      <div class="wallet-tier">
+        <div class="tier-kudos">+500 kudos</div>
+        <div class="tier-desc">Connect wallet</div>
+      </div>
+      <div class="wallet-tier">
+        <div class="tier-kudos">+2,500 kudos</div>
+        <div class="tier-desc">Hold 10k+ AIPG</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider">or create a pseudonymous account</div>
+
+  <form method="post" action="/register" class="register-form">
+    <div>
+      <label for="username">Username</label>
+      <input type="text"
+             id="username"
+             name="username"
+             placeholder="Choose a username"
+             required
+             maxlength="30"
+             pattern="[A-Za-z0-9_]+"
+             title="Letters, numbers, and underscores only"
+             autocomplete="username"/>
+      <p class="hint">Letters, numbers, and underscores only. Key cannot be recovered if lost.</p>
+    </div>
+    <button type="submit" class="submit-btn">Create API key</button>
+  </form>
+  {% endif %}
+
+  <div class="foot">
+    <a href="{{ horde_url }}/api">API</a>
+    <span>&middot;</span>
+    <a href="{{ horde_url }}/api/v2/documentation">Docs</a>
+  </div>
+</div>
 {% endblock %}

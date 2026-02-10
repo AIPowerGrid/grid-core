@@ -713,9 +713,17 @@ def register():
             user.create()
     if user:
         welcome = f"Welcome back {user.get_unique_alias()}"
+    oauth_available = bool(
+        os.getenv("GOOGLE_CLIENT_ID")
+        or os.getenv("DISCORD_CLIENT_ID")
+        or os.getenv("GITHUB_CLIENT_ID")
+    )
     return render_template(
         "register.html",
         page_title=f"Join the {horde_title}!",
+        horde_title=horde_title,
+        horde_url=horde_url,
+        oauth_available=oauth_available,
         use_recaptcha=use_recaptcha,
         recaptcha_site=os.getenv("RECAPTCHA_SITE_KEY"),
         welcome=welcome,

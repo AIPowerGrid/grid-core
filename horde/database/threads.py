@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 import patreon
 import stripe
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 
 from horde.argparser import args
 from horde.classes.base.user import User
@@ -496,16 +496,17 @@ def monitor_queue_health():
 
         # Query stuck processing_gens
         stuck_query = db.session.execute(
-            f"""
+            text("""
             SELECT
                 model,
                 COUNT(*) as count,
                 EXTRACT(EPOCH FROM (NOW() - MIN(created)))/60 as oldest_minutes
             FROM processing_gens
-            WHERE created < NOW() - INTERVAL '{STUCK_JOB_THRESHOLD_MINUTES} minutes'
+            WHERE created < NOW() - make_interval(mins => :interval_minutes)
             GROUP BY model
             ORDER BY count DESC
-            """,
+            """),
+            {"interval_minutes": STUCK_JOB_THRESHOLD_MINUTES},
         )
 
         stuck_by_model = []
@@ -546,33 +547,34 @@ def monitor_queue_health():
 
             # Delete very old processing_gens
             deleted_pgs = db.session.execute(
-                f"""
+                text("""
                 DELETE FROM processing_gens
-                WHERE created < NOW() - INTERVAL '{AUTO_CLEANUP_THRESHOLD_MINUTES} minutes'
+                WHERE created < NOW() - make_interval(mins => :interval_minutes)
                 RETURNING id
-                """,
+                """),
+                {"interval_minutes": AUTO_CLEANUP_THRESHOLD_MINUTES},
             )
             deleted_pg_count = deleted_pgs.rowcount
 
             # Clean orphaned waiting_prompts (n=0 with no processing_gens)
             db.session.execute(
-                """
+                text("""
                 DELETE FROM wp_models
                 WHERE wp_id IN (
                     SELECT wp.id FROM waiting_prompts wp
                     LEFT JOIN processing_gens pg ON pg.wp_id = wp.id
                     WHERE pg.id IS NULL AND wp.n = 0
                 )
-                """,
+                """),
             )
 
             deleted_wps = db.session.execute(
-                """
+                text("""
                 DELETE FROM waiting_prompts wp
                 WHERE NOT EXISTS (SELECT 1 FROM processing_gens pg WHERE pg.wp_id = wp.id)
                 AND wp.n = 0
                 RETURNING id
-                """,
+                """),
             )
             deleted_wp_count = deleted_wps.rowcount
 
