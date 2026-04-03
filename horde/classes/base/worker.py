@@ -309,12 +309,12 @@ class WorkerTemplate(db.Model):
                 self.modify_kudos(kudos, "uptime")
                 self.user.record_uptime(kudos)
                 logger.debug(
-                    f"Worker '{self.name}' received {kudos} kudos for uptime of {self.uptime_reward_threshold} seconds.",
+                    f"Worker '{self.name}' received {kudos} den for uptime of {self.uptime_reward_threshold} seconds.",
                 )
                 self.last_reward_uptime = self.uptime
         else:
             # If the worker comes back from being stale, we just reset their last_reward_uptime
-            # So that they have to stay up at least 10 mins to get uptime kudos
+            # So that they have to stay up at least 10 mins to get uptime den
             self.last_reward_uptime = self.uptime
             # Notify Discord that worker came back online
             if was_stale:

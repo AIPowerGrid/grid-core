@@ -72,7 +72,7 @@ def assign_monthly_kudos():
         or_conditions.append(User.id.in_(patron_ids))
         users = db.session.query(User).filter(or_(*or_conditions))
         all_users = users.all()
-        logger.info(f"Found {len(all_users)} users with Monthly Kudos Assignment: {[u.id for u in all_users]}")
+        logger.info(f"Found {len(all_users)} users with Monthly Den Assignment: {[u.id for u in all_users]}")
         for user in all_users:
             user.receive_monthly_kudos()
 
@@ -411,7 +411,7 @@ def store_stripe_members():
 
 @logger.catch(reraise=True)
 def increment_extra_priority():
-    """Increases the priority of every WP currently in the queue by 50 kudos"""
+    """Increases the priority of every WP currently in the queue by 50 den"""
     with HORDE.app_context():
         # cutoff_time = datetime.utcnow()
         for wp_class in [ImageWaitingPrompt, TextWaitingPrompt]:

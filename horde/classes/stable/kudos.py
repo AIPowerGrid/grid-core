@@ -238,7 +238,7 @@ class KudosModel:
         If `self.model` is defined, it will be returned instead."""
         if not model_filename and not self.model:
             model_filename = str(pathlib.Path(__file__).parent.joinpath("kudos-v21-206.ckpt").resolve())
-            logger.warning(f"Loading default kudos model {model_filename}")
+            logger.warning(f"Loading default den model {model_filename}")
 
         if self.model:
             return self.model
@@ -270,21 +270,21 @@ if __name__ == "__main__":
 
     kudos_model = KudosModel(sys.argv[1])
 
-    logger.message(f"Kudos basis is {kudos_model.KUDOS_BASIS}")
+    logger.message(f"Den basis is {kudos_model.KUDOS_BASIS}")
     logger.message(f"Time basis is {kudos_model.time_basis} seconds")
 
     # Test the basis job
     job_kudos = kudos_model.calculate_kudos(KudosModel.BASIS_PAYLOAD)
-    logger.message(f"The basis job worth {job_kudos} kudos, " f"expected {KudosModel.KUDOS_BASIS} kudos")
+    logger.message(f"The basis job worth {job_kudos} den, " f"expected {KudosModel.KUDOS_BASIS} den")
 
-    # Test fixed kudos basis adjustment
+    # Test fixed den basis adjustment
     job_kudos = kudos_model.calculate_kudos(KudosModel.BASIS_PAYLOAD, 5)
-    logger.message(f"Adjusting a job by +5 worth {job_kudos}, " f"expected {KudosModel.KUDOS_BASIS+5} kudos")
+    logger.message(f"Adjusting a job by +5 worth {job_kudos}, " f"expected {KudosModel.KUDOS_BASIS+5} den")
 
-    # Test fixed kudos basis adjustment and percentage scaling
+    # Test fixed den basis adjustment and percentage scaling
     job_kudos = kudos_model.calculate_kudos(KudosModel.BASIS_PAYLOAD, 5, 1.25)
     logger.message(
-        f"Adjusting a job by +5 and +25% worth {job_kudos}, " f"expected {(KudosModel.KUDOS_BASIS+5)*1.25} kudos",
+        f"Adjusting a job by +5 and +25% worth {job_kudos}, " f"expected {(KudosModel.KUDOS_BASIS+5)*1.25} den",
     )
 else:
     kudos_model = KudosModel()

@@ -117,7 +117,7 @@ class TextWaitingPrompt(WaitingPrompt):
         return (False, max_tokens, False)
 
     def downgrade(self, max_tokens):
-        """Ensures this WP requirements are not exceeding upfront kudos requirements"""
+        """Ensures this WP requirements are not exceeding upfront den requirements"""
         self.slow_workers = True
         while self.max_length > max_tokens:
             self.max_length = max_tokens

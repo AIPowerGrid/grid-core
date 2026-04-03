@@ -261,7 +261,7 @@ def notify_job_submitted(job_id: str, model: str, worker_name: str, kudos: float
         "timestamp": datetime.utcnow().isoformat(),
     }
     if kudos is not None:
-        embed["fields"].append({"name": "Kudos", "value": f"{kudos:.1f}", "inline": False})
+        embed["fields"].append({"name": "Den", "value": f"{kudos:.1f}", "inline": False})
 
     send_embed(webhook_url, embed)
 

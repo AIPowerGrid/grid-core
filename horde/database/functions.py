@@ -484,7 +484,7 @@ def transfer_kudos(source_user, dest_user, amount):
         transfer_type = "donated"
     source_user.modify_kudos(-amount, transfer_type)
     dest_user.modify_kudos(amount, "received")
-    logger.info(f"{source_user.get_unique_alias()} transfered {amount} kudos to {dest_user.get_unique_alias()}")
+    logger.info(f"{source_user.get_unique_alias()} transferred {amount} den to {dest_user.get_unique_alias()}")
     return [amount, "OK"]
 
 

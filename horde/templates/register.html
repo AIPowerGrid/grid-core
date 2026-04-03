@@ -8,35 +8,41 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 {% block content %}
 <style>
   .reg {
-    max-width: 440px;
+    max-width: 540px;
     margin: 3rem auto;
-    background: #161b22;
-    border: 1px solid #30363d;
-    border-radius: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
     padding: 2rem 1.75rem;
   }
 
+  .reg .logo {
+    display: block;
+    width: 76px;
+    height: 76px;
+    margin: 0 auto 0.75rem auto;
+    border-radius: var(--radius);
+  }
+
   .reg h1 {
-    font-size: 1.5rem;
-    color: #f0f6fc;
-    font-weight: 600;
+    font-size: 1.75rem;
+    color: var(--text);
+    font-weight: 700;
     text-align: center;
     margin: 0 0 0.25rem 0;
-    background: none;
-    -webkit-text-fill-color: #f0f6fc;
   }
 
   .reg .sub {
     text-align: center;
-    color: #8b949e;
-    font-size: 0.85rem;
+    color: var(--text-dim);
+    font-size: 0.95rem;
     margin: 0 0 1.75rem 0;
   }
 
   /* ── OAuth ── */
   .reg .oauth-label {
-    font-size: 0.7rem;
-    color: #8b949e;
+    font-size: 0.78rem;
+    color: var(--text-dim);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     text-align: center;
@@ -51,52 +57,55 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
   .oauth-row a {
     flex: 1;
-    display: flex !important;
+    display: flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    height: 40px;
-    border-radius: 8px;
-    font-size: 13px;
+    height: 46px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
     font-weight: 500;
-    color: #fff !important;
-    text-decoration: none !important;
-    transition: opacity 0.15s;
+    color: var(--text);
+    text-decoration: none;
+    transition: border-color 0.15s, background 0.15s;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
   }
 
-  .oauth-row a:hover { opacity: 0.85; }
+  .oauth-row a:hover {
+    border-color: var(--accent);
+    background: var(--bg-input);
+  }
 
-  .oauth-row a svg { width: 18px; height: 18px; flex-shrink: 0; }
+  .oauth-row a svg { width: 20px; height: 20px; flex-shrink: 0; }
 
-  .o-google  { background: #4285f4; }
-  .o-discord { background: #5865f2; }
-  .o-github  { background: #24292e; border: 1px solid #30363d; }
   /* ── Wallet section ── */
   .wallet-section {
-    margin-top: 1rem;
-    background: #0d1117;
-    border: 1px solid #30363d;
-    border-radius: 8px;
-    padding: 0.85rem 1rem;
+    margin-top: 0.75rem;
   }
 
   .wallet-section a {
-    display: flex !important;
+    display: flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    height: 40px;
-    border-radius: 8px;
-    background: linear-gradient(135deg, #f7931a, #e2720a);
-    font-size: 13px;
+    height: 46px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
     font-weight: 500;
-    color: #fff !important;
-    text-decoration: none !important;
-    transition: opacity 0.15s;
+    color: var(--text);
+    text-decoration: none;
+    transition: border-color 0.15s, background 0.15s;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
   }
 
-  .wallet-section a:hover { opacity: 0.85; }
-  .wallet-section a svg { width: 18px; height: 18px; flex-shrink: 0; }
+  .wallet-section a:hover {
+    border-color: var(--accent);
+    background: var(--bg-input);
+  }
+
+  .wallet-section a svg { width: 20px; height: 20px; flex-shrink: 0; }
 
   .wallet-tiers {
     display: flex;
@@ -107,22 +116,22 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   .wallet-tier {
     flex: 1;
     text-align: center;
-    padding: 0.5rem 0.25rem;
-    border-radius: 6px;
-    background: #161b22;
-    border: 1px solid #21262d;
+    padding: 0.4rem 0.25rem;
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
   }
 
   .wallet-tier .tier-kudos {
     font-size: 0.95rem;
     font-weight: 600;
-    color: #f7931a;
+    color: var(--accent);
   }
 
   .wallet-tier .tier-desc {
-    font-size: 0.7rem;
-    color: #8b949e;
-    margin-top: 0.15rem;
+    font-size: 0.76rem;
+    color: var(--text-dim);
+    margin-top: 0.1rem;
   }
 
   /* ── Divider ── */
@@ -131,8 +140,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     align-items: center;
     gap: 0.75rem;
     margin: 1.25rem 0;
-    font-size: 0.75rem;
-    color: #484f58;
+    font-size: 0.82rem;
+    color: var(--text-dim);
   }
 
   .divider::before,
@@ -140,43 +149,43 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     content: '';
     flex: 1;
     height: 1px;
-    background: #21262d;
+    background: var(--border);
   }
 
   /* ── Form ── */
   .reg label {
     display: block;
-    font-size: 0.85rem;
+    font-size: 0.95rem;
     font-weight: 500;
-    color: #c9d1d9;
+    color: var(--text-label);
     margin: 0 0 0.35rem 0;
   }
 
   .reg input[type="text"] {
     width: 100%;
-    padding: 9px 12px;
-    background: #0d1117 !important;
-    border: 1px solid #30363d !important;
-    border-radius: 8px;
-    color: #c9d1d9 !important;
-    font-size: 14px;
-    box-shadow: none !important;
-    -webkit-box-shadow: none !important;
+    padding: 11px 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-size: 15px;
+    font-family: var(--font);
+    box-shadow: none;
     transition: border-color 0.15s;
     box-sizing: border-box;
   }
 
   .reg input[type="text"]:focus {
     outline: none;
-    border-color: #58a6ff !important;
-    box-shadow: 0 0 0 2px rgba(88,166,255,0.15) !important;
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 2px var(--accent-glow);
   }
 
-  .reg input[type="text"]::placeholder { color: #484f58; }
+  .reg input[type="text"]::placeholder { color: var(--text-dim); }
 
   .reg .hint {
-    font-size: 0.75rem;
-    color: #484f58;
+    font-size: 0.82rem;
+    color: var(--text-dim);
     margin: 0.25rem 0 0 0;
   }
 
@@ -185,109 +194,103 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     width: 100%;
     padding: 10px;
     margin-top: 0.85rem;
-    background: #238636 !important;
-    border: 1px solid rgba(240,246,252,0.1) !important;
-    border-radius: 8px;
-    color: #fff !important;
+    background: var(--accent);
+    border: none;
+    border-radius: var(--radius-sm);
+    color: #fff;
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 600;
+    font-family: var(--font);
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background 0.15s, box-shadow 0.15s;
   }
 
-  .reg .submit-btn:hover { background: #2ea043 !important; }
+  .reg .submit-btn:hover {
+    background: var(--accent-hover);
+    box-shadow: 0 0 20px var(--accent-glow);
+  }
 
   /* ── API key result ── */
   .reg .result { text-align: center; }
 
   .reg .result h2 {
     font-size: 1.15rem;
-    color: #3fb950;
+    color: var(--green);
     font-weight: 600;
     margin: 0 0 0.4rem 0;
     text-align: center;
   }
 
   .reg .result .warn {
-    color: #d29922;
+    color: var(--yellow);
     font-size: 0.85rem;
     margin: 0 0 0.85rem 0;
   }
 
   .key-box {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    background: #0d1117;
-    border: 1px solid #30363d;
-    border-radius: 8px;
-    padding: 8px 10px;
-    gap: 6px;
-    margin: 0 0 0.75rem 0;
-    font-family: 'SF Mono', Monaco, Consolas, monospace;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    gap: 8px;
+    margin: 0 auto 0.75rem auto;
+    font-family: var(--mono);
   }
 
   .key-box .kt {
-    flex: 1;
-    color: #c9d1d9;
-    font-size: 0.85rem;
-    word-break: break-all;
-    text-align: left;
+    color: var(--text);
+    font-size: 1.05rem;
+    letter-spacing: 0.04em;
     user-select: none;
+    white-space: nowrap;
   }
 
   .key-box button {
-    background: #21262d !important;
-    border: 1px solid #30363d !important;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
     border-radius: 6px;
-    color: #8b949e !important;
+    color: var(--text-dim);
     cursor: pointer;
     padding: 4px 8px;
     font-size: 0.75rem;
-    font-family: inherit;
+    font-family: var(--font);
     white-space: nowrap;
     transition: color 0.15s, border-color 0.15s;
   }
 
   .key-box button:hover {
-    color: #c9d1d9 !important;
-    border-color: #484f58 !important;
+    color: var(--text);
+    border-color: var(--accent);
   }
 
   .key-box button.ok {
-    color: #3fb950 !important;
-    border-color: #3fb950 !important;
+    color: var(--green);
+    border-color: var(--green);
   }
 
   .reg .result .note {
     font-size: 0.8rem;
-    color: #8b949e;
+    color: var(--text-dim);
     margin: 0 0 1rem 0;
-  }
-
-  .reg .result .note code {
-    background: #0d1117;
-    border: 1px solid #30363d;
-    border-radius: 4px;
-    padding: 1px 5px;
-    font-size: 0.8em;
-    color: #c9d1d9;
   }
 
   .reg .result .links {
     font-size: 0.85rem;
   }
 
-  .reg .result .links a { color: #58a6ff; margin: 0 0.35rem; }
+  .reg .result .links a { color: var(--accent); margin: 0 0.35rem; }
 
   /* ── Alert ── */
   .reg .alert {
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     font-size: 0.85rem;
     margin: 0 0 1.25rem 0;
     padding: 8px 12px;
-    background: rgba(210, 153, 34, 0.1);
-    border: 1px solid rgba(210, 153, 34, 0.3);
-    color: #d29922;
+    background: var(--yellow-dim);
+    border: 1px solid rgba(251, 191, 36, 0.25);
+    color: var(--yellow);
   }
 
   /* ── Footer ── */
@@ -295,13 +298,13 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     text-align: center;
     margin-top: 1.25rem;
     padding-top: 0.85rem;
-    border-top: 1px solid #21262d;
+    border-top: 1px solid var(--border);
     font-size: 0.78rem;
-    color: #484f58;
+    color: var(--text-dim);
   }
 
-  .reg .foot a { color: #8b949e; margin: 0 0.35rem; }
-  .reg .foot a:hover { color: #58a6ff; }
+  .reg .foot a { color: var(--text-dim); margin: 0 0.35rem; }
+  .reg .foot a:hover { color: var(--accent); }
 
   /* ── Mobile ── */
   @media (max-width: 480px) {
@@ -311,6 +314,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 </style>
 
 <div class="reg">
+  <img src="https://aipowergrid.io/aipg-main.png" alt="AI Power Grid" class="logo"/>
   <h1>Join the Grid</h1>
   <p class="sub">Get an API key for {{ horde_title }}</p>
 
@@ -330,7 +334,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     <p class="note">Use as the <code>apikey</code> header when calling the API.</p>
     <div class="links">
       <a href="{{ horde_url }}/api">API docs</a>
-      <span style="color:#30363d">&middot;</span>
+      <span style="color:var(--border)">&middot;</span>
       <a href="{{ horde_url }}/register">New key</a>
     </div>
   </div>
@@ -372,11 +376,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     </a>
     <div class="wallet-tiers">
       <div class="wallet-tier">
-        <div class="tier-kudos">+500 kudos</div>
+        <div class="tier-kudos">+500 den</div>
         <div class="tier-desc">Connect wallet</div>
       </div>
       <div class="wallet-tier">
-        <div class="tier-kudos">+2,500 kudos</div>
+        <div class="tier-kudos">+2,500 den</div>
         <div class="tier-desc">Hold 10k+ AIPG</div>
       </div>
     </div>
@@ -403,9 +407,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   {% endif %}
 
   <div class="foot">
-    <a href="{{ horde_url }}/api">API</a>
+    <a href="{{ horde_url }}">Home</a>
     <span>&middot;</span>
-    <a href="{{ horde_url }}/api/v2/documentation">Docs</a>
+    <a href="{{ horde_url }}/api">API Docs</a>
   </div>
 </div>
 {% endblock %}

@@ -128,12 +128,12 @@ class InterrogationForms(db.Model):
             kudos_burn += 1
         self.interrogation.record_usage(kudos=self.kudos + kudos_burn)
         logger.info(
-            f"New{cancel_txt} Form {self.id} ({self.name}) worth {self.kudos} kudos, "
+            f"New{cancel_txt} Form {self.id} ({self.name}) worth {self.kudos} den, "
             f"delivered by worker: {self.worker.name} for interrogation {self.interrogation.id}",
         )
 
     def abort(self):
-        """Called when this request needs to be stopped without rewarding kudos. Say because it timed out due to a worker crash"""
+        """Called when this request needs to be stopped without rewarding den. Say because it timed out due to a worker crash"""
         if self.state != State.PROCESSING:
             return
         self.worker.log_aborted_job()
@@ -352,7 +352,7 @@ class Interrogation(db.Model):
         return ret_dict
 
     def record_usage(self, kudos):
-        """Record that we received a requested interrogation and how much kudos it costs us"""
+        """Record that we received a requested interrogation and how much den it costs us"""
         self.user.record_usage(0, kudos, "interrogation")
         self.refresh()
 

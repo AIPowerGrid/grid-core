@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import oauthlib
 import requests
-from flask import redirect, render_template, request, send_from_directory, url_for
+from flask import redirect, render_template, request, send_from_directory, session, url_for
 from flask_dance.contrib.discord import discord
 from flask_dance.contrib.github import github
 from flask_dance.contrib.google import google
@@ -121,9 +121,9 @@ def index():
         image_models_list = "<ul style='list-style: none; padding: 0; margin: 0;'>\n"
         for model in image_models[:10]:  # Show top 10
             image_models_list += (
-                f"<li style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'>"
+                f"<li style='padding: 4px 0; border-bottom: 1px solid var(--border);'>"
                 f"<strong>{model['name']}</strong> "
-                f"<span style='color: #8b949e;'>({model['count']} workers)</span></li>\n"
+                f"<span style='color: var(--text-dim);'>({model['count']} workers)</span></li>\n"
             )
         if len(image_models) > 10:
             image_models_list += (
@@ -131,15 +131,15 @@ def index():
             )
         image_models_list += "</ul>"
         if not image_models:
-            image_models_list = "<p style='color: #8b949e;'>No image models currently available</p>"
+            image_models_list = "<p style='color: var(--text-dim);'>No image models currently available</p>"
 
         # Create text model list as HTML
         text_models_list = "<ul style='list-style: none; padding: 0; margin: 0;'>\n"
         for model in text_models[:10]:  # Show top 10
             text_models_list += (
-                f"<li style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'>"
+                f"<li style='padding: 4px 0; border-bottom: 1px solid var(--border);'>"
                 f"<strong>{model['name']}</strong> "
-                f"<span style='color: #8b949e;'>({model['count']} workers)</span></li>\n"
+                f"<span style='color: var(--text-dim);'>({model['count']} workers)</span></li>\n"
             )
         if len(text_models) > 10:
             text_models_list += (
@@ -147,15 +147,15 @@ def index():
             )
         text_models_list += "</ul>"
         if not text_models:
-            text_models_list = "<p style='color: #8b949e;'>No text models currently available</p>"
+            text_models_list = "<p style='color: var(--text-dim);'>No text models currently available</p>"
 
         # Create video model list as HTML
         video_models_list = "<ul style='list-style: none; padding: 0; margin: 0;'>\n"
         for model in video_models[:10]:  # Show top 10
             video_models_list += (
-                f"<li style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'>"
+                f"<li style='padding: 4px 0; border-bottom: 1px solid var(--border);'>"
                 f"<strong>{model['name']}</strong> "
-                f"<span style='color: #8b949e;'>({model['count']} workers)</span></li>\n"
+                f"<span style='color: var(--text-dim);'>({model['count']} workers)</span></li>\n"
             )
         if len(video_models) > 10:
             video_models_list += (
@@ -163,27 +163,27 @@ def index():
             )
         video_models_list += "</ul>"
         if not video_models:
-            video_models_list = "<p style='color: #8b949e;'>No video models currently available</p>"
+            video_models_list = "<p style='color: var(--text-dim);'>No video models currently available</p>"
 
         # Get top models by worker count
         top_models = sorted(available_models, key=lambda x: x.get("count", 0), reverse=True)[:5]
         top_models_list = "<ul style='list-style: none; padding: 0; margin: 0;'>\n"
         for model in top_models:
             top_models_list += (
-                f"<li style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'>"
+                f"<li style='padding: 4px 0; border-bottom: 1px solid var(--border);'>"
                 f"<strong>{model['name']}</strong> "
-                f"<span style='color: #8b949e;'>({model['count']} workers)</span></li>\n"
+                f"<span style='color: var(--text-dim);'>({model['count']} workers)</span></li>\n"
             )
         top_models_list += "</ul>"
         if not top_models:
-            top_models_list = "<p style='color: #8b949e;'>No models currently available</p>"
+            top_models_list = "<p style='color: var(--text-dim);'>No models currently available</p>"
     except Exception as e:
         # Fallback if models can't be loaded
         logger.warning(f"Failed to load models for index page: {e}")
-        image_models_list = "<p style='color: #f85149;'>Unable to load models</p>"
-        text_models_list = "<p style='color: #f85149;'>Unable to load models</p>"
-        video_models_list = "<p style='color: #f85149;'>Unable to load models</p>"
-        top_models_list = "<p style='color: #f85149;'>Unable to load models</p>"
+        image_models_list = "<p style='color: var(--red);'>Unable to load models</p>"
+        text_models_list = "<p style='color: var(--red);'>Unable to load models</p>"
+        video_models_list = "<p style='color: var(--red);'>Unable to load models</p>"
+        top_models_list = "<p style='color: var(--red);'>Unable to load models</p>"
         video_worker_count = 0
 
     findex = index.format(
@@ -232,353 +232,11 @@ def index():
         video_workers=video_worker_count,
     )
 
-    style = """<style>
-        body {
-            background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
-            color: #c9d1d9;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
-            line-height: 1.7;
-            margin: 0;
-            padding: 40px 20px;
-            max-width: 1000px;
-            margin: 0 auto;
-            min-height: 100vh;
-        }
-
-        h1 {
-            color: #f0f6fc;
-            font-weight: 700;
-            font-size: 2.5rem;
-            margin: 0 0 1rem 0;
-            border: none;
-            text-align: center;
-            background: linear-gradient(135deg, #58a6ff, #8b5cf6);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        h2 {
-            color: #f0f6fc;
-            font-weight: 600;
-            font-size: 1.8rem;
-            margin: 0.5rem 0 1rem 0;
-            border-bottom: none;
-            padding-bottom: 0.5rem;
-            position: relative;
-            text-align: center;
-        }
-
-        h3 {
-            color: #f0f6fc;
-            font-weight: 600;
-            font-size: 1.3rem;
-            margin: 2rem 0 1rem 0;
-            border-bottom: none;
-            padding-bottom: 0.5rem;
-            text-align: center;
-        }
-
-        h4, h5, h6 {
-            color: #f0f6fc;
-            font-weight: 600;
-            margin: 1.5rem 0 0.5rem 0;
-            text-align: center;
-        }
-
-        p {
-            margin: 1rem 0;
-            color: #c9d1d9;
-        }
-
-        a {
-            color: #58a6ff;
-            text-decoration: none;
-            transition: all 0.2s ease;
-            border-bottom: 1px solid transparent;
-        }
-
-        a:hover {
-            color: #8b5cf6;
-            border-bottom: 1px solid #8b5cf6;
-            text-decoration: none;
-        }
-
-        code {
-            background: rgba(22, 27, 34, 0.8);
-            border: 1px solid #30363d;
-            border-radius: 6px;
-            padding: 3px 8px;
-            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
-            color: #c9d1d9;
-            font-size: 0.9em;
-            backdrop-filter: blur(10px);
-        }
-
-        pre {
-            background: rgba(22, 27, 34, 0.9);
-            border: 1px solid #30363d;
-            border-radius: 12px;
-            padding: 24px;
-            overflow-x: auto;
-            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
-            margin: 1.5rem 0;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-            backdrop-filter: blur(10px);
-        }
-
-        pre code {
-            background: none;
-            border: none;
-            padding: 0;
-            color: #c9d1d9;
-        }
-
-        hr {
-            border: none;
-            border-top: 1px solid #30363d;
-            margin: 3rem 0;
-            position: relative;
-        }
-
-        hr::after {
-            content: '';
-            position: absolute;
-            top: -1px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 100px;
-            height: 1px;
-            background: linear-gradient(90deg, transparent, #58a6ff, transparent);
-        }
-
-        ul, ol {
-            padding-left: 1.5rem;
-            margin: 1rem 0;
-        }
-
-        li {
-            margin: 0.5rem 0;
-            color: #c9d1d9;
-        }
-
-        strong {
-            color: #f0f6fc;
-            font-weight: 600;
-        }
-
-        blockquote {
-            background: rgba(22, 27, 34, 0.5);
-            border-left: 4px solid #58a6ff;
-            margin: 1.5rem 0;
-            padding: 1rem 1.5rem;
-            border-radius: 0 8px 8px 0;
-            font-style: italic;
-            color: #8b949e;
-        }
-
-        .highlight {
-            background: linear-gradient(135deg, rgba(88, 166, 255, 0.1), rgba(139, 92, 246, 0.1));
-            border: 1px solid rgba(88, 166, 255, 0.2);
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin: 1.5rem 0;
-        }
-
-        .card {
-            background: rgba(22, 27, 34, 0.6);
-            border: 1px solid #30363d;
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin: 1.5rem 0;
-            transition: all 0.3s ease;
-            backdrop-filter: blur(10px);
-        }
-
-        .card:hover {
-            border-color: #58a6ff;
-            box-shadow: 0 8px 32px rgba(88, 166, 255, 0.1);
-            transform: translateY(-2px);
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 1.5rem;
-            margin: 2rem 0;
-        }
-
-        .grid-2 {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 1.5rem;
-            margin: 2rem 0;
-        }
-
-        .stat {
-            background: rgba(22, 27, 34, 0.7);
-            border: 1px solid #30363d;
-            border-radius: 12px;
-            padding: 1.5rem;
-            text-align: center;
-            transition: all 0.3s ease;
-            backdrop-filter: blur(10px);
-        }
-
-        .stat:hover {
-            border-color: #8b5cf6;
-            transform: translateY(-2px);
-        }
-
-        .stat-value {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: #58a6ff;
-            margin-bottom: 0.5rem;
-        }
-
-        .stat-label {
-            color: #8b949e;
-            font-size: 0.9rem;
-        }
-
-        details {
-            margin: 1rem 0;
-            border: 1px solid #30363d;
-            border-radius: 8px;
-            background: rgba(22, 27, 34, 0.5);
-        }
-
-        details summary {
-            padding: 1rem;
-            cursor: pointer;
-            font-weight: 600;
-            color: #f0f6fc;
-            background: rgba(22, 27, 34, 0.8);
-            border-radius: 8px 8px 0 0;
-            transition: background-color 0.2s ease;
-        }
-
-        details summary:hover {
-            background: rgba(22, 27, 34, 0.9);
-        }
-
-        details[open] summary {
-            border-bottom: 1px solid #30363d;
-            border-radius: 8px 8px 0 0;
-        }
-
-        .model-list {
-            padding: 1rem;
-            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
-            font-size: 0.9rem;
-            line-height: 1.6;
-            color: #c9d1d9;
-            background: rgba(22, 27, 34, 0.3);
-            border-radius: 0 0 8px 8px;
-        }
-
-        .model-list ul {
-            margin: 0;
-            padding-left: 1rem;
-        }
-
-        .model-list li {
-            margin: 0.3rem 0;
-            padding: 0.2rem 0;
-        }
-
-        @media (max-width: 768px) {
-            body {
-                padding: 20px 15px;
-            }
-
-            h1 {
-                font-size: 2rem;
-            }
-
-            h2 {
-                font-size: 1.5rem;
-            }
-
-            .grid {
-                grid-template-columns: 1fr;
-            }
-
-            .grid-2 {
-                grid-template-columns: 1fr;
-            }
-
-            details summary {
-                padding: 0.8rem;
-                font-size: 0.9rem;
-            }
-
-                        .model-list {
-                padding: 0.8rem;
-                font-size: 0.8rem;
-            }
-        }
-
-        .logo-section {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-
-        .logo {
-            max-width: 100px;
-            height: auto;
-            margin-bottom: 0.5rem;
-        }
-
-        .cta-section {
-            text-align: center;
-            margin: 2.5rem 0;
-            padding: 2rem;
-            background: linear-gradient(135deg, rgba(88, 166, 255, 0.1), rgba(139, 92, 246, 0.1));
-            border: 1px solid rgba(88, 166, 255, 0.3);
-            border-radius: 16px;
-        }
-
-        .cta-button {
-            display: inline-block;
-            padding: 16px 40px;
-            background: linear-gradient(135deg, #58a6ff, #8b5cf6);
-            color: #fff !important;
-            font-size: 1.2rem;
-            font-weight: 700;
-            text-decoration: none !important;
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 20px rgba(88, 166, 255, 0.3);
-        }
-
-        .cta-button:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 30px rgba(88, 166, 255, 0.4);
-            color: #fff !important;
-            border-bottom: none !important;
-        }
-
-        .cta-subtext {
-            color: #8b949e;
-            font-size: 0.95rem;
-            margin-top: 1rem;
-            margin-bottom: 0;
-        }
-        </style>
-    """
-
-    head = f"""<head>
-    <title>{horde_title}</title>
-    <meta name="google-site-verification" content="{google_verification_string}" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    {style}
-    </head>
-    """
-    return head + markdown(findex + policies)
+    return render_template(
+        "index.html",
+        page_title=horde_title,
+        content=markdown(findex + policies),
+    )
 
 
 @HORDE.route("/sponsors")
@@ -754,7 +412,7 @@ def transfer():
         amount = request.form["amount"]
         if not amount.isnumeric():
             kudos = 0
-            error = "Please enter a number in the kudos field"
+            error = "Please enter a number in the den field"
         # Triggered when the user submited without logging in
         elif src_user:
             ret = database.transfer_kudos_to_username(src_user, dest_username, int(amount))
@@ -769,10 +427,10 @@ def transfer():
             kudos = ret[0]
             error = ret[1]
     if src_user:
-        welcome = f"Welcome back {src_user.get_unique_alias()}. You have {src_user.kudos} kudos remaining"
+        welcome = f"Welcome back {src_user.get_unique_alias()}. You have {src_user.kudos} den remaining"
     return render_template(
         "transfer_kudos.html",
-        page_title="Kudos Transfer",
+        page_title="Den Transfer",
         welcome=welcome,
         kudos=kudos,
         error=error,
@@ -783,37 +441,25 @@ def transfer():
 
 @HORDE.route("/google/<return_to>")
 def google_login(return_to):
-    global dance_return_to
-    dance_return_to = "/" + return_to
+    session["dance_return_to"] = "/" + return_to
     return redirect(url_for("google.login"))
 
 
 @HORDE.route("/discord/<return_to>")
 def discord_login(return_to):
-    global dance_return_to
-    dance_return_to = "/" + return_to
+    session["dance_return_to"] = "/" + return_to
     return redirect(url_for("discord.login"))
 
 
 @HORDE.route("/github/<return_to>")
 def github_login(return_to):
-    global dance_return_to
-    dance_return_to = "/" + return_to
+    session["dance_return_to"] = "/" + return_to
     return redirect(url_for("github.login"))
-
-
-# @HORDE.route('/patreon/<return_to>')
-# def patreon_login(return_to):
-#     global dance_return_to
-#     dance_return_to = '/' + return_to
-#     return redirect('/patreon/patreon')
 
 
 @HORDE.route("/finish_dance")
 def finish_dance():
-    global dance_return_to
-    redirect_url = dance_return_to
-    dance_return_to = "/"
+    redirect_url = session.pop("dance_return_to", "/")
     return redirect(redirect_url)
 
 

@@ -105,6 +105,10 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
+# Claude Code (contains DB credentials)
+.claude/
+.mcp.json
+
 # Environments
 .env
 .venv

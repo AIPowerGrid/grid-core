@@ -84,7 +84,7 @@ arg_parser.add_argument(
     action="store",
     required=False,
     type=int,
-    help="Provide a patreon username to force to kudos push patreon rewards",
+    help="Provide a patreon username to force den push patreon rewards",
 )
 arg_parser.add_argument(
     "--prevent_date_change",

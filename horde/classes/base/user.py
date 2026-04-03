@@ -172,7 +172,7 @@ class UserSharedKey(db.Model):
             if self.kudos < 0:
                 self.kudos = 0
         self.utilized = round(self.utilized + kudos, 2)
-        logger.debug(f"Utilized {kudos} from shared key {self.id}. {self.kudos} remaining.")
+        logger.debug(f"Utilized {kudos} den from shared key {self.id}. {self.kudos} remaining.")
         db.session.commit()
 
     def is_valid(self):
@@ -654,7 +654,7 @@ class User(db.Model):
     def modify_monthly_kudos(self, monthly_kudos):
         # We always give upfront the monthly kudos to the user once.
         # If they already had some, we give the difference but don't change the date
-        logger.info(f"Modifying monthly kudos of {self.get_unique_alias()} by {monthly_kudos}")
+        logger.info(f"Modifying monthly den of {self.get_unique_alias()} by {monthly_kudos}")
         if monthly_kudos > 0:
             self.modify_kudos(monthly_kudos, "recurring")
         if not self.monthly_kudos_last_received:
@@ -667,24 +667,24 @@ class User(db.Model):
 
     def receive_monthly_kudos(self, force=False, prevent_date_change=False):
         logger.info(
-            f"Checking {self.get_unique_alias()} for monthly kudos. "
-            f"They currently have {self.kudos} kudos last received at {self.monthly_kudos_last_received}",
+            f"Checking {self.get_unique_alias()} for monthly den. "
+            f"They currently have {self.kudos} den last received at {self.monthly_kudos_last_received}",
         )
         kudos_amount = self.calculate_monthly_kudos()
         if kudos_amount == 0:
-            logger.warning(f"receive_monthly_kudos() received 0 kudos account {self.get_unique_alias()}")
+            logger.warning(f"receive_monthly_kudos() received 0 den for account {self.get_unique_alias()}")
             return
         if force:
             has_month_passed = True
         elif self.monthly_kudos_last_received:
             has_month_passed = datetime.utcnow() > self.monthly_kudos_last_received + dateutil.relativedelta.relativedelta(months=+1)
         else:
-            # If the user is supposed to receive Kudos, but doesn't have a last received date,
+            # If the user is supposed to receive den, but doesn't have a last received date,
             # it means it is a moderator who hasn't received it the first time
             has_month_passed = True
         if has_month_passed:
             logger.info(
-                f"Preparing to assign {kudos_amount} monthly kudos to {self.get_unique_alias()}. "
+                f"Preparing to assign {kudos_amount} monthly den to {self.get_unique_alias()}. "
                 f"Current total: {self.kudos}. Last received date: {self.monthly_kudos_last_received}",
             )
             # Not committing as it'll happen in modify_kudos() anyway
@@ -694,7 +694,7 @@ class User(db.Model):
                 self.monthly_kudos_last_received = self.monthly_kudos_last_received + dateutil.relativedelta.relativedelta(months=+1)
             self.modify_kudos(kudos_amount, "recurring")
             logger.info(
-                f"User {self.get_unique_alias()} received their {kudos_amount} monthly Kudos. "
+                f"User {self.get_unique_alias()} received their {kudos_amount} monthly den. "
                 f"Their new total is {self.kudos} and the last received date set to {self.monthly_kudos_last_received}",
             )
 
@@ -707,7 +707,7 @@ class User(db.Model):
         return base_amount
 
     def modify_kudos(self, kudos, action="accumulated"):
-        logger.debug(f"modifying existing {self.kudos} kudos of {self.get_unique_alias()} by {kudos} for {action}")
+        logger.debug(f"modifying existing {self.kudos} den of {self.get_unique_alias()} by {kudos} for {action}")
         self.kudos = round(self.kudos + kudos, 2)
         self.ensure_kudos_positive()
         kudos_details = db.session.query(UserStats).filter_by(user_id=self.id).filter_by(action=action).first()

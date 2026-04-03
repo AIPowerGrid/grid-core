@@ -456,7 +456,7 @@ class WaitingPrompt(db.Model):
 
     # This should be overriden by each extending class
     def calculate_kudos(self):
-        """Returns the expected kudos a worker will receive for this request"""
+        """Returns the expected den a worker will receive for this request"""
         # Dummy ammount
         return 10
 

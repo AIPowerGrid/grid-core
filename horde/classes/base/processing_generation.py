@@ -130,7 +130,7 @@ class ProcessingGeneration(db.Model):
         return kudos
 
     def cancel(self):
-        """Cancelling requests in progress still rewards/burns the relevant amount of kudos"""
+        """Cancelling requests in progress still rewards/burns the relevant amount of den"""
         if self.is_completed() or self.is_faulted():
             return None
         self.faulted = True
@@ -150,14 +150,14 @@ class ProcessingGeneration(db.Model):
             # We do not record usage for paused workers, unless the requestor was the same owner as the worker
             self.worker.record_contribution(raw_things=self.wp.things, kudos=kudos, things_per_sec=things_per_sec)
             logger.info(
-                f"Fake{cancel_txt} Generation {self.id} worth {self.kudos} kudos, delivered by worker: "
+                f"Fake{cancel_txt} Generation {self.id} worth {self.kudos} den, delivered by worker: "
                 f"{self.worker.name} for wp {self.wp.id}",
             )
         else:
             self.worker.record_contribution(raw_things=self.wp.things, kudos=kudos, things_per_sec=things_per_sec)
             self.wp.record_usage(raw_things=self.wp.things, kudos=self.adjust_user_kudos(kudos))
             log_string = (
-                f"New{cancel_txt} Generation {self.id} worth {kudos} kudos, delivered by worker: {self.worker.name} for wp {self.wp.id} "
+                f"New{cancel_txt} Generation {self.id} worth {kudos} den, delivered by worker: {self.worker.name} for wp {self.wp.id} "
             )
             log_string += f" (requesting user {self.wp.user.get_unique_alias()} [{self.wp.ipaddr}])"
             logger.info(log_string)
@@ -168,7 +168,7 @@ class ProcessingGeneration(db.Model):
         return kudos
 
     def abort(self):
-        """Called when this request needs to be stopped without rewarding kudos. Say because it timed out due to a worker crash"""
+        """Called when this request needs to be stopped without rewarding den. Say because it timed out due to a worker crash"""
         if self.is_completed() or self.is_faulted():
             return
         self.faulted = True

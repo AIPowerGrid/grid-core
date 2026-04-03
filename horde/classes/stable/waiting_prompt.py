@@ -282,7 +282,7 @@ class ImageWaitingPrompt(WaitingPrompt):
             f"New {prompt_type} prompt with ID {self.id} by {self.user.get_unique_alias()}{proxied_account} "
             f"({self.ipaddr}) ({self.client_agent}): "
             f"w:{self.width} * h:{self.height} * s:{self.get_accurate_steps()} * n:{self.n} "
-            f"== {self.total_usage} Total MPs for {self.kudos} kudos.",
+            f"== {self.total_usage} Total MPs for {self.kudos} den.",
         )
 
     def seed_to_int(self, s=None):
@@ -361,18 +361,18 @@ class ImageWaitingPrompt(WaitingPrompt):
             model_params["source_mask"] = True if self.source_mask else False
             self.kudos = kudos_model.calculate_kudos(model_params)
         except Exception as e:
-            logger.error(f"Error calculating kudos for {self.id}, defaulting to legacy calculation (exception): {e}")
+            logger.error(f"Error calculating den for {self.id}, defaulting to legacy calculation (exception): {e}")
             self.kudos = legacy_kudos_cost
-        logger.debug(f"Old Kudos {legacy_kudos_cost} / New Kudos {self.kudos} for {self.id}")
+        logger.debug(f"Old den {legacy_kudos_cost} / New den {self.kudos} for {self.id}")
         kudos_difference = abs(legacy_kudos_cost - self.kudos)
         if kudos_difference > (legacy_kudos_cost * 0.5):
             logger.debug(
-                f"Kudos difference is more than 50% of the legacy cost ({legacy_kudos_cost}) for {self.id} difference={kudos_difference}",
+                f"Den difference is more than 50% of the legacy cost ({legacy_kudos_cost}) for {self.id} difference={kudos_difference}",
             )
-        # If they're requesting LoRas, we're adding 3 extra kudos per lora requested
+        # If they're requesting LoRas, we're adding 3 extra den per lora requested
         # To make up for time lost downloading
         self.kudos += len(self.params.get("loras", [])) * 3
-        # If they've requested TIs, we add 1 kudos extra
+        # If they've requested TIs, we add 1 den extra
         if self.params.get("tis"):
             self.kudos += 1
         db.session.commit()
@@ -427,7 +427,7 @@ class ImageWaitingPrompt(WaitingPrompt):
         return (False, max_res, False)
 
     def downgrade(self, max_resolution):
-        """Ensures this WP requirements are not exceeding upfront kudos requirements"""
+        """Ensures this WP requirements are not exceeding upfront den requirements"""
         self.slow_workers = True
         downgraded = False
         while self.width * self.height > max_resolution * max_resolution:

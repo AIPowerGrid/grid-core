@@ -31,7 +31,7 @@ def after_request(response):
 
 
 google_client_id = os.getenv("GOOGLE_CLIENT_ID")
-google_client_secret = os.getenv("GLOOGLE_CLIENT_SECRET")
+google_client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
 discord_client_id = os.getenv("DISCORD_CLIENT_ID")
 discord_client_secret = os.getenv("DISCORD_CLIENT_SECRET")
 github_client_id = os.getenv("GITHUB_CLIENT_ID")
@@ -72,7 +72,7 @@ HORDE.register_blueprint(github_blueprint, url_prefix="/github")
 if args.force_subscription:
     from horde.ops import force_subscription_kudos
 
-    logger.info(f"focing kudos on user_id: {args.force_subscription}")
+    logger.info(f"forcing den on user_id: {args.force_subscription}")
     force_subscription_kudos(args.force_subscription, args.prevent_date_change)
     import sys
 

@@ -1,0 +1,103 @@
+<!--
+SPDX-FileCopyrightText: 2026 AI Power Grid
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+{% extends "master.html" %}
+{% block content %}
+<style>
+  .idx { max-width: 1000px; margin: 0 auto; padding: 20px 0; }
+  .idx h1 { font-size: 2.2rem; font-weight: 700; text-align: center; margin: 0 0 1rem 0; }
+  .idx h2 { font-size: 1.6rem; font-weight: 600; text-align: center; margin: 0.5rem 0 1rem 0; }
+  .idx h3 { font-size: 1.2rem; font-weight: 600; text-align: center; margin: 2rem 0 1rem 0; }
+  .idx h4, .idx h5, .idx h6 { font-weight: 600; text-align: center; margin: 1.5rem 0 0.5rem 0; }
+  .idx p { margin: 1rem 0; }
+  .idx a { color: var(--accent); }
+  .idx a:hover { color: var(--accent-hover); }
+  .idx code {
+    background: var(--bg-input); border: 1px solid var(--border);
+    border-radius: 4px; padding: 2px 6px; font-family: var(--mono); font-size: 0.82rem;
+  }
+  .idx pre {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px; overflow-x: auto;
+    font-family: var(--mono); margin: 1.5rem 0;
+  }
+  .idx pre code { background: none; border: none; padding: 0; }
+  .idx hr { border: none; border-top: 1px solid var(--border); margin: 3rem 0; }
+  .idx ul, .idx ol { padding-left: 1.5rem; margin: 1rem 0; }
+  .idx li { margin: 0.5rem 0; }
+  .idx strong { color: var(--text); font-weight: 600; }
+  .idx blockquote {
+    background: var(--bg-card); border-left: 4px solid var(--accent);
+    margin: 1.5rem 0; padding: 1rem 1.5rem;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    font-style: italic; color: var(--text-dim);
+  }
+  .idx .card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1.5rem; margin: 1.5rem 0;
+    transition: border-color 0.15s;
+  }
+  .idx .card:hover { border-color: var(--accent); }
+  .idx .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.5rem; margin: 2rem 0;
+  }
+  .idx .grid-2 {
+    display: grid; grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem; margin: 2rem 0;
+  }
+  .idx .stat {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1.5rem; text-align: center;
+    transition: border-color 0.15s;
+  }
+  .idx .stat:hover { border-color: var(--accent); }
+  .idx .stat-value { font-size: 1.5rem; font-weight: 700; color: var(--accent); margin-bottom: 0.5rem; }
+  .idx .stat-label { color: var(--text-dim); font-size: 0.9rem; }
+  .idx details {
+    margin: 1rem 0; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--bg-card);
+  }
+  .idx details summary {
+    padding: 1rem; cursor: pointer; font-weight: 600;
+    background: var(--bg-raised); border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    transition: background 0.15s;
+  }
+  .idx details summary:hover { background: var(--bg-card); }
+  .idx details[open] summary { border-bottom: 1px solid var(--border); }
+  .idx .model-list {
+    padding: 1rem; font-family: var(--mono); font-size: 0.85rem;
+    line-height: 1.6; background: var(--bg-input);
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  }
+  .idx .model-list ul { margin: 0; padding-left: 1rem; }
+  .idx .model-list li { margin: 0.3rem 0; padding: 0.2rem 0; }
+  .idx .logo-section { text-align: center; margin-bottom: 2rem; }
+  .idx .logo { max-width: 100px; height: auto; margin-bottom: 0.5rem; }
+  .idx .cta-section {
+    text-align: center; margin: 2.5rem 0; padding: 2rem;
+    background: var(--accent-glow); border: 1px solid rgba(108, 92, 231, 0.25);
+    border-radius: var(--radius);
+  }
+  .idx .cta-button {
+    display: inline-block; padding: 14px 36px; background: var(--accent);
+    color: #fff !important; font-size: 1.1rem; font-weight: 700;
+    text-decoration: none !important; border: none; border-radius: var(--radius-sm);
+    cursor: pointer; transition: background 0.15s, box-shadow 0.15s;
+  }
+  .idx .cta-button:hover { background: var(--accent-hover); box-shadow: 0 0 30px var(--accent-glow); }
+  .idx .cta-subtext { color: var(--text-dim); font-size: 0.95rem; margin-top: 1rem; margin-bottom: 0; }
+  @media (max-width: 768px) {
+    .idx h1 { font-size: 1.8rem; }
+    .idx h2 { font-size: 1.4rem; }
+    .idx .grid, .idx .grid-2 { grid-template-columns: 1fr; }
+    .idx details summary { padding: 0.8rem; font-size: 0.9rem; }
+    .idx .model-list { padding: 0.8rem; font-size: 0.8rem; }
+  }
+</style>
+
+<div class="idx">
+  {{ content | safe }}
+</div>
+{% endblock %}
