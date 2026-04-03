@@ -25,6 +25,7 @@ from ..database import new_session, processing_gens_table, users_table, waiting_
 from ..redis_client import get_redis
 from ..services import job_queue, token_stream
 from ..services.den import calculate_den
+from ..services.metrics_state import record_job_complete, record_job_failed
 
 logger = logging.getLogger("grid_api.worker_ws")
 
@@ -322,6 +323,9 @@ async def worker_websocket(ws: WebSocket):
                     "id": job["job_id"],
                     "den": den_awarded,
                 })
+
+                # Record metrics
+                record_job_complete(tokens=token_count, den=den_awarded, duration=gen_time)
         finally:
             poll_task.cancel()
 
@@ -341,6 +345,7 @@ async def worker_websocket(ws: WebSocket):
             # Worker disconnected with a job in progress — notify client and requeue
             job_id = current_job["job_id"]
             logger.warning(f"Worker disconnected with job {job_id} in progress — sending error to client and requeuing")
+            record_job_failed()
             await token_stream.publish_error(job_id, "Worker disconnected during generation. Job requeued.")
             await job_queue.requeue_job(
                 job_id,

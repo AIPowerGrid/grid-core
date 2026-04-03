@@ -17,6 +17,7 @@ _redis: aioredis.Redis | None = None
 
 STREAM_KEY = "grid:jobs:text"
 CONSUMER_GROUP = "grid:workers"
+WORKER_ACTIVE_SET_KEY = "grid:workers:active"
 
 
 async def init_redis():
@@ -36,7 +37,10 @@ async def close_redis():
     """Close the Redis connection."""
     global _redis
     if _redis:
-        await _redis.aclose()
+        try:
+            await _redis.aclose()
+        except AttributeError:
+            await _redis.close()
 
 
 def get_redis() -> aioredis.Redis:

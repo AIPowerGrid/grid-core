@@ -25,7 +25,7 @@ from slowapi.util import get_remote_address
 
 from .database import close_database, init_database
 from .redis_client import close_redis, init_redis
-from .routers import anthropic, health, images, openai, worker_ws
+from .routers import anthropic, health, images, metrics, openai, worker_ws
 
 logging.basicConfig(
     level=logging.INFO,
@@ -96,6 +96,7 @@ app.include_router(anthropic.router)
 app.include_router(images.router)
 app.include_router(worker_ws.router)
 app.include_router(health.router)
+app.include_router(metrics.router)
 
 
 @app.get("/")
