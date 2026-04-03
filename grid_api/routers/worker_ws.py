@@ -24,6 +24,7 @@ from ..auth import hash_api_key
 from ..database import new_session, processing_gens_table, users_table, waiting_prompts_table, worker_models_table, workers_table
 from ..redis_client import get_redis
 from ..services import job_queue, token_stream
+from ..services.den import calculate_den
 
 logger = logging.getLogger("grid_api.worker_ws")
 
@@ -290,14 +291,24 @@ async def worker_websocket(ws: WebSocket):
                 })
 
                 # Wait for tokens + done
-                full_text = await _handle_worker_generation(ws, job, worker_info)
+                import time as _time
+                gen_start = _time.time()
+                full_text, token_count = await _handle_worker_generation(ws, job, worker_info)
+                gen_time = _time.time() - gen_start
 
                 # Job completed successfully
                 current_job = None
                 await job_queue.ack_job(job["stream_id"])
 
-                # Record in DB
-                den_awarded = 10.0  # TODO: real den calculation
+                # Calculate den reward based on tokens, model, context
+                prompt_text = job["payload"].get("prompt", "")
+                prompt_tokens = len(prompt_text.split())  # Rough estimate
+                den_awarded = calculate_den(
+                    output_tokens=token_count,
+                    prompt_tokens=prompt_tokens,
+                    model_name=selected_model,
+                    generation_time_seconds=gen_time,
+                )
                 async with await new_session() as session:
                     await session.execute(
                         sa.update(processing_gens_table)
@@ -342,13 +353,14 @@ async def worker_websocket(ws: WebSocket):
             logger.info(f"Worker '{worker_info['name']}' cleaned up")
 
 
-async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict) -> str:
+async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict) -> tuple[str, int]:
     """Receive tokens from worker and relay to Redis Pub/Sub + buffer.
 
-    Returns the full generated text.
+    Returns (full_text, token_count).
     """
     job_id = job["job_id"]
     full_text = ""
+    token_count = 0
 
     while True:
         msg = await asyncio.wait_for(ws.receive_json(), timeout=300)
@@ -357,12 +369,13 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
         if msg_type == "token":
             text = msg.get("text", "")
             full_text += text
+            token_count += 1
             await token_stream.publish_token(job_id, text)
 
         elif msg_type == "done":
             full_text = msg.get("full_text", full_text)
             await token_stream.publish_done(job_id, full_text)
-            return full_text
+            return full_text, token_count
 
         elif msg_type == "pong":
             continue
@@ -370,4 +383,4 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
         elif msg_type == "error":
             logger.error(f"Worker error on job {job_id}: {msg.get('message')}")
             await token_stream.publish_error(job_id, msg.get("message", "Worker error"))
-            return full_text
+            return full_text, token_count
