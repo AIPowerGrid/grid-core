@@ -27,6 +27,7 @@ from ..auth import hash_api_key
 from .. import format as fmt
 from ..database import new_session, processing_gens_table, users_table, waiting_prompts_table
 from ..services import job_queue, token_stream
+from ..services.sanitizer import sanitize
 from .worker_ws import get_available_models
 
 logger = logging.getLogger("grid_api.anthropic")
@@ -90,7 +91,11 @@ async def create_message(
         raise HTTPException(status_code=503, detail={"type": "overloaded_error", "message": "No streaming workers online"})
 
     model = body.model if body.model in available else available[0]
-    prompt = _messages_to_prompt(body)
+    raw_prompt = _messages_to_prompt(body)
+
+    # Sanitize — strip credentials before they reach workers
+    sanitized = sanitize(raw_prompt)
+    prompt = sanitized.text
 
     job_id = str(uuid4())
     payload = {

@@ -30,6 +30,7 @@ from .. import format as fmt
 from ..database import new_session, processing_gens_table, users_table, waiting_prompts_table
 from ..models.openai import ChatCompletionRequest, ModelInfo, ModelListResponse
 from ..services import job_queue, token_stream
+from ..services.sanitizer import sanitize_messages
 from .worker_ws import get_available_models
 
 logger = logging.getLogger("grid_api.openai")
@@ -99,8 +100,14 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
         else:
             raise HTTPException(status_code=400, detail=f"Model '{request.model}' not available. Available: {available}")
 
+    # Sanitize messages — strip credentials before they reach workers
+    clean_messages, was_redacted, redacted_types = sanitize_messages(
+        [m.model_dump() for m in request.messages]
+    )
+
     # Convert messages to prompt
-    prompt = _messages_to_prompt(request.messages)
+    from ..models.openai import ChatMessage
+    prompt = _messages_to_prompt([ChatMessage(**m) for m in clean_messages])
 
     # Create job
     job_id = str(uuid4())
