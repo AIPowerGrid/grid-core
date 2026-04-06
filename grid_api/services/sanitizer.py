@@ -213,6 +213,100 @@ _p(
     'heroku_key',
 )
 
+# ── From h33tlit/secret-regex-list — additional high-confidence patterns ──
+
+# Amazon MWS Auth Token
+_p(
+    r'amzn\.mws\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+    '[REDACTED: Amazon MWS token removed for your safety]',
+    'amazon_mws_token',
+)
+
+# Facebook Access Token
+_p(
+    r'EAACEdEose0cBA[0-9A-Za-z]+',
+    '[REDACTED: Facebook access token removed for your safety]',
+    'facebook_token',
+)
+
+# Google OAuth Access Token — ya29.
+_p(
+    r'ya29\.[0-9A-Za-z_-]+',
+    '[REDACTED: Google OAuth token removed for your safety]',
+    'google_oauth_token',
+)
+
+# Google Cloud Service Account JSON
+_p(
+    r'"type"\s*:\s*"service_account"',
+    '[REDACTED: Google service account config detected — do not share credentials with AI]',
+    'gcp_service_account',
+)
+
+# PGP private key
+_p(
+    r'-----BEGIN PGP PRIVATE KEY BLOCK-----[\s\S]*?-----END PGP PRIVATE KEY BLOCK-----',
+    '[REDACTED: PGP private key removed for your safety]',
+    'pgp_private_key',
+    re.DOTALL,
+)
+
+# Slack Webhook URL
+_p(
+    r'https://hooks\.slack\.com/services/T[a-zA-Z0-9_]{8,}/B[a-zA-Z0-9_]{8,}/[a-zA-Z0-9_]{24,}',
+    '[REDACTED: Slack webhook URL removed for your safety]',
+    'slack_webhook',
+)
+
+# Square Access Token
+_p(
+    r'sq0atp-[0-9A-Za-z_-]{22,}',
+    '[REDACTED: Square access token removed for your safety]',
+    'square_token',
+)
+
+# Square OAuth Secret
+_p(
+    r'sq0csp-[0-9A-Za-z_-]{40,}',
+    '[REDACTED: Square OAuth secret removed for your safety]',
+    'square_oauth',
+)
+
+# PayPal Braintree Access Token
+_p(
+    r'access_token\$production\$[0-9a-z]{16}\$[0-9a-f]{32}',
+    '[REDACTED: PayPal/Braintree token removed for your safety]',
+    'paypal_token',
+)
+
+# MailChimp API Key
+_p(
+    r'[0-9a-f]{32}-us[0-9]{1,2}',
+    '[REDACTED: MailChimp API key removed for your safety]',
+    'mailchimp_key',
+)
+
+# Picatic API Key (same prefix as Stripe live)
+_p(
+    r'sk_live_[0-9a-z]{32}',
+    '[REDACTED: API key removed for your safety]',
+    'picatic_key',
+)
+
+# Cloudinary URL
+_p(
+    r'cloudinary://[^\s]+',
+    '[REDACTED: Cloudinary URL with credentials removed for your safety]',
+    'cloudinary_url',
+)
+
+# Password in URL (generic) — proto://user:pass@host
+_p(
+    r'[a-zA-Z]{3,10}://[^\s/:@]{3,20}:[^\s/:@]{3,20}@[^\s"\']+',
+    '[REDACTED: URL with embedded credentials removed for your safety]',
+    'password_in_url',
+)
+
 
 def sanitize(text: str) -> RedactionResult:
     """Sanitize a string by replacing detected credentials with safe placeholders.
