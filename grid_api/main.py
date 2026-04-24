@@ -26,6 +26,7 @@ from slowapi.util import get_remote_address
 from .database import close_database, init_database
 from .redis_client import close_redis, init_redis
 from .routers import anthropic, health, images, metrics, openai, worker_ws
+from .services.p2p import init_p2p, close_p2p
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,11 +57,13 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Grid Streaming API...")
     await init_database()
     await init_redis()
+    await init_p2p()  # Initialize P2P (no-op if disabled)
     reclaimer = asyncio.create_task(_stale_job_reclaimer())
     logger.info("Grid Streaming API ready.")
     yield
     logger.info("Shutting down Grid Streaming API...")
     reclaimer.cancel()
+    await close_p2p()  # Shutdown P2P
     await close_redis()
     await close_database()
 
@@ -101,6 +104,11 @@ app.include_router(metrics.router)
 
 @app.get("/")
 async def root():
+    from .services.p2p import get_p2p_node, get_p2p_config
+
+    p2p_config = get_p2p_config()
+    p2p_node = get_p2p_node()
+
     return {
         "name": "AI Power Grid — Streaming API",
         "version": "1.0.0",
@@ -111,5 +119,10 @@ async def root():
             "models": "GET /v1/models",
             "worker_ws": "WS /v1/workers/ws",
             "health": "GET /health",
+        },
+        "p2p": {
+            "enabled": p2p_config.enabled,
+            "peer_id": p2p_node.peer_id if p2p_node else None,
+            "status": "running" if p2p_node and p2p_node.running else "disabled",
         },
     }
