@@ -3,25 +3,17 @@
 
 """P2P job queue implementation.
 
-This module provides the same interface as services/job_queue.py but uses
-libp2p gossipsub instead of Redis Streams. It can be used as a drop-in
-replacement when P2P mode is enabled.
+Provides the same interface as services/job_queue.py but uses libp2p gossipsub.
+Can be used as a drop-in replacement when P2P mode is enabled.
 
 Architecture:
-    - Jobs are broadcast to model-specific gossipsub topics
-    - Workers subscribe to topics for models they support
-    - Claims are broadcast to prevent double-processing
-    - Results are streamed back via job-specific topics
-
-Usage:
-    # Gateway submits a job
-    await submit_job(job_id, payload, models)
-
-    # Worker listens for jobs
-    async for job in listen_for_jobs(["llama3.2:3b", "mistral:7b"]):
-        if should_process(job):
-            await claim_job(job.id, worker_id)
-            # ... process job ...
+    Gateway → publish_job() → gossipsub /aipg/1/jobs/{model}
+                                    ↓
+    Workers ← pop_job() ← message dispatcher
+                                    ↓
+              claim_job() → gossipsub /aipg/1/claims
+                                    ↓
+              stream tokens → gossipsub /aipg/1/results/{job_id}
 """
 
 import asyncio
@@ -34,7 +26,7 @@ from typing import Any
 from uuid import uuid4
 
 from .config import get_p2p_config
-from .node import get_p2p_node
+from .node import get_p2p_node, P2PMessage
 from .protocol import JobRequest, JobClaim, JobResult, should_claim
 from .topics import job_topic, claims_topic, results_topic
 
@@ -44,7 +36,6 @@ logger = logging.getLogger("grid_api.p2p.job_queue")
 @dataclass
 class PendingJob:
     """A job waiting to be processed."""
-
     request: JobRequest
     received_at: float = field(default_factory=time.time)
     claimed_by: str | None = None
@@ -54,21 +45,172 @@ class PendingJob:
 _pending_jobs: dict[str, PendingJob] = {}
 _claimed_jobs: dict[str, JobClaim] = {}
 _job_queues: dict[str, asyncio.Queue] = {}  # model -> queue of jobs
+_result_queues: dict[str, asyncio.Queue] = {}  # job_id -> queue of results
+_dispatcher_task: asyncio.Task | None = None
 
+
+async def _start_dispatcher() -> None:
+    """Start the background message dispatcher."""
+    global _dispatcher_task
+
+    if _dispatcher_task is not None:
+        return
+
+    _dispatcher_task = asyncio.create_task(_message_dispatcher())
+    logger.info("P2P message dispatcher started")
+
+
+async def _message_dispatcher() -> None:
+    """Background task that routes incoming P2P messages."""
+    node = get_p2p_node()
+    if not node:
+        return
+
+    config = get_p2p_config()
+    cleanup_interval = 60  # seconds
+    last_cleanup = time.time()
+
+    while True:
+        try:
+            # Get next message from P2P node
+            msg = await node.get_message(timeout=0.5)
+
+            if msg:
+                await _handle_message(msg)
+
+            # Periodic cleanup of expired jobs
+            now = time.time()
+            if now - last_cleanup > cleanup_interval:
+                _cleanup_expired()
+                last_cleanup = now
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Dispatcher error: {e}")
+            await asyncio.sleep(0.1)
+
+
+async def _handle_message(msg: P2PMessage) -> None:
+    """Route a message to the appropriate handler."""
+    topic = msg.topic
+    data = msg.data
+
+    try:
+        if "/jobs/" in topic:
+            await _handle_job_message(topic, data, msg.from_peer)
+        elif "/claims" in topic:
+            await _handle_claim_message(data, msg.from_peer)
+        elif "/results/" in topic:
+            await _handle_result_message(topic, data)
+        else:
+            logger.debug(f"Unknown topic: {topic}")
+    except Exception as e:
+        logger.error(f"Error handling message on {topic}: {e}")
+
+
+async def _handle_job_message(topic: str, data: bytes, from_peer: str) -> None:
+    """Handle an incoming job broadcast."""
+    try:
+        job = JobRequest.from_json(data.decode())
+
+        # Skip expired jobs
+        if job.is_expired():
+            logger.debug(f"Skipping expired job {job.id[:8]}")
+            return
+
+        # Skip already-claimed jobs
+        if job.id in _claimed_jobs:
+            claimer = _claimed_jobs[job.id].worker_id
+            node = get_p2p_node()
+            if node and claimer != node.peer_id:
+                logger.debug(f"Skipping claimed job {job.id[:8]}")
+                return
+
+        # Store pending job
+        _pending_jobs[job.id] = PendingJob(request=job)
+
+        # Add to model queue
+        queue = _job_queues.setdefault(job.model, asyncio.Queue())
+        await queue.put({
+            "job_id": job.id,
+            "payload": job.payload,
+            "models": [job.model],
+            "job_request": job,  # Include full request for claim resolution
+        })
+
+        logger.info(f"Queued job {job.id[:8]} for model {job.model}")
+
+    except Exception as e:
+        logger.error(f"Error handling job message: {e}")
+
+
+async def _handle_claim_message(data: bytes, from_peer: str) -> None:
+    """Handle an incoming claim broadcast."""
+    try:
+        claim = JobClaim.from_json(data.decode())
+
+        # Record the claim (first one wins)
+        existing = _claimed_jobs.get(claim.job_id)
+        if not existing or claim.timestamp < existing.timestamp:
+            _claimed_jobs[claim.job_id] = claim
+            logger.debug(f"Recorded claim: {claim.worker_id[:8]} -> {claim.job_id[:8]}")
+
+            # Track the worker
+            node = get_p2p_node()
+            if node:
+                node.add_known_worker(claim.worker_id)
+
+    except Exception as e:
+        logger.error(f"Error handling claim message: {e}")
+
+
+async def _handle_result_message(topic: str, data: bytes) -> None:
+    """Handle an incoming result message."""
+    try:
+        result = JobResult.from_json(data.decode())
+
+        # Route to the job's result queue
+        queue = _result_queues.get(result.job_id)
+        if queue:
+            await queue.put(result)
+
+    except Exception as e:
+        logger.error(f"Error handling result message: {e}")
+
+
+def _cleanup_expired() -> None:
+    """Remove expired jobs and claims from local state."""
+    config = get_p2p_config()
+    now = time.time()
+    ttl = config.job_ttl_seconds
+
+    # Clean pending jobs
+    expired_jobs = [
+        job_id for job_id, pending in _pending_jobs.items()
+        if now - pending.received_at > ttl
+    ]
+    for job_id in expired_jobs:
+        del _pending_jobs[job_id]
+
+    # Clean claims
+    expired_claims = [
+        job_id for job_id, claim in _claimed_jobs.items()
+        if now - claim.timestamp > ttl * 2  # Keep claims longer
+    ]
+    for job_id in expired_claims:
+        del _claimed_jobs[job_id]
+
+    if expired_jobs or expired_claims:
+        logger.debug(f"Cleaned up {len(expired_jobs)} jobs, {len(expired_claims)} claims")
+
+
+# ── Gateway API ──
 
 async def submit_job(job_id: str, payload: dict, models: list[str]) -> str:
     """Submit a job for processing via P2P.
 
-    This broadcasts the job to gossipsub topics for each specified model.
-    Workers subscribed to those topics will receive the job.
-
-    Args:
-        job_id: Unique job identifier
-        payload: The job payload (messages, params, etc.)
-        models: List of acceptable models for this job
-
-    Returns:
-        The job_id (for compatibility with Redis interface)
+    Broadcasts the job to gossipsub topics for each specified model.
     """
     node = get_p2p_node()
     if not node:
@@ -76,8 +218,10 @@ async def submit_job(job_id: str, payload: dict, models: list[str]) -> str:
 
     config = get_p2p_config()
 
+    # Ensure dispatcher is running
+    await _start_dispatcher()
+
     # Create job request
-    # Note: In production, user_pubkey and signature would come from auth
     job = JobRequest(
         id=job_id,
         model=models[0] if models else "unknown",
@@ -88,41 +232,53 @@ async def submit_job(job_id: str, payload: dict, models: list[str]) -> str:
         ttl=config.job_ttl_seconds,
     )
 
+    # Subscribe to results topic to receive response
+    result_topic = results_topic(job_id)
+    await node.subscribe(result_topic)
+    _result_queues[job_id] = asyncio.Queue()
+
     # Broadcast to all model topics
     for model in models:
         job.model = model
-        await node.publish_job(job)
+        topic = job_topic(model)
+        await node.publish(topic, job.to_json().encode())
 
-    logger.info(f"Submitted job {job_id} to P2P network for models: {models}")
+    logger.info(f"Submitted job {job_id[:8]} to P2P for models: {models}")
     return job_id
 
 
 async def pop_job(worker_id: str, timeout_ms: int = 5000) -> dict | None:
     """Wait for the next job from the P2P network.
 
-    This is called by workers to receive jobs. It blocks until a job
-    arrives or timeout occurs.
-
-    Note: Unlike Redis XREADGROUP, this doesn't guarantee exactly-once
-    delivery. Workers should use claim_job() to coordinate.
-
-    Args:
-        worker_id: The worker's peer ID
-        timeout_ms: How long to wait (milliseconds)
-
-    Returns:
-        Job dict with keys: job_id, payload, models, or None on timeout
+    Called by workers to receive jobs. Blocks until a job arrives or timeout.
     """
-    # Find a queue with pending jobs
-    timeout_sec = timeout_ms / 1000.0
+    # Ensure dispatcher is running
+    await _start_dispatcher()
 
-    # Check all model queues we're subscribed to
-    for model, queue in _job_queues.items():
-        try:
-            job = await asyncio.wait_for(queue.get(), timeout=timeout_sec)
-            return job
-        except asyncio.TimeoutError:
-            continue
+    timeout_sec = timeout_ms / 1000.0
+    end_time = time.time() + timeout_sec
+
+    # Check all model queues
+    while time.time() < end_time:
+        for model, queue in list(_job_queues.items()):
+            try:
+                job = queue.get_nowait()
+
+                # Verify we should claim this job
+                job_request = job.get("job_request")
+                if job_request:
+                    node = get_p2p_node()
+                    if node:
+                        known = node.get_known_workers()
+                        if not should_claim(job_request, node.peer_id, known):
+                            logger.debug(f"Not our turn for job {job['job_id'][:8]}")
+                            continue
+
+                return job
+            except asyncio.QueueEmpty:
+                continue
+
+        await asyncio.sleep(0.1)
 
     return None
 
@@ -130,25 +286,18 @@ async def pop_job(worker_id: str, timeout_ms: int = 5000) -> dict | None:
 async def claim_job(job_id: str, worker_id: str) -> bool:
     """Claim a job for this worker.
 
-    Broadcasts the claim to the network so other workers don't process it.
-    Returns False if someone else already claimed it.
-
-    Args:
-        job_id: The job ID to claim
-        worker_id: This worker's peer ID
-
-    Returns:
-        True if claim succeeded, False if already claimed by another worker
+    Broadcasts the claim so other workers skip it.
+    Returns False if already claimed by another worker.
     """
     node = get_p2p_node()
     if not node:
         return False
 
-    # Check if already claimed
+    # Check if already claimed by someone else
     if job_id in _claimed_jobs:
         existing = _claimed_jobs[job_id]
         if existing.worker_id != worker_id:
-            logger.debug(f"Job {job_id} already claimed by {existing.worker_id}")
+            logger.debug(f"Job {job_id[:8]} already claimed by {existing.worker_id[:8]}")
             return False
         return True  # We already claimed it
 
@@ -162,35 +311,27 @@ async def claim_job(job_id: str, worker_id: str) -> bool:
     )
 
     _claimed_jobs[job_id] = claim
-    await node.publish_claim(claim)
 
-    logger.info(f"Claimed job {job_id} for worker {worker_id}")
+    topic = claims_topic()
+    await node.subscribe(topic)  # Ensure subscribed
+    await node.publish(topic, claim.to_json().encode())
+
+    logger.info(f"Claimed job {job_id[:8]}")
     return True
 
 
 async def ack_job(message_id: str) -> None:
-    """Acknowledge a completed job.
-
-    In the P2P model, this just cleans up local state.
-    The message_id is actually the job_id.
-    """
-    # Clean up local state
+    """Acknowledge a completed job. Cleans up local state."""
     _pending_jobs.pop(message_id, None)
     _claimed_jobs.pop(message_id, None)
+    _result_queues.pop(message_id, None)
 
 
 async def requeue_job(
     job_id: str, payload: dict, models: list[str], stream_id: str = None
 ) -> str:
-    """Requeue a failed job.
-
-    In P2P mode, we simply resubmit the job with the same ID.
-    Other workers will see it and can claim it.
-    """
-    # Clean up old claim
+    """Requeue a failed job."""
     _claimed_jobs.pop(job_id, None)
-
-    # Resubmit
     return await submit_job(job_id, payload, models)
 
 
@@ -204,112 +345,55 @@ def get_claim(job_id: str) -> JobClaim | None:
     return _claimed_jobs.get(job_id)
 
 
-# ── Worker-side functions ──
-
+# ── Worker API ──
 
 async def register_worker(models: list[str]) -> None:
     """Register this node as a worker for the given models.
 
-    This subscribes to the appropriate job topics and sets up
-    message handling.
+    Subscribes to job topics and the claims topic.
     """
     node = get_p2p_node()
     if not node:
         raise RuntimeError("P2P node not initialized")
 
-    async def handle_job(topic: str, data: bytes) -> None:
-        """Handle incoming job messages."""
-        try:
-            job = JobRequest.from_json(data.decode())
+    # Ensure dispatcher is running
+    await _start_dispatcher()
 
-            # Skip expired jobs
-            if job.is_expired():
-                logger.debug(f"Skipping expired job {job.id}")
-                return
+    # Subscribe to job topics
+    for model in models:
+        topic = job_topic(model)
+        await node.subscribe(topic)
+        _job_queues.setdefault(model, asyncio.Queue())
+        logger.info(f"Listening for jobs on {topic}")
 
-            # Skip already-claimed jobs
-            if job.id in _claimed_jobs:
-                claimer = _claimed_jobs[job.id].worker_id
-                if claimer != node.peer_id:
-                    logger.debug(f"Skipping claimed job {job.id}")
-                    return
-
-            # Check if we should claim this job
-            known_workers = node.get_known_workers()
-            if not should_claim(job, node.peer_id, known_workers):
-                logger.debug(f"Not our turn to claim job {job.id}")
-                return
-
-            # Add to queue for processing
-            queue = _job_queues.setdefault(job.model, asyncio.Queue())
-            await queue.put({
-                "job_id": job.id,
-                "payload": job.payload,
-                "models": [job.model],
-            })
-
-            logger.info(f"Queued job {job.id} for model {job.model}")
-
-        except Exception as e:
-            logger.error(f"Error handling job message: {e}")
-
-    async def handle_claim(topic: str, data: bytes) -> None:
-        """Handle incoming claim messages."""
-        try:
-            claim = JobClaim.from_json(data.decode())
-
-            # Record the claim
-            existing = _claimed_jobs.get(claim.job_id)
-            if not existing or claim.timestamp < existing.timestamp:
-                _claimed_jobs[claim.job_id] = claim
-                logger.debug(f"Recorded claim: {claim.worker_id} -> {claim.job_id}")
-
-                # Add worker to known set
-                node.add_known_worker(claim.worker_id)
-
-        except Exception as e:
-            logger.error(f"Error handling claim message: {e}")
-
-    # Subscribe to job topics for each model
-    await node.subscribe_to_jobs(models, handle_job)
-
-    # Subscribe to global claims topic
-    await node.subscribe_to_claims(handle_claim)
+    # Subscribe to claims
+    await node.subscribe(claims_topic())
 
     logger.info(f"Registered as worker for models: {models}")
 
 
 async def stream_result(
-    job_id: str, worker_id: str
+    job_id: str, worker_id: str = ""
 ) -> AsyncGenerator[JobResult, None]:
     """Subscribe to results for a job.
 
     Used by gateways to receive streaming results from workers.
-
-    Args:
-        job_id: The job to watch
-        worker_id: Expected worker ID (optional validation)
-
-    Yields:
-        JobResult messages (tokens, done, or error)
     """
     node = get_p2p_node()
     if not node:
         raise RuntimeError("P2P node not initialized")
 
-    result_queue: asyncio.Queue[JobResult] = asyncio.Queue()
-
-    async def handle_result(topic: str, data: bytes) -> None:
-        result = JobResult.from_json(data.decode())
-        await result_queue.put(result)
-
+    # Subscribe to result topic
     topic = results_topic(job_id)
-    await node.subscribe(topic, handle_result)
+    await node.subscribe(topic)
+
+    # Create queue for results
+    result_queue = _result_queues.setdefault(job_id, asyncio.Queue())
+
+    config = get_p2p_config()
+    deadline = time.time() + config.job_ttl_seconds
 
     try:
-        config = get_p2p_config()
-        deadline = time.time() + config.job_ttl_seconds
-
         while time.time() < deadline:
             try:
                 result = await asyncio.wait_for(result_queue.get(), timeout=1.0)
@@ -319,19 +403,21 @@ async def stream_result(
                     break
             except asyncio.TimeoutError:
                 continue
-
     finally:
+        # Cleanup
         await node.unsubscribe(topic)
+        _result_queues.pop(job_id, None)
 
 
 async def publish_token(job_id: str, worker_id: str, text: str, index: int) -> None:
-    """Publish a token result to the job's result topic."""
+    """Publish a token result."""
     node = get_p2p_node()
     if not node:
         return
 
     result = JobResult.token_msg(job_id, worker_id, text, index)
-    await node.publish_result(result)
+    topic = results_topic(job_id)
+    await node.publish(topic, result.to_json().encode())
 
 
 async def publish_done(
@@ -343,7 +429,8 @@ async def publish_done(
         return
 
     result = JobResult.done_msg(job_id, worker_id, full_text, token_count, "")
-    await node.publish_result(result)
+    topic = results_topic(job_id)
+    await node.publish(topic, result.to_json().encode())
 
 
 async def publish_error(job_id: str, worker_id: str, message: str) -> None:
@@ -353,4 +440,5 @@ async def publish_error(job_id: str, worker_id: str, message: str) -> None:
         return
 
     result = JobResult.error_msg(job_id, worker_id, message)
-    await node.publish_result(result)
+    topic = results_topic(job_id)
+    await node.publish(topic, result.to_json().encode())
