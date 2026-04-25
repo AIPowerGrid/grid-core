@@ -10,15 +10,23 @@ Architecture:
     ┌─────────────────────────────────────────┐
     │  FastAPI (asyncio)                      │
     │  ├── publish_job() ──► _outbox queue    │
-    │  └── _inbox queue ◄── on_message()      │
+    │  ├── _inbox queue ◄── on_message()      │
+    │  └── _stream_inbox ◄── direct streams   │
     └─────────────────────────────────────────┘
                         │ thread-safe queues
     ┌─────────────────────────────────────────┐
     │  P2P Thread (trio)                      │
     │  ├── _run_trio_node()                   │
-    │  ├── gossipsub pub/sub                  │
-    │  └── bootstrap peer connections         │
+    │  ├── gossipsub pub/sub (jobs, claims)   │
+    │  └── direct streams (result streaming)  │
     └─────────────────────────────────────────┘
+
+Gossipsub is used for:
+- Job broadcasts: /aipg/1/jobs/{model}
+- Claim broadcasts: /aipg/1/claims
+
+Direct streams are used for:
+- Result streaming: worker opens stream to requester, streams tokens
 """
 
 import asyncio
@@ -43,6 +51,15 @@ class P2PMessage:
 
 
 @dataclass
+class StreamMessage:
+    """Message received on a direct stream."""
+    job_id: str
+    data: bytes
+    from_peer: str = ""
+    is_done: bool = False
+
+
+@dataclass
 class P2PNode:
     """P2P node wrapper that bridges asyncio (FastAPI) and trio (libp2p).
 
@@ -55,15 +72,18 @@ class P2PNode:
     running: bool = False
 
     # Thread-safe communication
-    _inbox: queue.Queue = field(default_factory=queue.Queue)  # trio -> asyncio
+    _inbox: queue.Queue = field(default_factory=queue.Queue)  # trio -> asyncio (gossipsub)
     _outbox: queue.Queue = field(default_factory=queue.Queue)  # asyncio -> trio
     _commands: queue.Queue = field(default_factory=queue.Queue)  # control commands
+    _stream_inbox: dict[str, queue.Queue] = field(default_factory=dict)  # job_id -> stream msgs
 
     # Internal state
     _thread: threading.Thread | None = None
     _subscribed_topics: set[str] = field(default_factory=set)
     _known_workers: set[str] = field(default_factory=set)
     _handlers: dict[str, list[Callable]] = field(default_factory=dict)
+    _pending_streams: dict[str, Any] = field(default_factory=dict)  # job_id -> stream
+    _host: Any = None  # libp2p host reference
 
     def start(self) -> None:
         """Start the P2P node in a background thread."""
@@ -120,7 +140,10 @@ class P2PNode:
         from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
         from libp2p.tools.anyio_service import background_trio_service
         from libp2p.custom_types import TProtocol
+        from libp2p.network.stream.net_stream_interface import INetStream
         import multiaddr
+
+        from .protocol import RESULT_STREAM_PROTOCOL
 
         # Generate or load key pair
         # TODO: Load from config.private_key_path if set
@@ -162,8 +185,20 @@ class P2PNode:
                     self.peer_id = host.get_id().to_string()
                     self._known_workers.add(self.peer_id)
 
+                    # Register handler for incoming result streams
+                    async def stream_handler(stream: INetStream) -> None:
+                        await self._handle_incoming_stream(stream, nursery)
+
+                    host.set_stream_handler(
+                        TProtocol(RESULT_STREAM_PROTOCOL), stream_handler
+                    )
+
+                    # Store host reference for opening outgoing streams
+                    self._host = host
+
                     logger.info(f"P2P node ready on port {listen_port}")
                     logger.info(f"Peer ID: {self.peer_id}")
+                    logger.info(f"Result stream handler registered: {RESULT_STREAM_PROTOCOL}")
 
                     # Connect to bootstrap peers
                     for peer_addr in self.config.bootstrap_peers:
@@ -301,6 +336,86 @@ class P2PNode:
                 pass
             await trio.sleep(0.1)
 
+    async def _handle_incoming_stream(self, stream: Any, nursery: Any) -> None:
+        """Handle an incoming result stream from a worker.
+
+        Protocol:
+        1. Worker sends job_id (first line, newline-terminated)
+        2. Worker sends result messages (JSON lines)
+        3. Worker closes stream when done
+        """
+        import trio
+        from libp2p.peer.id import ID
+
+        try:
+            remote_peer = stream.muxed_conn.peer_id
+            remote_peer_str = ID(remote_peer).to_base58() if hasattr(remote_peer, 'to_bytes') else str(remote_peer)
+            logger.debug(f"Incoming result stream from {remote_peer_str[:8]}")
+
+            # Read job_id (first line)
+            job_id_bytes = b""
+            while True:
+                chunk = await stream.read(1)
+                if not chunk or chunk == b"\n":
+                    break
+                job_id_bytes += chunk
+
+            job_id = job_id_bytes.decode().strip()
+            if not job_id:
+                logger.warning("Stream missing job_id, closing")
+                await stream.close()
+                return
+
+            logger.debug(f"Result stream for job {job_id[:8]}")
+
+            # Create queue for this job if not exists
+            if job_id not in self._stream_inbox:
+                self._stream_inbox[job_id] = queue.Queue()
+
+            job_queue = self._stream_inbox[job_id]
+
+            # Read result messages until stream closes
+            buffer = b""
+            while True:
+                try:
+                    chunk = await stream.read(4096)
+                    if not chunk:
+                        # Stream closed
+                        job_queue.put(StreamMessage(
+                            job_id=job_id,
+                            data=b"",
+                            from_peer=remote_peer_str,
+                            is_done=True,
+                        ))
+                        break
+
+                    buffer += chunk
+
+                    # Process complete lines
+                    while b"\n" in buffer:
+                        line, buffer = buffer.split(b"\n", 1)
+                        if line:
+                            job_queue.put(StreamMessage(
+                                job_id=job_id,
+                                data=line,
+                                from_peer=remote_peer_str,
+                                is_done=False,
+                            ))
+
+                except Exception as e:
+                    logger.error(f"Error reading stream for {job_id[:8]}: {e}")
+                    break
+
+            await stream.close()
+            logger.debug(f"Result stream closed for job {job_id[:8]}")
+
+        except Exception as e:
+            logger.error(f"Error handling incoming stream: {e}")
+            try:
+                await stream.close()
+            except:
+                pass
+
     # ── Public API (called from asyncio) ──
 
     async def subscribe(self, topic: str) -> None:
@@ -335,6 +450,38 @@ class P2PNode:
     def add_known_worker(self, worker_id: str) -> None:
         """Add a worker to the known set."""
         self._known_workers.add(worker_id)
+
+    # ── Direct Stream API ──
+
+    def register_job_stream(self, job_id: str) -> None:
+        """Register to receive stream messages for a job.
+
+        Call this before broadcasting the job so the queue exists
+        when the worker connects.
+        """
+        if job_id not in self._stream_inbox:
+            self._stream_inbox[job_id] = queue.Queue()
+            logger.debug(f"Registered stream inbox for job {job_id[:8]}")
+
+    async def get_stream_message(
+        self, job_id: str, timeout: float = 1.0
+    ) -> StreamMessage | None:
+        """Get next stream message for a job (non-blocking for asyncio)."""
+        job_queue = self._stream_inbox.get(job_id)
+        if not job_queue:
+            return None
+
+        try:
+            return await asyncio.to_thread(
+                job_queue.get, timeout=timeout
+            )
+        except:
+            return None
+
+    def cleanup_job_stream(self, job_id: str) -> None:
+        """Remove the stream inbox for a job."""
+        self._stream_inbox.pop(job_id, None)
+        logger.debug(f"Cleaned up stream inbox for job {job_id[:8]}")
 
 
 # ── Global singleton ──

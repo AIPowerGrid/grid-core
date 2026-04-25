@@ -5,9 +5,16 @@
 
 These dataclasses define the wire format for P2P messages.
 All messages are JSON-encoded for simplicity (could migrate to protobuf later).
+
+Direct streaming protocol:
+- Workers open a direct libp2p stream to the requester for results
+- More efficient than gossipsub for high-frequency token streaming
 """
 
 import hashlib
+
+# Protocol ID for direct result streaming
+RESULT_STREAM_PROTOCOL = "/aipg/1/result-stream"
 import json
 import time
 from dataclasses import dataclass, field
@@ -25,6 +32,7 @@ class JobRequest:
     max_cost: int  # Max AIPG (in wei) willing to pay
     user_pubkey: str  # Hex-encoded public key
     signature: str  # Hex-encoded signature
+    requester_peer_id: str = ""  # Peer ID to stream results to (direct connection)
     timestamp: float = field(default_factory=time.time)
     ttl: int = 60  # Seconds until expiry
 

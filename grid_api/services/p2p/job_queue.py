@@ -3,17 +3,21 @@
 
 """P2P job queue implementation.
 
-Provides the same interface as services/job_queue.py but uses libp2p gossipsub.
+Provides the same interface as services/job_queue.py but uses libp2p.
 Can be used as a drop-in replacement when P2P mode is enabled.
 
 Architecture:
-    Gateway → publish_job() → gossipsub /aipg/1/jobs/{model}
+    Gateway → submit_job() → gossipsub /aipg/1/jobs/{model}
                                     ↓
     Workers ← pop_job() ← message dispatcher
                                     ↓
               claim_job() → gossipsub /aipg/1/claims
                                     ↓
-              stream tokens → gossipsub /aipg/1/results/{job_id}
+              stream tokens → DIRECT STREAM to requester peer
+                              (not gossipsub - more efficient)
+
+Gossipsub is used for job/claim broadcast (one-to-many).
+Direct streams are used for result streaming (one-to-one).
 """
 
 import asyncio
@@ -211,6 +215,7 @@ async def submit_job(job_id: str, payload: dict, models: list[str]) -> str:
     """Submit a job for processing via P2P.
 
     Broadcasts the job to gossipsub topics for each specified model.
+    Workers will open a direct stream to us to send results.
     """
     node = get_p2p_node()
     if not node:
@@ -221,7 +226,10 @@ async def submit_job(job_id: str, payload: dict, models: list[str]) -> str:
     # Ensure dispatcher is running
     await _start_dispatcher()
 
-    # Create job request
+    # Register stream inbox BEFORE broadcasting so it's ready when worker connects
+    node.register_job_stream(job_id)
+
+    # Create job request with our peer ID so worker knows where to stream results
     job = JobRequest(
         id=job_id,
         model=models[0] if models else "unknown",
@@ -229,13 +237,9 @@ async def submit_job(job_id: str, payload: dict, models: list[str]) -> str:
         max_cost=0,  # Free tier for now
         user_pubkey="",  # TODO: from auth
         signature=uuid4().hex + uuid4().hex,  # Random seed for claim resolution
+        requester_peer_id=node.peer_id,  # Worker streams results to this peer
         ttl=config.job_ttl_seconds,
     )
-
-    # Subscribe to results topic to receive response
-    result_topic = results_topic(job_id)
-    await node.subscribe(result_topic)
-    _result_queues[job_id] = asyncio.Queue()
 
     # Broadcast to all model topics
     for model in models:
@@ -375,20 +379,14 @@ async def register_worker(models: list[str]) -> None:
 async def stream_result(
     job_id: str, worker_id: str = ""
 ) -> AsyncGenerator[JobResult, None]:
-    """Subscribe to results for a job.
+    """Receive streaming results for a job via direct stream.
 
-    Used by gateways to receive streaming results from workers.
+    Workers open a direct libp2p stream to us and send result messages.
+    Much more efficient than gossipsub for high-frequency token streaming.
     """
     node = get_p2p_node()
     if not node:
         raise RuntimeError("P2P node not initialized")
-
-    # Subscribe to result topic
-    topic = results_topic(job_id)
-    await node.subscribe(topic)
-
-    # Create queue for results
-    result_queue = _result_queues.setdefault(job_id, asyncio.Queue())
 
     config = get_p2p_config()
     deadline = time.time() + config.job_ttl_seconds
@@ -396,17 +394,33 @@ async def stream_result(
     try:
         while time.time() < deadline:
             try:
-                result = await asyncio.wait_for(result_queue.get(), timeout=1.0)
-                yield result
+                # Get next message from direct stream
+                msg = await node.get_stream_message(job_id, timeout=1.0)
 
-                if result.type in ("done", "error"):
+                if msg is None:
+                    continue
+
+                if msg.is_done:
+                    # Stream closed by worker
+                    logger.debug(f"Stream closed for job {job_id[:8]}")
                     break
+
+                # Parse result from stream message
+                try:
+                    result = JobResult.from_json(msg.data.decode())
+                    yield result
+
+                    if result.type in ("done", "error"):
+                        break
+                except Exception as e:
+                    logger.error(f"Error parsing stream message: {e}")
+                    continue
+
             except asyncio.TimeoutError:
                 continue
     finally:
         # Cleanup
-        await node.unsubscribe(topic)
-        _result_queues.pop(job_id, None)
+        node.cleanup_job_stream(job_id)
 
 
 async def publish_token(job_id: str, worker_id: str, text: str, index: int) -> None:
