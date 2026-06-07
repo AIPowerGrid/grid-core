@@ -165,3 +165,4 @@ GRID_FIX_SUMMARY.md
 IMAGE_GEN_ANALYSIS.md
 "JSON is valid"
 horde/modelvault/
+.venv-test/
