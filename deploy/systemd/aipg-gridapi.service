@@ -1,0 +1,27 @@
+# FastAPI streaming API (/v1/*, worker WebSockets, metrics).
+[Unit]
+Description=AIPG Grid API (FastAPI/uvicorn)
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aipg
+Group=aipg
+WorkingDirectory=/home/aipg/system-core
+EnvironmentFile=/etc/aipg/grid.env
+# --proxy-headers + forwarded-allow-ips so rate limiting sees real client IPs
+# behind nginx. Port 7010 (Flask owns 7001-7008; grid_api/routers/images.py
+# proxies to Flask on 7001).
+ExecStart=/home/aipg/system-core/.venv/bin/uvicorn grid_api.main:app \
+    --host 127.0.0.1 --port 7010 --workers 4 \
+    --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

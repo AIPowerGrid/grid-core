@@ -4,6 +4,7 @@
 
 import hashlib
 import json
+import os
 import random
 import secrets
 import uuid
@@ -83,10 +84,42 @@ def sanitize_string(text):
     return bleach.clean(text).lstrip().rstrip()
 
 
+_API_KEY_SALT = None
+
+
+def _get_api_key_salt():
+    """Read the API-key salt from GRID_SALT, exactly once, failing loudly.
+
+    History: the original deployment hardcoded "s0m3s3cr3t" because the .env
+    secret was never parsed, and the database filled with keys hashed against
+    the known default. That deployment is being retired with a fresh database.
+    This version refuses to run without a real secret, and refuses the
+    known-compromised value, so the failure mode can never repeat silently.
+
+    The same GRID_SALT env var is read by grid_api/auth.py and the dashboard
+    (grid-frontend generate-api-key route) — all three must share it so keys
+    hash identically everywhere.
+    """
+    global _API_KEY_SALT
+    if _API_KEY_SALT is None:
+        salt = os.getenv("GRID_SALT")
+        if not salt:
+            raise RuntimeError(
+                "GRID_SALT is not set. Refusing to hash API keys without a real "
+                "secret — set GRID_SALT in the environment (see deploy/env.template). "
+                "It must match grid_api and the dashboard."
+            )
+        if salt == "s0m3s3cr3t":
+            raise RuntimeError(
+                "GRID_SALT is set to the known-compromised legacy value. "
+                "Generate a fresh secret (e.g. `openssl rand -hex 32`)."
+            )
+        _API_KEY_SALT = salt
+    return _API_KEY_SALT
+
+
 def hash_api_key(unhashed_api_key):
-    # Force using the default salt to match existing database entries
-    salt = "s0m3s3cr3t"  # Note hardcoded default to match existing database entries
-    return hashlib.sha256(salt.encode() + unhashed_api_key.encode()).hexdigest()
+    return hashlib.sha256(_get_api_key_salt().encode() + unhashed_api_key.encode()).hexdigest()
 
 
 def hash_dictionary(dictionary):
