@@ -90,7 +90,16 @@ async def create_message(
     if not available:
         raise HTTPException(status_code=503, detail={"type": "overloaded_error", "message": "No streaming workers online"})
 
-    model = body.model if body.model in available else available[0]
+    # Never silently substitute a different model than the one requested.
+    if body.model not in available:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "type": "not_found_error",
+                "message": f"Model '{body.model}' is not available. Online models: {available}",
+            },
+        )
+    model = body.model
     raw_prompt = _messages_to_prompt(body)
 
     # Sanitize — strip credentials before they reach workers

@@ -69,8 +69,9 @@ async def create_image(
     except HTTPException:
         raise
     except Exception as e:
+        # Log full detail server-side; return generic message to the client.
         logger.error(f"Image generation error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error while processing the request.")
 
 
 async def _handle_image_gen(request: ImageRequest, apikey: str):

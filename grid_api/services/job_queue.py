@@ -18,14 +18,23 @@ logger = logging.getLogger("grid_api.job_queue")
 # Jobs pending longer than this are considered abandoned and can be reclaimed
 STALE_JOB_MS = 300_000  # 5 minutes
 
+# A job can be requeued (bounced between workers that don't serve its model)
+# at most this many times before we give up and fault it. With instant
+# requeues, a job for a model NO worker serves hits this cap in milliseconds
+# and fails cleanly, instead of hanging the client until the 300s timeout.
+# Set comfortably above the realistic number of model-mismatched workers a
+# job might bounce through in a healthy heterogeneous pool.
+MAX_REQUEUE = 25
 
-async def submit_job(job_id: str, payload: dict, models: list[str]) -> str:
+
+async def submit_job(job_id: str, payload: dict, models: list[str], requeue_count: int = 0) -> str:
     """Add a text generation job to the Redis Stream."""
     r = get_redis()
     data = {
         "job_id": job_id,
         "payload": json.dumps(payload),
         "models": json.dumps(models),
+        "requeue_count": str(requeue_count),
     }
     return await r.xadd(STREAM_KEY, data)
 
@@ -55,7 +64,37 @@ async def pop_job(worker_id: str, timeout_ms: int = 5000) -> dict | None:
         "job_id": fields["job_id"],
         "payload": json.loads(fields["payload"]),
         "models": json.loads(fields["models"]),
+        # Default 0 for jobs queued before this field existed.
+        "requeue_count": int(fields.get("requeue_count", 0)),
     }
+
+
+async def requeue_for_mismatch(job: dict) -> bool:
+    """Requeue a job that landed on a worker that doesn't serve its model.
+
+    The single shared stream + consumer group means XREADGROUP hands a job
+    to a random worker regardless of which models it serves. Rather than
+    discard a mismatched job (which silently strands the waiting client),
+    we ack the current delivery and re-add it for another worker.
+
+    Returns True if requeued, False if the bounce limit was hit (caller
+    should fault the job and notify the client).
+    """
+    r = get_redis()
+    count = job.get("requeue_count", 0)
+
+    # Ack the current delivery either way so it leaves this worker's PEL.
+    await r.xack(STREAM_KEY, CONSUMER_GROUP, job["stream_id"])
+
+    if count >= MAX_REQUEUE:
+        logger.warning(
+            f"Job {job['job_id']} hit requeue limit ({MAX_REQUEUE}) for "
+            f"models {job['models']} — no worker serves it; faulting."
+        )
+        return False
+
+    await submit_job(job["job_id"], job["payload"], job["models"], requeue_count=count + 1)
+    return True
 
 
 async def ack_job(message_id: str):

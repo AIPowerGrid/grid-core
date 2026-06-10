@@ -69,8 +69,10 @@ async def chat_completions(
     except HTTPException:
         raise
     except Exception as e:
+        # Log the full detail server-side; return a generic message so we
+        # never leak internal paths / SQL / stack details to the public.
         logger.error(f"chat_completions error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error while processing the request.")
 
 
 async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
@@ -92,13 +94,16 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
             detail="No streaming workers online. Use /api/v2/generate/text/async for the legacy queue.",
         )
 
-    # Resolve model — use requested or first available
+    # Resolve model. Never silently substitute — a client asking for
+    # llama-70b must not receive output from whatever random model happens
+    # to be online, labeled as the one they asked for. Return a clear
+    # model-not-available error listing what IS online.
     model = request.model
     if model not in available:
-        if available:
-            model = available[0]
-        else:
-            raise HTTPException(status_code=400, detail=f"Model '{request.model}' not available. Available: {available}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Model '{request.model}' is not available. Online models: {available}",
+        )
 
     # Sanitize messages — strip credentials before they reach workers
     clean_messages, was_redacted, redacted_types = sanitize_messages(

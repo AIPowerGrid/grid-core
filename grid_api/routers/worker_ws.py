@@ -21,7 +21,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..auth import hash_api_key
-from ..database import new_session, processing_gens_table, users_table, waiting_prompts_table, worker_models_table, workers_table
+from ..database import den_events_table, new_session, processing_gens_table, users_table, waiting_prompts_table, worker_models_table, workers_table
 from ..redis_client import get_redis
 from ..services import job_queue, token_stream
 from ..services.den import calculate_den
@@ -38,6 +38,21 @@ WORKER_ACTIVE_SET = "grid:workers:active"
 
 # In-process tracking for WebSocket handles (can't serialize these to Redis)
 _local_ws: dict[str, WebSocket] = {}
+
+
+def _wallet_from_name(worker_name: str) -> str:
+    """Best-effort extract an EVM wallet from the worker name.
+
+    Convention used across AIPG workers: "MyWorker.0xABC..." or
+    "MyWorker#0xABC...". Returns "" if no 0x-prefixed 40-hex address is found.
+    Settlement can still resolve via worker->user mapping when this is empty.
+    """
+    import re
+
+    if not worker_name:
+        return ""
+    m = re.search(r"0x[a-fA-F0-9]{40}", worker_name)
+    return m.group(0) if m else ""
 
 
 # ── Redis-backed worker registry ──
@@ -109,6 +124,9 @@ async def worker_websocket(ws: WebSocket):
         models = init_msg.get("models", [])
         max_length = init_msg.get("max_length", 512)
         max_context_length = init_msg.get("max_context_length", 2048)
+        # Optional explicit wallet; otherwise fall back to the wallet-in-name
+        # convention "WorkerName.0xADDRESS" or "WorkerName#0xADDRESS".
+        wallet_address = init_msg.get("wallet_address") or _wallet_from_name(worker_name)
 
         if not apikey or not worker_name:
             await ws.send_json({"type": "error", "message": "Missing apikey or name"})
@@ -181,6 +199,7 @@ async def worker_websocket(ws: WebSocket):
             "models": models,
             "max_length": max_length,
             "max_context_length": max_context_length,
+            "wallet_address": wallet_address,
         }
         await register_worker(worker_id, worker_info)
         _local_ws[worker_id] = ws
@@ -229,11 +248,22 @@ async def worker_websocket(ws: WebSocket):
                 if not job:
                     continue
 
-                # Check model compatibility
+                # Check model compatibility. The shared stream + consumer group
+                # hands jobs to a random worker regardless of served models, so
+                # a mismatch is normal in a heterogeneous pool. Requeue for
+                # another worker instead of discarding (which would strand the
+                # client). If the job has bounced past the requeue limit, no
+                # worker serves the model — fault it and tell the client.
                 job_models = job["models"]
                 matching = [m for m in job_models if m in models] if job_models else models
                 if not matching:
-                    await job_queue.ack_job(job["stream_id"])
+                    requeued = await job_queue.requeue_for_mismatch(job)
+                    if not requeued:
+                        await token_stream.publish_error(
+                            job["job_id"],
+                            f"No worker available for the requested model(s): "
+                            f"{', '.join(job_models) if job_models else 'unspecified'}.",
+                        )
                     continue
 
                 selected_model = matching[0]
@@ -301,11 +331,34 @@ async def worker_websocket(ws: WebSocket):
                 current_job = None
                 await job_queue.ack_job(job["stream_id"])
 
-                # Calculate den reward based on tokens, model, context
+                # Calculate den reward — but harden against gaming first.
+                #
+                # 1) Output tokens: NEVER trust the worker's self-reported count
+                #    (a malicious worker inflates it). Count server-side from
+                #    the text we actually received, and cap at the job's
+                #    requested max_length — a worker can't be credited for more
+                #    output than was asked for.
+                requested_max = int(job["payload"].get("max_length", 512) or 512)
+                server_token_count = len(full_text.split())
+                effective_tokens = min(server_token_count, token_count or server_token_count, requested_max)
+
+                # 2) Context: the prompt is user-controlled and the context
+                #    multiplier scales up to 30x. Cap the prompt token count at
+                #    the worker's advertised max_context_length so a self-dealer
+                #    can't farm den by sending an enormous prompt to their own
+                #    worker.
                 prompt_text = job["payload"].get("prompt", "")
-                prompt_tokens = len(prompt_text.split())  # Rough estimate
+                ctx_cap = int(worker_info.get("max_context_length", 2048) or 2048)
+                prompt_tokens = min(len(prompt_text.split()), ctx_cap)
+
+                # NOTE: the model-size multiplier still derives from the model
+                # NAME (den.py), which a worker advertising a fake large-model
+                # name could inflate via self-dealing. The real fix is to source
+                # the param count from the on-chain ModelVault registry rather
+                # than the name. Tracked separately — bounded here only by the
+                # token/context caps above.
                 den_awarded = calculate_den(
-                    output_tokens=token_count,
+                    output_tokens=effective_tokens,
                     prompt_tokens=prompt_tokens,
                     model_name=selected_model,
                     generation_time_seconds=gen_time,
@@ -316,6 +369,20 @@ async def worker_websocket(ws: WebSocket):
                         .where(processing_gens_table.c.id == job["job_id"])
                         .values(generation=full_text, faulted=False)
                     )
+                    # Persist den to the durable ledger the settlement bot
+                    # pays against. Without this row, den is computed and
+                    # discarded and the worker can never be paid.
+                    await session.execute(
+                        sa.insert(den_events_table).values(
+                            job_id=job["job_id"],
+                            worker_id=worker_id,
+                            wallet_address=worker_info.get("wallet_address", ""),
+                            model=selected_model,
+                            den=den_awarded,
+                            output_tokens=effective_tokens,
+                            created=datetime.utcnow(),
+                        )
+                    )
                     await session.commit()
 
                 await ws.send_json({
@@ -325,7 +392,7 @@ async def worker_websocket(ws: WebSocket):
                 })
 
                 # Record metrics
-                record_job_complete(tokens=token_count, den=den_awarded, duration=gen_time)
+                record_job_complete(tokens=effective_tokens, den=den_awarded, duration=gen_time)
         finally:
             poll_task.cancel()
 
