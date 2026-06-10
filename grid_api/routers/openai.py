@@ -17,11 +17,9 @@ from uuid import uuid4
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
 from fastapi.responses import StreamingResponse
+
+from ..ratelimit import limiter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import extract_api_key, hash_api_key
@@ -29,7 +27,7 @@ from ..auth import extract_api_key, hash_api_key
 from .. import format as fmt
 from ..database import new_session, processing_gens_table, users_table, waiting_prompts_table
 from ..models.openai import ChatCompletionRequest, ModelInfo, ModelListResponse
-from ..services import job_queue, token_stream
+from ..services import job_queue, quota, token_stream
 from ..services.sanitizer import sanitize_messages
 from .worker_ws import get_available_models
 
@@ -104,6 +102,10 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
             status_code=404,
             detail=f"Model '{request.model}' is not available. Online models: {available}",
         )
+
+    # Free-tier daily quota. Checked here (after auth + worker availability)
+    # so a user only spends quota on a request that's actually going to queue.
+    await quota.check_and_consume(dict(user))
 
     # Sanitize messages — strip credentials before they reach workers
     clean_messages, was_redacted, redacted_types = sanitize_messages(

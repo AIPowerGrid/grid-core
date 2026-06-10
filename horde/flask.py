@@ -28,10 +28,22 @@ def create_app():
         HORDE.config["SQLALCHEMY_DATABASE_URI"] = (
             f"postgresql://{os.getenv('POSTGRES_USER', 'postgres')}:" f"{os.getenv('POSTGRES_PASS')}@{os.getenv('POSTGRES_URL')}"
         )
+        # Connection-pool sizing. The previous config (pool_size 50, unlimited
+        # overflow) let a single process open an unbounded number of
+        # connections — under load, 8 processes blew past Postgres's
+        # max_connections and every new request got "FATAL: too many
+        # connections". Now finite and env-tunable.
+        #
+        # Budget the total: (DB_POOL_SIZE + DB_MAX_OVERFLOW) * num_processes
+        # must stay under Postgres max_connections (minus grid_api's pools and
+        # headroom). With the default 8 Flask procs and these defaults that's
+        # 8 * (10 + 15) = 200 worst-case — raise Postgres max_connections to
+        # ~300 and/or front it with pgbouncer before scaling processes.
         HORDE.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-            "pool_size": 50,
-            "max_overflow": -1,
-            # "pool_pre_ping": True,
+            "pool_size": int(os.getenv("DB_POOL_SIZE", "10")),
+            "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "15")),
+            "pool_pre_ping": True,        # drop dead connections instead of erroring mid-request
+            "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "1800")),  # recycle every 30 min
         }
     HORDE.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     db.init_app(HORDE)

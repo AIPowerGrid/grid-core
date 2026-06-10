@@ -15,18 +15,16 @@ from uuid import uuid4
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Header, HTTPException, Request
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+from ..ratelimit import limiter
 
 from ..auth import hash_api_key
 
 from .. import format as fmt
 from ..database import new_session, processing_gens_table, users_table, waiting_prompts_table
-from ..services import job_queue, token_stream
+from ..services import job_queue, quota, token_stream
 from ..services.sanitizer import sanitize
 from .worker_ws import get_available_models
 
@@ -99,6 +97,10 @@ async def create_message(
                 "message": f"Model '{body.model}' is not available. Online models: {available}",
             },
         )
+
+    # Free-tier daily quota (paid/contributor users pass through).
+    await quota.check_and_consume(dict(user))
+
     model = body.model
     raw_prompt = _messages_to_prompt(body)
 

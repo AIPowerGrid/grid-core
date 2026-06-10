@@ -19,11 +19,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 from .database import close_database, init_database
+from .ratelimit import limiter
 from .redis_client import close_redis, init_redis
 from .routers import anthropic, health, images, metrics, openai, worker_ws
 from .services.p2p import init_p2p, close_p2p
@@ -34,8 +33,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("grid_api")
 
-# Rate limiter — keyed by IP address
-limiter = Limiter(key_func=get_remote_address)
+# Rate limiter is the shared, Redis-backed, per-API-key limiter from
+# .ratelimit (imported above). All routers use the same instance.
 
 
 async def _stale_job_reclaimer():

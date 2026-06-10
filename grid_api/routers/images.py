@@ -13,16 +13,16 @@ import logging
 import time
 
 import httpx
+import sqlalchemy as sa
 from fastapi import APIRouter, Header, HTTPException, Request
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
 from pydantic import BaseModel, Field
 from typing import Optional
 
 from ..auth import extract_api_key, hash_api_key
 from ..config import get_settings
+from ..database import new_session, users_table
+from ..ratelimit import limiter
+from ..services import quota
 
 logger = logging.getLogger("grid_api.images")
 
@@ -65,6 +65,15 @@ async def create_image(
     """
     try:
         key = extract_api_key(apikey, authorization)
+        # Validate the key + load the user so we can meter the free tier.
+        async with await new_session() as session:
+            result = await session.execute(
+                sa.select(users_table).where(users_table.c.api_key == hash_api_key(key))
+            )
+            user = result.mappings().first()
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        await quota.check_and_consume(dict(user))
         return await _handle_image_gen(body, key)
     except HTTPException:
         raise
