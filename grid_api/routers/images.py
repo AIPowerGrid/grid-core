@@ -29,16 +29,16 @@ logger = logging.getLogger("grid_api.images")
 router = APIRouter()
 
 DEFAULT_IMAGE_MODEL = "FLUX.2 [klein]"
-GRID_API_BASE = None  # Lazy init
 
 
 def _get_grid_api_base() -> str:
-    global GRID_API_BASE
-    if GRID_API_BASE is None:
-        settings = get_settings()
-        # Talk to the Flask API on localhost
-        GRID_API_BASE = "http://127.0.0.1:7001"
-    return GRID_API_BASE
+    """Base URL of the legacy Flask API we proxy image/video jobs to.
+
+    Configurable via FLASK_API_BASE so grid_api can run on a separate VM from
+    the Flask pool when the stateless tier is scaled out. Defaults to the
+    co-located localhost pool.
+    """
+    return get_settings().flask_api_base.rstrip("/")
 
 
 class ImageRequest(BaseModel):
