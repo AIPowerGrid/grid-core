@@ -46,11 +46,30 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='aipg'" | grep -
     sudo -u postgres psql -c "CREATE ROLE aipg LOGIN PASSWORD '$DB_PASS';"
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='aipg_grid'" | grep -q 1 || \
     sudo -u postgres psql -c "CREATE DATABASE aipg_grid OWNER aipg;"
+
+# pg_cron — REQUIRED. The horde sql_statements schedule stored procedures via
+# pg_cron and directly UPDATE cron.job. Without it, every Flask proc crashes on
+# boot with "schema cron does not exist". Detect the installed PG major version.
+PGVER=$(ls /etc/postgresql/ | sort -V | tail -1)
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "postgresql-${PGVER}-cron"
+PG_CONFD="/etc/postgresql/${PGVER}/main/conf.d"
+mkdir -p "$PG_CONFD"
+cat > "$PG_CONFD/pg_cron.conf" <<EOF
+shared_preload_libraries = 'pg_cron'
+cron.database_name = 'aipg_grid'
+EOF
+
 # Connection budget: 8 Flask procs * (10+15) + grid_api pools + headroom
 PGCONF=$(sudo -u postgres psql -tc "SHOW config_file" | xargs)
 grep -q "^max_connections = 300" "$PGCONF" || \
     sed -i 's/^max_connections.*/max_connections = 300/' "$PGCONF"
 systemctl restart postgresql
+sleep 4
+
+# pg_cron extension + grant the app user the privileges the sql_statements need
+# (they UPDATE cron.job directly, which a non-owner can't do without grants).
+sudo -u postgres psql -d aipg_grid -c "CREATE EXTENSION IF NOT EXISTS pg_cron;"
+sudo -u postgres psql -d aipg_grid -c "GRANT USAGE ON SCHEMA cron TO aipg; GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA cron TO aipg; GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA cron TO aipg;"
 
 echo "── [4/5] /etc/aipg/grid.env (generated secrets) ──"
 mkdir -p /etc/aipg
