@@ -16,6 +16,10 @@ from .config import get_settings
 _redis: aioredis.Redis | None = None
 
 STREAM_KEY = "grid:jobs:text"
+# Media (image/video) jobs ride a separate stream so the consumer group never
+# hands a media job to a text worker (and vice versa) — mismatch-requeue is
+# only needed for *model* mismatches within a type.
+MEDIA_STREAM_KEY = "grid:jobs:media"
 CONSUMER_GROUP = "grid:workers"
 WORKER_ACTIVE_SET_KEY = "grid:workers:active"
 
@@ -25,12 +29,13 @@ async def init_redis():
     global _redis
     settings = get_settings()
     _redis = aioredis.from_url(settings.redis_url, decode_responses=True)
-    # Create the consumer group if it doesn't exist
-    try:
-        await _redis.xgroup_create(STREAM_KEY, CONSUMER_GROUP, id="0", mkstream=True)
-    except aioredis.ResponseError as e:
-        if "BUSYGROUP" not in str(e):
-            raise
+    # Create the consumer groups if they don't exist
+    for stream in (STREAM_KEY, MEDIA_STREAM_KEY):
+        try:
+            await _redis.xgroup_create(stream, CONSUMER_GROUP, id="0", mkstream=True)
+        except aioredis.ResponseError as e:
+            if "BUSYGROUP" not in str(e):
+                raise
 
 
 async def close_redis():

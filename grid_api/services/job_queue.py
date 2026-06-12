@@ -11,7 +11,7 @@ automatically via claim_stale_jobs().
 import json
 import logging
 
-from ..redis_client import CONSUMER_GROUP, STREAM_KEY, get_redis
+from ..redis_client import CONSUMER_GROUP, MEDIA_STREAM_KEY, STREAM_KEY, get_redis
 
 logger = logging.getLogger("grid_api.job_queue")
 
@@ -27,29 +27,42 @@ STALE_JOB_MS = 300_000  # 5 minutes
 MAX_REQUEUE = 25
 
 
-async def submit_job(job_id: str, payload: dict, models: list[str], requeue_count: int = 0) -> str:
-    """Add a text generation job to the Redis Stream."""
+def _stream_for(job_type: str) -> str:
+    return STREAM_KEY if job_type == "text" else MEDIA_STREAM_KEY
+
+
+async def submit_job(
+    job_id: str,
+    payload: dict,
+    models: list[str],
+    requeue_count: int = 0,
+    job_type: str = "text",
+) -> str:
+    """Add a generation job to its type's Redis Stream."""
     r = get_redis()
     data = {
         "job_id": job_id,
+        "job_type": job_type,
         "payload": json.dumps(payload),
         "models": json.dumps(models),
         "requeue_count": str(requeue_count),
     }
-    return await r.xadd(STREAM_KEY, data)
+    return await r.xadd(_stream_for(job_type), data)
 
 
-async def pop_job(worker_id: str, timeout_ms: int = 5000) -> dict | None:
-    """Block-wait for the next job from the stream.
+async def pop_job(worker_id: str, timeout_ms: int = 5000, job_types: list[str] | None = None) -> dict | None:
+    """Block-wait for the next job from the stream(s) this worker serves.
 
-    Uses XREADGROUP so each job goes to exactly one worker.
+    Uses XREADGROUP so each job goes to exactly one worker. A worker serving
+    both text and media blocks on both streams in one call.
     Returns None on timeout (no jobs available).
     """
     r = get_redis()
+    streams = sorted({_stream_for(t) for t in (job_types or ["text"])})
     results = await r.xreadgroup(
         CONSUMER_GROUP,
         worker_id,
-        {STREAM_KEY: ">"},
+        {s: ">" for s in streams},
         count=1,
         block=timeout_ms,
     )
@@ -61,7 +74,9 @@ async def pop_job(worker_id: str, timeout_ms: int = 5000) -> dict | None:
 
     return {
         "stream_id": message_id,
+        "stream": stream_name,
         "job_id": fields["job_id"],
+        "job_type": fields.get("job_type", "text"),
         "payload": json.loads(fields["payload"]),
         "models": json.loads(fields["models"]),
         # Default 0 for jobs queued before this field existed.
@@ -82,9 +97,10 @@ async def requeue_for_mismatch(job: dict) -> bool:
     """
     r = get_redis()
     count = job.get("requeue_count", 0)
+    job_type = job.get("job_type", "text")
 
     # Ack the current delivery either way so it leaves this worker's PEL.
-    await r.xack(STREAM_KEY, CONSUMER_GROUP, job["stream_id"])
+    await r.xack(job.get("stream", _stream_for(job_type)), CONSUMER_GROUP, job["stream_id"])
 
     if count >= MAX_REQUEUE:
         logger.warning(
@@ -93,17 +109,27 @@ async def requeue_for_mismatch(job: dict) -> bool:
         )
         return False
 
-    await submit_job(job["job_id"], job["payload"], job["models"], requeue_count=count + 1)
+    await submit_job(
+        job["job_id"], job["payload"], job["models"],
+        requeue_count=count + 1, job_type=job_type,
+    )
     return True
 
 
-async def ack_job(message_id: str):
+async def ack_job(message_id: str, stream: str = STREAM_KEY):
     """Acknowledge a completed job so it's removed from the pending list."""
     r = get_redis()
-    await r.xack(STREAM_KEY, CONSUMER_GROUP, message_id)
+    await r.xack(stream, CONSUMER_GROUP, message_id)
 
 
-async def requeue_job(job_id: str, payload: dict, models: list[str], stream_id: str = None):
+async def requeue_job(
+    job_id: str,
+    payload: dict,
+    models: list[str],
+    stream_id: str = None,
+    job_type: str = "text",
+    stream: str | None = None,
+):
     """Requeue a failed job back into the stream.
 
     Called when a worker disconnects mid-generation. The original stream
@@ -111,8 +137,8 @@ async def requeue_job(job_id: str, payload: dict, models: list[str], stream_id: 
     """
     r = get_redis()
     if stream_id:
-        await r.xack(STREAM_KEY, CONSUMER_GROUP, stream_id)
-    new_id = await submit_job(job_id, payload, models)
+        await r.xack(stream or _stream_for(job_type), CONSUMER_GROUP, stream_id)
+    new_id = await submit_job(job_id, payload, models, job_type=job_type)
     logger.info(f"Requeued job {job_id} as {new_id}")
     return new_id
 
@@ -125,28 +151,29 @@ async def claim_stale_jobs() -> int:
     Returns the number of jobs reclaimed.
     """
     r = get_redis()
-    # XAUTOCLAIM: grab pending messages older than STALE_JOB_MS
-    try:
-        result = await r.xautoclaim(
-            STREAM_KEY, CONSUMER_GROUP, "reclaimer", min_idle_time=STALE_JOB_MS, start_id="0-0", count=10,
-        )
-        # result = (next_start_id, [(msg_id, fields), ...], [deleted_ids])
-        if not result or not result[1]:
-            return 0
-
-        reclaimed = 0
-        for msg_id, fields in result[1]:
-            job_id = fields.get("job_id", "unknown")
-            logger.warning(f"Reclaiming stale job {job_id} (msg {msg_id})")
-            # Ack the old message and requeue
-            await r.xack(STREAM_KEY, CONSUMER_GROUP, msg_id)
-            await submit_job(
-                job_id,
-                json.loads(fields.get("payload", "{}")),
-                json.loads(fields.get("models", "[]")),
+    reclaimed = 0
+    for stream in (STREAM_KEY, MEDIA_STREAM_KEY):
+        # XAUTOCLAIM: grab pending messages older than STALE_JOB_MS
+        try:
+            result = await r.xautoclaim(
+                stream, CONSUMER_GROUP, "reclaimer", min_idle_time=STALE_JOB_MS, start_id="0-0", count=10,
             )
-            reclaimed += 1
-        return reclaimed
-    except Exception as e:
-        logger.error(f"Error claiming stale jobs: {e}")
-        return 0
+            # result = (next_start_id, [(msg_id, fields), ...], [deleted_ids])
+            if not result or not result[1]:
+                continue
+
+            for msg_id, fields in result[1]:
+                job_id = fields.get("job_id", "unknown")
+                logger.warning(f"Reclaiming stale job {job_id} (msg {msg_id}) from {stream}")
+                # Ack the old message and requeue
+                await r.xack(stream, CONSUMER_GROUP, msg_id)
+                await submit_job(
+                    job_id,
+                    json.loads(fields.get("payload", "{}")),
+                    json.loads(fields.get("models", "[]")),
+                    job_type=fields.get("job_type", "text"),
+                )
+                reclaimed += 1
+        except Exception as e:
+            logger.error(f"Error claiming stale jobs from {stream}: {e}")
+    return reclaimed

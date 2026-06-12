@@ -1,28 +1,28 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""OpenAI-compatible /v1/images/generations endpoint.
+"""OpenAI-compatible /v1/images/generations endpoint — native v2 dispatch.
 
-Image generation uses the existing poll-based Flask API under the hood.
-This endpoint translates OpenAI format → Grid v2 API → polls → returns result.
-Default model: Flux Schnell (fast) or whatever is available.
+Jobs go straight onto the media Redis Stream and are served by WS-connected
+media workers (same dispatch machinery as text). No Flask proxy: the worker
+uploads results directly to R2 via presigned URLs and the completion arrives
+on the job's pub/sub channel.
 """
 
-import asyncio
+import json
 import logging
 import time
+from uuid import uuid4
 
-import httpx
 import sqlalchemy as sa
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import Optional
 
 from ..auth import extract_api_key, hash_api_key
-from ..config import get_settings
 from ..database import new_session, users_table
 from ..ratelimit import limiter
-from ..services import quota
+from ..services import job_queue, quota, token_stream
 
 logger = logging.getLogger("grid_api.images")
 
@@ -30,15 +30,8 @@ router = APIRouter()
 
 DEFAULT_IMAGE_MODEL = "FLUX.2 [klein]"
 
-
-def _get_grid_api_base() -> str:
-    """Base URL of the legacy Flask API we proxy image/video jobs to.
-
-    Configurable via FLASK_API_BASE so grid_api can run on a separate VM from
-    the Flask pool when the stateless tier is scaled out. Defaults to the
-    co-located localhost pool.
-    """
-    return get_settings().flask_api_base.rstrip("/")
+# Max seconds to wait for a media job before giving up.
+MEDIA_TIMEOUT = 300
 
 
 class ImageRequest(BaseModel):
@@ -84,9 +77,6 @@ async def create_image(
 
 
 async def _handle_image_gen(request: ImageRequest, apikey: str):
-    base = _get_grid_api_base()
-    headers = {"apikey": apikey, "Content-Type": "application/json"}
-
     # Parse size
     try:
         width, height = map(int, request.size.split("x"))
@@ -104,73 +94,40 @@ async def _handle_image_gen(request: ImageRequest, apikey: str):
     cfg_scale = 1.0 if is_fast_flux else (3.5 if is_flux else 7.5)
     sampler = "euler" if is_flux else "k_euler"
 
+    job_id = str(uuid4())
     payload = {
         "prompt": request.prompt,
-        "nsfw": False,
-        "censor_nsfw": True,
-        "trusted_workers": False,
-        "models": [model],
-        "r2": True,
-        "params": {
-            "n": request.n,
-            "width": width,
-            "height": height,
-            "steps": steps,
-            "sampler_name": sampler,
-            "cfg_scale": cfg_scale,
-        },
+        "n": request.n,
+        "width": width,
+        "height": height,
+        "steps": steps,
+        "sampler_name": sampler,
+        "cfg_scale": cfg_scale,
+        "ext": "webp",
     }
 
-    async with httpx.AsyncClient(timeout=120) as client:
-        # Submit job to Flask v2 API
-        resp = await client.post(f"{base}/api/v2/generate/async", headers=headers, json=payload)
-        if resp.status_code not in (200, 202):
-            detail = resp.text[:200]
-            logger.error(f"Grid API submit error {resp.status_code}: {detail}")
-            raise HTTPException(status_code=resp.status_code, detail=detail)
+    await job_queue.submit_job(job_id, payload, [model], job_type="image")
+    logger.info(f"Image job {job_id} queued for model={model} size={width}x{height} n={request.n}")
 
-        job_data = resp.json()
-        job_id = job_data.get("id")
-        if not job_id:
-            raise HTTPException(status_code=500, detail="No job ID returned from Grid API")
+    # Wait for the worker's completion on the job's pub/sub channel.
+    # Progress events arrive as plain tokens (JSON text) and are skipped here;
+    # the done event carries the media result as JSON in full_text.
+    async for event in token_stream.subscribe_tokens(job_id, timeout=MEDIA_TIMEOUT):
+        if event.get("error"):
+            raise HTTPException(status_code=502, detail=event["error"])
+        if "full_text" in event:
+            try:
+                result = json.loads(event["full_text"])
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=500, detail="Malformed worker result")
+            data = [
+                {"url": o["url"], "revised_prompt": request.prompt}
+                for o in result.get("media", [])
+                if o.get("url")
+            ]
+            if not data:
+                raise HTTPException(status_code=500, detail="No images returned")
+            logger.info(f"Image job {job_id} completed: {len(data)} images")
+            return {"created": int(time.time()), "data": data}
 
-        logger.info(f"Image job {job_id} submitted for model={model} size={width}x{height}")
-
-        # Poll for completion
-        for attempt in range(60):  # Max 2 minutes
-            await asyncio.sleep(2)
-            check = await client.get(f"{base}/api/v2/generate/check/{job_id}", headers=headers)
-            if check.status_code != 200:
-                continue
-
-            check_data = check.json()
-            if check_data.get("done"):
-                # Fetch final result
-                status = await client.get(f"{base}/api/v2/generate/status/{job_id}", headers=headers)
-                if status.status_code != 200:
-                    raise HTTPException(status_code=500, detail="Failed to fetch completed image")
-
-                status_data = status.json()
-                generations = status_data.get("generations", [])
-
-                # Build OpenAI-format response
-                data = []
-                for gen in generations:
-                    img_url = gen.get("img")
-                    if not img_url:
-                        img_id = gen.get("id")
-                        if img_id:
-                            img_url = f"https://images.aipg.art/{img_id}.webp"
-                    if img_url:
-                        data.append({"url": img_url, "revised_prompt": request.prompt})
-
-                if not data:
-                    raise HTTPException(status_code=500, detail="No images returned")
-
-                logger.info(f"Image job {job_id} completed: {len(data)} images")
-                return {"created": int(time.time()), "data": data}
-
-            if check_data.get("faulted"):
-                raise HTTPException(status_code=500, detail="Image generation faulted")
-
-        raise HTTPException(status_code=504, detail="Image generation timed out")
+    raise HTTPException(status_code=504, detail="Image generation timed out")

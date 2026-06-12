@@ -1,11 +1,19 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""WebSocket endpoint for text workers.
+"""WebSocket endpoint for grid workers — the unified worker protocol.
 
-Workers connect via WSS, receive jobs pushed from Redis Streams,
-and stream tokens back. Each token is relayed to Redis Pub/Sub
-so SSE clients (OpenAI/Anthropic endpoints) receive them in real time.
+One protocol for every worker type. Workers register with the job types they
+serve (text | image | video), receive jobs pushed from the per-type Redis
+Streams, and report results back:
+
+  text  — stream tokens; relayed to Redis Pub/Sub for SSE clients
+  media — upload outputs directly to R2 via presigned PUT URLs included in
+          the job message (workers never hold storage credentials), then
+          report the object keys + content hashes
+
+Every completion appends an event to the grid_ledger (den + prompt/result
+hashes) — the source of truth the on-chain settlement pays against.
 
 Worker registry is stored in Redis (not in-memory) so multiple
 uvicorn processes can share state.
@@ -21,10 +29,11 @@ import sqlalchemy as sa
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..auth import hash_api_key
-from ..database import den_events_table, new_session, processing_gens_table, users_table, waiting_prompts_table, worker_models_table, workers_table
+from ..database import new_session, processing_gens_table, users_table, waiting_prompts_table, worker_models_table, workers_table
 from ..redis_client import get_redis
-from ..services import job_queue, token_stream
-from ..services.den import calculate_den
+from ..services import job_queue, storage, token_stream
+from ..services import ledger as ledger_svc
+from ..services.den import calculate_den, calculate_media_den
 from ..services.metrics_state import record_job_complete, record_job_failed
 
 logger = logging.getLogger("grid_api.worker_ws")
@@ -124,6 +133,10 @@ async def worker_websocket(ws: WebSocket):
         models = init_msg.get("models", [])
         max_length = init_msg.get("max_length", 512)
         max_context_length = init_msg.get("max_context_length", 2048)
+        # Job types this worker serves. Accepts the new `job_types` list or the
+        # legacy single `worker_type`; defaults to text for old text workers.
+        job_types = init_msg.get("job_types") or [init_msg.get("worker_type", "text")]
+        job_types = [t for t in job_types if t in ("text", "image", "video")] or ["text"]
         # Optional explicit wallet; otherwise fall back to the wallet-in-name
         # convention "WorkerName.0xADDRESS" or "WorkerName#0xADDRESS".
         wallet_address = init_msg.get("wallet_address") or _wallet_from_name(worker_name)
@@ -173,7 +186,7 @@ async def worker_websocket(ws: WebSocket):
                         id=worker_id,
                         user_id=user["id"],
                         name=worker_name,
-                        worker_type="text",
+                        worker_type=job_types[0],
                         last_check_in=datetime.utcnow(),
                         max_length=max_length,
                         max_context_length=max_context_length,
@@ -197,6 +210,7 @@ async def worker_websocket(ws: WebSocket):
             "user_id": user["id"],
             "name": worker_name,
             "models": models,
+            "job_types": job_types,
             "max_length": max_length,
             "max_context_length": max_context_length,
             "wallet_address": wallet_address,
@@ -205,7 +219,9 @@ async def worker_websocket(ws: WebSocket):
         _local_ws[worker_id] = ws
 
         await ws.send_json({"type": "ready", "worker_id": worker_id})
-        logger.info(f"Worker '{worker_name}' ({worker_id}) connected with models: {models}")
+        logger.info(
+            f"Worker '{worker_name}' ({worker_id}) connected, types={job_types}, models: {models}"
+        )
 
         # ── Step 2: Concurrent job polling + keepalive ──
         job_ready = asyncio.Event()
@@ -214,7 +230,7 @@ async def worker_websocket(ws: WebSocket):
         async def _poll_jobs():
             """Background: block on Redis for jobs, signal when one arrives."""
             while True:
-                job = await job_queue.pop_job(worker_id, timeout_ms=5000)
+                job = await job_queue.pop_job(worker_id, timeout_ms=5000, job_types=job_types)
                 if job:
                     pending_job["data"] = job
                     job_ready.set()
@@ -271,6 +287,15 @@ async def worker_websocket(ws: WebSocket):
                 # Track current job for retry on disconnect
                 current_job = job
 
+                # ── Media path (image/video) ──
+                if job.get("job_type", "text") != "text":
+                    ok = await _handle_media_job(ws, job, selected_model, worker_id, worker_info)
+                    if ok:
+                        await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
+                    current_job = None
+                    continue
+
+                # ── Text path ──
                 # Create or update processing_gen (may already exist from a requeued job)
                 async with await new_session() as session:
                     existing = await session.execute(
@@ -369,21 +394,22 @@ async def worker_websocket(ws: WebSocket):
                         .where(processing_gens_table.c.id == job["job_id"])
                         .values(generation=full_text, faulted=False)
                     )
-                    # Persist den to the durable ledger the settlement bot
-                    # pays against. Without this row, den is computed and
-                    # discarded and the worker can never be paid.
-                    await session.execute(
-                        sa.insert(den_events_table).values(
-                            job_id=job["job_id"],
-                            worker_id=worker_id,
-                            wallet_address=worker_info.get("wallet_address", ""),
-                            model=selected_model,
-                            den=den_awarded,
-                            output_tokens=effective_tokens,
-                            created=datetime.utcnow(),
-                        )
-                    )
                     await session.commit()
+
+                # Append the completion to the grid_ledger — the source of
+                # truth the on-chain settlement pays against, carrying the
+                # prompt/result hashes that make the work attestable.
+                await ledger_svc.record_completion(
+                    job_id=job["job_id"],
+                    worker_id=worker_id,
+                    wallet=worker_info.get("wallet_address", ""),
+                    model=selected_model,
+                    job_type="text",
+                    den=den_awarded,
+                    output_units=effective_tokens,
+                    prompt_hash=ledger_svc.text_hash(prompt_text),
+                    result_hash=ledger_svc.text_hash(full_text),
+                )
 
                 await ws.send_json({
                     "type": "ack",
@@ -419,10 +445,122 @@ async def worker_websocket(ws: WebSocket):
                 current_job["payload"],
                 current_job["models"],
                 current_job.get("stream_id"),
+                job_type=current_job.get("job_type", "text"),
+                stream=current_job.get("stream"),
             )
 
         if worker_info:
             logger.info(f"Worker '{worker_info['name']}' cleaned up")
+
+
+async def _handle_media_job(
+    ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict
+) -> bool:
+    """Dispatch one image/video job to the worker and collect the result.
+
+    The job message carries presigned PUT slots so the worker uploads outputs
+    straight to R2. Completion is published on the job's token-stream channel
+    as a JSON `full_text` payload, which the waiting HTTP handler parses.
+
+    Returns True if the job finished (success or clean failure published to
+    the client) and should be acked; raising propagates a socket failure so
+    the caller's disconnect path requeues the job.
+    """
+    import time as _time
+
+    job_id = job["job_id"]
+    payload = job["payload"]
+    job_type = job.get("job_type", "image")
+
+    n = int(payload.get("n", 1) or 1)
+    ext = payload.get("ext") or ("mp4" if job_type == "video" else "webp")
+    try:
+        upload_slots = storage.presign_outputs(job_id, n, ext)
+    except Exception as e:
+        logger.error(f"Presign failed for job {job_id}: {e}")
+        await token_stream.publish_error(job_id, "Storage unavailable; please retry.")
+        return True
+
+    await ws.send_json({
+        "type": "job",
+        "id": job_id,
+        "job_type": job_type,
+        "model": selected_model,
+        "payload": payload,
+        "upload": [
+            {"put_url": s["put_url"], "key": s["key"], "content_type": s["content_type"]}
+            for s in upload_slots
+        ],
+    })
+
+    gen_start = _time.time()
+    while True:
+        msg = await asyncio.wait_for(ws.receive_json(), timeout=600)
+        msg_type = msg.get("type")
+
+        if msg_type == "progress":
+            # Relayed on the token channel so a future SSE progress endpoint
+            # can stream it; the blocking HTTP handler simply ignores tokens.
+            await token_stream.publish_token(
+                job_id,
+                json.dumps({"progress": msg.get("pct", 0), "preview": msg.get("preview_b64")}),
+            )
+
+        elif msg_type == "done":
+            gen_time = _time.time() - gen_start
+            reported = {r.get("index", i): r for i, r in enumerate(msg.get("results", []))}
+            outputs = []
+            for i, slot in enumerate(upload_slots):
+                rep = reported.get(i, {})
+                outputs.append({
+                    "url": slot["public_url"],
+                    "key": slot["key"],
+                    "seed": rep.get("seed"),
+                    "sha256": rep.get("sha256"),
+                })
+
+            den_awarded = calculate_media_den(
+                job_type=job_type,
+                width=int(payload.get("width", 1024) or 1024),
+                height=int(payload.get("height", 1024) or 1024),
+                steps=int(payload.get("steps", 20) or 20),
+                n=n,
+                frames=int(payload.get("frames", 0) or 0),
+            )
+
+            # Result hash: deterministic digest over the worker-reported
+            # per-output sha256s (server never sees media bytes — verifiable
+            # later by fetching the R2 objects).
+            result_hash = ledger_svc.canonical_hash(
+                [o.get("sha256") or o["key"] for o in outputs]
+            )
+            await ledger_svc.record_completion(
+                job_id=job_id,
+                worker_id=worker_id,
+                wallet=worker_info.get("wallet_address", ""),
+                model=selected_model,
+                job_type=job_type,
+                den=den_awarded,
+                output_units=max(n, int(payload.get("frames", 0) or 0)),
+                prompt_hash=ledger_svc.canonical_hash(payload),
+                result_hash=result_hash,
+            )
+
+            await token_stream.publish_done(
+                job_id, json.dumps({"media": outputs, "model": selected_model})
+            )
+            await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
+            record_job_complete(tokens=0, den=den_awarded, duration=gen_time)
+            return True
+
+        elif msg_type == "pong":
+            continue
+
+        elif msg_type == "error":
+            logger.error(f"Worker error on media job {job_id}: {msg.get('message')}")
+            await token_stream.publish_error(job_id, msg.get("message", "Worker error"))
+            record_job_failed()
+            return True
 
 
 async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict) -> tuple[str, int]:

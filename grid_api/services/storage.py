@@ -1,0 +1,74 @@
+# SPDX-FileCopyrightText: 2026 AI Power Grid
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+"""R2/S3 presigned uploads for media workers.
+
+Workers never hold storage credentials: at dispatch time the server presigns
+one PUT URL per expected output, the worker uploads directly to R2, and the
+client gets the public URL. Presigning is pure local crypto (no network
+round-trip), so calling boto3's sync API inline is safe in async handlers.
+"""
+
+import logging
+import os
+from functools import lru_cache
+
+import boto3
+from botocore.client import Config as BotoConfig
+
+logger = logging.getLogger("grid_api.storage")
+
+CONTENT_TYPES = {
+    "webp": "image/webp",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "mp4": "video/mp4",
+    "webm": "video/webm",
+}
+
+
+@lru_cache
+def _client():
+    endpoint = os.getenv("R2_TRANSIENT_ACCOUNT", "")
+    if not endpoint:
+        raise RuntimeError("R2_TRANSIENT_ACCOUNT not configured — media uploads unavailable")
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        config=BotoConfig(signature_version="s3v4"),
+    )
+
+
+def media_bucket() -> str:
+    return os.getenv("R2_TRANSIENT_BUCKET", "aipg-transient")
+
+
+def public_media_base() -> str:
+    """Public base URL fronting the media bucket (Cloudflare-routed)."""
+    return os.getenv("GRID_MEDIA_BASE_URL", "https://images.aipg.art").rstrip("/")
+
+
+def presign_outputs(job_id: str, n: int, ext: str, expires: int = 900) -> list[dict]:
+    """Presign PUT URLs for a job's expected outputs.
+
+    Returns one slot per output: {key, put_url, content_type, public_url}.
+    """
+    bucket = media_bucket()
+    content_type = CONTENT_TYPES.get(ext, "application/octet-stream")
+    slots = []
+    for i in range(n):
+        key = f"{job_id}/{i}.{ext}"
+        put_url = _client().generate_presigned_url(
+            "put_object",
+            Params={"Bucket": bucket, "Key": key, "ContentType": content_type},
+            ExpiresIn=expires,
+        )
+        slots.append(
+            {
+                "key": key,
+                "put_url": put_url,
+                "content_type": content_type,
+                "public_url": f"{public_media_base()}/{key}",
+            }
+        )
+    return slots

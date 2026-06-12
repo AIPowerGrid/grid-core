@@ -163,12 +163,19 @@ async def init_database():
     # Create grid_api-owned tables idempotently. checkfirst + an explicit
     # table list means we only ever touch tables we own — never the horde
     # schema, which is managed separately. Safe to run on every boot.
+    #
+    # v2 tables: Alembic is the canonical migration path (alembic upgrade
+    # head), but create_all here keeps a fresh boot working without a manual
+    # step — identical DDL, checkfirst, grid_-namespaced only.
+    from .v2.schema import metadata as v2_metadata
+
     async with _engine.begin() as conn:
         await conn.run_sync(
             lambda sync_conn: metadata.create_all(
                 sync_conn, tables=[den_events_table], checkfirst=True
             )
         )
+        await conn.run_sync(lambda sync_conn: v2_metadata.create_all(sync_conn, checkfirst=True))
 
 
 async def close_database():

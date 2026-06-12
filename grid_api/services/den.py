@@ -102,3 +102,46 @@ def calculate_den(
     )
 
     return den
+
+
+# ── Media (image/video) den ──
+# Tunable knobs — these are POLICY, expected to be adjusted as real worker
+# economics emerge. Kept dead simple on purpose: den is a meter, AIPG/den is
+# set by the epoch budget at settlement, so absolute scale here only affects
+# relative weighting between job types.
+
+# 1 megapixel-step of diffusion work ≈ this many den.
+DEN_PER_MEGAPIXEL_STEP = 0.04
+# Video work is costlier per frame than a lone image at the same resolution
+# (temporal models, VAE decode over frames) — weight per frame-step.
+DEN_PER_MEGAPIXEL_FRAME_STEP = 0.002
+
+
+def calculate_media_den(
+    job_type: str,
+    width: int,
+    height: int,
+    steps: int = 20,
+    n: int = 1,
+    frames: int = 0,
+) -> float:
+    """Calculate den for an image or video generation.
+
+    Scales with actual compute: megapixels x steps x outputs (x frames for
+    video). Server-side inputs only — all values come from the job payload the
+    server constructed, never from worker self-reporting.
+    """
+    megapixels = max((width * height) / 1_048_576, 0.01)
+    steps = max(steps, 1)
+
+    if job_type == "video":
+        den = megapixels * steps * max(frames, 1) * DEN_PER_MEGAPIXEL_FRAME_STEP
+    else:
+        den = megapixels * steps * max(n, 1) * DEN_PER_MEGAPIXEL_STEP
+
+    den = max(round(den, 2), 0.1)
+    logger.debug(
+        f"Media den calc: {job_type} {width}x{height} steps={steps} n={n} "
+        f"frames={frames} → {den} den"
+    )
+    return den
