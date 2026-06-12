@@ -24,6 +24,7 @@ from ..auth import hash_api_key
 
 from .. import format as fmt
 from ..database import new_session, processing_gens_table, users_table, waiting_prompts_table
+from ..services import accounts as accounts_svc
 from ..services import job_queue, quota, token_stream
 from ..services.sanitizer import sanitize
 from .worker_ws import get_available_models
@@ -75,12 +76,8 @@ async def create_message(
     """Anthropic-compatible messages endpoint with streaming."""
 
     # Auth
-    hashed = hash_api_key(x_api_key)
-    async with await new_session() as session:
-        result = await session.execute(
-            sa.select(users_table).where(users_table.c.api_key == hashed)
-        )
-        user = result.mappings().first()
+    # v2 account keys first, legacy Haidra keys as fallback.
+    user = await accounts_svc.resolve_api_key(x_api_key)
     if not user:
         raise HTTPException(status_code=401, detail={"type": "authentication_error", "message": "Invalid API key"})
 
@@ -153,6 +150,7 @@ async def create_message(
         # when it picks up the job (needs real worker_id for FK constraint)
         await session.commit()
 
+    payload["_legacy_rows"] = legacy_rows
     await job_queue.submit_job(job_id, payload, [model])
 
     message_id = fmt._gen_id("msg")

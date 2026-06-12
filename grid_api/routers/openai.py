@@ -27,6 +27,7 @@ from ..auth import extract_api_key, hash_api_key
 from .. import format as fmt
 from ..database import new_session, processing_gens_table, users_table, waiting_prompts_table
 from ..models.openai import ChatCompletionRequest, ModelInfo, ModelListResponse
+from ..services import accounts as accounts_svc
 from ..services import job_queue, quota, token_stream
 from ..services.sanitizer import sanitize_messages
 from .worker_ws import get_available_models
@@ -74,15 +75,8 @@ async def chat_completions(
 
 
 async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
-    # Auth
-    hashed = hash_api_key(apikey)
-    async with await new_session() as session:
-        result = await session.execute(
-            sa.select(users_table).where(users_table.c.api_key == hashed)
-        )
-        user = result.mappings().first()
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+    # Auth — v2 account keys first, legacy Haidra keys as fallback.
+    user = await accounts_svc.authenticate(apikey)
 
     # Check for available workers
     available = await get_available_models()
@@ -125,8 +119,11 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
         "top_p": request.top_p,
     }
 
-    # Write waiting prompt + processing gen to DB
-    async with await new_session() as session:
+    # Legacy bookkeeping rows only exist for legacy (Haidra) keys — v2
+    # account ids don't fit the integer FK, and nothing v2 reads these.
+    legacy_rows = user["source"] == "legacy"
+    if legacy_rows:
+      async with await new_session() as session:
         await session.execute(
             sa.insert(waiting_prompts_table).values(
                 id=job_id,
@@ -163,7 +160,9 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
         # when it picks up the job (needs real worker_id for FK constraint)
         await session.commit()
 
-    # Submit to Redis Stream for workers
+    # Submit to Redis Stream for workers. _legacy_rows tells the WS handler
+    # whether the horde bookkeeping rows exist for this job.
+    payload["_legacy_rows"] = legacy_rows
     await job_queue.submit_job(job_id, payload, [model])
 
     completion_id = fmt._gen_id()

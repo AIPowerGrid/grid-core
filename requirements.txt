@@ -50,3 +50,4 @@ prometheus-client>=0.20.0
 alembic>=1.13.0
 aiosqlite>=0.20.0
 
+eth-account==0.13.7

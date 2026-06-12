@@ -22,6 +22,7 @@ from typing import Optional
 from ..auth import extract_api_key, hash_api_key
 from ..database import new_session, users_table
 from ..ratelimit import limiter
+from ..services import accounts as accounts_svc
 from ..services import job_queue, quota, token_stream
 
 logger = logging.getLogger("grid_api.images")
@@ -58,14 +59,8 @@ async def create_image(
     """
     try:
         key = extract_api_key(apikey, authorization)
-        # Validate the key + load the user so we can meter the free tier.
-        async with await new_session() as session:
-            result = await session.execute(
-                sa.select(users_table).where(users_table.c.api_key == hash_api_key(key))
-            )
-            user = result.mappings().first()
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+        # v2 account keys first, legacy Haidra keys as fallback.
+        user = await accounts_svc.authenticate(key)
         await quota.check_and_consume(dict(user))
         return await _handle_image_gen(body, key)
     except HTTPException:
