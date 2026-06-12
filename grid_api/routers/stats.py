@@ -147,3 +147,54 @@ async def stats_models(period: str = "month"):
             for r in sorted(rows, key=lambda r: -r["jobs"])
         ],
     }
+
+
+@router.get("/v1/wallets/{address}/earnings")
+async def wallet_earnings(address: str):
+    """Den earnings for a wallet, straight from the ledger settlement pays on."""
+    addr = address.lower()
+    day_ago = datetime.now(timezone.utc) - timedelta(days=1)
+    async with await new_session() as session:
+        totals = (
+            await session.execute(
+                sa.select(
+                    sa.func.count().label("jobs"),
+                    sa.func.coalesce(sa.func.sum(ledger_table.c.den), 0.0).label("den"),
+                ).where(ledger_table.c.wallet == addr)
+            )
+        ).mappings().first()
+        last24 = (
+            await session.execute(
+                sa.select(
+                    sa.func.count().label("jobs"),
+                    sa.func.coalesce(sa.func.sum(ledger_table.c.den), 0.0).label("den"),
+                ).where(ledger_table.c.wallet == addr, ledger_table.c.created >= day_ago)
+            )
+        ).mappings().first()
+        recent = (
+            await session.execute(
+                sa.select(
+                    ledger_table.c.job_type,
+                    ledger_table.c.model,
+                    ledger_table.c.den,
+                    ledger_table.c.created,
+                )
+                .where(ledger_table.c.wallet == addr)
+                .order_by(ledger_table.c.id.desc())
+                .limit(25)
+            )
+        ).mappings().all()
+    return {
+        "wallet": addr,
+        "total": {"jobs": totals["jobs"], "den": round(float(totals["den"]), 2)},
+        "last_24h": {"jobs": last24["jobs"], "den": round(float(last24["den"]), 2)},
+        "recent": [
+            {
+                "type": r["job_type"],
+                "model": r["model"],
+                "den": round(float(r["den"]), 2),
+                "at": r["created"].isoformat() if r["created"] else None,
+            }
+            for r in recent
+        ],
+    }
