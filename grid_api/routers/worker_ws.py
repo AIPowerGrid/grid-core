@@ -29,7 +29,15 @@ import sqlalchemy as sa
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..auth import hash_api_key
-from ..database import new_session, processing_gens_table, users_table, waiting_prompts_table, worker_models_table, workers_table
+from ..database import (
+    LEGACY_WORKER_DEFAULTS,
+    new_session,
+    processing_gens_table,
+    users_table,
+    waiting_prompts_table,
+    worker_models_table,
+    workers_table,
+)
 from ..redis_client import get_redis
 from ..services import job_queue, storage, token_stream
 from ..services import ledger as ledger_svc
@@ -187,11 +195,15 @@ async def worker_websocket(ws: WebSocket):
                         user_id=user["id"],
                         name=worker_name,
                         worker_type=job_types[0],
-                        kudos=0,
                         last_check_in=datetime.utcnow(),
                         max_length=max_length,
                         max_context_length=max_context_length,
                         threads=1,
+                        nsfw=False,
+                        maintenance=False,
+                        paused=False,
+                        bridge_agent=init_msg.get("bridge_agent", "grid-ws"),
+                        **LEGACY_WORKER_DEFAULTS,
                     )
                 )
 

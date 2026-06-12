@@ -41,18 +41,61 @@ workers_table = sa.Table(
     sa.Column("user_id", sa.Integer, sa.ForeignKey("users.id")),
     sa.Column("name", sa.String(100)),
     sa.Column("worker_type", sa.String(30)),
-    # NOT NULL in the legacy schema with an ORM-side-only default — must be
-    # set explicitly on insert or first-time registration dies.
-    sa.Column("kudos", sa.BigInteger, default=0),
     sa.Column("max_length", sa.Integer),
     sa.Column("max_context_length", sa.Integer),
     sa.Column("last_check_in", sa.DateTime),
     sa.Column("maintenance", sa.Boolean, default=False),
     sa.Column("paused", sa.Boolean, default=False),
-    sa.Column("bridge_agent", sa.String(100)),
+    sa.Column("bridge_agent", sa.Text),
     sa.Column("threads", sa.Integer, default=1),
     sa.Column("nsfw", sa.Boolean, default=False),
     sa.Column("ipaddr", sa.String(39)),
+    # ── Legacy appeasement ──
+    # Every column below is NOT NULL in the Haidra schema with defaults that
+    # exist only in the Flask ORM, so a direct insert must supply them all or
+    # first-time registration dies. Dies with this table in v2 step 6.
+    sa.Column("kudos", sa.BigInteger, default=0),
+    sa.Column("contributions", sa.BigInteger, default=0),
+    sa.Column("fulfilments", sa.Integer, default=0),
+    sa.Column("aborted_jobs", sa.Integer, default=0),
+    sa.Column("uncompleted_jobs", sa.Integer, default=0),
+    sa.Column("uptime", sa.BigInteger, default=0),
+    sa.Column("last_reward_uptime", sa.BigInteger, default=0),
+    sa.Column("max_power", sa.Integer, default=8),
+    sa.Column("extra_slow_worker", sa.Boolean, default=False),
+    sa.Column("maintenance_msg", sa.String(300), default=""),
+    sa.Column("allow_unsafe_ipaddr", sa.Boolean, default=False),
+    sa.Column("max_pixels", sa.BigInteger, default=1_048_576),
+    sa.Column("allow_img2img", sa.Boolean, default=True),
+    sa.Column("allow_painting", sa.Boolean, default=False),
+    sa.Column("allow_post_processing", sa.Boolean, default=False),
+    sa.Column("allow_controlnet", sa.Boolean, default=False),
+    sa.Column("allow_sdxl_controlnet", sa.Boolean, default=False),
+    sa.Column("allow_lora", sa.Boolean, default=False),
+    sa.Column("limit_max_steps", sa.Boolean, default=False),
+)
+
+# Values for every legacy NOT-NULL-no-DB-default column, used at insert.
+LEGACY_WORKER_DEFAULTS = dict(
+    kudos=0,
+    contributions=0,
+    fulfilments=0,
+    aborted_jobs=0,
+    uncompleted_jobs=0,
+    uptime=0,
+    last_reward_uptime=0,
+    max_power=8,
+    extra_slow_worker=False,
+    maintenance_msg="",
+    allow_unsafe_ipaddr=False,
+    max_pixels=1_048_576,
+    allow_img2img=True,
+    allow_painting=False,
+    allow_post_processing=False,
+    allow_controlnet=False,
+    allow_sdxl_controlnet=False,
+    allow_lora=False,
+    limit_max_steps=False,
 )
 
 worker_models_table = sa.Table(
