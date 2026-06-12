@@ -56,6 +56,13 @@ class CreateAccountForm(BaseModel):
     oauth_sub: Optional[str] = None
 
 
+class SessionForm(BaseModel):
+    oauth_sub: Optional[str] = None
+    email: Optional[str] = None
+    wallet: Optional[str] = None
+    username: Optional[str] = None
+
+
 class IssueKeyForm(BaseModel):
     label: Optional[str] = None
 
@@ -146,6 +153,76 @@ async def create_account(
         username=form.username, email=form.email, oauth_sub=form.oauth_sub
     )
     return {"account_id": acct["id"], "username": acct["username"], "api_key": key}
+
+
+@router.post("/v1/accounts/session")
+async def account_session(
+    form: SessionForm,
+    x_internal_token: Optional[str] = Header(None),
+):
+    """Dashboard login hook: find-or-create the account, rotate its
+    dashboard-session key, return the fresh key.
+
+    Internal-token gated (the dashboard verified the user via OAuth/wallet
+    itself). Exactly one active "dashboard-session" key exists per account —
+    each login revokes the previous one, so a leaked old session key is dead
+    the moment the user logs in again.
+    """
+    expected = os.getenv("GRID_INTERNAL_TOKEN", "")
+    if not expected or x_internal_token != expected:
+        raise HTTPException(403, detail="Internal token required")
+    if not (form.oauth_sub or form.wallet or form.email):
+        raise HTTPException(400, detail="Provide oauth_sub, wallet, or email")
+
+    from ..v2.schema import accounts as accounts_table
+
+    async with await new_session() as session:
+        conds = []
+        if form.oauth_sub:
+            conds.append(accounts_table.c.oauth_sub == form.oauth_sub)
+        if form.wallet:
+            conds.append(accounts_table.c.wallet == form.wallet.lower())
+        if form.email:
+            conds.append(accounts_table.c.email == form.email)
+        row = (
+            await session.execute(
+                sa.select(accounts_table).where(sa.or_(*conds))
+            )
+        ).mappings().first()
+
+    created = False
+    if row:
+        account_id, username = row["id"], row["username"]
+        # Rotate: revoke any previous dashboard-session key.
+        async with await new_session() as session:
+            await session.execute(
+                sa.update(api_keys_table)
+                .where(
+                    api_keys_table.c.account_id == account_id,
+                    api_keys_table.c.label == "dashboard-session",
+                    api_keys_table.c.revoked.is_(False),
+                )
+                .values(revoked=True)
+            )
+            await session.commit()
+        key = await accounts_svc.issue_key(account_id, label="dashboard-session")
+    else:
+        created = True
+        acct, key = await accounts_svc.create_account(
+            username=form.username,
+            email=form.email,
+            oauth_sub=form.oauth_sub,
+            wallet=form.wallet,
+            key_label="dashboard-session",
+        )
+        account_id, username = acct["id"], acct["username"]
+
+    return {
+        "account_id": str(account_id),
+        "username": username,
+        "created": created,
+        "api_key": key,
+    }
 
 
 # ── Self-service (any active key on the account) ──
