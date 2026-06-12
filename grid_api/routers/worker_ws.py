@@ -187,6 +187,7 @@ async def worker_websocket(ws: WebSocket):
                         user_id=user["id"],
                         name=worker_name,
                         worker_type=job_types[0],
+                        kudos=0,
                         last_check_in=datetime.utcnow(),
                         max_length=max_length,
                         max_context_length=max_context_length,

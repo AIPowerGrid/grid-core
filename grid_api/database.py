@@ -41,6 +41,9 @@ workers_table = sa.Table(
     sa.Column("user_id", sa.Integer, sa.ForeignKey("users.id")),
     sa.Column("name", sa.String(100)),
     sa.Column("worker_type", sa.String(30)),
+    # NOT NULL in the legacy schema with an ORM-side-only default — must be
+    # set explicitly on insert or first-time registration dies.
+    sa.Column("kudos", sa.BigInteger, default=0),
     sa.Column("max_length", sa.Integer),
     sa.Column("max_context_length", sa.Integer),
     sa.Column("last_check_in", sa.DateTime),
