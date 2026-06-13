@@ -280,62 +280,57 @@ async def worker_websocket(ws: WebSocket):
         )
 
         # ── Step 2: Concurrent job polling + keepalive ──
-        job_ready = asyncio.Event()
-        pending_job = {}
+        # A bounded queue (maxsize=1) decouples the Redis poll from the
+        # dispatch loop with natural backpressure: at most one job is
+        # prefetched. This replaces an earlier job_ready/busy-wait handshake
+        # that could deadlock the poll task after the first dispatch (it spun
+        # forever in `while job_ready.is_set()`), so it stopped calling
+        # XREADGROUP entirely — silently stranding every later job while the
+        # worker still looked online.
+        local_jobs: asyncio.Queue = asyncio.Queue(maxsize=1)
 
         async def _poll_jobs():
-            """Background: block on Redis for jobs, signal when one arrives."""
+            """Background: pull jobs from Redis and hand them to the loop."""
             while True:
                 job = await job_queue.pop_job(worker_id, timeout_ms=5000, job_types=job_types)
                 if job:
-                    pending_job["data"] = job
-                    job_ready.set()
-                    while job_ready.is_set():
-                        await asyncio.sleep(0.1)
+                    await local_jobs.put(job)  # blocks (backpressure) until taken
 
         poll_task = asyncio.create_task(_poll_jobs())
 
         try:
             while True:
+                # Wait for the next job, or time out every 10s to keepalive.
                 try:
-                    await asyncio.wait_for(job_ready.wait(), timeout=10)
+                    job = await asyncio.wait_for(local_jobs.get(), timeout=10)
                 except asyncio.TimeoutError:
-                    pass
+                    job = None
 
-                # Refresh registration FIRST — a cheap Redis write that keeps
-                # the worker in the registry regardless of socket health.
-                # (Bug fix: a half-open TCP socket made the keepalive send
-                # below block for minutes — until the kernel TCP timeout — so
-                # refresh never ran and the worker silently fell out of the
-                # registry while still "connected", stranding all new jobs.)
+                # Refresh registration every iteration regardless of socket
+                # health (cheap Redis write; keeps the worker in the registry
+                # even if the WS is momentarily slow).
                 await refresh_worker(worker_id, worker_info)
 
-                # Keepalive ping — BOUNDED. On a half-open connection a raw
-                # ws.send_json can block until the kernel gives up (minutes),
-                # wedging this whole loop. Time-box it; any failure means the
-                # connection is effectively dead, so break cleanly: the
-                # in-flight job (if any) gets requeued and the worker
-                # reconnects + re-registers within seconds.
-                try:
-                    await asyncio.wait_for(ws.send_json({"type": "ping"}), timeout=10)
+                if job is None:
+                    # Idle keepalive — BOUNDED. On a half-open connection a raw
+                    # ws.send_json can block until the kernel TCP timeout
+                    # (minutes), wedging the loop; time-box it and break cleanly
+                    # on any failure so the worker reconnects + re-registers.
                     try:
-                        await asyncio.wait_for(ws.receive_json(), timeout=0.5)
-                    except asyncio.TimeoutError:
-                        pass
-                except (asyncio.TimeoutError, WebSocketDisconnect, RuntimeError) as e:
-                    logger.info(
-                        f"Worker '{worker_name}' keepalive failed "
-                        f"({type(e).__name__}) — closing for reconnect"
-                    )
-                    break
-
-                if not job_ready.is_set():
+                        await asyncio.wait_for(ws.send_json({"type": "ping"}), timeout=10)
+                        try:
+                            await asyncio.wait_for(ws.receive_json(), timeout=0.5)
+                        except asyncio.TimeoutError:
+                            pass
+                    except (asyncio.TimeoutError, WebSocketDisconnect, RuntimeError) as e:
+                        logger.info(
+                            f"Worker '{worker_name}' keepalive failed "
+                            f"({type(e).__name__}) — closing for reconnect"
+                        )
+                        break
                     continue
 
-                job = pending_job.pop("data", None)
-                job_ready.clear()
-                if not job:
-                    continue
+                # Got a job → dispatch it (model check + text/media paths below).
 
                 # Check model compatibility. The shared stream + consumer group
                 # hands jobs to a random worker regardless of served models, so
