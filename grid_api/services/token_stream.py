@@ -16,6 +16,8 @@ import json
 import logging
 from typing import AsyncGenerator
 
+import redis.exceptions
+
 from ..redis_client import get_redis
 
 logger = logging.getLogger("grid_api.token_stream")
@@ -112,10 +114,18 @@ async def subscribe_tokens(job_id: str, timeout: int = 300) -> AsyncGenerator[di
             if remaining <= 0:
                 break
 
-            message = await asyncio.wait_for(
-                pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0),
-                timeout=min(remaining, 5.0),
-            )
+            # A Redis socket read-timeout here is benign — it just means no
+            # message arrived in the window (the blocking read raced its own
+            # timeout). Treat it as "no message" and keep polling until the
+            # real deadline, rather than letting it bubble up and end the
+            # stream with an empty reply.
+            try:
+                message = await asyncio.wait_for(
+                    pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0),
+                    timeout=min(remaining, 5.0),
+                )
+            except (asyncio.TimeoutError, redis.exceptions.TimeoutError):
+                message = None
 
             if message is None:
                 # Check buffer for tokens that arrived via replay race

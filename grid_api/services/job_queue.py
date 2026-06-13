@@ -11,6 +11,8 @@ automatically via claim_stale_jobs().
 import json
 import logging
 
+import redis.exceptions
+
 from ..redis_client import CONSUMER_GROUP, MEDIA_STREAM_KEY, STREAM_KEY, get_redis
 
 logger = logging.getLogger("grid_api.job_queue")
@@ -59,13 +61,18 @@ async def pop_job(worker_id: str, timeout_ms: int = 5000, job_types: list[str] |
     """
     r = get_redis()
     streams = sorted({_stream_for(t) for t in (job_types or ["text"])})
-    results = await r.xreadgroup(
-        CONSUMER_GROUP,
-        worker_id,
-        {s: ">" for s in streams},
-        count=1,
-        block=timeout_ms,
-    )
+    try:
+        results = await r.xreadgroup(
+            CONSUMER_GROUP,
+            worker_id,
+            {s: ">" for s in streams},
+            count=1,
+            block=timeout_ms,
+        )
+    except redis.exceptions.TimeoutError:
+        # The blocking read can race its own socket timeout when no job
+        # arrives within the block window — that's just "no job", not an error.
+        return None
     if not results:
         return None
 
