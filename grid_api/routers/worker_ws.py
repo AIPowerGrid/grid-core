@@ -290,11 +290,23 @@ async def worker_websocket(ws: WebSocket):
         local_jobs: asyncio.Queue = asyncio.Queue(maxsize=1)
 
         async def _poll_jobs():
-            """Background: pull jobs from Redis and hand them to the loop."""
+            """Background: pull jobs from Redis and hand them to the loop.
+
+            Wrapped so a transient Redis/parse error can NEVER silently kill
+            this task — if it died, the main loop kept refreshing registration
+            (worker looks online) while no jobs were ever consumed again. That
+            was the 'serves one job then goes deaf' bug.
+            """
             while True:
-                job = await job_queue.pop_job(worker_id, timeout_ms=5000, job_types=job_types)
-                if job:
-                    await local_jobs.put(job)  # blocks (backpressure) until taken
+                try:
+                    job = await job_queue.pop_job(worker_id, timeout_ms=5000, job_types=job_types)
+                    if job:
+                        await local_jobs.put(job)  # blocks (backpressure) until taken
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(f"_poll_jobs error for {worker_id}: {e}", exc_info=True)
+                    await asyncio.sleep(1)
 
         poll_task = asyncio.create_task(_poll_jobs())
 
