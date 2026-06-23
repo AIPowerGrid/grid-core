@@ -5,57 +5,50 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Per-model charge pricing — AIPG-NATIVE (no runtime oracle).
+"""Per-model charge pricing — USD-NATIVE (no oracle on the request path).
 
-What USERS pay, denominated in AIPG (distinct from the on-chain `denMultiplier`,
-which is what WORKERS earn). Prices are stored as **AIPG per 1,000,000 tokens**;
-the ledger charges in integer **micro-AIPG** (AIPG × 1e6 — fits BigInteger,
-6 decimals of granularity, far finer than any per-request cost).
+What USERS pay, denominated in USD. Prices are stored as **USD per 1,000,000
+tokens**; the ledger charges in integer **micro-USD** (USD × 1e6 — fits
+BigInteger, 6 decimals of granularity, far finer than any per-request cost).
 
-The competitor cost sheet is in USD, so `half_of()` converts the USD floor →
-half → AIPG **using `AIPG_USD_RATE` ONCE, at peg time** (deploy/re-peg). That
-rate is NOT used per request: a deposit credits AIPG 1:1, and a charge debits
-AIPG directly. So the payment path has zero oracle dependency — the only place a
-USD rate appears is the deliberate, occasional re-peg of the list prices to track
-competitors. Re-peg by updating AIPG_USD_RATE (or by editing the AIPG numbers).
+Why USD, not AIPG: USDC is the unit everyone on Base actually holds and what
+x402 settles in, so credits are denominated in USD and a USDC deposit credits
+1:1 with zero oracle. AIPG is the worker-stake / reward-share asset (supply
+side), not the customer unit of account — see services/economics.py.
 
-    cost_aipg = (prompt_tokens * input_per_mtok + completion_tokens * output_per_mtok) / 1_000_000
+The price book is sourced from the cheapest competitor's USD sheet, halved
+(`half_of`) — our standing "half of the cheapest competitor" position. Re-peg by
+editing the USD numbers here; nothing converts at request time.
+
+    cost_usd = (prompt_tokens * input_per_mtok + completion_tokens * output_per_mtok) / 1_000_000
 """
 
-import os
 from dataclasses import dataclass
 
-MICRO = 1_000_000  # micro-AIPG per AIPG (the ledger's integer unit)
-
-# Peg-time reference ONLY — used by half_of() to translate the USD competitor
-# sheet into AIPG list prices. Never read on the request path. Re-peg here.
-AIPG_USD_RATE = float(os.getenv("AIPG_USD_RATE", "0.00123"))
+MICRO = 1_000_000  # micro-USD per USD (the ledger's integer unit)
 
 
 @dataclass
 class ModelPrice:
-    input_per_mtok: float   # AIPG per 1M input tokens
-    output_per_mtok: float  # AIPG per 1M output tokens
-    image_per_image: float = 0.0   # AIPG per image
-    video_per_second: float = 0.0  # AIPG per second of video
+    input_per_mtok: float   # USD per 1M input tokens
+    output_per_mtok: float  # USD per 1M output tokens
+    image_per_image: float = 0.0   # USD per image
+    video_per_second: float = 0.0  # USD per second of video
 
 
 def half_of(usd_input: float, usd_output: float, **media) -> ModelPrice:
-    """Cheapest-competitor USD $/Mtok → HALF → AIPG, at the current peg.
-
-    Convenience so the USD cost sheet maps 1:1. The resulting AIPG numbers are
-    static until you re-peg; nothing converts at request time."""
-    r = AIPG_USD_RATE
+    """Cheapest-competitor USD $/Mtok → HALF. The price book stays in USD; no
+    conversion happens at request time."""
     return ModelPrice(
-        input_per_mtok=(usd_input / 2) / r,
-        output_per_mtok=(usd_output / 2) / r,
-        image_per_image=((media["usd_image"] / 2) / r) if media.get("usd_image") else 0.0,
-        video_per_second=((media["usd_video_sec"] / 2) / r) if media.get("usd_video_sec") else 0.0,
+        input_per_mtok=usd_input / 2,
+        output_per_mtok=usd_output / 2,
+        image_per_image=(media["usd_image"] / 2) if media.get("usd_image") else 0.0,
+        video_per_second=(media["usd_video_sec"] / 2) if media.get("usd_video_sec") else 0.0,
     )
 
 
 # ── Price book (keyed by lowercased model name) — HALF cheapest competitor ──
-# half_of() takes the competitor USD floor and stores the AIPG-native price.
+# half_of() takes the competitor USD floor and stores HALF of it, in USD.
 # KEYS MUST MATCH the model name workers advertise. Sourced 2026-06-15.
 PRICING: dict[str, ModelPrice] = {
     "gpt-oss-120b":       half_of(0.15, 0.60),   # floor Fireworks/Groq
@@ -84,12 +77,12 @@ def get_price(model: str) -> ModelPrice | None:
 
 
 def quote_text(model: str, prompt_tokens: int, completion_tokens: int) -> int:
-    """Cost of a text completion, in integer micro-AIPG. 0 if unpriced."""
+    """Cost of a text completion, in integer micro-USD. 0 if unpriced."""
     p = get_price(model)
     if not p:
         return 0
-    aipg = (prompt_tokens * p.input_per_mtok + completion_tokens * p.output_per_mtok) / 1_000_000.0
-    return int(round(aipg * MICRO))
+    usd = (prompt_tokens * p.input_per_mtok + completion_tokens * p.output_per_mtok) / 1_000_000.0
+    return int(round(usd * MICRO))
 
 
 def quote_image(model: str, n: int = 1) -> int:

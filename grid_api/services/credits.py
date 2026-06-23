@@ -6,16 +6,18 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Prepaid credit ledger — AIPG-native (integer micro-AIPG, AIPG × 1e6).
+"""Prepaid credit ledger — USD-native (integer micro-USD, USD × 1e6).
 
-No runtime oracle: an AIPG deposit credits the balance 1:1 (micro-AIPG), and a
-charge debits AIPG directly (priced by `pricing`, which pegs to competitors at
-deploy time only). `balance_micro` / `delta_micro` are micro-AIPG.
+No runtime oracle: a USDC deposit credits the balance 1:1 (micro-USD), and a
+charge debits USD directly (priced by `pricing`, which pegs to competitors at
+deploy time only). `balance_micro` / `delta_micro` are micro-USD. Non-USDC
+deposits (ETH/cbBTC) are swapped to USDC at the door; AIPG deposits credit at
+the peg — the conversion happens in the deposit watcher, never here.
 
 `debit` is overdraft-safe (a conditional UPDATE: balance only moves if it
 covers the charge) and idempotent (unique `ref` per charge — a retried request
 can't double-bill). `credit` (top-up) is idempotent on `ref` too, so a re-seen
-AIPG deposit / Stripe event can't double-credit.
+deposit / Stripe event can't double-credit.
 
 Charging is OFF by default (`GRID_CHARGING_ENABLED`): until you flip it on,
 `charge_request` only LOGS what it would bill and never debits or blocks — so
@@ -134,7 +136,7 @@ async def charge_request(user: dict, model: str, prompt_tokens: int, completion_
         return {"status": "legacy", "charged": 0}
     if not CHARGING_ENABLED:
         logger.info(
-            "[charge:dry] account=%s model=%s in=%d out=%d would_charge=%d micro-AIPG (%.6f AIPG)",
+            "[charge:dry] account=%s model=%s in=%d out=%d would_charge=%d micro-USD ($%.4f)",
             aid, model, prompt_tokens, completion_tokens, cost, cost / 1_000_000,
         )
         return {"status": "dry_run", "charged": 0, "would_charge": cost}

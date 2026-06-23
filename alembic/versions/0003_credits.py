@@ -5,7 +5,7 @@
 Adds two grid_-namespaced tables:
 
 * grid_credits        — one row per account; prepaid balance in integer
-                        micro-AIPG (AIPG x 1e6). A cache of the ledger sum.
+                        micro-USD (USD x 1e6). A cache of the ledger sum.
 * grid_credit_ledger  — append-only signed deltas (top-up positive, charge
                         negative) with a UNIQUE `ref` so a retried request or a
                         re-seen deposit can't double-apply.

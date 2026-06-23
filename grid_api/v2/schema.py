@@ -189,8 +189,8 @@ ledger = sa.Table(
 
 
 # ── Credits (prepaid demand-side balance) ────────────────────────────────
-# Prepaid balance in integer micro-AIPG (AIPG × 1e6). One row per account.
-# A deposit credits 1:1 (micro-AIPG); a completion debits per `pricing`. The
+# Prepaid balance in integer micro-USD (USD × 1e6). One row per account.
+# A USDC deposit credits 1:1 (micro-USD); a completion debits per `pricing`. The
 # balance is a cache of the ledger sum — `grid_credit_ledger` is the truth and
 # makes every credit/debit idempotent (unique `ref`). See services/credits.py.
 # Ships dark (GRID_CHARGING_ENABLED=0): the request path only logs would-charge.
@@ -219,7 +219,7 @@ credit_ledger = sa.Table(
         nullable=False,
         index=True,
     ),
-    # Signed micro-AIPG: positive = top-up, negative = charge.
+    # Signed micro-USD: positive = top-up, negative = charge.
     sa.Column("delta_micro", sa.BigInteger, nullable=False),
     sa.Column("reason", sa.String(64), nullable=False),
     # Idempotency key: the charged job_id (debit) or deposit/Stripe event id
