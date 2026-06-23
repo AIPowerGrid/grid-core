@@ -35,7 +35,6 @@ module produces proofs that any peer's tree of the same entries will also accept
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -44,7 +43,7 @@ from typing import Iterable
 # system-core already depends on web3.py which brings eth_utils transitively.
 try:
     from eth_utils import keccak as _keccak
-    from eth_utils import to_bytes, to_checksum_address
+    from eth_utils import to_checksum_address
 except ImportError:  # pragma: no cover - eth_utils is a runtime dep of web3.py
     from Crypto.Hash import keccak as _crypto_keccak
 
@@ -52,9 +51,6 @@ except ImportError:  # pragma: no cover - eth_utils is a runtime dep of web3.py
         h = _crypto_keccak.new(digest_bits=256)
         h.update(data)
         return h.digest()
-
-    def to_bytes(hexstr: str) -> bytes:
-        return bytes.fromhex(hexstr.removeprefix("0x"))
 
     def to_checksum_address(addr: str) -> str:
         # Naive lowercase if eth_utils not available — works fine for hashing,
@@ -65,7 +61,7 @@ except ImportError:  # pragma: no cover - eth_utils is a runtime dep of web3.py
 @dataclass
 class TreeEntry:
     address: str          # checksum-cased
-    den: int              # raw integer
+    den: int              # integer settlement units
     leaf: bytes           # keccak256(address || uint256(den))
     proof: list[bytes] = field(default_factory=list)
 
@@ -88,7 +84,7 @@ def _leaf(address: str, den: int) -> bytes:
     """Match the Solidity: keccak256(abi.encodePacked(address, uint256))."""
     if den < 0:
         raise ValueError(f"den must be non-negative, got {den}")
-    addr_bytes = to_bytes(to_checksum_address(address))
+    addr_bytes = bytes.fromhex(to_checksum_address(address).removeprefix("0x"))
     if len(addr_bytes) != 20:
         raise ValueError(f"address {address} is not 20 bytes")
     den_bytes = den.to_bytes(32, "big")
@@ -112,12 +108,12 @@ def build_tree(entries: Iterable[tuple[str, int]]) -> MerkleTree:
     """
     # Deduplicate while preserving the last-write-wins for stability across
     # callers who might pass duplicates from concurrent DB writes.
-    from ..den import DEN_SCALE
     by_address: dict[str, int] = {}
     for addr, den in entries:
-        # Float den → integer micro-den (DEN_SCALE), so sub-1.0 earners aren't
-        # zeroed by truncation. MUST match the snapshot and the on-chain contract.
-        by_address[to_checksum_address(addr)] = int(round(float(den) * DEN_SCALE))
+        # Entries are already integer settlement units from the canonical snapshot.
+        # Do not scale here; doing so would make Merkle leaves diverge from the
+        # totalDen reported on-chain.
+        by_address[to_checksum_address(addr)] = int(den)
 
     if not by_address:
         raise ValueError("cannot build tree from zero entries")

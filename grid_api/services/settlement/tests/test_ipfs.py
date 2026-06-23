@@ -18,6 +18,7 @@ from grid_api.services.settlement.ipfs import (
     build_settlement_snapshot,
     settlement_snapshot_json,
 )
+from grid_api.services.den import DEN_SCALE
 
 
 # ============ SNAPSHOT BUILDING ============
@@ -37,7 +38,7 @@ def test_snapshot_sums_total_den():
     )
 
     assert snap["period_id"] == 42
-    assert snap["total_den"] == 4000
+    assert snap["total_den"] == 4000 * DEN_SCALE
     assert snap["pool_allocation_wei"] == 4080 * 10**18
     assert len(snap["entries"]) == 3
 
@@ -60,15 +61,15 @@ def test_snapshot_sorts_entries_deterministically():
 
 
 def test_snapshot_coerces_den_to_int():
-    """Floats / strings should be normalized to int so JSON serialization is stable."""
+    """Floats / strings are normalized to integer micro-den settlement units."""
     snap = build_settlement_snapshot(
         period_id=1,
         period_length_seconds=86400,
         pool_allocation_wei=1000,
-        entries=[{"address": "0x" + "11" * 20, "den": 12345}],
+        entries=[{"address": "0x" + "11" * 20, "den": "1.234567"}],
         timestamp_iso="2026-06-07T00:00:00+00:00",
     )
-    assert snap["entries"][0]["den"] == 12345
+    assert snap["entries"][0]["den"] == 1_234_567
     assert isinstance(snap["entries"][0]["den"], int)
 
 

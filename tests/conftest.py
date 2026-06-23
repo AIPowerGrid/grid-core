@@ -39,7 +39,7 @@ def api_key() -> _MaskedApiKey:
     if key_file.exists():
         return _MaskedApiKey(key_file.read_text().strip())
 
-    raise ValueError("No api key file found")
+    pytest.skip("No tests/apikey.txt file found; skipping live integration tests")
 
 
 @pytest.fixture(autouse=True, scope="session")

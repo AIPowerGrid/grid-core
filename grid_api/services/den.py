@@ -36,6 +36,7 @@ DEN_SCALE = 1_000_000
 MODEL_REGISTRY: dict[str, float] = {
     # Seed of currently-approved models; replaced/augmented by the ModelVault sync.
     # Keyed by lowercased advertised model name -> size multiplier (~param billions).
+    "qwen3-27b": 27.0,
     "qwen3.6-27b": 27.0,
     "gpt-oss-120b": 120.0,
     "gpt-oss-20b": 20.0,
@@ -61,6 +62,16 @@ def estimate_model_multiplier(model_name: str) -> float:
     models get DEFAULT_MULTIPLIER so a fake large-model name can't farm den.
     """
     return MODEL_REGISTRY.get((model_name or "").lower().strip(), DEFAULT_MULTIPLIER)
+
+
+def den_to_units(den: float | int | str) -> int:
+    """Convert float den to integer on-chain/Merkle units once.
+
+    The DB ledger stores human-scale float den. Settlement snapshots, Merkle
+    leaves, and contract calls use integer micro-den so fractional earners do
+    not round to zero. Call this at the ledger->settlement boundary only.
+    """
+    return int(round(float(den) * DEN_SCALE))
 
 
 # ── Server-side output token counting (worker-independent, anti-gaming) ──

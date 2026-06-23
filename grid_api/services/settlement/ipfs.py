@@ -29,7 +29,7 @@ logger = logging.getLogger("grid_api.settlement.ipfs")
 
 class WorkerDenEntry(TypedDict):
     address: str  # 0x-prefixed checksum address
-    den: int      # raw integer den earned this period
+    den: int      # integer micro-den units in settlement snapshots
 
 
 class SettlementSnapshot(TypedDict):
@@ -104,11 +104,11 @@ def build_settlement_snapshot(
     resulting JSON is deterministic — independent verifiers building the same
     snapshot from the same DB rows get bit-identical output.
     """
-    from ..den import DEN_SCALE
-    # Float den → integer micro-den (DEN_SCALE), identical to merkle.build_tree so
-    # the snapshot total matches the root. Sub-1.0 earners are preserved, not zeroed.
+    from ..den import den_to_units
+    # Float den → integer micro-den. This is the single scaling boundary: the
+    # Merkle builder receives these snapshot units and must not scale again.
     sorted_entries = sorted(
-        ({"address": e["address"], "den": int(round(float(e["den"]) * DEN_SCALE))} for e in entries),
+        ({"address": e["address"], "den": den_to_units(e["den"])} for e in entries),
         key=lambda e: e["address"].lower(),
     )
     total_den = sum(e["den"] for e in sorted_entries)

@@ -12,7 +12,8 @@ The formula:
     den = max(round(den, 2), 0.1)
 
 Where:
-    model_mult comes from name-matching against MODEL_REGISTRY dict
+    model_mult comes from exact MODEL_REGISTRY matches; unknown names use the
+    conservative default to avoid reward farming by fake "...-405b" names.
     context_mult = clamp(1.2 + 2.2 ** log2(max(prompt_tokens/1024, 0.1)), 0.1, 30)
 """
 
@@ -27,6 +28,7 @@ from grid_api.services.den import (
     MODEL_REGISTRY,
     calculate_context_multiplier,
     calculate_den,
+    den_to_units,
     estimate_model_multiplier,
 )
 
@@ -37,17 +39,14 @@ from grid_api.services.den import (
 @pytest.mark.parametrize(
     "model_name, expected",
     [
-        ("llama-3-8b-instruct", 8.0),
-        ("Llama-3-8B-Instruct", 8.0),       # case-insensitive
-        ("mistral-7b", 7.0),
-        ("qwen2.5-1.5b", 1.5),
-        ("llama-3-70b", 70.0),
-        ("flux-120b-uncensored", 120.0),
-        ("405b-mega", 405.0),
-        ("DeepSeek-V3-405B", 405.0),
+        ("qwen3-27b", 27.0),
+        ("Qwen3-27B", 27.0),       # case-insensitive exact registry key
+        ("qwen3.6-27b", 27.0),
+        ("gpt-oss-120b", 120.0),
+        ("gpt-oss-20b", 20.0),
     ],
 )
-def test_model_multiplier_extracts_size_from_name(model_name, expected):
+def test_model_multiplier_uses_registry(model_name, expected):
     assert estimate_model_multiplier(model_name) == expected
 
 
@@ -57,11 +56,10 @@ def test_model_multiplier_unknown_model_uses_default():
     assert estimate_model_multiplier("") == DEFAULT_MULTIPLIER
 
 
-def test_model_multiplier_prefers_largest_match():
-    """If a name contains multiple plausible sizes, prefer the largest.
-    Example: a fine-tune named 'llama-7b-on-70b-derived' should pick 70b."""
-    # 'distill-1.5b-from-70b' — should pick 70b (largest)
-    assert estimate_model_multiplier("deepseek-distill-1.5b-from-70b") == 70.0
+def test_model_multiplier_does_not_parse_fake_large_names():
+    """Fake/unregistered names should not farm den by embedding a large size."""
+    assert estimate_model_multiplier("deepseek-distill-1.5b-from-70b") == DEFAULT_MULTIPLIER
+    assert estimate_model_multiplier("totally-real-405b") == DEFAULT_MULTIPLIER
 
 
 # ============ CONTEXT MULTIPLIER ============
@@ -127,9 +125,9 @@ def test_den_scales_linearly_with_output_tokens():
 def test_den_scales_with_model_size():
     """A larger model earns more per token than a smaller one
     (same output tokens, same context)."""
-    den_3b = calculate_den(100, prompt_tokens=1024, model_name="3b-tiny")
-    den_70b = calculate_den(100, prompt_tokens=1024, model_name="70b-large")
-    assert den_70b > den_3b
+    den_default = calculate_den(100, prompt_tokens=1024, model_name="unregistered-3b-tiny")
+    den_120b = calculate_den(100, prompt_tokens=1024, model_name="gpt-oss-120b")
+    assert den_120b > den_default
 
 
 def test_den_scales_with_context_length():
@@ -141,13 +139,12 @@ def test_den_scales_with_context_length():
 
 def test_baseline_calibration_holds():
     """Headline calibration from the docstring:
-       100 tokens × 3B model × 1024 ctx ≈ 10 den.
-    Actual: 100 * (max(3, 13)/13)^0.20 * 3/125 * 2.2 = 100 * 1.0 * 0.024 * 2.2 = 5.28
-    The docstring's "~10" is more aspirational than precise — pin the actual.
+       Unknown/unregistered models use DEFAULT_MULTIPLIER=1.0, so the
+       anti-gaming baseline is intentionally lower than registered model pay.
     """
     den = calculate_den(100, prompt_tokens=1024, model_name="3b")
     # Document the actual value so a regression is visible
-    assert den == pytest.approx(5.28, abs=0.5)
+    assert den == pytest.approx(1.76, abs=0.1)
 
 
 def test_returns_float_rounded_to_2_decimals():
@@ -162,6 +159,11 @@ def test_unknown_model_uses_default_multiplier_in_calc():
     """An unknown model name should not zero out — uses DEFAULT_MULTIPLIER."""
     den = calculate_den(100, prompt_tokens=1024, model_name="some-mystery-model")
     assert den > 0
+
+
+def test_den_to_units_preserves_fractional_earners():
+    assert den_to_units(0.1) == 100_000
+    assert den_to_units("1.234567") == 1_234_567
 
 
 def test_extreme_context_does_not_overflow_or_explode():
