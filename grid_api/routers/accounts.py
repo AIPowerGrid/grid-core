@@ -279,6 +279,7 @@ async def get_account(
         "account_id": str(user["account_id"]),
         "username": user["username"],
         "wallet": user["wallet"],
+        "payout_wallet": user.get("payout_wallet") or "",
         "keys": [
             {
                 # Identify keys by hash prefix only — enough to manage, useless to forge.
@@ -291,6 +292,31 @@ async def get_account(
             for k in keys
         ],
     }
+
+
+class PayoutWalletForm(BaseModel):
+    # Empty string / null clears the payout address.
+    wallet: Optional[str] = None
+
+
+@router.post("/v1/account/payout-wallet")
+@limiter.limit("20/minute")
+async def set_payout_wallet(
+    request: Request,
+    form: PayoutWalletForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Set the Base address worker earnings are paid to. No ownership proof
+    (mining-style — point earnings wherever you want); the address is only
+    format-checked. Distinct from the login wallet, so an OAuth/username
+    operator can receive payouts."""
+    user = await _require_v2(apikey, authorization)
+    try:
+        value = await accounts_svc.set_payout_wallet(user["account_id"], form.wallet)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+    return {"payout_wallet": value or ""}
 
 
 @router.post("/v1/account/keys")

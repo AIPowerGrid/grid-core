@@ -58,6 +58,11 @@ accounts = sa.Table(
     metadata,
     sa.Column("id", sa.Uuid, primary_key=True, default=uuid4),
     sa.Column("wallet", sa.String(42), unique=True, nullable=True, index=True),
+    # Payout address for worker earnings. Distinct from `wallet` (the login
+    # identity): NOT unique, NOT a credential — an OAuth/username operator can
+    # point earnings at any Base address, mining-style, no ownership proof.
+    # Settlement prefers this; falls back to `wallet`.
+    sa.Column("payout_wallet", sa.String(42), nullable=True),
     sa.Column("email", sa.String(254), unique=True, nullable=True),
     sa.Column("oauth_sub", sa.String(255), unique=True, nullable=True),
     sa.Column("username", sa.String(100), nullable=True),

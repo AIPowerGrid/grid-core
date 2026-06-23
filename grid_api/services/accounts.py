@@ -14,6 +14,7 @@ which store the key came from.
 """
 
 import logging
+import re
 import secrets
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -58,6 +59,7 @@ async def resolve_api_key(plain_key: str) -> dict | None:
                     accounts_table.c.id.label("account_id"),
                     accounts_table.c.username,
                     accounts_table.c.wallet,
+                    accounts_table.c.payout_wallet,
                     accounts_table.c.flags,
                 )
                 .select_from(
@@ -96,6 +98,9 @@ async def resolve_api_key(plain_key: str) -> dict | None:
                 "account_id": row["account_id"],
                 "username": row["username"] or "",
                 "wallet": row["wallet"] or "",
+                # Payout address for worker earnings; falls back to the identity
+                # wallet so SIWE users are paid without setting a separate one.
+                "payout_wallet": row["payout_wallet"] or row["wallet"] or "",
                 # Legacy paid-tier signal: quota.is_paid checks kudos against
                 # the threshold, so map the v2 paid flag onto it.
                 "kudos": PAID_KUDOS_THRESHOLD if flags.get("paid") else 0,
@@ -108,7 +113,7 @@ async def resolve_api_key(plain_key: str) -> dict | None:
             )
         ).mappings().first()
         if legacy:
-            return {**dict(legacy), "source": "legacy", "wallet": ""}
+            return {**dict(legacy), "source": "legacy", "wallet": "", "payout_wallet": ""}
 
     return None
 
@@ -213,3 +218,33 @@ async def get_account_by_wallet(wallet: str) -> dict | None:
             )
         ).mappings().first()
         return dict(row) if row else None
+
+
+_ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+
+
+def is_valid_eth_address(addr: str) -> bool:
+    """Well-formed EVM address (0x + 40 hex). Format only — like a miner's
+    payout config, we don't prove control of the address."""
+    return bool(addr and _ADDR_RE.match(addr.strip()))
+
+
+async def set_payout_wallet(account_id, address: str | None) -> str | None:
+    """Set (or clear with None/"") an account's payout address.
+
+    No ownership proof — point earnings wherever you like, mining-style. We only
+    validate the FORMAT to catch typos. Stored lowercase; returns the stored
+    value. Raises ValueError on a malformed address."""
+    cleaned = (address or "").strip().lower()
+    if cleaned and not is_valid_eth_address(cleaned):
+        raise ValueError("payout address must be a valid 0x-prefixed 40-hex EVM address")
+    value = cleaned or None
+    async with await new_session() as session:
+        await session.execute(
+            sa.update(accounts_table)
+            .where(accounts_table.c.id == account_id)
+            .values(payout_wallet=value)
+        )
+        await session.commit()
+    logger.info(f"payout_wallet set: account={account_id} -> {value or '(cleared)'}")
+    return value

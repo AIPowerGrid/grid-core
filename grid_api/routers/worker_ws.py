@@ -259,11 +259,12 @@ async def worker_websocket(ws: WebSocket):
             await ws.close(code=4003)
             return
 
-        # Payout wallet ALWAYS comes from the authenticated account (set once by
-        # the operator via SIWE on the dashboard), never from the worker. If the
-        # account has no wallet yet, den is still recorded and accrues
-        # unattributed until they set one (see settlement.count_unattributed_den).
-        wallet_address = user.get("wallet") or ""
+        # Payout wallet ALWAYS comes from the authenticated account, never the
+        # worker. Prefer the explicit payout_wallet (settable by any operator,
+        # mining-style, no proof) and fall back to the identity wallet for SIWE
+        # users. If neither is set, den accrues unattributed until they set one
+        # (see settlement.count_unattributed_den).
+        wallet_address = user.get("payout_wallet") or user.get("wallet") or ""
 
         if user["source"] == "v2":
             # v2 workers live in grid_workers (wallet-keyed, JSON models).
