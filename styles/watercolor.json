@@ -1,0 +1,12 @@
+{
+  "id": "watercolor",
+  "name": "Watercolor",
+  "description": "Soft hand-painted watercolor with paper texture.",
+  "model": "z-image-turbo",
+  "job_type": "image",
+  "prompt": "{prompt}, watercolor painting, soft washes, visible paper texture, delicate brushwork, pastel palette, hand-painted",
+  "negative_prompt": "photorealistic, 3d render, harsh lines, oversaturated",
+  "params": {"steps": 8, "sampler": "euler"},
+  "locked": ["steps"],
+  "aspect": "1:1"
+}

@@ -41,7 +41,7 @@ from ..redis_client import get_redis
 from ..services import accounts as accounts_svc
 from ..services import job_queue, storage, token_stream
 from ..services import ledger as ledger_svc
-from ..services.den import calculate_den, calculate_media_den
+from ..services.den import calculate_den, calculate_media_den, count_tokens
 from ..v2.schema import workers as v2_workers_table
 from ..services.metrics_state import record_job_complete, record_job_failed
 
@@ -53,24 +53,58 @@ router = APIRouter()
 WORKER_STATUS_PREFIX = "grid:worker:"
 WORKER_STATUS_SUFFIX = ":status"
 WORKER_ACTIVE_SET = "grid:workers:active"
+# name → "1" with TTL, for O(1) "is this worker online?" by name (worker
+# affinity). Refreshed on every heartbeat; TTL-reaped if a worker vanishes.
+WORKER_ONLINE_BY_NAME = "grid:worker:online:"
+
+
+async def _worker_online(worker_name: str) -> bool:
+    """True if a worker with this name currently has a live registration."""
+    if not worker_name:
+        return False
+    r = get_redis()
+    return bool(await r.get(f"{WORKER_ONLINE_BY_NAME}{worker_name}"))
 
 # In-process tracking for WebSocket handles (can't serialize these to Redis)
 _local_ws: dict[str, WebSocket] = {}
 
+# ── Worker health enforcement ──
+# A completion that is empty (zero tokens) or an explicit worker error counts
+# as a strike. A worker that accumulates MAX_STRIKES within the decay window is
+# evicted and barred from re-registering for EVICT_COOLDOWN_S — this is what
+# stops a worker whose inference backend has died from silently swallowing a
+# share of every job (the 2026-06-14 "empty every other message" outage).
+MAX_STRIKES = 6
+STRIKE_DECAY_S = 300       # strikes reset after 5 min without a failure
+EVICT_COOLDOWN_S = 30     # barred from re-registering after eviction
 
-def _wallet_from_name(worker_name: str) -> str:
-    """Best-effort extract an EVM wallet from the worker name.
 
-    Convention used across AIPG workers: "MyWorker.0xABC..." or
-    "MyWorker#0xABC...". Returns "" if no 0x-prefixed 40-hex address is found.
-    Settlement can still resolve via worker->user mapping when this is empty.
-    """
-    import re
+async def _record_strike(worker_id: str) -> int:
+    """Increment a worker's failure strike count; returns the new total."""
+    r = get_redis()
+    key = f"{WORKER_STATUS_PREFIX}{worker_id}:strikes"
+    n = await r.incr(key)
+    await r.expire(key, STRIKE_DECAY_S)
+    return n
 
-    if not worker_name:
-        return ""
-    m = re.search(r"0x[a-fA-F0-9]{40}", worker_name)
-    return m.group(0) if m else ""
+
+async def _clear_strikes(worker_id: str):
+    """A successful job clears the strike count."""
+    r = get_redis()
+    await r.delete(f"{WORKER_STATUS_PREFIX}{worker_id}:strikes")
+
+
+async def _evict_worker(worker_id: str, worker_name: str):
+    """Deregister an unhealthy worker and bar it from re-registering briefly."""
+    r = get_redis()
+    await unregister_worker(worker_id, worker_name)
+    await r.setex(f"grid:worker:cooldown:{worker_name}", EVICT_COOLDOWN_S, "evicted")
+    await r.delete(f"{WORKER_STATUS_PREFIX}{worker_id}:strikes")
+
+
+async def _is_in_cooldown(worker_name: str) -> bool:
+    r = get_redis()
+    return bool(await r.get(f"grid:worker:cooldown:{worker_name}"))
 
 
 # ── Redis-backed worker registry ──
@@ -82,37 +116,79 @@ async def register_worker(worker_id: str, info: dict):
     key = f"{WORKER_STATUS_PREFIX}{worker_id}{WORKER_STATUS_SUFFIX}"
     await r.setex(key, 60, json.dumps(info))
     await r.sadd(WORKER_ACTIVE_SET, worker_id)
+    if info.get("name"):
+        await r.setex(f"{WORKER_ONLINE_BY_NAME}{info['name']}", 60, "1")
 
 
-async def unregister_worker(worker_id: str):
+async def unregister_worker(worker_id: str, worker_name: str = ""):
     """Remove a worker from the Redis registry."""
     r = get_redis()
     key = f"{WORKER_STATUS_PREFIX}{worker_id}{WORKER_STATUS_SUFFIX}"
     await r.delete(key)
     await r.srem(WORKER_ACTIVE_SET, worker_id)
+    if worker_name:
+        await r.delete(f"{WORKER_ONLINE_BY_NAME}{worker_name}")
 
 
 async def refresh_worker(worker_id: str, info: dict):
-    """Refresh worker TTL in Redis."""
+    """Refresh worker TTL in Redis AND re-assert active-set membership.
+
+    Re-adding to the set on every refresh self-heals a reconnect race: when a
+    worker reconnects under the same worker_id, the OLD handler's cleanup
+    (unregister_worker: srem + del) can run AFTER the NEW handler's
+    register_worker, leaving a live status key that's missing from
+    grid:workers:active — making the worker invisible to get_available_models
+    (so /v1/models returns [] and chat 503s) even though it's connected and
+    healthy. Re-asserting membership here repairs that within one refresh (~10s).
+    """
     r = get_redis()
     key = f"{WORKER_STATUS_PREFIX}{worker_id}{WORKER_STATUS_SUFFIX}"
     await r.setex(key, 60, json.dumps(info))
+    await r.sadd(WORKER_ACTIVE_SET, worker_id)
+    if info.get("name"):
+        await r.setex(f"{WORKER_ONLINE_BY_NAME}{info['name']}", 60, "1")
 
 
-async def get_available_models() -> list[str]:
-    """Get all models from all connected workers (reads from Redis)."""
+async def get_available_models(job_type: str | None = None, api_format: str | None = None) -> list[str]:
+    """Get models from connected workers (reads from Redis).
+
+    When `job_type` is given (e.g. "text"), only models served by a worker of
+    that modality are returned — so the OpenAI `/v1/models` chat list never
+    surfaces image/video models like LTX-2.3 that can't be used via
+    chat-completions. Each worker self-declares its `job_types` at registration.
+
+    When `api_format` is given (e.g. "anthropic", "openai-responses"), only
+    models served by a worker whose backend natively exposes that API are
+    returned. This is what makes `/v1/messages` and `/v1/responses` honest:
+    if no connected worker advertises the format, the model list is empty and
+    the endpoint returns 503 — the grid never fakes a format it can't serve.
+    Workers that don't advertise `api_formats` are treated as openai-chat.
+    """
     r = get_redis()
-    worker_ids = await r.smembers(WORKER_ACTIVE_SET)
+    worker_ids = list(await r.smembers(WORKER_ACTIVE_SET))
+    if not worker_ids:
+        return []
+    # Pipeline the per-worker GETs into ONE round-trip (was N+1 sequential GETs on the
+    # hot path — every chat/image/video/models request, sometimes twice).
+    keys = [f"{WORKER_STATUS_PREFIX}{wid}{WORKER_STATUS_SUFFIX}" for wid in worker_ids]
+    pipe = r.pipeline()
+    for key in keys:
+        pipe.get(key)
+    results = await pipe.execute()
     models = set()
-    for wid in worker_ids:
-        key = f"{WORKER_STATUS_PREFIX}{wid}{WORKER_STATUS_SUFFIX}"
-        data = await r.get(key)
-        if data:
-            info = json.loads(data)
-            models.update(info.get("models", []))
-        else:
-            # Stale entry — worker expired
-            await r.srem(WORKER_ACTIVE_SET, wid)
+    stale = []
+    for wid, data in zip(worker_ids, results):
+        if not data:
+            stale.append(wid)  # expired worker — prune
+            continue
+        info = json.loads(data)
+        if job_type and job_type not in (info.get("job_types") or ["text"]):
+            continue
+        if api_format and api_format not in (info.get("api_formats") or ["openai-chat"]):
+            continue
+        models.update(info.get("models", []))
+    if stale:
+        await r.srem(WORKER_ACTIVE_SET, *stale)
     return sorted(models)
 
 
@@ -146,9 +222,20 @@ async def worker_websocket(ws: WebSocket):
         # legacy single `worker_type`; defaults to text for old text workers.
         job_types = init_msg.get("job_types") or [init_msg.get("worker_type", "text")]
         job_types = [t for t in job_types if t in ("text", "image", "video")] or ["text"]
-        # Optional explicit wallet; otherwise fall back to the wallet-in-name
-        # convention "WorkerName.0xADDRESS" or "WorkerName#0xADDRESS".
-        wallet_address = init_msg.get("wallet_address") or _wallet_from_name(worker_name)
+        # API formats this worker's backend natively serves. The worker probes
+        # its inference engine and advertises only what actually answers (vLLM
+        # exposes openai-chat + openai-responses but NOT anthropic, for example).
+        # The grid routes each API endpoint to the matching pool; a format with
+        # no workers simply has no capacity (honest 503) — the grid never
+        # translates between formats. Legacy workers that don't send this are
+        # assumed to be plain OpenAI chat workers.
+        api_formats = init_msg.get("api_formats") or ["openai-chat"]
+        api_formats = [f for f in api_formats if f in ("openai-chat", "openai-responses", "anthropic")] or ["openai-chat"]
+        # NOTE: the payout wallet is NOT taken from the worker. It's resolved
+        # from the authenticated account below. This means an operator runs
+        # workers on any number of rigs with ONLY an API key — no wallet or
+        # private key on the rig — and a worker can't declare a wallet to
+        # redirect another account's earnings.
 
         if not apikey or not worker_name:
             await ws.send_json({"type": "error", "message": "Missing apikey or name"})
@@ -162,8 +249,21 @@ async def worker_websocket(ws: WebSocket):
             await ws.close(code=4001)
             return
 
-        # Wallet preference: explicit > name convention > account wallet.
-        wallet_address = wallet_address or user.get("wallet", "")
+        # Refuse workers we just evicted for failing health — gives a flapping
+        # worker (dead backend) time to actually recover before rejoining.
+        if await _is_in_cooldown(worker_name):
+            await ws.send_json({
+                "type": "error",
+                "message": "Worker recently evicted for failed generations; retry shortly.",
+            })
+            await ws.close(code=4003)
+            return
+
+        # Payout wallet ALWAYS comes from the authenticated account (set once by
+        # the operator via SIWE on the dashboard), never from the worker. If the
+        # account has no wallet yet, den is still recorded and accrues
+        # unattributed until they set one (see settlement.count_unattributed_den).
+        wallet_address = user.get("wallet") or ""
 
         if user["source"] == "v2":
             # v2 workers live in grid_workers (wallet-keyed, JSON models).
@@ -171,11 +271,21 @@ async def worker_websocket(ws: WebSocket):
             async with await new_session() as session:
                 row = (
                     await session.execute(
-                        sa.select(v2_workers_table.c.id).where(
+                        sa.select(v2_workers_table.c.id, v2_workers_table.c.account_id).where(
                             v2_workers_table.c.name == worker_name
                         )
                     )
                 ).first()
+                # SECURITY: a worker name is owned by the account that created it. Without
+                # this check any authenticated account could register an existing worker's
+                # name and rebind its wallet → redirect another operator's den/earnings.
+                if row and row[1] != user["account_id"]:
+                    await ws.send_json({
+                        "type": "error",
+                        "message": "worker name already registered to another account",
+                    })
+                    await ws.close(code=4003)
+                    return
                 if row:
                     worker_id = str(row[0])
                     await session.execute(
@@ -267,6 +377,7 @@ async def worker_websocket(ws: WebSocket):
             "name": worker_name,
             "models": models,
             "job_types": job_types,
+            "api_formats": api_formats,
             "max_length": max_length,
             "max_context_length": max_context_length,
             "wallet_address": wallet_address,
@@ -344,6 +455,20 @@ async def worker_websocket(ws: WebSocket):
 
                 # Got a job → dispatch it (model check + text/media paths below).
 
+                # ── Worker affinity (soft) ──
+                # If the job prefers a different worker, release it back so that
+                # worker can claim it — but only while the preferred worker is
+                # online and the job hasn't bounced too many times. Otherwise run
+                # it here: affinity is a preference, never a reason to stall.
+                preferred = job.get("preferred_worker", "")
+                if preferred and preferred != worker_name:
+                    if await _worker_online(preferred):
+                        bounced = await job_queue.bounce_for_affinity(job)
+                        if bounced:
+                            continue
+                        # bounce limit hit → fall through and run it here.
+                    # preferred worker offline → run it here (don't strand the job).
+
                 # Check model compatibility. The shared stream + consumer group
                 # hands jobs to a random worker regardless of served models, so
                 # a mismatch is normal in a heterogeneous pool. Requeue for
@@ -364,12 +489,40 @@ async def worker_websocket(ws: WebSocket):
 
                 selected_model = matching[0]
 
+                # Check API-format compatibility too. A job for /v1/responses or
+                # /v1/messages must land on a worker whose backend natively serves
+                # that format; if this worker doesn't, requeue for one that does
+                # (same heterogeneous-pool logic as model mismatch).
+                job_format = job["payload"].get("api_format", "openai-chat")
+                worker_formats = worker_info.get("api_formats") or ["openai-chat"]
+                if job_format not in worker_formats:
+                    requeued = await job_queue.requeue_for_mismatch(job)
+                    if not requeued:
+                        await token_stream.publish_error(
+                            job["job_id"],
+                            f"No worker available serving the '{job_format}' API for "
+                            f"model(s): {', '.join(job_models) if job_models else 'unspecified'}.",
+                        )
+                    continue
+
                 # Track current job for retry on disconnect
                 current_job = job
 
                 # ── Media path (image/video) ──
                 if job.get("job_type", "text") != "text":
                     ok = await _handle_media_job(ws, job, selected_model, worker_id, worker_info)
+                    if ok:
+                        await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
+                    current_job = None
+                    continue
+
+                # ── Raw passthrough path (Anthropic / OpenAI-Responses) ──
+                # Natively-served formats are tunneled raw: the worker forwards
+                # the request to the matching backend endpoint and relays the
+                # upstream events verbatim. The grid tees usage for den but does
+                # not transform the payload.
+                if job_format != "openai-chat":
+                    ok = await _handle_raw_passthrough(ws, job, selected_model, worker_id, worker_info)
                     if ok:
                         await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
                     current_job = None
@@ -435,10 +588,57 @@ async def worker_websocket(ws: WebSocket):
                 # Wait for tokens + done
                 import time as _time
                 gen_start = _time.time()
-                full_text, token_count = await _handle_worker_generation(ws, job, worker_info)
+                full_text, token_count, failed, client_error, ttft = await _handle_worker_generation(ws, job, worker_info)
                 gen_time = _time.time() - gen_start
 
-                # Job completed successfully
+                if client_error is not None:
+                    # The request itself was bad (e.g. malformed tool schema,
+                    # context too long). Surface the real reason to the client and
+                    # ack — do NOT strike the worker or requeue (it is not the
+                    # worker's fault and would fail identically on every worker).
+                    await token_stream.publish_error(job["job_id"], client_error, code=400)
+                    record_job_failed()
+                    await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
+                    current_job = None
+                    continue
+
+                if failed:
+                    # The worker couldn't serve this job (dead backend / empty
+                    # output). Strike it, and recover the job: if nothing was
+                    # streamed to the client yet, silently requeue so a healthy
+                    # worker can serve it; otherwise surface the error. NEVER pay
+                    # den for a failed generation.
+                    strikes = await _record_strike(worker_id)
+                    record_job_failed()
+                    if token_count == 0:
+                        await job_queue.requeue_job(
+                            job["job_id"], job["payload"], job["models"],
+                            job.get("stream_id"), job_type="text", stream=job.get("stream"),
+                            preferred_worker=job.get("preferred_worker", ""),
+                            affinity_passes=job.get("affinity_passes", 0),
+                        )
+                        logger.warning(
+                            f"Job {job['job_id']} requeued after worker '{worker_name}' "
+                            f"failed it (strike {strikes}/{MAX_STRIKES})"
+                        )
+                    else:
+                        await token_stream.publish_error(
+                            job["job_id"], "Worker failed mid-generation; please retry."
+                        )
+                        await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
+                    current_job = None
+
+                    if strikes >= MAX_STRIKES:
+                        logger.error(
+                            f"Worker '{worker_name}' ({worker_id}) hit {MAX_STRIKES} "
+                            f"strikes — evicting and barring re-register for {EVICT_COOLDOWN_S}s"
+                        )
+                        await _evict_worker(worker_id, worker_name)
+                        break  # drop the WS; cooldown blocks immediate rejoin
+                    continue
+
+                # Job completed successfully — clear any prior strikes.
+                await _clear_strikes(worker_id)
                 current_job = None
                 await job_queue.ack_job(job["stream_id"])
 
@@ -450,7 +650,9 @@ async def worker_websocket(ws: WebSocket):
                 #    requested max_length — a worker can't be credited for more
                 #    output than was asked for.
                 requested_max = int(job["payload"].get("max_length", 512) or 512)
-                server_token_count = len(full_text.split())
+                # Real tokenizer (tiktoken) server-side — worker-independent and
+                # far more accurate than word-splitting (which undercounts ~25%).
+                server_token_count = count_tokens(full_text)
                 effective_tokens = min(server_token_count, token_count or server_token_count, requested_max)
 
                 # 2) Context: the prompt is user-controlled and the context
@@ -462,12 +664,13 @@ async def worker_websocket(ws: WebSocket):
                 ctx_cap = int(worker_info.get("max_context_length", 2048) or 2048)
                 prompt_tokens = min(len(prompt_text.split()), ctx_cap)
 
-                # NOTE: the model-size multiplier still derives from the model
-                # NAME (den.py), which a worker advertising a fake large-model
-                # name could inflate via self-dealing. The real fix is to source
-                # the param count from the on-chain ModelVault registry rather
-                # than the name. Tracked separately — bounded here only by the
-                # token/context caps above.
+                # The model-size multiplier comes from den.MODEL_REGISTRY (exact name
+                # match), NOT from parsing the name — an unregistered/fake name gets the
+                # conservative DEFAULT_MULTIPLIER (1.0), so it can't be inflated by
+                # advertising "...-405b". Remaining gap (tracked): the registry isn't yet
+                # ModelVault-synced, and the worker still isn't cryptographically proven to
+                # serve the model it advertises — a registered-name worker serving a smaller
+                # model is the open item, to be closed by validator re-exec / model-hash proof.
                 den_awarded = calculate_den(
                     output_tokens=effective_tokens,
                     prompt_tokens=prompt_tokens,
@@ -494,6 +697,8 @@ async def worker_websocket(ws: WebSocket):
                     job_type="text",
                     den=den_awarded,
                     output_units=effective_tokens,
+                    duration=gen_time,
+                    ttft=ttft,
                     prompt_hash=ledger_svc.text_hash(prompt_text),
                     result_hash=ledger_svc.text_hash(full_text),
                 )
@@ -519,7 +724,7 @@ async def worker_websocket(ws: WebSocket):
         # ── Cleanup + job retry ──
         if worker_id:
             _local_ws.pop(worker_id, None)
-            await unregister_worker(worker_id)
+            await unregister_worker(worker_id, worker_name or "")
 
         if current_job:
             # Worker disconnected with a job in progress — notify client and requeue
@@ -534,6 +739,8 @@ async def worker_websocket(ws: WebSocket):
                 current_job.get("stream_id"),
                 job_type=current_job.get("job_type", "text"),
                 stream=current_job.get("stream"),
+                preferred_worker=current_job.get("preferred_worker", ""),
+                affinity_passes=current_job.get("affinity_passes", 0),
             )
 
         if worker_info:
@@ -562,7 +769,7 @@ async def _handle_media_job(
     n = int(payload.get("n", 1) or 1)
     ext = payload.get("ext") or ("mp4" if job_type == "video" else "webp")
     try:
-        upload_slots = storage.presign_outputs(job_id, n, ext)
+        upload_slots = storage.presign_outputs(job_id, n, ext, job_type=job_type)
     except Exception as e:
         logger.error(f"Presign failed for job {job_id}: {e}")
         await token_stream.publish_error(job_id, "Storage unavailable; please retry.")
@@ -586,12 +793,21 @@ async def _handle_media_job(
         msg_type = msg.get("type")
 
         if msg_type == "progress":
-            # Relayed on the token channel so a future SSE progress endpoint
-            # can stream it; the blocking HTTP handler simply ignores tokens.
+            pct = msg.get("pct", 0)
+            # Relayed on the token channel (for any future SSE consumer); the
+            # blocking HTTP handler ignores tokens.
             await token_stream.publish_token(
                 job_id,
-                json.dumps({"progress": msg.get("pct", 0), "preview": msg.get("preview_b64")}),
+                json.dumps({"progress": pct, "preview": msg.get("preview_b64")}),
             )
+            # Also stash the latest % under the client's progress token so it can
+            # be polled at GET /v1/progress/{token} while the (synchronous) job runs.
+            token = job.get("progress_token")
+            if token:
+                try:
+                    await get_redis().setex(f"grid:progress:{token}", 180, str(int(pct)))
+                except Exception:
+                    pass  # progress is best-effort; never fail a job over it
 
         elif msg_type == "done":
             gen_time = _time.time() - gen_start
@@ -615,9 +831,13 @@ async def _handle_media_job(
                 frames=int(payload.get("frames", 0) or 0),
             )
 
-            # Result hash: deterministic digest over the worker-reported
-            # per-output sha256s (server never sees media bytes — verifiable
-            # later by fetching the R2 objects).
+            # Result hash: digest over the worker-reported per-output sha256s.
+            # ⚠️ UNATTESTED: the worker uploads to R2 directly and self-reports the
+            # sha256 — the grid never fetches the bytes, so a malicious/lazy worker can
+            # report an arbitrary hash for arbitrary content and still earn den (audit H4).
+            # This hash is integrity bookkeeping, NOT proof-of-output. Real attestation
+            # comes from the validator scan path (re-fetch + recompute, or sampled re-exec);
+            # do not treat media result_hash as authoritative at settlement until then.
             result_hash = ledger_svc.canonical_hash(
                 [o.get("sha256") or o["key"] for o in outputs]
             )
@@ -629,12 +849,18 @@ async def _handle_media_job(
                 job_type=job_type,
                 den=den_awarded,
                 output_units=max(n, int(payload.get("frames", 0) or 0)),
+                duration=gen_time,
                 prompt_hash=ledger_svc.canonical_hash(payload),
                 result_hash=result_hash,
             )
 
             await token_stream.publish_done(
-                job_id, json.dumps({"media": outputs, "model": selected_model})
+                job_id, json.dumps({
+                    "media": outputs,
+                    "model": selected_model,
+                    "worker": worker_info.get("name", ""),
+                    "gen_time": round(gen_time, 2),
+                })
             )
             await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
             record_job_complete(tokens=0, den=den_awarded, duration=gen_time)
@@ -650,34 +876,251 @@ async def _handle_media_job(
             return True
 
 
-async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict) -> tuple[str, int]:
-    """Receive tokens from worker and relay to Redis Pub/Sub + buffer.
+async def _handle_raw_passthrough(
+    ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict
+) -> bool:
+    """Tunnel a raw Anthropic / OpenAI-Responses job to the worker and relay it.
 
-    Returns (full_text, token_count).
+    The worker forwards the client's request to the matching backend endpoint
+    (/v1/messages or /v1/responses) and streams back the upstream events
+    VERBATIM as `raw` messages (or a single `done` with `full_json` for
+    non-streaming). The grid relays them untouched and only TEES the
+    backend-reported `usage` for den — true faithful passthrough.
+
+    Returns True when finished (success or surfaced failure) so the caller acks.
     """
+    import time as _time
+
+    job_id = job["job_id"]
+    payload = job["payload"]
+
+    await ws.send_json({
+        "type": "job",
+        "id": job_id,
+        "model": selected_model,
+        "payload": payload,
+    })
+
+    gen_start = _time.time()
+    accumulated: list[str] = []  # raw data strings, for the result hash
+    usage = None
+    ttft: float | None = None
+
+    while True:
+        msg = await asyncio.wait_for(ws.receive_json(), timeout=300)
+        mtype = msg.get("type")
+
+        if mtype == "raw":
+            if ttft is None:
+                ttft = _time.time() - gen_start
+            data = msg.get("data", "")
+            accumulated.append(data)
+            await token_stream.publish_raw_event(job_id, msg.get("event"), data)
+
+        elif mtype == "done":
+            gen_time = _time.time() - gen_start
+            usage = msg.get("usage") or usage
+            full_json = msg.get("full_json")
+            await token_stream.publish_done(job_id, usage=usage, full_json=full_json)
+
+            # Metering: trust the backend-reported usage (we tee it), but cap the
+            # output at the job's requested max and the prompt at the worker's
+            # advertised context so a self-dealer can't inflate den.
+            out_tokens = in_tokens = 0
+            if isinstance(usage, dict):
+                out_tokens = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+                in_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+            requested_max = int(payload.get("max_length", 4096) or 4096)
+            effective_tokens = min(out_tokens, requested_max) if out_tokens else 0
+            ctx_cap = int(worker_info.get("max_context_length", 2048) or 2048)
+            prompt_tokens = min(in_tokens, ctx_cap)
+
+            den_awarded = calculate_den(
+                output_tokens=effective_tokens,
+                prompt_tokens=prompt_tokens,
+                model_name=selected_model,
+                generation_time_seconds=gen_time,
+            )
+            await _clear_strikes(worker_id)
+            result_src = "".join(accumulated) if accumulated else json.dumps(full_json or {})
+            await ledger_svc.record_completion(
+                job_id=job_id,
+                worker_id=worker_id,
+                wallet=worker_info.get("wallet_address", ""),
+                model=selected_model,
+                job_type="text",
+                den=den_awarded,
+                output_units=effective_tokens,
+                duration=gen_time,
+                ttft=ttft,
+                prompt_hash=ledger_svc.text_hash(json.dumps(payload.get("request", {}), sort_keys=True)[:20000]),
+                result_hash=ledger_svc.text_hash(result_src[:20000]),
+            )
+            await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
+            record_job_complete(tokens=effective_tokens, den=den_awarded, duration=gen_time)
+            return True
+
+        elif mtype == "pong":
+            continue
+
+        elif mtype == "error":
+            message = msg.get("message", "Worker error")
+            if msg.get("client_error"):
+                logger.info(f"Client error on raw job {job_id}: {message[:200]}")
+                await token_stream.publish_error(job_id, message, code=400)
+            else:
+                logger.error(f"Worker error on raw job {job_id}: {message}")
+                await token_stream.publish_error(job_id, message, code=502)
+            record_job_failed()
+            return True
+
+
+def _merge_tool_call_deltas(acc: dict, deltas: list):
+    """Accumulate streamed OpenAI tool_call fragments into full tool calls.
+
+    Tool calls arrive split across deltas: the first carries the index + id +
+    function name and a partial `arguments` string; later deltas append more
+    `arguments`. We merge by `index` so the assembled non-streaming response
+    has complete, parseable tool calls (the stream itself still relays each raw
+    fragment to the client — this is only for the collected/DONE view + hashing).
+    """
+    for tc in deltas or []:
+        idx = tc.get("index", 0)
+        slot = acc.setdefault(
+            idx, {"index": idx, "id": None, "type": "function", "function": {"name": "", "arguments": ""}}
+        )
+        if tc.get("id"):
+            slot["id"] = tc["id"]
+        if tc.get("type"):
+            slot["type"] = tc["type"]
+        fn = tc.get("function") or {}
+        if fn.get("name"):
+            slot["function"]["name"] += fn["name"]
+        if fn.get("arguments"):
+            slot["function"]["arguments"] += fn["arguments"]
+
+
+async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict) -> tuple[str, int, bool, str | None, float | None]:
+    """Receive the worker's stream, relay it faithfully, and tee a copy.
+
+    OBSERVE-mode passthrough: each `token` message carries the inference
+    backend's raw `delta` (content / reasoning_content / tool_calls), which we
+    republish UNTOUCHED for SSE clients. We simultaneously *tee* the stream —
+    accumulating content/reasoning, assembling tool_calls, and capturing
+    authoritative `usage` — so the grid can meter den, build the non-streaming
+    reply, and hash the result without ever mutating what the client receives.
+
+    Legacy workers (no `delta`, just `text`+`reasoning`) are still handled.
+
+    Returns (full_text, token_count, failed, client_error, ttft). `token_count`
+    prefers the backend's reported completion_tokens when available (more
+    accurate than counting deltas). `ttft` is the time-to-first-token in seconds
+    (None if no token arrived). On FAILURE (explicit error, or zero output)
+    it publishes NOTHING and returns failed=True. `client_error` is a non-None
+    message when the failure was the CALLER's fault (e.g. a 4xx from the backend
+    over a malformed request) — the caller surfaces it to the client and skips
+    the requeue/strike machinery (retrying would fail identically everywhere).
+    """
+    import time as _time
     job_id = job["job_id"]
     full_text = ""
+    full_reasoning = ""
+    tool_acc: dict = {}
     token_count = 0
+    usage = None
+    last_finish = None
+    recv_start = _time.time()
+    ttft: float | None = None
 
     while True:
         msg = await asyncio.wait_for(ws.receive_json(), timeout=300)
         msg_type = msg.get("type")
 
         if msg_type == "token":
-            text = msg.get("text", "")
-            full_text += text
-            token_count += 1
-            await token_stream.publish_token(job_id, text)
+            if ttft is None:
+                ttft = _time.time() - recv_start
+            delta = msg.get("delta")
+            if delta is not None:
+                # Faithful path — accumulate a copy, relay the raw delta as-is.
+                if delta.get("content"):
+                    full_text += delta["content"]
+                if delta.get("reasoning_content"):
+                    full_reasoning += delta["reasoning_content"]
+                if delta.get("tool_calls"):
+                    _merge_tool_call_deltas(tool_acc, delta["tool_calls"])
+                if msg.get("finish_reason"):
+                    last_finish = msg["finish_reason"]
+                token_count += 1
+                await token_stream.publish_token(
+                    job_id, delta=delta, finish_reason=msg.get("finish_reason")
+                )
+            else:
+                # Legacy path — separate text/reasoning channels.
+                text = msg.get("text", "")
+                is_reasoning = bool(msg.get("reasoning", False))
+                if is_reasoning:
+                    full_reasoning += text
+                else:
+                    full_text += text
+                token_count += 1
+                await token_stream.publish_token(job_id, text, reasoning=is_reasoning)
 
         elif msg_type == "done":
             full_text = msg.get("full_text", full_text)
-            await token_stream.publish_done(job_id, full_text)
-            return full_text, token_count
+            full_reasoning = msg.get("full_reasoning", full_reasoning)
+            usage = msg.get("usage") or usage
+            tool_calls = [tool_acc[i] for i in sorted(tool_acc)] if tool_acc else None
+            finish_reason = msg.get("finish_reason") or last_finish or (
+                "tool_calls" if tool_calls else "stop"
+            )
+
+            # An empty completion (no content, no reasoning, no tool calls) is a
+            # silent backend failure, not a success — don't pay for it or hand
+            # the client a blank reply.
+            produced_output = bool(
+                (full_text or "").strip()
+                or (full_reasoning or "").strip()
+                or tool_calls
+                or token_count
+            )
+            if not produced_output:
+                logger.warning(f"Worker returned EMPTY completion for job {job_id} — treating as failure")
+                return full_text, 0, True, None, ttft
+
+            # Provenance the API surfaces with the reply: who ran it + how fast.
+            # tokens_per_s here is an at-completion estimate (metered tokens over
+            # wall-clock); the ledger-derived per-model t/s is authoritative.
+            gen_elapsed = _time.time() - recv_start
+            metered_now = (usage.get("completion_tokens") if usage and isinstance(usage.get("completion_tokens"), int) else token_count) or 0
+            grid_meta = {
+                "worker": worker_info.get("name", ""),
+                "gen_time": round(gen_elapsed, 2),
+                "ttft": round(ttft, 2) if ttft is not None else None,
+                "tokens_per_s": round(metered_now / gen_elapsed, 1) if gen_elapsed > 0 and metered_now else None,
+            }
+            await token_stream.publish_done(
+                job_id, full_text, full_reasoning,
+                tool_calls=tool_calls, usage=usage, finish_reason=finish_reason,
+                grid=grid_meta,
+            )
+
+            # Prefer the backend's authoritative completion_tokens for metering;
+            # fall back to the delta count. (The den path still caps this against
+            # a server-side tiktoken count + requested max, so a worker can't
+            # inflate it.)
+            metered = token_count
+            if usage and isinstance(usage.get("completion_tokens"), int):
+                metered = usage["completion_tokens"]
+            return full_text, metered, False, None, ttft
 
         elif msg_type == "pong":
             continue
 
         elif msg_type == "error":
-            logger.error(f"Worker error on job {job_id}: {msg.get('message')}")
-            await token_stream.publish_error(job_id, msg.get("message", "Worker error"))
-            return full_text, token_count
+            message = msg.get("message", "Worker error")
+            if msg.get("client_error"):
+                # Deterministic caller fault (bad request); not the worker's fault.
+                logger.info(f"Client error on job {job_id}: {message[:200]}")
+                return full_text, token_count, True, message, ttft
+            logger.error(f"Worker error on job {job_id}: {message}")
+            return full_text, token_count, True, None, ttft

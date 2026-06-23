@@ -12,6 +12,7 @@ round-trip), so calling boto3's sync API inline is safe in async handlers.
 import logging
 import os
 from functools import lru_cache
+from uuid import uuid4
 
 import boto3
 from botocore.client import Config as BotoConfig
@@ -48,16 +49,37 @@ def public_media_base() -> str:
     return os.getenv("GRID_MEDIA_BASE_URL", "https://images.aipg.art").rstrip("/")
 
 
-def presign_outputs(job_id: str, n: int, ext: str, expires: int = 900) -> list[dict]:
+def upload_source(data: bytes, ext: str, expires: int = 3600) -> str:
+    """Store a caller-supplied source image (img2img / img2video input) and return a
+    presigned GET URL the worker fetches. Same bucket, `source/` prefix (so a
+    lifecycle rule can reap inputs quickly). Network PUT — call via asyncio.to_thread
+    from async handlers. Returns a presigned URL, not a public one (inputs aren't
+    meant to be publicly addressable)."""
+    key = f"source/{uuid4().hex}.{ext}"
+    content_type = CONTENT_TYPES.get(ext, "application/octet-stream")
+    _client().put_object(Bucket=media_bucket(), Key=key, Body=data, ContentType=content_type)
+    return _client().generate_presigned_url(
+        "get_object", Params={"Bucket": media_bucket(), "Key": key}, ExpiresIn=expires
+    )
+
+
+def presign_outputs(job_id: str, n: int, ext: str, expires: int = 900,
+                    job_type: str = "image") -> list[dict]:
     """Presign PUT URLs for a job's expected outputs.
 
     Returns one slot per output: {key, put_url, content_type, public_url}.
+
+    Keys are prefixed by media type (`image/…`, `video/…`) so a single bucket can
+    carry both yet still take prefix-scoped R2 lifecycle rules — e.g. expire
+    `video/` sooner (it's ~5× the storage/egress) while keeping images longer —
+    without a separate bucket or domain.
     """
     bucket = media_bucket()
     content_type = CONTENT_TYPES.get(ext, "application/octet-stream")
+    prefix = "video" if job_type == "video" else "image"
     slots = []
     for i in range(n):
-        key = f"{job_id}/{i}.{ext}"
+        key = f"{prefix}/{job_id}/{i}.{ext}"
         put_url = _client().generate_presigned_url(
             "put_object",
             Params={"Bucket": bucket, "Key": key, "ContentType": content_type},

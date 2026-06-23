@@ -1,0 +1,12 @@
+{
+  "id": "anime",
+  "name": "Anime",
+  "description": "Clean cel-shaded anime illustration.",
+  "model": "z-image-turbo",
+  "job_type": "image",
+  "prompt": "{prompt}, anime, cel shaded, vibrant colors, clean lineart, studio anime key visual",
+  "negative_prompt": "photorealistic, 3d render, lowres, deformed, extra limbs",
+  "params": {"steps": 8, "sampler": "euler"},
+  "locked": ["steps"],
+  "aspect": "3:4"
+}

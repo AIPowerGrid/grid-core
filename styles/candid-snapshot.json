@@ -1,0 +1,13 @@
+{
+  "id": "candid-snapshot",
+  "name": "Candid Snapshot",
+  "description": "Authentic phone-camera realism (Realistic Snapshot LoRA).",
+  "model": "z-image-turbo",
+  "job_type": "image",
+  "prompt": "{prompt}, amateur digital snapshot, candid, smartphone capture, direct on-camera flash, visible pores, detailed skin texture, depth of field",
+  "negative_prompt": "studio lighting, professional photography, oversaturated, cartoon, illustration",
+  "params": {"steps": 8, "sampler": "euler"},
+  "locked": ["steps"],
+  "loras": [{"name": "2617751", "model": 0.85, "is_version": true}],
+  "aspect": "3:4"
+}

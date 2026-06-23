@@ -17,23 +17,26 @@ async def metrics():
     """Prometheus metrics in text exposition format."""
     try:
         r = get_redis()
-        # Worker count from Redis set
-        workers = await r.scard("grid:workers:active")
+        # Worker count from Redis set (use the canonical constant — was hardcoded, which
+        # silently mismatches if the key ever changes in redis_client).
+        workers = await r.scard(WORKER_ACTIVE_SET_KEY)
         WORKERS_CONNECTED.set(workers)
 
         # Queue depth
         depth = await r.xlen(STREAM_KEY)
         QUEUE_DEPTH.set(depth)
 
-        # Count distinct models from worker status keys
-        worker_ids = await r.smembers("grid:workers:active")
+        # Distinct models from worker status keys — pipelined (one round-trip).
+        worker_ids = list(await r.smembers(WORKER_ACTIVE_SET_KEY))
         models = set()
-        for wid in worker_ids:
-            data = await r.get(f"grid:worker:{wid}:status")
-            if data:
-                import json
-                info = json.loads(data)
-                models.update(info.get("models", []))
+        if worker_ids:
+            import json
+            pipe = r.pipeline()
+            for wid in worker_ids:
+                pipe.get(f"grid:worker:{wid}:status")
+            for data in await pipe.execute():
+                if data:
+                    models.update(json.loads(data).get("models", []))
         MODELS_AVAILABLE.set(len(models))
     except Exception:
         pass

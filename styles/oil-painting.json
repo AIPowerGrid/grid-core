@@ -1,0 +1,12 @@
+{
+  "id": "oil-painting",
+  "name": "Oil Painting",
+  "description": "Rich textured classical oil painting.",
+  "model": "FLUX.2 Klein 4B FP8",
+  "job_type": "image",
+  "prompt": "{prompt}, oil painting, thick impasto brushstrokes, rich textures, classical fine art, dramatic lighting",
+  "negative_prompt": "photo, 3d render, lowres, flat",
+  "params": {"steps": 4, "cfg_scale": 1.0, "sampler": "euler"},
+  "locked": ["steps", "cfg_scale"],
+  "aspect": "1:1"
+}

@@ -60,24 +60,91 @@ async def list_workers():
     }
 
 
+@router.get("/v1/progress/{token}")
+async def job_progress(token: str):
+    """Latest generation progress (0–100) for a client-supplied progress_token.
+
+    Media jobs run synchronously on the worker; the worker streams ComfyUI's
+    per-step % to the grid, which stashes the latest value under this token so a
+    client can poll it while its (blocking) generation request is in flight.
+    Returns {progress: int|null} — null when nothing has been reported yet.
+    """
+    try:
+        raw = await get_redis().get(f"grid:progress:{token}")
+        return {"progress": int(raw) if raw is not None else None}
+    except Exception:
+        return {"progress": None}
+
+
+async def _perf_by_model(session, since: datetime | None) -> dict[tuple[str, str], dict]:
+    """Per-(model, job_type) performance from the ledger's timing columns over a
+    window. Only rows with a recorded `duration` count (historical/NULL rows are
+    excluded). t/s and TTFT are text-meaningful; media gets avg latency only.
+
+    Returns {(model, job_type): {samples, avg_latency_s, tokens_per_s, avg_ttft_s}}.
+    Aggregated from the same ledger settlement reads, so perf numbers and payouts
+    derive from one source.
+    """
+    q = sa.select(
+        ledger_table.c.model,
+        ledger_table.c.job_type,
+        sa.func.count().label("samples"),
+        sa.func.avg(ledger_table.c.duration).label("avg_dur"),
+        sa.func.sum(ledger_table.c.duration).label("sum_dur"),
+        sa.func.sum(ledger_table.c.output_units).label("sum_units"),
+        sa.func.avg(ledger_table.c.ttft).label("avg_ttft"),
+    ).where(ledger_table.c.duration.isnot(None), ledger_table.c.duration > 0)
+    if since is not None:
+        q = q.where(ledger_table.c.created >= since)
+    q = q.group_by(ledger_table.c.model, ledger_table.c.job_type)
+    rows = (await session.execute(q)).mappings().all()
+    out: dict[tuple[str, str], dict] = {}
+    for r in rows:
+        sum_dur = float(r["sum_dur"] or 0.0)
+        sum_units = int(r["sum_units"] or 0)
+        is_text = r["job_type"] == "text"
+        out[(r["model"], r["job_type"])] = {
+            "samples": int(r["samples"]),
+            "avg_latency_s": round(float(r["avg_dur"]), 2) if r["avg_dur"] is not None else None,
+            "tokens_per_s": round(sum_units / sum_dur, 1) if (is_text and sum_dur > 0) else None,
+            "avg_ttft_s": round(float(r["avg_ttft"]), 2) if r["avg_ttft"] is not None else None,
+        }
+    return out
+
+
 @router.get("/v1/status/models")
 async def status_models():
-    """Models currently served, with how many workers serve each."""
+    """Models currently served, with how many workers serve each — plus recent
+    per-model performance (t/s, TTFT, avg latency) from the last 24h of ledger
+    timing, so a picker can show live availability AND how fast each model is."""
     workers = await _active_workers()
     counts: dict[str, int] = {}
     types: dict[str, set] = {}
+    ctx: dict[str, int] = {}
     for w in workers:
+        wc = int(w.get("max_context_length") or 0)
         for m in w.get("models", []):
             counts[m] = counts.get(m, 0) + 1
             types.setdefault(m, set()).update(w.get("job_types", ["text"]))
-    return [
-        {
+            if wc > 0:
+                ctx[m] = max(ctx.get(m, 0), wc)
+    async with await new_session() as session:
+        perf = await _perf_by_model(session, _since("day"))
+    out = []
+    for m, c in sorted(counts.items(), key=lambda kv: -kv[1]):
+        mtype = sorted(types.get(m, {"text"}))[0] if types.get(m) else "text"
+        p = perf.get((m, mtype)) or {}
+        out.append({
             "name": m,
             "count": c,
-            "type": sorted(types.get(m, {"text"}))[0] if types.get(m) else "text",
-        }
-        for m, c in sorted(counts.items(), key=lambda kv: -kv[1])
-    ]
+            "type": mtype,
+            "max_context_length": ctx.get(m) or None,
+            "samples": p.get("samples", 0),
+            "tokens_per_s": p.get("tokens_per_s"),
+            "avg_ttft_s": p.get("avg_ttft_s"),
+            "avg_latency_s": p.get("avg_latency_s"),
+        })
+    return out
 
 
 def _since(period: str) -> datetime | None:
@@ -124,17 +191,19 @@ async def stats_models(period: str = "month"):
     """Per-model job counts + den over a period (minute/hour/day/month/total)."""
     if period not in ("minute", "hour", "day", "month", "total"):
         period = "month"
+    since = _since(period)
     async with await new_session() as session:
         q = sa.select(
             ledger_table.c.model,
             ledger_table.c.job_type,
             sa.func.count().label("jobs"),
             sa.func.coalesce(sa.func.sum(ledger_table.c.den), 0.0).label("den"),
+            sa.func.coalesce(sa.func.sum(ledger_table.c.output_units), 0).label("units"),
         ).group_by(ledger_table.c.model, ledger_table.c.job_type)
-        since = _since(period)
         if since is not None:
             q = q.where(ledger_table.c.created >= since)
         rows = (await session.execute(q)).mappings().all()
+        perf = await _perf_by_model(session, since)
     return {
         "period": period,
         "models": [
@@ -143,6 +212,11 @@ async def stats_models(period: str = "month"):
                 "type": r["job_type"],
                 "jobs": r["jobs"],
                 "den": round(float(r["den"]), 2),
+                "units": int(r["units"]),
+                **{
+                    k: perf.get((r["model"], r["job_type"]), {}).get(k)
+                    for k in ("samples", "tokens_per_s", "avg_ttft_s", "avg_latency_s")
+                },
             }
             for r in sorted(rows, key=lambda r: -r["jobs"])
         ],

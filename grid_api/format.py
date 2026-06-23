@@ -18,11 +18,17 @@ def _gen_id(prefix: str = "chatcmpl") -> str:
 # ── OpenAI format ──
 
 
-def openai_chunk(content: str, model: str, completion_id: str, is_first: bool = False, is_last: bool = False) -> dict:
-    """Format a single token as an OpenAI streaming chunk."""
+def openai_chunk(content: str, model: str, completion_id: str, is_first: bool = False, is_last: bool = False, reasoning: str | None = None) -> dict:
+    """Format a single token as an OpenAI streaming chunk.
+
+    Reasoning is emitted in the standard `delta.reasoning_content` field
+    (faithful passthrough from the worker), not mutated into inline <think> tags.
+    """
     delta = {}
     if is_first:
         delta["role"] = "assistant"
+    if reasoning:
+        delta["reasoning_content"] = reasoning
     if content:
         delta["content"] = content
 
@@ -41,8 +47,66 @@ def openai_chunk(content: str, model: str, completion_id: str, is_first: bool = 
     }
 
 
-def openai_response(content: str, model: str, prompt_tokens: int = 0, completion_tokens: int = 0) -> dict:
-    """Format a complete non-streaming OpenAI response."""
+def openai_chunk_raw(delta: dict, model: str, completion_id: str, finish_reason: str | None = None) -> dict:
+    """Wrap a raw backend `delta` in an OpenAI streaming-chunk envelope.
+
+    This is the faithful-passthrough path: the worker forwards the inference
+    backend's `choices[0].delta` verbatim (content, reasoning_content,
+    tool_calls, refusal, …) and the grid only stamps identity
+    (id / model / created) — it does NOT rewrite the delta. Anything vLLM can
+    emit, the client receives unchanged.
+    """
+    return {
+        "id": completion_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": delta or {},
+                "finish_reason": finish_reason,
+            }
+        ],
+    }
+
+
+def openai_usage_chunk(model: str, completion_id: str, usage: dict) -> dict:
+    """Final usage-only chunk (OpenAI emits this when stream_options.include_usage)."""
+    return {
+        "id": completion_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [],
+        "usage": usage,
+    }
+
+
+def openai_response(
+    content: str,
+    model: str,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    reasoning: str = "",
+    tool_calls: list | None = None,
+    finish_reason: str = "stop",
+) -> dict:
+    """Format a complete non-streaming OpenAI response.
+
+    Assembled by the grid from the streamed deltas (the worker always streams;
+    the grid collects). `content` is null when the model returned only
+    tool_calls, matching OpenAI's own shape.
+    """
+    message = {"role": "assistant", "content": content or None}
+    if reasoning:
+        message["reasoning_content"] = reasoning
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+        # A response that called tools finishes with "tool_calls" unless the
+        # backend told us otherwise.
+        if finish_reason == "stop":
+            finish_reason = "tool_calls"
     return {
         "id": _gen_id(),
         "object": "chat.completion",
@@ -51,8 +115,8 @@ def openai_response(content: str, model: str, prompt_tokens: int = 0, completion
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": content},
-                "finish_reason": "stop",
+                "message": message,
+                "finish_reason": finish_reason,
             }
         ],
         "usage": {

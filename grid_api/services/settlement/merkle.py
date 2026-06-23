@@ -112,9 +112,12 @@ def build_tree(entries: Iterable[tuple[str, int]]) -> MerkleTree:
     """
     # Deduplicate while preserving the last-write-wins for stability across
     # callers who might pass duplicates from concurrent DB writes.
+    from ..den import DEN_SCALE
     by_address: dict[str, int] = {}
     for addr, den in entries:
-        by_address[to_checksum_address(addr)] = int(den)
+        # Float den → integer micro-den (DEN_SCALE), so sub-1.0 earners aren't
+        # zeroed by truncation. MUST match the snapshot and the on-chain contract.
+        by_address[to_checksum_address(addr)] = int(round(float(den) * DEN_SCALE))
 
     if not by_address:
         raise ValueError("cannot build tree from zero entries")

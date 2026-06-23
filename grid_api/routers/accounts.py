@@ -38,9 +38,34 @@ logger = logging.getLogger("grid_api.accounts_api")
 
 router = APIRouter()
 
-# ── SIWE nonce store (single-use, TTL) ──
-_NONCES: dict[str, float] = {}
+# ── SIWE nonce store (single-use, TTL) — Redis-backed so it works across uvicorn
+# workers (an in-process dict means a nonce minted on worker A fails to verify on
+# worker B). SET NX + GETDEL give atomic single-use semantics. ──
 _NONCE_TTL = 300
+_NONCE_PREFIX = "grid:siwe_nonce:"
+
+
+async def _nonce_issue() -> str:
+    from ..redis_client import get_redis
+    nonce = uuid_mod.uuid4().hex
+    await get_redis().set(f"{_NONCE_PREFIX}{nonce}", "1", ex=_NONCE_TTL)
+    return nonce
+
+
+async def _nonce_consume(nonce: str) -> bool:
+    """Atomically consume a nonce; True if it was valid+unused, False otherwise."""
+    if not nonce:
+        return False
+    from ..redis_client import get_redis
+    r = get_redis()
+    # GETDEL is atomic single-use; fall back to get+delete if the server is old.
+    try:
+        val = await r.getdel(f"{_NONCE_PREFIX}{nonce}")
+    except Exception:
+        val = await r.get(f"{_NONCE_PREFIX}{nonce}")
+        if val:
+            await r.delete(f"{_NONCE_PREFIX}{nonce}")
+    return bool(val)
 
 
 class WalletVerifyForm(BaseModel):
@@ -70,12 +95,7 @@ class IssueKeyForm(BaseModel):
 @router.post("/v1/accounts/wallet/nonce")
 @limiter.limit("30/minute")
 async def wallet_nonce(request: Request):
-    now = time.time()
-    for n in [n for n, exp in _NONCES.items() if exp < now]:
-        _NONCES.pop(n, None)
-    nonce = uuid_mod.uuid4().hex
-    _NONCES[nonce] = now + _NONCE_TTL
-    return {"nonce": nonce}
+    return {"nonce": await _nonce_issue()}
 
 
 @router.post("/v1/accounts/wallet/verify")
@@ -95,7 +115,7 @@ async def wallet_verify(request: Request, form: WalletVerifyForm):
 
     m = re.search(r"Nonce: ([0-9a-fA-F]+)", form.message)
     nonce = m.group(1) if m else None
-    if not nonce or _NONCES.pop(nonce, 0) < time.time():
+    if not await _nonce_consume(nonce):
         raise HTTPException(401, detail="Invalid or expired nonce. Please retry.")
 
     try:

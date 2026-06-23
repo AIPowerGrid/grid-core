@@ -3,9 +3,14 @@
 
 """Roll up the den ledger into per-wallet totals for a settlement period.
 
-The on-chain settlement bot calls this to turn the durable den_events
-ledger (written per completed job in worker_ws.py) into the
-[(wallet_address, total_den)] list it commits as a Merkle root and pays out.
+The on-chain settlement bot calls this to turn the durable grid_ledger
+(written per completed job in worker_ws.py via services.ledger) into the
+[(wallet, total_den)] list it commits as a Merkle root and pays out.
+
+NOTE: this reads `grid_ledger` (the v2 source of truth, column `wallet`). It
+previously read an orphan `grid_den_events` table that nothing ever wrote to,
+so every aggregation returned zero rows — i.e. settlement would have paid
+nobody. Keep this pointed at the same table services.ledger writes.
 
 Period boundaries are [start, end) UTC half-open intervals so adjacent
 periods never double-count a job on the boundary.
@@ -17,7 +22,8 @@ from datetime import datetime
 
 import sqlalchemy as sa
 
-from ...database import den_events_table, new_session
+from ...database import new_session
+from ...v2.schema import ledger as ledger_table
 
 
 async def aggregate_den_for_period(
@@ -37,20 +43,20 @@ async def aggregate_den_for_period(
     async with await new_session() as session:
         result = await session.execute(
             sa.select(
-                den_events_table.c.wallet_address,
-                sa.func.sum(den_events_table.c.den).label("den"),
+                ledger_table.c.wallet,
+                sa.func.sum(ledger_table.c.den).label("den"),
             )
             .where(
-                den_events_table.c.created >= start,
-                den_events_table.c.created < end,
-                den_events_table.c.wallet_address != "",
-                den_events_table.c.wallet_address.isnot(None),
+                ledger_table.c.created >= start,
+                ledger_table.c.created < end,
+                ledger_table.c.wallet != "",
+                ledger_table.c.wallet.isnot(None),
             )
-            .group_by(den_events_table.c.wallet_address)
-            .having(sa.func.sum(den_events_table.c.den) > min_den)
+            .group_by(ledger_table.c.wallet)
+            .having(sa.func.sum(ledger_table.c.den) > min_den)
         )
         return [
-            {"address": row.wallet_address, "den": float(row.den)}
+            {"address": row.wallet, "den": float(row.den)}
             for row in result
         ]
 
@@ -65,13 +71,13 @@ async def count_unattributed_den(start: datetime, end: datetime) -> dict:
         result = await session.execute(
             sa.select(
                 sa.func.count().label("jobs"),
-                sa.func.coalesce(sa.func.sum(den_events_table.c.den), 0).label("den"),
+                sa.func.coalesce(sa.func.sum(ledger_table.c.den), 0).label("den"),
             ).where(
-                den_events_table.c.created >= start,
-                den_events_table.c.created < end,
+                ledger_table.c.created >= start,
+                ledger_table.c.created < end,
                 sa.or_(
-                    den_events_table.c.wallet_address == "",
-                    den_events_table.c.wallet_address.is_(None),
+                    ledger_table.c.wallet == "",
+                    ledger_table.c.wallet.is_(None),
                 ),
             )
         )

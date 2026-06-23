@@ -1,0 +1,12 @@
+{
+  "id": "3d-render",
+  "name": "3D Render",
+  "description": "Polished 3D render — soft global illumination, subsurface detail.",
+  "model": "FLUX.2 Klein 4B FP8",
+  "job_type": "image",
+  "prompt": "{prompt}, 3d render, octane render, global illumination, soft studio lighting, subsurface scattering, ultra detailed, 8k",
+  "negative_prompt": "flat, 2d, sketch, lowres, noisy",
+  "params": {"steps": 4, "cfg_scale": 1.0, "sampler": "euler"},
+  "locked": ["steps", "cfg_scale"],
+  "aspect": "1:1"
+}

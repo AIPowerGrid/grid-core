@@ -25,6 +25,7 @@ from ..auth import hash_api_key
 from ..database import new_session, users_table
 from ..v2.schema import accounts as accounts_table
 from ..v2.schema import api_keys as api_keys_table
+from ..v2.schema import workers as workers_table
 from .quota import PAID_KUDOS_THRESHOLD
 
 logger = logging.getLogger("grid_api.accounts")
@@ -118,6 +119,32 @@ async def authenticate(plain_key: str) -> dict:
     if not user:
         raise HTTPException(status_code=401, detail="Invalid API key")
     return user
+
+
+async def assert_owns_worker(user: dict, worker_name: str) -> None:
+    """Authorize worker affinity: the account must OWN the named worker.
+
+    Targeting a worker you don't own would let you steer load onto (or grief)
+    another operator's hardware, so this is a hard gate. Workers are bound to the
+    account that registered them (grid_workers.account_id, enforced at register).
+
+    Raises 400 (no account context — e.g. legacy key), 404 (no such worker), or
+    403 (worker owned by another account). Returns None when ownership is good.
+    """
+    account_id = user.get("account_id")
+    if not account_id:
+        # Legacy keys have no v2 account and therefore own no v2 workers.
+        raise HTTPException(status_code=403, detail="Worker targeting requires a v2 account key.")
+    async with await new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(workers_table.c.account_id).where(workers_table.c.name == worker_name)
+            )
+        ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No worker named '{worker_name}'.")
+    if str(row[0]) != str(account_id):
+        raise HTTPException(status_code=403, detail="You do not own that worker.")
 
 
 async def create_account(

@@ -11,11 +11,7 @@ import hashlib
 import os
 from typing import Optional
 
-import sqlalchemy as sa
-from fastapi import Header, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from .database import get_session, users_table
+from fastapi import HTTPException
 
 _API_KEY_SALT = None
 
@@ -67,27 +63,3 @@ def extract_api_key(
             return authorization[7:]
         return authorization
     raise HTTPException(status_code=401, detail="Missing API key. Use 'apikey' header or 'Authorization: Bearer' header.")
-
-
-async def get_current_user(
-    apikey: str = Header(..., description="API key for authentication"),
-    session: AsyncSession = None,
-):
-    """Validate an API key and return the user row.
-
-    Used as a FastAPI dependency. Hashes the key with the same SHA256+salt
-    as the Flask app so both systems share the same user accounts.
-    """
-    if not apikey:
-        raise HTTPException(status_code=401, detail="Missing apikey header")
-
-    hashed = hash_api_key(apikey)
-    result = await session.execute(
-        sa.select(users_table).where(users_table.c.api_key == hashed)
-    )
-    user = result.mappings().first()
-
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
-    return dict(user)

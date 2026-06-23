@@ -1,0 +1,12 @@
+{
+  "id": "photoreal",
+  "name": "Photorealistic",
+  "description": "Sharp, lifelike detail with natural lighting.",
+  "model": "FLUX.2 Klein 4B FP8",
+  "job_type": "image",
+  "prompt": "{prompt}, photorealistic, ultra-detailed, natural lighting, sharp focus, 8k, professional photography",
+  "negative_prompt": "cartoon, anime, illustration, painting, lowres, blurry, deformed",
+  "params": {"steps": 4, "cfg_scale": 1.0, "sampler": "euler"},
+  "locked": ["steps", "cfg_scale"],
+  "aspect": "3:4"
+}

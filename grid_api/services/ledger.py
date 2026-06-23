@@ -23,6 +23,7 @@ import logging
 from datetime import datetime, timezone
 
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 
 from ..database import new_session
 from ..v2.schema import ledger as ledger_table
@@ -51,8 +52,12 @@ async def record_completion(
     output_units: int,
     prompt_hash: str | None,
     result_hash: str | None,
+    duration: float | None = None,
+    ttft: float | None = None,
 ) -> None:
-    """Append one completion event. Failure is logged, never raised — a
+    """Append one completion event. Idempotent on job_id: a duplicate write
+    (stale-job reclaim + the original worker both completing the same job) is
+    a no-op, not a second payout. Other failures are logged, never raised — a
     ledger hiccup must not fail the job the client already got."""
     try:
         async with await new_session() as session:
@@ -65,11 +70,18 @@ async def record_completion(
                     job_type=job_type,
                     den=den,
                     output_units=output_units,
+                    duration=duration,
+                    ttft=ttft,
                     prompt_hash=prompt_hash,
                     result_hash=result_hash,
                     created=datetime.now(timezone.utc),
                 )
             )
             await session.commit()
+    except IntegrityError:
+        # Unique(job_id) violation — this job was already settled (double
+        # dispatch via stale-reclaim/requeue). Dropping the dup prevents
+        # double-pay; this is expected, not an error.
+        logger.info(f"Ledger: duplicate completion for job {job_id} ignored (already settled)")
     except Exception as e:
         logger.error(f"Ledger write failed for job {job_id}: {e}", exc_info=True)

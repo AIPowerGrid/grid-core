@@ -17,36 +17,73 @@ import logging
 
 logger = logging.getLogger("grid_api.den")
 
-# Known model size multipliers (parameter count in billions)
-# These are approximate — the exact multiplier can be refined over time.
-MODEL_MULTIPLIERS = {
-    # Small models (1-3B)
-    "1b": 1.0, "1.5b": 1.5, "2b": 2.0, "3b": 3.0,
-    # Medium models (7-13B)
-    "7b": 7.0, "8b": 8.0, "9b": 9.0, "13b": 13.0,
-    # Large models (30-70B)
-    "30b": 30.0, "34b": 34.0, "35b": 35.0,
-    "65b": 65.0, "70b": 70.0,
-    # XL models (100B+)
-    "120b": 120.0, "180b": 180.0, "405b": 405.0,
+# ── Settlement scaling ──
+# Den is a float meter (per-job ~0.1–50). On-chain payouts and Merkle leaves
+# need integers, and a bare int(den) would round every sub-1.0 earner to ZERO.
+# Multiply by DEN_SCALE at the float→int boundary (settlement) so 6 decimals of
+# den survive. THE CONTRACT MUST USE THE SAME SCALE. 1e6 = micro-den (USDC-like),
+# ample headroom: a 100k-den epoch → 1e11, far inside uint256.
+DEN_SCALE = 1_000_000
+
+# ── Model size multipliers — sourced from the on-chain ModelVault registry ──
+# A model's den multiplier is its parameter count (in billions). The SOURCE OF
+# TRUTH is the ModelVault contract; `model_registry.sync_from_modelvault()`
+# populates MODEL_REGISTRY (keyed by lowercased model name). We deliberately do
+# NOT parse the multiplier out of the model NAME anymore — a worker could
+# advertise "myllama-405b", serve a 1B model, and farm a 405x reward (and the
+# old substring match even mis-scored "Qwen3.6-27B" as 7x by matching "7b").
+# Unknown / unregistered models get DEFAULT_MULTIPLIER, never a name-derived one.
+MODEL_REGISTRY: dict[str, float] = {
+    # Seed of currently-approved models; replaced/augmented by the ModelVault sync.
+    # Keyed by lowercased advertised model name -> size multiplier (~param billions).
+    "qwen3.6-27b": 27.0,
+    "gpt-oss-120b": 120.0,
+    "gpt-oss-20b": 20.0,
 }
 
-# Default multiplier for unknown models
-DEFAULT_MULTIPLIER = 7.0
+# Conservative BASELINE for models not in the registry. Was 7.0, which let any worker
+# advertising an unregistered name farm 7x with no proof it serves that model (audit H1).
+# Now 1.0: an unknown model earns baseline; register it (seed above / ModelVault) to earn
+# its true larger multiplier. Bounds reward-gaming to ~baseline until identity is proven.
+DEFAULT_MULTIPLIER = 1.0
+
+
+def register_model(model_name: str, param_billions: float) -> None:
+    """Add/update a model's multiplier (called by the ModelVault sync)."""
+    if model_name:
+        MODEL_REGISTRY[model_name.lower().strip()] = float(param_billions)
 
 
 def estimate_model_multiplier(model_name: str) -> float:
-    """Estimate model size multiplier from the model name.
+    """Look up a model's size multiplier from the ModelVault-sourced registry.
 
-    Looks for patterns like '7b', '70b', '120b' in the model name.
-    Falls back to DEFAULT_MULTIPLIER if no size pattern found.
+    Exact (case-insensitive) name match only — no name parsing. Unregistered
+    models get DEFAULT_MULTIPLIER so a fake large-model name can't farm den.
     """
-    name_lower = model_name.lower()
-    # Try to extract parameter count from model name
-    for size_str, multiplier in sorted(MODEL_MULTIPLIERS.items(), key=lambda x: -x[1]):
-        if size_str in name_lower:
-            return multiplier
-    return DEFAULT_MULTIPLIER
+    return MODEL_REGISTRY.get((model_name or "").lower().strip(), DEFAULT_MULTIPLIER)
+
+
+# ── Server-side output token counting (worker-independent, anti-gaming) ──
+_TOKEN_ENC = None
+
+
+def count_tokens(text: str) -> int:
+    """Count output tokens SERVER-SIDE so a worker can't inflate its reward.
+
+    Uses tiktoken's o200k_base as a deterministic, model-agnostic proxy (far
+    better than word-splitting, which undercounts ~25% and mangles code/CJK).
+    Falls back to a ~4-chars/token estimate if tiktoken isn't installed.
+    """
+    if not text:
+        return 0
+    global _TOKEN_ENC
+    try:
+        import tiktoken
+        if _TOKEN_ENC is None:
+            _TOKEN_ENC = tiktoken.get_encoding("o200k_base")
+        return len(_TOKEN_ENC.encode(text, disallowed_special=()))
+    except Exception:
+        return max(1, len(text) // 4)
 
 
 def calculate_context_multiplier(prompt_tokens: int) -> float:

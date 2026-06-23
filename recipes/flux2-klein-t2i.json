@@ -1,0 +1,290 @@
+{
+  "_grid": {
+    "name": "FLUX.2 Klein 4B FP8",
+    "modelName": "FLUX.2 Klein 4B FP8",
+    "engine": "comfyui",
+    "jobType": "image",
+    "deterministic": false,
+    "requiredModels": [
+      "FLUX.2 Klein 4B FP8"
+    ],
+    "vars": {
+      "prompt": "92:74.inputs.text",
+      "negative_prompt": "92:87.inputs.text",
+      "seed": "92:73.inputs.noise_seed",
+      "steps": "92:62.inputs.steps",
+      "cfg": "92:63.inputs.cfg",
+      "width": "92:68.inputs.value",
+      "height": "92:69.inputs.value",
+      "sampler": "92:61.inputs.sampler_name"
+    },
+    "clamps": {
+      "steps": [
+        4,
+        6
+      ],
+      "cfg": [
+        1,
+        1.5
+      ],
+      "width": [
+        512,
+        1536
+      ],
+      "height": [
+        512,
+        1536
+      ]
+    },
+    "enums": {
+      "sampler": [
+        "euler",
+        "dpmpp_2m",
+        "dpmpp_2m_sde",
+        "res_multistep"
+      ]
+    },
+    "loraInject": {
+      "model_src": [
+        "92:70",
+        0
+      ],
+      "clip_src": [
+        "92:71",
+        0
+      ],
+      "model_sinks": [
+        [
+          "92:63",
+          "model"
+        ]
+      ],
+      "clip_sinks": [
+        [
+          "92:74",
+          "clip"
+        ],
+        [
+          "92:87",
+          "clip"
+        ]
+      ]
+    }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "Flux2-Klein-4b",
+      "images": [
+        "92:65",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "92:61": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSamplerSelect"
+    }
+  },
+  "92:62": {
+    "inputs": {
+      "steps": 4,
+      "width": [
+        "92:68",
+        0
+      ],
+      "height": [
+        "92:69",
+        0
+      ]
+    },
+    "class_type": "Flux2Scheduler",
+    "_meta": {
+      "title": "Flux2Scheduler"
+    }
+  },
+  "92:63": {
+    "inputs": {
+      "cfg": 1.0,
+      "model": [
+        "92:70",
+        0
+      ],
+      "positive": [
+        "92:74",
+        0
+      ],
+      "negative": [
+        "92:87",
+        0
+      ]
+    },
+    "class_type": "CFGGuider",
+    "_meta": {
+      "title": "CFGGuider"
+    }
+  },
+  "92:64": {
+    "inputs": {
+      "noise": [
+        "92:73",
+        0
+      ],
+      "guider": [
+        "92:63",
+        0
+      ],
+      "sampler": [
+        "92:61",
+        0
+      ],
+      "sigmas": [
+        "92:62",
+        0
+      ],
+      "latent_image": [
+        "92:66",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    }
+  },
+  "92:65": {
+    "inputs": {
+      "samples": [
+        "92:64",
+        0
+      ],
+      "vae": [
+        "92:72",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "92:66": {
+    "inputs": {
+      "width": [
+        "92:68",
+        0
+      ],
+      "height": [
+        "92:69",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": {
+      "title": "Empty Flux 2 Latent"
+    }
+  },
+  "92:68": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Width"
+    }
+  },
+  "92:69": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Height"
+    }
+  },
+  "92:70": {
+    "inputs": {
+      "unet_name": "flux-2-klein-4b.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "92:71": {
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "92:72": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "92:73": {
+    "inputs": {
+      "noise_seed": 265337237770076
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "RandomNoise"
+    }
+  },
+  "92:74": {
+    "inputs": {
+      "text": [
+        "76",
+        0
+      ],
+      "clip": [
+        "92:71",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "92:87": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "92:71",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "76": {
+    "inputs": {
+      "value": "a serene mountain landscape at golden hour"
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Prompt"
+    }
+  }
+}

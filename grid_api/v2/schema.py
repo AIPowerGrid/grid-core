@@ -158,13 +158,21 @@ ledger = sa.Table(
     metadata,
     sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
     sa.Column("epoch_id", sa.String(32), nullable=True, index=True),  # set at settlement
-    sa.Column("job_id", sa.Uuid, nullable=False, index=True),
+    # Unique: one settled completion per job. Makes record_completion idempotent
+    # so a stale-job reclaim + the original worker both finishing can't double-pay.
+    sa.Column("job_id", sa.Uuid, nullable=False, unique=True),
     sa.Column("worker_id", sa.Uuid, nullable=False, index=True),
     sa.Column("wallet", sa.String(42), nullable=True, index=True),
     sa.Column("model", sa.String(255), nullable=False),
     sa.Column("job_type", sa.String(16), nullable=False),
     sa.Column("den", sa.Float, nullable=False, default=0.0),
     sa.Column("output_units", sa.Integer, nullable=False, default=0),  # tokens / images / frames
+    # Performance telemetry (not economic — never feeds den/settlement). Used to
+    # compute per-model t/s, TTFT, and avg latency in /v1/status|stats/models.
+    # Nullable: historical rows + media jobs (ttft) carry NULL and are excluded
+    # from the aggregates.
+    sa.Column("duration", sa.Float, nullable=True),  # wall-clock generation seconds
+    sa.Column("ttft", sa.Float, nullable=True),      # time-to-first-token seconds (text only)
     # sha256 of canonicalized prompt payload and result bytes — the
     # attestation hook for future verifiable inference.
     sa.Column("prompt_hash", sa.String(64), nullable=True),

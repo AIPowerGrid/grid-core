@@ -104,8 +104,11 @@ def build_settlement_snapshot(
     resulting JSON is deterministic — independent verifiers building the same
     snapshot from the same DB rows get bit-identical output.
     """
+    from ..den import DEN_SCALE
+    # Float den → integer micro-den (DEN_SCALE), identical to merkle.build_tree so
+    # the snapshot total matches the root. Sub-1.0 earners are preserved, not zeroed.
     sorted_entries = sorted(
-        ({"address": e["address"], "den": int(e["den"])} for e in entries),
+        ({"address": e["address"], "den": int(round(float(e["den"]) * DEN_SCALE))} for e in entries),
         key=lambda e: e["address"].lower(),
     )
     total_den = sum(e["den"] for e in sorted_entries)

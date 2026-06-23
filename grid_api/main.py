@@ -24,7 +24,7 @@ from slowapi.errors import RateLimitExceeded
 from .database import close_database, init_database
 from .ratelimit import limiter
 from .redis_client import close_redis, init_redis
-from .routers import accounts, anthropic, health, images, metrics, openai, stats, worker_ws
+from .routers import accounts, anthropic, health, images, metrics, openai, responses, stats, styles, videos, worker_ws
 from .services.p2p import init_p2p, close_p2p
 
 logging.basicConfig(
@@ -50,6 +50,21 @@ async def _stale_job_reclaimer():
         await asyncio.sleep(60)  # Check every minute
 
 
+async def _recipe_sync_loop():
+    """Background task: refresh approved recipes from on-chain RecipeVault.
+    No-ops until RECIPEVAULT_ADDRESS/BASE_RPC_URL are set; curated local recipes
+    loaded at startup remain servable regardless. Interval via RECIPE_SYNC_SECONDS."""
+    import os
+    from .services.recipes import sync_from_recipevault
+    interval = int(os.getenv("RECIPE_SYNC_SECONDS", "600") or 600)
+    while True:
+        try:
+            await sync_from_recipevault()
+        except Exception as e:
+            logger.error(f"Recipe sync loop error: {e}")
+        await asyncio.sleep(interval)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
@@ -58,10 +73,24 @@ async def lifespan(app: FastAPI):
     await init_redis()
     await init_p2p()  # Initialize P2P (no-op if disabled)
     reclaimer = asyncio.create_task(_stale_job_reclaimer())
+    # Media recipes: load curated local recipes now (servable immediately), then
+    # refresh from RecipeVault on an interval (no-op until BASE_RPC/addr configured).
+    import os
+    from .services import recipes as _recipes
+    from .services import loras as _loras
+    from .services import styles as _styles
+    _base = os.path.dirname(os.path.dirname(__file__))
+    _recipes.load_local_recipes(os.path.join(_base, "recipes"))
+    _loras.load_blacklist(os.path.join(_base, "lora_blacklist.json"))
+    # Styles: curated creative presets that compose over recipes. Served at
+    # /v1/styles and applied server-side when a request carries `style`.
+    _styles.load_local_styles(os.path.join(_base, "styles"))
+    recipe_sync = asyncio.create_task(_recipe_sync_loop())
     logger.info("Grid Streaming API ready.")
     yield
     logger.info("Shutting down Grid Streaming API...")
     reclaimer.cancel()
+    recipe_sync.cancel()
     await close_p2p()  # Shutdown P2P
     await close_redis()
     await close_database()
@@ -88,16 +117,24 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # Auth is via the Authorization/apikey HEADER, never cookies — so credentials must be
+    # FALSE. "*" + allow_credentials=True is a footgun: Starlette then reflects the caller's
+    # Origin AND sets Allow-Credentials:true, making every origin a trusted credentialed one.
+    # With credentials off, the public API stays callable cross-origin (header auth works)
+    # without that reflection. Authorization is allowed via allow_headers below.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(openai.router)
 app.include_router(anthropic.router)
+app.include_router(responses.router)
 app.include_router(images.router)
+app.include_router(videos.router)
 app.include_router(worker_ws.router)
 app.include_router(stats.router)
+app.include_router(styles.router)
 app.include_router(accounts.router)
 app.include_router(health.router)
 app.include_router(metrics.router)

@@ -1,0 +1,12 @@
+{
+  "id": "pixel-art",
+  "name": "Pixel Art",
+  "description": "Retro 16-bit pixel art.",
+  "model": "z-image-turbo",
+  "job_type": "image",
+  "prompt": "{prompt}, pixel art, 16-bit, retro game sprite, crisp pixels, limited palette, dithering",
+  "negative_prompt": "photorealistic, smooth gradients, blurry, 3d",
+  "params": {"steps": 8, "sampler": "euler"},
+  "locked": ["steps"],
+  "aspect": "1:1"
+}

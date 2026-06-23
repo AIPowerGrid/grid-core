@@ -1,0 +1,12 @@
+{
+  "id": "cinematic",
+  "name": "Cinematic",
+  "description": "Film still — dramatic lighting, anamorphic, moody color grade.",
+  "model": "FLUX.2 Klein 4B FP8",
+  "job_type": "image",
+  "prompt": "{prompt}, cinematic film still, dramatic lighting, anamorphic lens, shallow depth of field, moody color grade, 35mm, highly detailed",
+  "negative_prompt": "flat lighting, cartoon, lowres, watermark, text",
+  "params": {"steps": 4, "cfg_scale": 1.0, "sampler": "euler"},
+  "locked": ["steps", "cfg_scale"],
+  "aspect": "2.4:1"
+}

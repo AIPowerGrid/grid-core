@@ -28,12 +28,50 @@ DONE_SENTINEL = "[DONE]"
 BUFFER_TTL = 300  # 5 minutes
 
 
-async def publish_token(job_id: str, text: str):
-    """Publish a token to pub/sub AND append to the replay buffer."""
+def event_content_text(data: dict) -> str:
+    """Extract plain *answer* text from a stream event, regardless of protocol.
+
+    Faithful passthrough events carry text in `data['delta']['content']`;
+    legacy events carry it in `data['text']` (unless flagged reasoning, which
+    is not answer text). Format adapters that render plain text only — like the
+    current Anthropic text block — use this so they work with either worker."""
+    delta = data.get("delta")
+    if delta is not None:
+        return delta.get("content") or ""
+    if data.get("reasoning"):
+        return ""
+    return data.get("text", "")
+
+
+async def publish_token(
+    job_id: str,
+    text: str = "",
+    reasoning: bool = False,
+    delta: dict | None = None,
+    finish_reason: str | None = None,
+):
+    """Publish one stream event to pub/sub AND append to the replay buffer.
+
+    Two shapes flow through here:
+
+    * Faithful passthrough (text generation): `delta` carries the inference
+      backend's raw `choices[0].delta` (content / reasoning_content /
+      tool_calls). The SSE layer re-wraps it untouched. This is the path that
+      makes the grid a transparent OpenAI proxy.
+    * Legacy / media: positional `text` (+ `reasoning` flag) — kept so old
+      workers and the media progress channel keep working unchanged.
+
+    Every event keeps a `text` key (default "") so the DONE-sentinel check in
+    `subscribe_tokens` never KeyErrors on a delta-only event."""
     r = get_redis()
     channel = f"{CHANNEL_PREFIX}{job_id}"
     buf_key = f"{BUFFER_PREFIX}{job_id}"
-    data = json.dumps({"text": text})
+    event = {"text": text, "reasoning": reasoning}
+    if delta is not None:
+        event["delta"] = delta
+    if finish_reason is not None:
+        event["finish_reason"] = finish_reason
+    data = json.dumps(event)
 
     pipe = r.pipeline()
     pipe.publish(channel, data)
@@ -42,12 +80,59 @@ async def publish_token(job_id: str, text: str):
     await pipe.execute()
 
 
-async def publish_done(job_id: str, full_text: str):
-    """Signal generation complete via pub/sub + buffer."""
+async def publish_raw_event(job_id: str, event: str | None, data: str):
+    """Relay ONE raw upstream SSE event verbatim (Anthropic / OpenAI-Responses
+    passthrough).
+
+    For natively-served formats the grid is a faithful tunnel: the worker reads
+    the backend's SSE `event:`/`data:` lines and we forward them byte-for-byte to
+    the client, only teeing usage for metering. `event` is the SSE event name
+    (may be None for data-only streams); `data` is the raw JSON string."""
     r = get_redis()
     channel = f"{CHANNEL_PREFIX}{job_id}"
     buf_key = f"{BUFFER_PREFIX}{job_id}"
-    data = json.dumps({"text": DONE_SENTINEL, "full_text": full_text})
+    payload = json.dumps({"text": "", "raw": True, "event": event, "data": data})
+
+    pipe = r.pipeline()
+    pipe.publish(channel, payload)
+    pipe.rpush(buf_key, payload)
+    pipe.expire(buf_key, BUFFER_TTL)
+    await pipe.execute()
+
+
+async def publish_done(
+    job_id: str,
+    full_text: str = "",
+    full_reasoning: str = "",
+    tool_calls: list | None = None,
+    usage: dict | None = None,
+    finish_reason: str = "stop",
+    full_json: dict | None = None,
+    grid: dict | None = None,
+):
+    """Signal generation complete via pub/sub + buffer.
+
+    Carries the fully-assembled result (content + reasoning + tool_calls) and
+    authoritative `usage` so the non-streaming collector can build the final
+    message and the streaming layer can emit a trailing usage chunk.
+
+    `grid` is optional provenance metadata (worker, gen_time, ttft, tokens_per_s)
+    the API surfaces alongside the response — additive, never alters output."""
+    r = get_redis()
+    channel = f"{CHANNEL_PREFIX}{job_id}"
+    buf_key = f"{BUFFER_PREFIX}{job_id}"
+    data = json.dumps({
+        "text": DONE_SENTINEL,
+        "full_text": full_text,
+        "full_reasoning": full_reasoning,
+        "tool_calls": tool_calls,
+        "usage": usage,
+        "finish_reason": finish_reason,
+        # For non-streaming raw passthrough (Anthropic/Responses): the complete
+        # upstream JSON body, returned to the client unchanged.
+        "full_json": full_json,
+        "grid": grid,
+    })
 
     pipe = r.pipeline()
     pipe.publish(channel, data)
@@ -56,12 +141,16 @@ async def publish_done(job_id: str, full_text: str):
     await pipe.execute()
 
 
-async def publish_error(job_id: str, message: str):
-    """Signal an error on the stream (worker disconnected, timeout, etc)."""
+async def publish_error(job_id: str, message: str, code: int = 502):
+    """Signal an error on the stream (worker disconnected, timeout, bad request).
+
+    `code` is the HTTP status the client should ultimately see — 502 for
+    worker/backend failures (the default), 400 for a deterministic caller fault
+    surfaced from the backend."""
     r = get_redis()
     channel = f"{CHANNEL_PREFIX}{job_id}"
     buf_key = f"{BUFFER_PREFIX}{job_id}"
-    data = json.dumps({"text": DONE_SENTINEL, "error": message, "full_text": ""})
+    data = json.dumps({"text": DONE_SENTINEL, "error": message, "code": code, "full_text": ""})
 
     pipe = r.pipeline()
     pipe.publish(channel, data)

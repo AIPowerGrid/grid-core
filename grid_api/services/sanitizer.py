@@ -351,6 +351,20 @@ def sanitize_messages(messages: list[dict]) -> tuple[list[dict], bool, list[str]
             if result.redacted:
                 was_redacted = True
                 all_types.extend(result.types)
+        elif isinstance(content, list):
+            # Multimodal content: a list of parts. Scrub the text in any
+            # text-type part; leave image_url / other parts untouched.
+            new_parts = []
+            for part in content:
+                if isinstance(part, dict) and isinstance(part.get("text"), str) and part["text"]:
+                    result = sanitize(part["text"])
+                    new_parts.append({**part, "text": result.text})
+                    if result.redacted:
+                        was_redacted = True
+                        all_types.extend(result.types)
+                else:
+                    new_parts.append(part)
+            sanitized.append({**msg, "content": new_parts})
         else:
             sanitized.append(msg)
 
