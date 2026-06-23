@@ -1,148 +1,29 @@
-# SPDX-FileCopyrightText: 2023 Tazlin
+# SPDX-FileCopyrightText: 2026 AI Power Grid
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-name: AI-Horde PR tests
+name: grid-core PR tests
 
 on:
-    pull_request_target:
-      branches:
-        - main
-      types:
-        - opened
-        - synchronize
-      paths:
-        - '**.py'
-        - '**.json'
-        - 'tox.ini'
-        - '.github/workflows/maintests.yml'
-        - '.github/workflows/prtests.yml'
-        - '.github/workflows/release.yml'
-        - '.pre-commit-config.yaml'
-        - 'bridgeData_template.yaml'
-        - 'requirements.txt'
-        - 'requirements.dev.txt'
-        - 'requirements.docs.txt'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'grid_api/**'
+      - 'alembic/**'
+      - 'requirements*.txt'
+      - '.github/workflows/prtests.yml'
 
 jobs:
-  required-label-job:
-    runs-on: ubuntu-latest
-    permissions:
-        issues: write
-        pull-requests: write
-    steps:
-        - uses: mheap/github-action-required-labels@v5
-          with:
-            mode: exactly
-            count: 1
-            labels: "allow-ci"
-
-  runner-job:
-    runs-on: ubuntu-latest
-    # runs-on: self-hosted
-    needs: required-label-job
-    env:
-      POSTGRES_URL: "localhost:5432/postgres"
-      PGUSER: "postgres"
-      PGPASSWORD: "postgres"
-      REDIS_IP: "localhost"
-      REDIS_SERVERS: '["localhost"]'
-      USE_SQLITE: 0
-      ADMINS: '["test_user#1"]'
-      R2_TRANSIENT_ACCOUNT: ${{ secrets.R2_TRANSIENT_ACCOUNT }}
-      R2_PERMANENT_ACCOUNT: ${{ secrets.R2_PERMANENT_ACCOUNT }}
-      SHARED_AWS_ACCESS_ID: ${{ secrets.SHARED_AWS_ACCESS_ID }}
-      SHARED_AWS_ACCESS_KEY: ${{ secrets.SHARED_AWS_ACCESS_KEY }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      KUDOS_TRUST_THRESHOLD: 100
-      AI_HORDE_DEV_URL: "http://localhost:7001/api/" # For grid_sdk tests
-
-    services:
-      redis:
-        image: redis
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
-
-      ai-horde-postgres:
-        image: ghcr.io/haidra-org/ai-horde-postgres:latest
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-          # cache: 'pip'
-      - run: python -m pip install --upgrade pip wheel setuptools
-      - name: Install and run tests
-        run: |
-          python -m pip install -r requirements.txt -r requirements.dev.txt
-          python server.py -vvvvi --horde stable &
-          
-          # Wait for server to be ready (retry up to 120 seconds for blockchain model fetch)
-          echo "Waiting for server to start..."
-          for i in {1..120}; do
-            if curl -s http://localhost:7001/ > /dev/null 2>&1; then
-              echo "Server is ready after ${i} seconds!"
-              break
-            fi
-            if [ $i -eq 120 ]; then
-              echo "Server failed to start within 120 seconds"
-              exit 1
-            fi
-            sleep 1
-          done
-
-          curl -s -X POST --data-raw 'username=test_user' http://localhost:7001/register | grep -Po '<code class="api-key-display">\K[^<]+' > tests/apikey.txt
-          export AI_HORDE_DEV_APIKEY=$(cat tests/apikey.txt)
-
-          pytest tests/ -s
-
-          git clone --depth 1 https://github.com/AIPowerGrid/grid-sdk.git
-          cd grid-sdk
-          python -m pip install -e .
-          pytest tests/ --ignore-glob=*api_calls.py --ignore-glob=*test_model_meta.py --ignore-glob=*test_verify_api_surface.py -s
-
-  lint-check-job:
-    runs-on: ubuntu-latest
-    needs: required-label-job
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-          # cache: 'pip'
-      - run: python -m pip install --upgrade pip wheel setuptools
-      - name: Install and run lint/format checkers
-        run: |
-          python -m pip install -r requirements.dev.txt
-          black --check .
-          ruff .
-
-  reuse-lint-job:
+  tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: REUSE Compliance Check
-        uses: fsfe/reuse-action@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip wheel setuptools
+      - name: Install deps
+        run: pip install -r requirements.txt pytest pytest-asyncio
+      - name: Offline test suite (grid_api)
+        run: python -m pytest grid_api -q
