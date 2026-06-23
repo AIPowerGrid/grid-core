@@ -1,6 +1,7 @@
-# ⚠️ UNWIRED / SHIP-DARK (2026-06-22 audit): no live request-path code imports this module.
-# It is built but NOT active — do NOT assume billing/slashing/registry-sync runs. Wire it
-# intentionally (+ tests) before relying on it. See task #62.
+# ⚠️ WIRED-DARK (2026-06-23): the request path (routers/openai.py _meter_charge) now
+# calls charge_request on every completion, but charging is GATED OFF by default
+# (GRID_CHARGING_ENABLED=0) — it only LOGS the would-charge amount and never debits,
+# blocks, or touches the credit tables. Flip the env var to go live. See task #73.
 
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later

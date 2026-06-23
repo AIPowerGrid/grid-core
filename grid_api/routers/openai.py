@@ -33,11 +33,26 @@ from .. import format as fmt
 from ..database import new_session, processing_gens_table, waiting_prompts_table
 from ..models.openai import ChatCompletionRequest, ModelInfo, ModelListResponse
 from ..services import accounts as accounts_svc
-from ..services import job_queue, media, quota, recipes, token_stream
+from ..services import credits, job_queue, media, quota, recipes, token_stream
 from ..services.sanitizer import sanitize_messages
 from .worker_ws import get_available_models
 
 logger = logging.getLogger("grid_api.openai")
+
+
+async def _meter_charge(user, model, prompt_tokens, completion_tokens, job_id):
+    """Meter one completion against the consumer's credit balance.
+
+    OFF by default (GRID_CHARGING_ENABLED=0): charge_request only LOGS what it
+    *would* bill and never debits or blocks — so we can observe pricing against
+    real traffic before flipping charging on. Billing must NEVER break a
+    response, so all errors are swallowed."""
+    try:
+        await credits.charge_request(
+            user, model, int(prompt_tokens or 0), int(completion_tokens or 0), job_id
+        )
+    except Exception:
+        logger.debug("charge_request failed (non-fatal)", exc_info=True)
 
 router = APIRouter()
 
@@ -363,7 +378,7 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
 
     if request.stream:
         return StreamingResponse(
-            _stream_openai(job_id, model, completion_id),
+            _stream_openai(job_id, model, completion_id, user),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -372,10 +387,10 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
             },
         )
     else:
-        return await _collect_response(job_id, model)
+        return await _collect_response(job_id, model, user)
 
 
-async def _stream_openai(job_id: str, model: str, completion_id: str):
+async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict | None = None):
     """SSE generator for OpenAI streaming format.
 
     Faithful passthrough: the grid emits one leading role chunk, then relays
@@ -409,6 +424,10 @@ async def _stream_openai(job_id: str, model: str, completion_id: str):
                 if grid_meta:
                     usage_chunk["grid"] = grid_meta
                 yield f"data: {json.dumps(usage_chunk)}\n\n"
+            u = usage or {}
+            await _meter_charge(
+                user, model, u.get("prompt_tokens", 0), u.get("completion_tokens", 0), job_id
+            )
             break
 
         delta = data.get("delta")
@@ -426,7 +445,7 @@ async def _stream_openai(job_id: str, model: str, completion_id: str):
     yield "data: [DONE]\n\n"
 
 
-async def _collect_response(job_id: str, model: str) -> dict:
+async def _collect_response(job_id: str, model: str, user: dict | None = None) -> dict:
     """Collect the stream and return a single non-streaming response.
 
     The worker always streams; the grid assembles. The DONE event carries the
@@ -469,6 +488,7 @@ async def _collect_response(job_id: str, model: str) -> dict:
 
     prompt_tokens = (usage or {}).get("prompt_tokens", 0)
     completion_tokens = (usage or {}).get("completion_tokens", 0)
+    await _meter_charge(user, model, prompt_tokens, completion_tokens, job_id)
     resp = fmt.openai_response(
         content,
         model,

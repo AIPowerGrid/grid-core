@@ -1,6 +1,6 @@
-# ⚠️ UNWIRED / SHIP-DARK (2026-06-22 audit): no live request-path code imports this module.
-# It is built but NOT active — do NOT assume billing/slashing/registry-sync runs. Wire it
-# intentionally (+ tests) before relying on it. See task #62.
+# ⚠️ WIRED-DARK (2026-06-23): the request path quotes against this book via
+# credits.charge_request, but only in dry-run (GRID_CHARGING_ENABLED=0) — the quote
+# is logged, never billed. Re-peg prices here before charging goes live. See task #73.
 
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later

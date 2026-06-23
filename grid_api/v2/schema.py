@@ -188,6 +188,48 @@ ledger = sa.Table(
 )
 
 
+# ── Credits (prepaid demand-side balance) ────────────────────────────────
+# Prepaid balance in integer micro-AIPG (AIPG × 1e6). One row per account.
+# A deposit credits 1:1 (micro-AIPG); a completion debits per `pricing`. The
+# balance is a cache of the ledger sum — `grid_credit_ledger` is the truth and
+# makes every credit/debit idempotent (unique `ref`). See services/credits.py.
+# Ships dark (GRID_CHARGING_ENABLED=0): the request path only logs would-charge.
+
+credits = sa.Table(
+    "grid_credits",
+    metadata,
+    sa.Column(
+        "account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column("balance_micro", sa.BigInteger, nullable=False, default=0),
+    sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+)
+
+credit_ledger = sa.Table(
+    "grid_credit_ledger",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    sa.Column(
+        "account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    # Signed micro-AIPG: positive = top-up, negative = charge.
+    sa.Column("delta_micro", sa.BigInteger, nullable=False),
+    sa.Column("reason", sa.String(64), nullable=False),
+    # Idempotency key: the charged job_id (debit) or deposit/Stripe event id
+    # (credit). UNIQUE so a retried request / re-seen deposit can't double-apply.
+    sa.Column("ref", sa.String(128), nullable=True, unique=True),
+    sa.Column("model", sa.String(255), nullable=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+)
+
+
 # ── Epochs / settlement (truth, mirrors chain) ──────────────────────────
 
 epochs = sa.Table(
