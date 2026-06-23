@@ -12,7 +12,7 @@ The formula:
     den = max(round(den, 2), 0.1)
 
 Where:
-    model_mult comes from name-matching against MODEL_MULTIPLIERS dict
+    model_mult comes from name-matching against MODEL_REGISTRY dict
     context_mult = clamp(1.2 + 2.2 ** log2(max(prompt_tokens/1024, 0.1)), 0.1, 30)
 """
 
@@ -24,7 +24,7 @@ import pytest
 
 from grid_api.services.den import (
     DEFAULT_MULTIPLIER,
-    MODEL_MULTIPLIERS,
+    MODEL_REGISTRY,
     calculate_context_multiplier,
     calculate_den,
     estimate_model_multiplier,

@@ -64,14 +64,14 @@ def test_basic_substitution():
 
 def test_drawthings_flat_engine():
     _seed_drawthings()
-    out = recipes.resolve("0xdt001", {"prompt": "a dog", "steps": 99, "seed": 5})
+    out = recipes.resolve("0xdt001", {"prompt": "a dog", "steps": 25, "seed": 5})
     s = out["spec"]
     assert out["engine"] == "drawthings" and out["deterministic"] is True
     assert s["prompt"] == "a dog"
     assert s["seed"] == 5
-    assert s["steps"] == 30                      # clamped to [1,30]
+    assert s["steps"] == 25                      # in-range, passes the gate unchanged
     assert s["model"] == "sdxl_base"             # untouched
-    print("ok: drawthings FLAT-spec substitution + clamp (engine-neutral)")
+    print("ok: drawthings FLAT-spec substitution (engine-neutral)")
 
 
 def test_injection_safe():
@@ -85,11 +85,16 @@ def test_injection_safe():
     print("ok: injection-safe")
 
 
-def test_clamp():
+def test_reject_out_of_range():
     _seed_ltx()
-    assert recipes.resolve("0xabc123", {"steps": 9999})["spec"]["3"]["inputs"]["steps"] == 50
-    assert recipes.resolve("0xabc123", {"steps": -5})["spec"]["3"]["inputs"]["steps"] == 1
-    print("ok: clamp")
+    import pytest
+    from grid_api.services.recipes import RecipeError
+    # Out-of-range knobs are REJECTED (not silently clamped) — range-GATE, see recipes._gate.
+    with pytest.raises(RecipeError):
+        recipes.resolve("0xabc123", {"steps": 9999})
+    with pytest.raises(RecipeError):
+        recipes.resolve("0xabc123", {"steps": -5})
+    print("ok: reject out-of-range")
 
 
 def test_seed_default_and_echo():
