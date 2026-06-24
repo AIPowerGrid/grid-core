@@ -745,21 +745,31 @@ async def worker_websocket(ws: WebSocket):
                     record_job_failed()
                     continue
 
-                # Committed → NOW it's safe to finalize: tell the client it's DONE,
-                # ack the queue + the worker, and record metrics.
                 current_job = None
-                await token_stream.publish_done(
-                    job["job_id"], full_text, gen["full_reasoning"],
-                    tool_calls=gen["tool_calls"], usage=gen["usage"],
-                    finish_reason=gen["finish_reason"], grid=gen["grid_meta"],
-                )
-                await job_queue.ack_job(job["stream_id"])
-                await ws.send_json({
-                    "type": "ack",
-                    "id": job["job_id"],
-                    "den": den_awarded,
-                })
-                record_job_complete(tokens=effective_tokens, den=den_awarded, duration=gen_time)
+                if settle_result in _PAID_SETTLE:
+                    # Paid success → tell the client DONE, ack queue + worker, metrics.
+                    await token_stream.publish_done(
+                        job["job_id"], full_text, gen["full_reasoning"],
+                        tool_calls=gen["tool_calls"], usage=gen["usage"],
+                        finish_reason=gen["finish_reason"], grid=gen["grid_meta"],
+                    )
+                    await job_queue.ack_job(job["stream_id"])
+                    await ws.send_json({"type": "ack", "id": job["job_id"], "den": den_awarded})
+                    record_job_complete(tokens=effective_tokens, den=den_awarded, duration=gen_time)
+                else:
+                    # 'stale_no_payout' / 'duplicate': the job is terminally CLOSED
+                    # but this is NOT a paid completion — no DONE-as-success, no den,
+                    # no success metrics. Ack the queue (done, don't reclaim) and ack
+                    # the worker with den=0. For stale_no_payout surface a soft error
+                    # so a still-waiting client isn't left hanging; for duplicate the
+                    # winning dispatch already delivered the response.
+                    logger.warning(f"Job {job['job_id']} closed without payout (settle={settle_result})")
+                    if settle_result == "stale_no_payout":
+                        await token_stream.publish_error(
+                            job["job_id"], "Job could not be settled (already closed); please retry."
+                        )
+                    await job_queue.ack_job(job["stream_id"])
+                    await ws.send_json({"type": "ack", "id": job["job_id"], "den": 0})
         finally:
             poll_task.cancel()
 
@@ -925,16 +935,26 @@ async def _handle_media_job(
                 await token_stream.publish_error(job_id, "Settlement failed; please retry.")
                 return False
 
-            await token_stream.publish_done(
-                job_id, json.dumps({
-                    "media": outputs,
-                    "model": selected_model,
-                    "worker": worker_info.get("name", ""),
-                    "gen_time": round(gen_time, 2),
-                })
-            )
-            await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
-            record_job_complete(tokens=0, den=den_awarded, duration=gen_time)
+            if settle_result in _PAID_SETTLE:
+                await token_stream.publish_done(
+                    job_id, json.dumps({
+                        "media": outputs,
+                        "model": selected_model,
+                        "worker": worker_info.get("name", ""),
+                        "gen_time": round(gen_time, 2),
+                    })
+                )
+                await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
+                record_job_complete(tokens=0, den=den_awarded, duration=gen_time)
+                return True
+
+            # 'stale_no_payout' / 'duplicate': terminally closed, NOT a paid job —
+            # no success DONE, no den, no metrics. Worker ack den=0; return True so
+            # the caller acks the queue (the work is done, just not paid).
+            logger.warning(f"Media job {job_id} closed without payout (settle={settle_result})")
+            if settle_result == "stale_no_payout":
+                await token_stream.publish_error(job_id, "Job could not be settled (already closed); please retry.")
+            await ws.send_json({"type": "ack", "id": job_id, "den": 0})
             return True
 
         elif msg_type == "pong":
@@ -1046,10 +1066,21 @@ async def _handle_raw_passthrough(
                 logger.critical(f"Terminal settlement failed for raw job {job_id} — not acking")
                 await token_stream.publish_error(job_id, "Settlement failed; please retry.")
                 return False
-            # Committed → finalize: tell the client DONE, ack the worker, metrics.
-            await token_stream.publish_done(job_id, usage=usage, full_json=full_json)
-            await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
-            record_job_complete(tokens=effective_tokens, den=den_awarded, duration=gen_time)
+
+            if settle_result in _PAID_SETTLE:
+                # Committed → finalize: tell the client DONE, ack the worker, metrics.
+                await token_stream.publish_done(job_id, usage=usage, full_json=full_json)
+                await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
+                record_job_complete(tokens=effective_tokens, den=den_awarded, duration=gen_time)
+                return True
+
+            # 'stale_no_payout' / 'duplicate': terminally closed, NOT paid — no
+            # success DONE, no den, no metrics. Worker ack den=0; return True so the
+            # caller acks the queue.
+            logger.warning(f"Raw job {job_id} closed without payout (settle={settle_result})")
+            if settle_result == "stale_no_payout":
+                await token_stream.publish_error(job_id, "Job could not be settled (already closed); please retry.")
+            await ws.send_json({"type": "ack", "id": job_id, "den": 0})
             return True
 
         elif mtype == "pong":
@@ -1091,6 +1122,12 @@ def _merge_tool_call_deltas(acc: dict, deltas: list):
             slot["function"]["name"] += fn["name"]
         if fn.get("arguments"):
             slot["function"]["arguments"] += fn["arguments"]
+
+
+# record_and_settle outcomes that mean a PAID success (publish DONE, pay den).
+# Everything else is either a retry ('error') or a terminally-closed-but-unpaid
+# job ('stale_no_payout' / 'duplicate') that must NOT look like a paid completion.
+_PAID_SETTLE = ("settled", "no_reservation")
 
 
 def _gen_result(*, full_text="", full_reasoning="", tool_calls=None, usage=None,

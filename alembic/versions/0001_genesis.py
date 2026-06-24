@@ -97,7 +97,8 @@ def upgrade() -> None:
 
     op.create_table(
         "grid_ledger",
-        sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+        sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"),
+                  primary_key=True, autoincrement=True),
         sa.Column("epoch_id", sa.String(32), nullable=True, index=True),
         # UNIQUE: one settled completion per job — the structural guard that makes
         # record_completion idempotent (a double dispatch can't double-pay). Must

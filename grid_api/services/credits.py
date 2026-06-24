@@ -510,11 +510,12 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
     `ledger_values` are the record_completion_in_session kwargs. `exact=True`
     (media) lets the exact reserve stand; otherwise reconcile against
     `completion_tokens` (text/passthrough). Returns:
-      'duplicate'      — job already in grid_ledger (double dispatch) → nothing done
-      'settled'        — ledger written + reservation reconciled
-      'no_reservation' — ledger written; no held row (dry-run / legacy / free)
-      'already_settled'— ledger written; reservation already settled elsewhere
-      'error'          — nothing committed (retryable; the sweeper recovers)
+      'duplicate'       — job already in grid_ledger (double dispatch) → nothing done
+      'settled'         — ledger written + reservation reconciled (paid success)
+      'no_reservation'  — ledger written; no held row (dry-run / legacy / free)
+      'stale_no_payout' — reservation existed but already closed → rolled back, no
+                          ledger row, no payout, no charge
+      'error'           — nothing committed (retryable; the sweeper recovers)
     Best-effort: never raises into the worker loop."""
     from . import ledger as ledger_svc
     job_id = str(ledger_values["job_id"])
