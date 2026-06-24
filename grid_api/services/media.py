@@ -23,7 +23,7 @@ import httpx
 from fastapi import HTTPException
 from PIL import Image
 
-from . import job_queue, token_stream, recipes, storage
+from . import job_queue, token_stream, recipes, storage, credits
 
 logger = logging.getLogger("grid_api.media")
 
@@ -37,6 +37,10 @@ MAX_FRAMES = 240  # ~10s @ 24fps ceiling
 
 IMAGE_TIMEOUT = 300
 VIDEO_TIMEOUT = 600
+
+# Billing fallback: when a video request omits `seconds`, the recipe's baked
+# default duration isn't known to the grid — bill this rather than free.
+DEFAULT_VIDEO_SECONDS = 5.0
 
 # Per-account cap on concurrent in-flight MEDIA jobs. Media is heavy + long (300–600s),
 # so one key holding many would starve the GPU pool. Kept tighter than the general
@@ -223,22 +227,48 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
     `preferred_worker` (a worker NAME the caller has verified the account owns)
     expresses soft affinity — the grid prefers that worker but won't stall if it's
     offline or busy."""
+    job_id = str(uuid4())
+
+    # Billing gate: media cost is deterministic from the request (n images /
+    # video seconds), so RESERVE the exact cost before dispatch in live mode and
+    # fail CLOSED with 402 if funds can't be held. Refund on every non-running
+    # path (429 / fault / timeout) so a job that didn't produce output is never
+    # charged. No-op in dry-run. Same enforce policy as text (unpriced/no-acct).
+    reserved = 0
+    if account_id is not None and credits.CHARGING_ENABLED:
+        n = int(payload.get("n", 1) or 1)
+        seconds = (payload.get("recipe_inputs") or {}).get("seconds")
+        if job_type == "video" and not seconds:
+            # the recipe's baked default duration isn't known to the grid; bill a
+            # conservative default rather than letting it slip through free.
+            seconds = DEFAULT_VIDEO_SECONDS
+        auth = await credits.authorize_media(account_id, model, job_type, n, seconds, job_id)
+        if not auth["ok"]:
+            raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
+        reserved = auth["reserved"]
+
     if account_id is not None and concurrency_limit:
         if not await _inflight_acquire(account_id, concurrency_limit):
+            if reserved:
+                await credits.refund_reservation(account_id, reserved, job_id)
             raise HTTPException(status_code=429,
                                 detail=f"Too many concurrent jobs (limit {concurrency_limit}). Retry shortly.")
     try:
-        return await _submit_and_wait_inner(model, job_type, payload, timeout,
+        return await _submit_and_wait_inner(model, job_type, payload, timeout, job_id,
                                             preferred_worker=preferred_worker,
                                             progress_token=progress_token)
+    except Exception:
+        # Generation failed/timed out → refund the reservation (best-effort).
+        if reserved:
+            await credits.refund_reservation(account_id, reserved, job_id)
+        raise
     finally:
         if account_id is not None and concurrency_limit:
             await _inflight_release(account_id)
 
 
 async def _submit_and_wait_inner(model: str, job_type: str, payload: dict, timeout: int,
-                                 preferred_worker: str = "", progress_token: str = "") -> tuple[list[dict], dict]:
-    job_id = str(uuid4())
+                                 job_id: str, preferred_worker: str = "", progress_token: str = "") -> tuple[list[dict], dict]:
 
     # Recipe-governed path: if `model` selects an approved RecipeVault recipe,
     # resolve it to a concrete ComfyUI graph and ride it in the payload — the

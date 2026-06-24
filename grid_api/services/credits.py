@@ -215,3 +215,42 @@ async def reconcile(user: dict, model: str, prompt_tokens: int, completion_token
                                aid, job_id, -diff, extra)
     except Exception:
         logger.error("reconcile failed account=%s job=%s (refund may be owed)", aid, job_id, exc_info=True)
+
+
+async def authorize_media(account_id, model: str, job_type: str, n: int, seconds, job_id) -> dict:
+    """Pre-dispatch billing gate for media (image/video). Unlike text, media cost
+    is deterministic from the request (n images / video seconds), so we reserve
+    the EXACT cost up front; on success it stands, on failure the caller refunds
+    (see refund_reservation). Same enforce policy as authorize_request:
+    unpriced / no-account / insufficient → blocked. Returns {ok, reserved, status}.
+    """
+    if not CHARGING_ENABLED:
+        return {"ok": True, "reserved": 0, "status": "dry_run"}
+    if not pricing.is_priced(model):
+        return {"ok": False, "reserved": 0, "status": "unpriced",
+                "reason": f"model '{model}' is not available for billing"}
+    if job_type == "video":
+        cost = pricing.quote_video(model, float(seconds or 0))
+    else:
+        cost = pricing.quote_image(model, int(n or 1))
+    if cost <= 0:
+        return {"ok": True, "reserved": 0, "status": "free"}
+    if not account_id:
+        return {"ok": False, "reserved": 0, "status": "no_account",
+                "reason": "billing requires a v2 account"}
+    status = await debit(account_id, cost, reason=f"reserve:{job_type}", ref=str(job_id), model=model)
+    if status in ("ok", "already"):
+        return {"ok": True, "reserved": cost, "status": status}
+    logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD: insufficient", account_id, model, cost)
+    return {"ok": False, "reserved": 0, "status": "insufficient", "reason": "insufficient credits"}
+
+
+async def refund_reservation(account_id, reserved_micro: int, job_id) -> None:
+    """Refund a media reservation when the job didn't run (fault / timeout / 429).
+    Best-effort + idempotent on the `:refund` ref; never raises into the caller."""
+    if not CHARGING_ENABLED or not account_id or reserved_micro <= 0:
+        return
+    try:
+        await credit(account_id, reserved_micro, reason="refund:media", ref=f"{job_id}:refund")
+    except Exception:
+        logger.error("media refund failed account=%s job=%s (refund owed)", account_id, job_id, exc_info=True)

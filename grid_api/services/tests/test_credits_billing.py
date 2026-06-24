@@ -31,7 +31,9 @@ from grid_api import database
 from grid_api.services import credits, pricing
 from grid_api.v2.schema import metadata as v2_metadata
 
-PRICED = "gpt-oss-120b"  # in the price book
+PRICED = "gpt-oss-120b"  # text, in the price book
+IMG = "z-image-turbo"    # image, priced
+VID = "ltx-2.3"          # video, priced per second
 
 
 @pytest_asyncio.fixture
@@ -137,3 +139,57 @@ async def test_authorize_noop_in_dry_run(db, monkeypatch):
     monkeypatch.setattr(credits, "CHARGING_ENABLED", False)
     auth = await credits.authorize_request({"account_id": uuid.uuid4()}, PRICED, 10, 10, "j")
     assert auth["ok"] and auth["reserved"] == 0 and auth["status"] == "dry_run"
+
+
+# ── Media (B4): same reserve/refund path ──
+
+
+@pytest.mark.asyncio
+async def test_authorize_media_image_reserves_n(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 1_000_000, "topup", ref="seed")
+    auth = await credits.authorize_media(aid, IMG, "image", 2, None, "mjob1")
+    cost = pricing.quote_image(IMG, 2)
+    assert auth["ok"] and cost > 0 and auth["reserved"] == cost
+    assert await credits.get_balance(aid) == 1_000_000 - cost
+
+
+@pytest.mark.asyncio
+async def test_authorize_media_video_reserves_seconds(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 10_000_000, "topup", ref="seed")
+    auth = await credits.authorize_media(aid, VID, "video", 1, 5, "mjob2")
+    cost = pricing.quote_video(VID, 5)
+    assert auth["ok"] and cost > 0 and auth["reserved"] == cost
+
+
+@pytest.mark.asyncio
+async def test_authorize_media_unpriced_blocked(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    auth = await credits.authorize_media(uuid.uuid4(), "no-such-image-xyz", "image", 1, None, "mjob3")
+    assert auth["ok"] is False and auth["status"] == "unpriced"
+
+
+@pytest.mark.asyncio
+async def test_authorize_media_insufficient_blocked(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 5, "topup", ref="seed")
+    auth = await credits.authorize_media(aid, IMG, "image", 1, None, "mjob4")
+    assert auth["ok"] is False and auth["status"] == "insufficient"
+    assert await credits.get_balance(aid) == 5
+
+
+@pytest.mark.asyncio
+async def test_media_refund_on_failure_idempotent(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 1_000_000, "topup", ref="seed")
+    cost = (await credits.authorize_media(aid, IMG, "image", 1, None, "mjob5"))["reserved"]
+    assert await credits.get_balance(aid) == 1_000_000 - cost
+    await credits.refund_reservation(aid, cost, "mjob5")
+    assert await credits.get_balance(aid) == 1_000_000
+    await credits.refund_reservation(aid, cost, "mjob5")  # idempotent
+    assert await credits.get_balance(aid) == 1_000_000

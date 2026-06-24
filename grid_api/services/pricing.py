@@ -62,6 +62,14 @@ PRICING: dict[str, ModelPrice] = {
     "glm-4.7":            half_of(2.25, 2.75),
     "mimo-v2.5":          half_of(0.14, 0.28),
     "mimo-v2.5-pro":      half_of(0.435, 0.87),
+
+    # ── Media (image per-image, video per-second) ──
+    # PLACEHOLDER PRICES — peg to real competitor floors before live (Justin).
+    # Keys are the lowercased model names workers advertise.
+    "z-image-turbo":        half_of(0, 0, usd_image=0.02),       # fast image
+    "flux.2 klein 4b fp8":  half_of(0, 0, usd_image=0.04),
+    "krea 2 turbo":         half_of(0, 0, usd_image=0.04),
+    "ltx-2.3":              half_of(0, 0, usd_video_sec=0.10),   # video, per second
 }
 
 BLOCK_UNPRICED = False  # unpriced model → 0 (free) unless flipped
