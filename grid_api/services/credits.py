@@ -57,6 +57,71 @@ async def get_balance(account_id) -> int:
         return int(row[0]) if row else 0
 
 
+async def _credit_in_session(s, account_id, amount_micro: int, reason: str, ref: str, model: str | None = None) -> None:
+    await s.execute(sa.insert(ledger_t).values(
+        account_id=account_id, delta_micro=amount_micro, reason=reason, ref=ref, model=model,
+    ))
+    res = await s.execute(
+        sa.update(credits_t)
+        .where(credits_t.c.account_id == account_id)
+        .values(balance_micro=credits_t.c.balance_micro + amount_micro, updated=_now())
+    )
+    if res.rowcount == 0:
+        await s.execute(sa.insert(credits_t).values(
+            account_id=account_id, balance_micro=amount_micro, updated=_now(),
+        ))
+
+
+async def _debit_in_session(s, account_id, amount_micro: int, reason: str, ref: str, model: str | None = None) -> str:
+    await s.execute(sa.insert(ledger_t).values(
+        account_id=account_id, delta_micro=-amount_micro, reason=reason, ref=ref, model=model,
+    ))
+    res = await s.execute(
+        sa.update(credits_t)
+        .where(sa.and_(
+            credits_t.c.account_id == account_id,
+            credits_t.c.balance_micro >= amount_micro,
+        ))
+        .values(balance_micro=credits_t.c.balance_micro - amount_micro, updated=_now())
+    )
+    return "ok" if res.rowcount else "insufficient"
+
+
+async def _insert_reservation_in_session(s, job_id, account_id, model: str, reserved_micro: int, prompt_toks: int) -> None:
+    await s.execute(sa.insert(reservations_t).values(
+        job_id=str(job_id), account_id=account_id, model=model,
+        reserved_micro=int(reserved_micro or 0), prompt_toks=int(prompt_toks or 0),
+        status="held", created=_now(),
+    ))
+
+
+async def _reservation_reserved_micro(job_id) -> int | None:
+    async with await new_session() as s:
+        row = (await s.execute(
+            sa.select(reservations_t.c.reserved_micro).where(reservations_t.c.job_id == str(job_id))
+        )).first()
+        return int(row[0] or 0) if row else None
+
+
+async def _try_extra_debit_in_session(s, account_id, amount_micro: int, ref: str, model: str | None = None) -> bool:
+    """Best-effort settlement extra without making the terminal claim retry forever."""
+    res = await s.execute(
+        sa.update(credits_t)
+        .where(sa.and_(
+            credits_t.c.account_id == account_id,
+            credits_t.c.balance_micro >= amount_micro,
+        ))
+        .values(balance_micro=credits_t.c.balance_micro - amount_micro, updated=_now())
+    )
+    if res.rowcount == 0:
+        return False
+    await s.execute(sa.insert(ledger_t).values(
+        account_id=account_id, delta_micro=-amount_micro,
+        reason="reconcile:extra", ref=ref, model=model,
+    ))
+    return True
+
+
 async def credit(account_id, amount_micro: int, reason: str, ref: str | None = None, model: str | None = None) -> bool:
     """Top up. Idempotent on `ref`. Returns True if applied, False if a dup ref."""
     if amount_micro <= 0:
@@ -68,21 +133,10 @@ async def credit(account_id, amount_micro: int, reason: str, ref: str | None = N
         raise ValueError("credit() requires a non-null ref")
     async with await new_session() as s:
         try:
-            await s.execute(sa.insert(ledger_t).values(
-                account_id=account_id, delta_micro=amount_micro, reason=reason, ref=ref, model=model,
-            ))
+            await _credit_in_session(s, account_id, amount_micro, reason, ref, model)
         except IntegrityError:
             await s.rollback()
             return False  # ref already seen — already credited
-        res = await s.execute(
-            sa.update(credits_t)
-            .where(credits_t.c.account_id == account_id)
-            .values(balance_micro=credits_t.c.balance_micro + amount_micro, updated=_now())
-        )
-        if res.rowcount == 0:
-            await s.execute(sa.insert(credits_t).values(
-                account_id=account_id, balance_micro=amount_micro, updated=_now(),
-            ))
         await s.commit()
         return True
 
@@ -95,22 +149,12 @@ async def debit(account_id, amount_micro: int, reason: str, ref: str | None = No
         raise ValueError("debit() requires a non-null ref")
     async with await new_session() as s:
         try:
-            await s.execute(sa.insert(ledger_t).values(
-                account_id=account_id, delta_micro=-amount_micro, reason=reason, ref=ref, model=model,
-            ))
+            status = await _debit_in_session(s, account_id, amount_micro, reason, ref, model)
         except IntegrityError:
             await s.rollback()
             return "already"  # this job already charged
         # Conditional debit: only succeeds if the balance covers it (overdraft-safe + race-safe).
-        res = await s.execute(
-            sa.update(credits_t)
-            .where(sa.and_(
-                credits_t.c.account_id == account_id,
-                credits_t.c.balance_micro >= amount_micro,
-            ))
-            .values(balance_micro=credits_t.c.balance_micro - amount_micro, updated=_now())
-        )
-        if res.rowcount == 0:
+        if status == "insufficient":
             await s.rollback()  # undoes the ledger insert too — nothing charged
             return "insufficient"
         await s.commit()
@@ -154,7 +198,8 @@ async def charge_request(user: dict, model: str, prompt_tokens: int, completion_
     return {"status": status, "charged": cost if status == "ok" else 0}
 
 
-async def authorize_request(user: dict, model: str, prompt_tokens: int, max_tokens: int, job_id) -> dict:
+async def authorize_request(user: dict, model: str, prompt_tokens: int, max_tokens: int, job_id,
+                            *, record_reservation: bool = False) -> dict:
     """Pre-dispatch billing gate (LIVE mode only). Reserve the MAX possible cost
     before any work is queued — paid inference is never dispatched unless funds
     are held first. The caller turns ok=False into a 402 BEFORE submitting the
@@ -166,8 +211,11 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
     - priced at 0 (free model) → ok, reserved 0.
     - no chargeable v2 account (e.g. legacy key) in enforce mode → BLOCKED.
     - insufficient balance → BLOCKED.
-    Idempotent: a retry with the same job_id re-uses the existing reservation
-    (debit returns 'already' on the duplicate ref).
+    When `record_reservation=True`, the debit and `grid_reservations` row are
+    created in one transaction. That is the durable worker-WS lifecycle: the job
+    must never be dispatched if either the hold or its settlement context cannot
+    be written. Idempotent: a retry with the same job_id re-uses the existing
+    reservation (debit returns 'already' on the duplicate ref).
     """
     if not CHARGING_ENABLED:
         return {"ok": True, "reserved": 0, "status": "dry_run"}
@@ -181,6 +229,42 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
     if not aid:
         return {"ok": False, "reserved": 0, "status": "no_account",
                 "reason": "billing requires a v2 account key"}
+    if record_reservation:
+        ref = str(job_id)
+        async with await new_session() as s:
+            try:
+                status = await _debit_in_session(s, aid, cost, reason="reserve:chat", ref=ref, model=model)
+            except IntegrityError:
+                await s.rollback()
+                reserved = await _reservation_reserved_micro(job_id)
+                if reserved is not None:
+                    return {"ok": True, "reserved": reserved, "status": "already"}
+                logger.error("reservation debit exists without reservation row job=%s account=%s", job_id, aid)
+                return {"ok": False, "reserved": 0, "status": "reservation_missing",
+                        "reason": "billing reservation is inconsistent; retry with a new request id"}
+            if status == "insufficient":
+                await s.rollback()
+                logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD: insufficient", aid, model, cost)
+                return {"ok": False, "reserved": 0, "status": "insufficient",
+                        "reason": "insufficient credits"}
+            try:
+                await _insert_reservation_in_session(s, job_id, aid, model, cost, prompt_tokens)
+            except IntegrityError:
+                await s.rollback()
+                reserved = await _reservation_reserved_micro(job_id)
+                if reserved is not None:
+                    return {"ok": True, "reserved": reserved, "status": "already"}
+                logger.error("reservation insert conflicted without readable row job=%s account=%s", job_id, aid)
+                return {"ok": False, "reserved": 0, "status": "reservation_failed",
+                        "reason": "billing reservation failed"}
+            except Exception:
+                await s.rollback()
+                logger.error("reservation insert failed job=%s account=%s", job_id, aid, exc_info=True)
+                return {"ok": False, "reserved": 0, "status": "reservation_failed",
+                        "reason": "billing reservation failed"}
+            await s.commit()
+            return {"ok": True, "reserved": cost, "status": "ok"}
+
     status = await debit(aid, cost, reason="reserve:chat", ref=str(job_id), model=model)
     if status in ("ok", "already"):
         return {"ok": True, "reserved": cost, "status": status}
@@ -259,12 +343,12 @@ async def refund_reservation(account_id, reserved_micro: int, job_id) -> None:
 
 # ── Durable per-job reservation lifecycle (worker-WS is the sole settler) ─────
 #
-# The HTTP request handler reserves before dispatch and records a 'held' row.
-# The worker-WS handler — which reaches a terminal state for EVERY job whether
-# or not the client stayed connected — calls settle_job / release_job on the
-# job's outcome. The held→settled UPDATE is the exactly-once guard: only the
-# winning UPDATE moves money, so a duplicate/retried terminal is a no-op and a
-# disconnected client can never strand or double-settle a reservation.
+# The HTTP request handler reserves before dispatch and records a 'held' row in
+# the same transaction. The worker-WS handler — which reaches a terminal state
+# for EVERY job whether or not the client stayed connected — calls settle_job /
+# release_job on the job's outcome. The held→settled UPDATE and ledger movement
+# commit together, so a duplicate/retried terminal is a no-op and a disconnected
+# client can never strand or double-settle a reservation.
 
 
 async def open_reservation(job_id, account_id, model: str, reserved_micro: int, prompt_toks: int) -> None:
@@ -277,11 +361,7 @@ async def open_reservation(job_id, account_id, model: str, reserved_micro: int, 
     try:
         async with await new_session() as s:
             try:
-                await s.execute(sa.insert(reservations_t).values(
-                    job_id=str(job_id), account_id=account_id, model=model,
-                    reserved_micro=int(reserved_micro or 0), prompt_toks=int(prompt_toks or 0),
-                    status="held", created=_now(),
-                ))
+                await _insert_reservation_in_session(s, job_id, account_id, model, reserved_micro, prompt_toks)
                 await s.commit()
             except IntegrityError:
                 await s.rollback()  # already opened (retry/requeue) — keep the original
@@ -289,72 +369,66 @@ async def open_reservation(job_id, account_id, model: str, reserved_micro: int, 
         logger.error("open_reservation failed job=%s (settlement context missing)", job_id, exc_info=True)
 
 
-async def _claim_terminal(job_id) -> dict | None:
-    """Flip the reservation held→settled exactly once. Returns the pre-settle
-    context if THIS call won the claim, else None (already settled / unknown)."""
-    async with await new_session() as s:
-        row = (await s.execute(
-            sa.select(reservations_t.c.account_id, reservations_t.c.model,
-                      reservations_t.c.reserved_micro, reservations_t.c.prompt_toks)
-            .where(reservations_t.c.job_id == str(job_id))
-        )).first()
-        if not row:
-            return None
-        res = await s.execute(
-            sa.update(reservations_t)
-            .where(sa.and_(reservations_t.c.job_id == str(job_id),
-                           reservations_t.c.status == "held"))
-            .values(status="settled", settled=_now())
-        )
-        await s.commit()
-        if res.rowcount == 0:
-            return None  # lost the race — another terminal already settled it
-        return {"account_id": row[0], "model": row[1],
-                "reserved_micro": int(row[2] or 0), "prompt_toks": int(row[3] or 0)}
-
-
 async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> None:
     """Authoritative terminal settlement (called from the worker-WS handler).
 
-    Flips the reservation held→settled exactly once, then reconciles the held
-    amount against ACTUAL grid-counted usage (refund the unused remainder /
-    collect any shortfall). Pass status='failed' for a job that produced nothing
-    billable → full release (refund). The completion count MUST be a grid-side
-    figure (server tiktoken of relayed text), never worker-reported usage.
+    Reconciles the held amount against ACTUAL grid-counted usage (refund the
+    unused remainder / collect any shortfall) and flips held→settled in the same
+    transaction. Pass status='failed' for a job that produced nothing billable →
+    full release (refund). The completion count MUST be a grid-side figure
+    (server tiktoken of relayed text), never worker-reported usage.
     Best-effort + loud on error: a settlement failure is money owed, never a
-    giveaway, and must not crash the worker loop."""
+    giveaway, and must not crash the worker loop. Because the status flip and
+    ledger movement commit together, a failed refund leaves the reservation held
+    and retryable instead of marking it settled prematurely."""
     try:
-        ctx = await _claim_terminal(job_id)
-        if ctx is None:
-            return  # no reservation, or already settled
-        aid, model = ctx["account_id"], ctx["model"]
-        reserved, prompt_toks = ctx["reserved_micro"], ctx["prompt_toks"]
+        async with await new_session() as s:
+            row = (await s.execute(
+                sa.select(reservations_t.c.account_id, reservations_t.c.model,
+                          reservations_t.c.reserved_micro, reservations_t.c.prompt_toks)
+                .where(reservations_t.c.job_id == str(job_id))
+            )).first()
+            if not row:
+                return
 
-        if not CHARGING_ENABLED:
-            # Dry-run observability — what we WOULD bill, against grid counts.
-            if status == "ok":
-                cost = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
-                logger.info("[settle:dry] job=%s account=%s model=%s in=%d out=%d "
-                            "would_charge=%d micro-USD ($%.4f)", job_id, aid, model,
-                            prompt_toks, completion_tokens, cost, cost / 1_000_000)
-            else:
-                logger.info("[settle:dry] job=%s released (status=%s)", job_id, status)
-            return
+            res = await s.execute(
+                sa.update(reservations_t)
+                .where(sa.and_(reservations_t.c.job_id == str(job_id),
+                               reservations_t.c.status == "held"))
+                .values(status="settled", settled=_now())
+            )
+            if res.rowcount == 0:
+                await s.rollback()
+                return  # lost the race — another terminal already settled it
 
-        if not aid or reserved <= 0:
-            return
-        if status != "ok":
-            await credit(aid, reserved, reason="release:failed", ref=f"{job_id}:refund", model=model)
-            return
-        actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
-        diff = reserved - actual
-        if diff > 0:
-            await credit(aid, diff, reason="reconcile:refund", ref=f"{job_id}:refund", model=model)
-        elif diff < 0:
-            extra = await debit(aid, -diff, reason="reconcile:extra", ref=f"{job_id}:extra", model=model)
-            if extra != "ok":
-                logger.warning("settle under-collected account=%s job=%s by %d micro-USD (%s)",
-                               aid, job_id, -diff, extra)
+            aid, model = row[0], row[1]
+            reserved, prompt_toks = int(row[2] or 0), int(row[3] or 0)
+
+            if not CHARGING_ENABLED:
+                if status == "ok":
+                    cost = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
+                    logger.info("[settle:dry] job=%s account=%s model=%s in=%d out=%d "
+                                "would_charge=%d micro-USD ($%.4f)", job_id, aid, model,
+                                prompt_toks, completion_tokens, cost, cost / 1_000_000)
+                else:
+                    logger.info("[settle:dry] job=%s released (status=%s)", job_id, status)
+                await s.commit()
+                return
+
+            if aid and reserved > 0:
+                if status != "ok":
+                    await _credit_in_session(s, aid, reserved, "release:failed", f"{job_id}:refund", model)
+                else:
+                    actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
+                    diff = reserved - actual
+                    if diff > 0:
+                        await _credit_in_session(s, aid, diff, "reconcile:refund", f"{job_id}:refund", model)
+                    elif diff < 0:
+                        extra_ok = await _try_extra_debit_in_session(s, aid, -diff, f"{job_id}:extra", model)
+                        if not extra_ok:
+                            logger.warning("settle under-collected account=%s job=%s by %d micro-USD (insufficient)",
+                                           aid, job_id, -diff)
+            await s.commit()
     except Exception:
         logger.error("settle_job failed job=%s (refund may be owed)", job_id, exc_info=True)
 

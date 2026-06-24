@@ -390,7 +390,7 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
 
     # ── Billing gate: RESERVE before dispatch (live mode only) ──────────────
     # Fail CLOSED: paid work is never queued unless funds are held first. In
-    # dry-run this is a no-op (reserved=0) and settlement just logs would_charge.
+    # dry-run this is a no-op; the collectors only log would-charge observations.
     # Streaming is covered because this runs before the stream starts, i.e.
     # before the first token leaves the server.
     # Grid-side prompt count (tiktoken) — the ONLY prompt-token figure we bill on.
@@ -398,19 +398,13 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
     # money. Computed once so the reservation and the final settlement agree.
     prompt_toks = den.count_tokens(prompt)
 
-    reserved = 0
     if credits.CHARGING_ENABLED:
         auth = await credits.authorize_request(
-            user, model, prompt_toks, request.max_tokens, job_id
+            user, model, prompt_toks, request.max_tokens, job_id,
+            record_reservation=True,
         )
         if not auth["ok"]:
             raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
-        reserved = auth["reserved"]
-
-    # Durable reservation: record the held amount + grid prompt count keyed by
-    # job_id so the worker-WS handler (the terminal authority) can settle this job
-    # without depending on the client staying connected. No-op in dry-run.
-    await credits.open_reservation(job_id, user.get("account_id"), model, reserved, prompt_toks)
 
     # Submit to Redis Stream for workers. _legacy_rows tells the WS handler
     # whether the horde bookkeeping rows exist for this job.

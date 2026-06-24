@@ -16,12 +16,14 @@ import uuid
 
 import pytest
 import pytest_asyncio
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from grid_api import database
 from grid_api.services import credits, pricing
 from grid_api.v2.schema import metadata as v2_metadata
+from grid_api.v2.schema import reservations as reservations_t
 
 PRICED = "gpt-oss-120b"
 
@@ -45,11 +47,62 @@ async def db():
 
 
 async def _reserve(aid, job_id, prompt=1000, mx=1000):
-    """Reserve at max + open the durable row, as the request path does."""
-    auth = await credits.authorize_request({"account_id": aid}, PRICED, prompt, mx, job_id)
+    """Reserve at max and open the durable row atomically, as the request path does."""
+    auth = await credits.authorize_request(
+        {"account_id": aid}, PRICED, prompt, mx, job_id,
+        record_reservation=True,
+    )
     assert auth["ok"]
-    await credits.open_reservation(job_id, aid, PRICED, auth["reserved"], prompt)
     return auth["reserved"]
+
+
+async def _reservation_status(job_id):
+    async with await database.new_session() as s:
+        row = (await s.execute(
+            sa.select(reservations_t.c.status).where(reservations_t.c.job_id == str(job_id))
+        )).first()
+        return row[0] if row else None
+
+
+@pytest.mark.asyncio
+async def test_authorize_records_reservation_atomically_and_idempotently(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 10_000_000, "topup", ref="seed")
+    auth = await credits.authorize_request(
+        {"account_id": aid}, PRICED, 1000, 1000, "job0",
+        record_reservation=True,
+    )
+    assert auth["ok"] and auth["reserved"] > 0
+    assert await _reservation_status("job0") == "held"
+    assert await credits.get_balance(aid) == 10_000_000 - auth["reserved"]
+
+    dup = await credits.authorize_request(
+        {"account_id": aid}, PRICED, 1000, 1000, "job0",
+        record_reservation=True,
+    )
+    assert dup["ok"] and dup["status"] == "already"
+    assert await credits.get_balance(aid) == 10_000_000 - auth["reserved"]
+
+
+@pytest.mark.asyncio
+async def test_authorize_rolls_back_debit_if_reservation_write_fails(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 10_000_000, "topup", ref="seed")
+
+    async def boom(*_args, **_kwargs):
+        raise RuntimeError("reservation unavailable")
+
+    monkeypatch.setattr(credits, "_insert_reservation_in_session", boom)
+    auth = await credits.authorize_request(
+        {"account_id": aid}, PRICED, 1000, 1000, "job-reserve-fail",
+        record_reservation=True,
+    )
+    assert auth["ok"] is False
+    assert auth["status"] == "reservation_failed"
+    assert await credits.get_balance(aid) == 10_000_000
+    assert await _reservation_status("job-reserve-fail") is None
 
 
 @pytest.mark.asyncio
@@ -83,6 +136,28 @@ async def test_release_full_refund(db, monkeypatch):
     assert await credits.get_balance(aid) == 10_000_000
     await credits.release_job("jobB")            # idempotent
     assert await credits.get_balance(aid) == 10_000_000
+
+
+@pytest.mark.asyncio
+async def test_failed_refund_leaves_reservation_held_for_retry(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 10_000_000, "topup", ref="seed")
+    reserved = await _reserve(aid, "jobB2")
+    original_credit = credits._credit_in_session
+
+    async def boom(*_args, **_kwargs):
+        raise RuntimeError("ledger unavailable")
+
+    monkeypatch.setattr(credits, "_credit_in_session", boom)
+    await credits.release_job("jobB2")
+    assert await credits.get_balance(aid) == 10_000_000 - reserved
+    assert await _reservation_status("jobB2") == "held"
+
+    monkeypatch.setattr(credits, "_credit_in_session", original_credit)
+    await credits.release_job("jobB2")
+    assert await credits.get_balance(aid) == 10_000_000
+    assert await _reservation_status("jobB2") == "settled"
 
 
 @pytest.mark.asyncio
