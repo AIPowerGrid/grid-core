@@ -76,6 +76,12 @@ def get_price(model: str) -> ModelPrice | None:
     return PRICING.get((model or "").lower().strip())
 
 
+def is_priced(model: str) -> bool:
+    """True if the model has an entry in the price book. Enforce mode
+    default-denies anything unpriced so a renamed/new model can't be free."""
+    return get_price(model) is not None
+
+
 def quote_text(model: str, prompt_tokens: int, completion_tokens: int) -> int:
     """Cost of a text completion, in integer micro-USD. 0 if unpriced."""
     p = get_price(model)

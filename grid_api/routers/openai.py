@@ -34,26 +34,31 @@ from .. import format as fmt
 from ..database import new_session, processing_gens_table, waiting_prompts_table
 from ..models.openai import ChatCompletionRequest, ModelInfo, ModelListResponse
 from ..services import accounts as accounts_svc
-from ..services import credits, job_queue, media, quota, recipes, token_stream
+from ..services import credits, den, job_queue, media, quota, recipes, token_stream
 from ..services.sanitizer import sanitize_messages
 from .worker_ws import get_available_models
 
 logger = logging.getLogger("grid_api.openai")
 
 
-async def _meter_charge(user, model, prompt_tokens, completion_tokens, job_id):
-    """Meter one completion against the consumer's credit balance.
+async def _settle(user, model, prompt_tokens, completion_tokens, job_id, reserved=0):
+    """Settle one completion AFTER the response.
 
-    OFF by default (GRID_CHARGING_ENABLED=0): charge_request only LOGS what it
-    *would* bill and never debits or blocks — so we can observe pricing against
-    real traffic before flipping charging on. Billing must NEVER break a
-    response, so all errors are swallowed."""
+    - dry-run (GRID_CHARGING_ENABLED=0): `charge_request` only LOGS would_charge,
+      never debits — lets us observe pricing against real traffic.
+    - live: `reconcile` the pre-dispatch reservation against actual usage,
+      refunding the unused portion. The charge already happened at reserve time
+      (pre-dispatch), so settlement only adjusts.
+    Settlement must NEVER break a response (it's already sent), so errors are
+    swallowed here — the money-correctness gate is the pre-dispatch reserve."""
     try:
-        await credits.charge_request(
-            user, model, int(prompt_tokens or 0), int(completion_tokens or 0), job_id
-        )
+        p, c = int(prompt_tokens or 0), int(completion_tokens or 0)
+        if credits.CHARGING_ENABLED:
+            await credits.reconcile(user, model, p, c, reserved, job_id)
+        else:
+            await credits.charge_request(user, model, p, c, job_id)
     except Exception:
-        logger.debug("charge_request failed (non-fatal)", exc_info=True)
+        logger.debug("settle failed (non-fatal)", exc_info=True)
 
 router = APIRouter()
 
@@ -378,6 +383,20 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
         # when it picks up the job (needs real worker_id for FK constraint)
         await session.commit()
 
+    # ── Billing gate: RESERVE before dispatch (live mode only) ──────────────
+    # Fail CLOSED: paid work is never queued unless funds are held first. In
+    # dry-run this is a no-op (reserved=0) and settlement just logs would_charge.
+    # Streaming is covered because this runs before the stream starts, i.e.
+    # before the first token leaves the server.
+    reserved = 0
+    if credits.CHARGING_ENABLED:
+        auth = await credits.authorize_request(
+            user, model, den.count_tokens(prompt), request.max_tokens or 0, job_id
+        )
+        if not auth["ok"]:
+            raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
+        reserved = auth["reserved"]
+
     # Submit to Redis Stream for workers. _legacy_rows tells the WS handler
     # whether the horde bookkeeping rows exist for this job.
     payload["_legacy_rows"] = legacy_rows
@@ -387,7 +406,7 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
 
     if request.stream:
         return StreamingResponse(
-            _stream_openai(job_id, model, completion_id, user, request.seed),
+            _stream_openai(job_id, model, completion_id, user, request.seed, reserved),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -396,10 +415,10 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
             },
         )
     else:
-        return await _collect_response(job_id, model, user, request.seed)
+        return await _collect_response(job_id, model, user, request.seed, reserved)
 
 
-async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict | None = None, seed: int | None = None):
+async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict | None = None, seed: int | None = None, reserved: int = 0):
     """SSE generator for OpenAI streaming format.
 
     Faithful passthrough: the grid emits one leading role chunk, then relays
@@ -436,8 +455,8 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
                     usage_chunk["grid"] = grid_meta
                 yield f"data: {json.dumps(usage_chunk)}\n\n"
             u = usage or {}
-            await _meter_charge(
-                user, model, u.get("prompt_tokens", 0), u.get("completion_tokens", 0), job_id
+            await _settle(
+                user, model, u.get("prompt_tokens", 0), u.get("completion_tokens", 0), job_id, reserved
             )
             break
 
@@ -456,7 +475,7 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
     yield "data: [DONE]\n\n"
 
 
-async def _collect_response(job_id: str, model: str, user: dict | None = None, seed: int | None = None) -> dict:
+async def _collect_response(job_id: str, model: str, user: dict | None = None, seed: int | None = None, reserved: int = 0) -> dict:
     """Collect the stream and return a single non-streaming response.
 
     The worker always streams; the grid assembles. The DONE event carries the
@@ -499,7 +518,7 @@ async def _collect_response(job_id: str, model: str, user: dict | None = None, s
 
     prompt_tokens = (usage or {}).get("prompt_tokens", 0)
     completion_tokens = (usage or {}).get("completion_tokens", 0)
-    await _meter_charge(user, model, prompt_tokens, completion_tokens, job_id)
+    await _settle(user, model, prompt_tokens, completion_tokens, job_id, reserved)
     resp = fmt.openai_response(
         content,
         model,

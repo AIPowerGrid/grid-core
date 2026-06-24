@@ -60,6 +60,11 @@ async def credit(account_id, amount_micro: int, reason: str, ref: str | None = N
     """Top up. Idempotent on `ref`. Returns True if applied, False if a dup ref."""
     if amount_micro <= 0:
         return False
+    if not ref:
+        # Idempotency is structural, not caller-discipline: a value-moving row
+        # MUST carry a dedup key. (DB NOT NULL constraint is the migration-phase
+        # hard lock; this is the code-level shield.)
+        raise ValueError("credit() requires a non-null ref")
     async with await new_session() as s:
         try:
             await s.execute(sa.insert(ledger_t).values(
@@ -85,6 +90,8 @@ async def debit(account_id, amount_micro: int, reason: str, ref: str | None = No
     """Atomic, overdraft-safe debit. Returns 'ok' | 'already' | 'insufficient'."""
     if amount_micro <= 0:
         return "ok"
+    if not ref:
+        raise ValueError("debit() requires a non-null ref")
     async with await new_session() as s:
         try:
             await s.execute(sa.insert(ledger_t).values(
@@ -144,3 +151,67 @@ async def charge_request(user: dict, model: str, prompt_tokens: int, completion_
     if status == "insufficient":
         logger.warning("account=%s insufficient credit for %d micro-USD (model=%s)", aid, cost, model)
     return {"status": status, "charged": cost if status == "ok" else 0}
+
+
+async def authorize_request(user: dict, model: str, prompt_tokens: int, max_tokens: int, job_id) -> dict:
+    """Pre-dispatch billing gate (LIVE mode only). Reserve the MAX possible cost
+    before any work is queued — paid inference is never dispatched unless funds
+    are held first. The caller turns ok=False into a 402 BEFORE submitting the
+    job. Returns {ok, reserved, status, reason?}.
+
+    Policy:
+    - dry-run (charging off) → ok, reserved 0 (caller logs via charge_request).
+    - unpriced model in enforce mode → BLOCKED (default-deny; B5).
+    - priced at 0 (free model) → ok, reserved 0.
+    - no chargeable v2 account (e.g. legacy key) in enforce mode → BLOCKED.
+    - insufficient balance → BLOCKED.
+    Idempotent: a retry with the same job_id re-uses the existing reservation
+    (debit returns 'already' on the duplicate ref).
+    """
+    if not CHARGING_ENABLED:
+        return {"ok": True, "reserved": 0, "status": "dry_run"}
+    if not pricing.is_priced(model):
+        return {"ok": False, "reserved": 0, "status": "unpriced",
+                "reason": f"model '{model}' is not available for billing"}
+    cost = pricing.quote_text(model, int(prompt_tokens or 0), int(max_tokens or 0))
+    if cost <= 0:
+        return {"ok": True, "reserved": 0, "status": "free"}
+    aid = _account_id(user)
+    if not aid:
+        return {"ok": False, "reserved": 0, "status": "no_account",
+                "reason": "billing requires a v2 account key"}
+    status = await debit(aid, cost, reason="reserve:chat", ref=str(job_id), model=model)
+    if status in ("ok", "already"):
+        return {"ok": True, "reserved": cost, "status": status}
+    logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD: insufficient", aid, model, cost)
+    return {"ok": False, "reserved": 0, "status": "insufficient",
+            "reason": "insufficient credits"}
+
+
+async def reconcile(user: dict, model: str, prompt_tokens: int, completion_tokens: int,
+                    reserved_micro: int, job_id) -> None:
+    """Post-completion settlement (LIVE mode only). We reserved the max up front;
+    refund the unused portion based on ACTUAL usage. Best-effort + loud on error:
+    the response already went out, so a settlement failure must NEVER crash it —
+    a failed refund is money owed to the user, never a giveaway. Idempotent via
+    job-scoped refs (`:refund` / `:extra`)."""
+    if not CHARGING_ENABLED:
+        return
+    aid = _account_id(user)
+    if not aid or reserved_micro <= 0:
+        return
+    try:
+        actual = pricing.quote_text(model, int(prompt_tokens or 0), int(completion_tokens or 0))
+        diff = reserved_micro - actual
+        if diff > 0:
+            await credit(aid, diff, reason="reconcile:refund", ref=f"{job_id}:refund", model=model)
+        elif diff < 0:
+            # Actual exceeded the reservation (prompt estimate was low). Collect
+            # the remainder best-effort; if the balance can't cover it we already
+            # served, so log and move on — never block on settlement.
+            extra = await debit(aid, -diff, reason="reconcile:extra", ref=f"{job_id}:extra", model=model)
+            if extra != "ok":
+                logger.warning("reconcile under-collected account=%s job=%s by %d micro-USD (%s)",
+                               aid, job_id, -diff, extra)
+    except Exception:
+        logger.error("reconcile failed account=%s job=%s (refund may be owed)", aid, job_id, exc_info=True)

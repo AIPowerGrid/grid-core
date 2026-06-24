@@ -211,7 +211,15 @@ credits = sa.Table(
 credit_ledger = sa.Table(
     "grid_credit_ledger",
     metadata,
-    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    # BigInteger on Postgres; Integer on SQLite so the autoincrement PK actually
+    # works there (BIGINT PKs don't autoincrement on SQLite) — keeps the
+    # "dialect-portable" promise true for the gateway-in-a-box / test path.
+    sa.Column(
+        "id",
+        sa.BigInteger().with_variant(sa.Integer(), "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    ),
     sa.Column(
         "account_id",
         sa.Uuid,
