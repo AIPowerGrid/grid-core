@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from ..auth import extract_api_key
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
-from ..services import quota
+from ..services import credits, quota
 from ._passthrough import (
     SSE_HEADERS,
     collect_passthrough,
@@ -61,6 +61,17 @@ async def create_response(
             raise HTTPException(
                 status_code=404,
                 detail=f"Model '{model}' is not available via the Responses API. Online: {available}",
+            )
+
+        # Billing gate: this is a RAW passthrough — the grid relays upstream
+        # events verbatim and cannot reliably count tokens grid-side for this
+        # format, so it has no trusted meter. Until per-request metering is wired
+        # (parse Responses `input`/output server-side, or reserve+reconcile), we
+        # fail CLOSED when charging is on rather than serve paid work for free.
+        if credits.CHARGING_ENABLED:
+            raise HTTPException(
+                status_code=402,
+                detail="Per-request billing is not yet available for the Responses API; use /v1/chat/completions.",
             )
 
         await quota.check_and_consume(dict(user))

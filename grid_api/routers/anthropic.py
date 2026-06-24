@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
-from ..services import quota
+from ..services import credits, quota
 from ._passthrough import (
     SSE_HEADERS,
     collect_passthrough,
@@ -73,6 +73,15 @@ async def create_message(
             raise _err(
                 404, "not_found_error",
                 f"Model '{model}' is not available via the Anthropic Messages API. Online: {available}",
+            )
+
+        # Billing gate: raw passthrough has no trusted grid-side meter (the grid
+        # relays Anthropic SSE verbatim), so we fail CLOSED when charging is on
+        # rather than serve paid work for free. See responses.py for the same gate.
+        if credits.CHARGING_ENABLED:
+            raise _err(
+                402, "billing_error",
+                "Per-request billing is not yet available for the Messages API; use /v1/chat/completions.",
             )
 
         await quota.check_and_consume(dict(user))

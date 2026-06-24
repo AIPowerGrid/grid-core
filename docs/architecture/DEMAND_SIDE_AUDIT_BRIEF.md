@@ -33,11 +33,17 @@ The independent review (2026-06) confirmed the brief asks the right questions an
 that several risks are **already real in code** (they only bite once charging is
 on). These are hard gates, not suggestions:
 
-- [x] **B1 (DONE, b8d4ca2) — Prepaid enforcement.** Reserve/authorize *before* dispatch; return
-  **402 before queueing** on insufficient funds; reconcile/refund after actual
-  usage. Stop swallowing charge failures in live mode. *(Today: `_meter_charge`
-  swallows errors and charges after the response — streaming charges after it's
-  already streamed → free usage. THE top blocker.)*
+- [~] **B1 (SUBSTANTIALLY DONE — core reserve path landed b8d4ca2; second pass
+  hardened the leaks) — Prepaid enforcement.** Reserve/authorize *before* dispatch;
+  return **402 before queueing** on insufficient funds; reconcile/refund after
+  actual usage. Second-pass fixes (this branch): settlement now bills on
+  **grid-counted** tokens, never worker-reported `usage` (a silent/lying worker
+  can't zero the bill); stranded reservations closed (refund on `submit_job`
+  failure; stream generator settles in a `finally` on client disconnect/cancel);
+  `max_tokens=null` no longer under-reserves. **Remaining before flip:** the
+  reserve→settle is per-request best-effort, not yet bound to job completion at
+  the worker-WS layer (a settlement crash mid-finally could still leak a reserve —
+  acceptable for dry-run, revisit with a sweeper before live).
 - [ ] **B2 — Scoped API keys.** Add key scopes/classes
   (`inference.submit`, `account.admin`, `billing.manage`, `workers.manage`,
   `identity.assert`). Account/payout/key-mgmt routes require admin scope; a
@@ -47,9 +53,16 @@ on). These are hard gates, not suggestions:
   contradiction (see §2). The chat bridge sends a short-lived **signed**
   assertion (`iss/sub/aud/exp/nonce`) from a scoped bridge key; the grid verifies
   the signature. No raw `X-Grid-User` trust.
-- [x] **B4 (DONE, 89e1b5d) — Universal metering for ALL job types.** One reserve/debit/reconcile
-  abstraction for chat **and** image **and** video (incl. chat-routed media).
-  Add image/video pricing. *(Today: media does quota only, no credit debit.)*
+- [~] **B4 (SUBSTANTIALLY DONE — chat + media metered 89e1b5d; passthrough gated
+  this branch) — Universal metering for ALL job types.** One reserve/debit/reconcile
+  abstraction for chat **and** image **and** video (incl. chat-routed media), with
+  the media `account_id` bug fixed (was passing `user["id"]` not the account UUID).
+  Second-pass fix: the raw passthrough endpoints (`/v1/responses`, `/v1/messages`)
+  have **no trusted grid-side meter** (verbatim relay), so they now **fail closed
+  with 402 when charging is on** instead of silently serving paid work for free.
+  **Remaining before flip:** wire real metering for those two formats (parse
+  input/output server-side, or reserve+reconcile) so they're billable, not just
+  blocked; peg media prices (currently placeholders).
 - [x] **B5 (DONE, b8d4ca2) — Default-deny unpriced models in enforce mode.** Flip
   `BLOCK_UNPRICED` semantics so an unpriced/renamed model can't be free when
   charging is on.

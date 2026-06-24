@@ -277,7 +277,7 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
     media_kind = await _detect_media_model(request.model)
     if media_kind:
         await quota.check_and_consume(dict(user))
-        return await _chat_media(request, media_kind, account_id=user["id"])
+        return await _chat_media(request, media_kind, account_id=user.get("account_id"))
 
     # Check for available text workers serving the OpenAI chat-completions API.
     available = await get_available_models(job_type="text", api_format="openai-chat")
@@ -321,6 +321,12 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
     # client-supplied seed is always honored. Mirrors the media path.
     if request.seed is None:
         request.seed = secrets.randbelow(2**53)
+
+    # Normalize max_tokens ONCE so the reservation, the request body, and the
+    # worker cap all agree. A client can send `null` (Optional), which would make
+    # the reserve estimate 0 (under-reserve) while dispatch fell back to 4096 —
+    # they must be the same number.
+    request.max_tokens = request.max_tokens or 4096
 
     # Faithful request: forward the developer's request as-is (tools,
     # tool_choice, multimodal content, seed, response_format, any extra params)
@@ -388,10 +394,15 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
     # dry-run this is a no-op (reserved=0) and settlement just logs would_charge.
     # Streaming is covered because this runs before the stream starts, i.e.
     # before the first token leaves the server.
+    # Grid-side prompt count (tiktoken) — the ONLY prompt-token figure we bill on.
+    # A worker could under/over-report `usage.prompt_tokens`; we never trust it for
+    # money. Computed once so the reservation and the final settlement agree.
+    prompt_toks = den.count_tokens(prompt)
+
     reserved = 0
     if credits.CHARGING_ENABLED:
         auth = await credits.authorize_request(
-            user, model, den.count_tokens(prompt), request.max_tokens or 0, job_id
+            user, model, prompt_toks, request.max_tokens, job_id
         )
         if not auth["ok"]:
             raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
@@ -399,14 +410,21 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
 
     # Submit to Redis Stream for workers. _legacy_rows tells the WS handler
     # whether the horde bookkeeping rows exist for this job.
+    # If dispatch itself fails the job never runs, so the held reservation must be
+    # released — otherwise funds are stranded with no settlement path.
     payload["_legacy_rows"] = legacy_rows
-    await job_queue.submit_job(job_id, payload, [model])
+    try:
+        await job_queue.submit_job(job_id, payload, [model])
+    except Exception:
+        if reserved and credits.CHARGING_ENABLED:
+            await credits.refund_reservation(user.get("account_id"), reserved, job_id)
+        raise
 
     completion_id = fmt._gen_id()
 
     if request.stream:
         return StreamingResponse(
-            _stream_openai(job_id, model, completion_id, user, request.seed, reserved),
+            _stream_openai(job_id, model, completion_id, user, request.seed, reserved, prompt_toks),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -415,10 +433,10 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
             },
         )
     else:
-        return await _collect_response(job_id, model, user, request.seed, reserved)
+        return await _collect_response(job_id, model, user, request.seed, reserved, prompt_toks)
 
 
-async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict | None = None, seed: int | None = None, reserved: int = 0):
+async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict | None = None, seed: int | None = None, reserved: int = 0, prompt_toks: int = 0):
     """SSE generator for OpenAI streaming format.
 
     Faithful passthrough: the grid emits one leading role chunk, then relays
@@ -430,52 +448,82 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
     chunk = fmt.openai_chunk("", model, completion_id, is_first=True)
     yield f"data: {json.dumps(chunk)}\n\n"
 
-    async for data in token_stream.subscribe_tokens(job_id):
-        if data.get("text") == token_stream.DONE_SENTINEL:
-            # A mid-stream error (bad request, worker/backend failure): surface
-            # it as an OpenAI error event so the client sees the real reason
-            # instead of a silently-truncated reply.
-            err = data.get("error")
-            if err:
-                yield f"data: {json.dumps({'error': {'message': err, 'type': 'invalid_request_error' if data.get('code') == 400 else 'upstream_error'}})}\n\n"
-                yield "data: [DONE]\n\n"
-                return
-            # Terminal finish_reason chunk, then optional usage chunk.
-            finish = data.get("finish_reason") or "stop"
-            yield f"data: {json.dumps(fmt.openai_chunk_raw({}, model, completion_id, finish_reason=finish))}\n\n"
-            usage = data.get("usage")
-            grid_meta = data.get("grid")
-            if seed is not None:
-                grid_meta = {**(grid_meta or {}), "seed": seed}
-            if usage or grid_meta:
-                usage_chunk = fmt.openai_usage_chunk(model, completion_id, usage or {})
-                # Additive provenance on the final chunk (worker, gen_time, ttft,
-                # tokens_per_s) — standard clients ignore the extra `grid` key.
-                if grid_meta:
-                    usage_chunk["grid"] = grid_meta
-                yield f"data: {json.dumps(usage_chunk)}\n\n"
-            u = usage or {}
-            await _settle(
-                user, model, u.get("prompt_tokens", 0), u.get("completion_tokens", 0), job_id, reserved
-            )
-            break
+    # Grid-side completion accumulator: we count what the grid ACTUALLY relayed
+    # (content + reasoning), not what the worker claims in `usage`. This is the
+    # figure we bill on — a worker can omit/underreport usage but cannot make the
+    # grid relay tokens it didn't forward to the client.
+    relayed = []
+    # Settlement must happen EXACTLY once and must never be skipped: a client that
+    # disconnects mid-stream cancels this generator, so the reservation would be
+    # stranded without a finally. The finally settles on tokens-relayed-so-far
+    # (reconcile refunds the unused remainder).
+    settled = False
 
-        delta = data.get("delta")
-        if delta is not None:
-            # Faithful path — relay the raw backend delta untouched.
-            chunk = fmt.openai_chunk_raw(delta, model, completion_id, finish_reason=data.get("finish_reason"))
-        elif data.get("reasoning"):
-            # Legacy worker path — reasoning channel.
-            chunk = fmt.openai_chunk("", model, completion_id, reasoning=data.get("text", ""))
-        else:
-            # Legacy worker path — plain content.
-            chunk = fmt.openai_chunk(data.get("text", ""), model, completion_id)
-        yield f"data: {json.dumps(chunk)}\n\n"
+    try:
+        async for data in token_stream.subscribe_tokens(job_id):
+            if data.get("text") == token_stream.DONE_SENTINEL:
+                # A mid-stream error (bad request, worker/backend failure): surface
+                # it as an OpenAI error event so the client sees the real reason
+                # instead of a silently-truncated reply.
+                err = data.get("error")
+                if err:
+                    yield f"data: {json.dumps({'error': {'message': err, 'type': 'invalid_request_error' if data.get('code') == 400 else 'upstream_error'}})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    # Job failed: settle on whatever was relayed before the error
+                    # (usually nothing → full refund). Never strand the reserve.
+                    bill_completion = den.count_tokens("".join(relayed))
+                    await _settle(user, model, prompt_toks, bill_completion, job_id, reserved)
+                    settled = True
+                    return
+                # Terminal finish_reason chunk, then optional usage chunk.
+                finish = data.get("finish_reason") or "stop"
+                yield f"data: {json.dumps(fmt.openai_chunk_raw({}, model, completion_id, finish_reason=finish))}\n\n"
+                usage = data.get("usage")
+                grid_meta = data.get("grid")
+                if seed is not None:
+                    grid_meta = {**(grid_meta or {}), "seed": seed}
+                if usage or grid_meta:
+                    usage_chunk = fmt.openai_usage_chunk(model, completion_id, usage or {})
+                    # Additive provenance on the final chunk (worker, gen_time, ttft,
+                    # tokens_per_s) — standard clients ignore the extra `grid` key.
+                    if grid_meta:
+                        usage_chunk["grid"] = grid_meta
+                    yield f"data: {json.dumps(usage_chunk)}\n\n"
+                # Settle on GRID-counted tokens, never worker-reported usage.
+                bill_completion = den.count_tokens("".join(relayed))
+                await _settle(user, model, prompt_toks, bill_completion, job_id, reserved)
+                settled = True
+                break
 
-    yield "data: [DONE]\n\n"
+            delta = data.get("delta")
+            if delta is not None:
+                # Faithful path — relay the raw backend delta untouched.
+                if delta.get("content"):
+                    relayed.append(delta["content"])
+                if delta.get("reasoning_content"):
+                    relayed.append(delta["reasoning_content"])
+                chunk = fmt.openai_chunk_raw(delta, model, completion_id, finish_reason=data.get("finish_reason"))
+            elif data.get("reasoning"):
+                # Legacy worker path — reasoning channel.
+                relayed.append(data.get("text", ""))
+                chunk = fmt.openai_chunk("", model, completion_id, reasoning=data.get("text", ""))
+            else:
+                # Legacy worker path — plain content.
+                relayed.append(data.get("text", ""))
+                chunk = fmt.openai_chunk(data.get("text", ""), model, completion_id)
+            yield f"data: {json.dumps(chunk)}\n\n"
+
+        yield "data: [DONE]\n\n"
+    finally:
+        # Disconnect / cancellation / unexpected exit: settle once on what we
+        # relayed so the held reservation is reconciled (and the remainder
+        # refunded) instead of stranded. _settle swallows its own errors.
+        if not settled:
+            bill_completion = den.count_tokens("".join(relayed))
+            await _settle(user, model, prompt_toks, bill_completion, job_id, reserved)
 
 
-async def _collect_response(job_id: str, model: str, user: dict | None = None, seed: int | None = None, reserved: int = 0) -> dict:
+async def _collect_response(job_id: str, model: str, user: dict | None = None, seed: int | None = None, reserved: int = 0, prompt_toks: int = 0) -> dict:
     """Collect the stream and return a single non-streaming response.
 
     The worker always streams; the grid assembles. The DONE event carries the
@@ -516,9 +564,17 @@ async def _collect_response(job_id: str, model: str, user: dict | None = None, s
         else:
             content += data.get("text", "")
 
-    prompt_tokens = (usage or {}).get("prompt_tokens", 0)
-    completion_tokens = (usage or {}).get("completion_tokens", 0)
-    await _settle(user, model, prompt_tokens, completion_tokens, job_id, reserved)
+    # BILL on grid-counted tokens: the prompt count we computed pre-dispatch and a
+    # fresh tiktoken count of the content+reasoning the grid actually assembled.
+    # Worker `usage` is for client DISPLAY only (faithful passthrough); it never
+    # moves money. Falls back to the grid count if the worker omits usage.
+    bill_completion = den.count_tokens(content + reasoning)
+    await _settle(user, model, prompt_toks, bill_completion, job_id, reserved)
+
+    # Client-facing usage: prefer the worker's report (faithful), fall back to the
+    # grid count so the envelope is never zeroed by a silent worker.
+    prompt_tokens = (usage or {}).get("prompt_tokens") or prompt_toks
+    completion_tokens = (usage or {}).get("completion_tokens") or bill_completion
     resp = fmt.openai_response(
         content,
         model,

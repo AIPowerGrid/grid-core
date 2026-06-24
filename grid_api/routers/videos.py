@@ -145,7 +145,7 @@ async def create_video(
             payload["loras"] = loras
 
         outputs, meta = await media.submit_and_wait(model, "video", payload, media.VIDEO_TIMEOUT,
-                                              account_id=user["id"], concurrency_limit=media.MEDIA_CONCURRENCY,
+                                              account_id=user.get("account_id"), concurrency_limit=media.MEDIA_CONCURRENCY,
                                               preferred_worker=body.worker or "", progress_token=body.progress_token or "")
 
         want_b64 = body.response_format == "b64_json"
