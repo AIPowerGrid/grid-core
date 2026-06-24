@@ -194,19 +194,26 @@ async def _chat_media(request: ChatCompletionRequest, kind: str, account_id=None
             model, source_image, size_was_set=False)
 
     steps, cfg_scale, sampler = media.diffusion_params(model, {})
+    seed = media.normalize_seed(request.seed)
+    seeds = media.seeds_for_outputs(seed, 1)
     if kind == "video":
-        width, height = 768, 512
+        width, height = int(recipe_inputs.get("width", 768)), int(recipe_inputs.get("height", 512))
+        frames, effective_seconds = media.normalize_video_timing(4.0, 24)
+        recipe_inputs.update({"width": width, "height": height, "seconds": effective_seconds, "fps": 24, "frames": frames})
         payload = {
             "prompt": prompt, "n": 1, "width": width, "height": height,
-            "frames": 4 * 24, "fps": 24, "steps": steps, "sampler_name": sampler,
-            "cfg_scale": cfg_scale, "ext": "mp4",
+            "frames": frames, "fps": 24, "length": frames, "video_length": frames,
+            "steps": steps, "sampler_name": sampler, "cfg_scale": cfg_scale,
+            "ext": "mp4", "seed": seed, "seeds": seeds,
         }
         timeout = media.VIDEO_TIMEOUT
     else:
-        width, height = 1024, 1024
+        width, height = int(recipe_inputs.get("width", 1024)), int(recipe_inputs.get("height", 1024))
+        recipe_inputs.update({"width": width, "height": height})
         payload = {
             "prompt": prompt, "n": 1, "width": width, "height": height,
-            "steps": steps, "sampler_name": sampler, "cfg_scale": cfg_scale, "ext": "webp",
+            "steps": steps, "sampler_name": sampler, "cfg_scale": cfg_scale,
+            "ext": "webp", "seed": seed, "seeds": seeds,
         }
         timeout = media.IMAGE_TIMEOUT
     if recipe_inputs:

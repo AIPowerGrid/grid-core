@@ -93,14 +93,17 @@ async def create_video(
 
         await quota.check_and_consume(dict(user))
 
-        width, height = media.parse_size(body.size, default=(768, 512))
-        frames = min(int(body.seconds * body.fps), media.MAX_FRAMES)
-        steps, cfg_scale, sampler = media.diffusion_params(model, extra)
-
-        # Recipe knobs: pass ONLY what the caller explicitly set, so anything omitted
-        # falls back to the recipe's baked default (the happy path). Out-of-range
-        # values are rejected (422) by the resolver against the model's allowed band.
         set_fields = body.model_fields_set
+        width, height = media.parse_size(body.size, default=(768, 512), strict=("size" in set_fields))
+        frames, effective_seconds = media.normalize_video_timing(body.seconds, body.fps)
+        steps, cfg_scale, sampler = media.diffusion_params(model, extra)
+        seed = media.normalize_seed(extra.get("seed"))
+        seeds = media.seeds_for_outputs(seed, body.n)
+
+        # Recipe knobs: pass effective dimensions/timing every time so the recipe,
+        # legacy payload, ledger reward, and billing all agree on what ran.
+        # Out-of-range values are rejected (422) by the resolver against the
+        # model's allowed band.
         recipe_inputs: dict = {}
 
         # img2video: decode the inline start frame, AUTO-MATCH output size to it
@@ -110,12 +113,13 @@ async def create_video(
             dims, source_image_url = await media.prepare_source_image(
                 model, body.image, size_was_set=("size" in set_fields))
             recipe_inputs.update(dims)
+            if dims:
+                width, height = int(dims["width"]), int(dims["height"])
 
-        if "size" in set_fields:
-            recipe_inputs["width"], recipe_inputs["height"] = width, height
-        if "seconds" in set_fields:
-            recipe_inputs["seconds"] = body.seconds
-        # fps stays baked in the recipe (LTX is trained around 24); not exposed.
+        recipe_inputs["width"], recipe_inputs["height"] = width, height
+        recipe_inputs["seconds"] = effective_seconds
+        recipe_inputs["fps"] = body.fps
+        recipe_inputs["frames"] = frames
         recipe_inputs.update(media.advanced_knob_inputs(extra))  # steps/cfg/sampler/scheduler
 
         # LoRAs: gate consistently with /v1/images (was silently ignored on video — a
@@ -129,12 +133,16 @@ async def create_video(
             "height": height,
             "frames": frames,
             "fps": body.fps,
+            "length": frames,
+            "video_length": frames,
             "steps": steps,
             "sampler_name": sampler,
             "cfg_scale": cfg_scale,
             "ext": "mp4",
+            "seed": seed,
+            "seeds": seeds,
         }
-        for k in ("seed", "negative_prompt"):
+        for k in ("negative_prompt",):
             if extra.get(k) is not None:
                 payload[k] = extra[k]
         if recipe_inputs:
@@ -150,14 +158,13 @@ async def create_video(
 
         want_b64 = body.response_format == "b64_json"
         data = []
-        for o in outputs:
+        for i, o in enumerate(outputs):
             item = {}
             if want_b64:
                 item["b64_json"] = await media.url_to_b64(o["url"])
             else:
                 item["url"] = o["url"]
-            if o.get("seed") is not None:
-                item["seed"] = o["seed"]
+            item["seed"] = o.get("seed") if o.get("seed") is not None else seeds[min(i, len(seeds) - 1)]
             data.append(item)
 
         return {"created": int(time.time()), "data": data, "grid": meta}

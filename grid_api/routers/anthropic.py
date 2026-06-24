@@ -29,6 +29,7 @@ from ._passthrough import (
     collect_passthrough,
     deep_sanitize,
     new_passthrough_job_id,
+    normalize_output_budget,
     stream_passthrough,
     submit_passthrough_job,
 )
@@ -80,7 +81,10 @@ async def create_message(
         await quota.check_and_consume(dict(user))
 
         raw = deep_sanitize(dict(body))
-        max_len = int(raw.get("max_tokens") or 4096)
+        try:
+            max_len = normalize_output_budget(API_FORMAT, raw)
+        except HTTPException as e:
+            raise _err(e.status_code, "invalid_request_error", str(e.detail))
 
         # Billing: reserve BEFORE dispatch on a grid-side prompt count (never the
         # worker's). 402 (Anthropic-shaped) on insufficient funds. Settlement on

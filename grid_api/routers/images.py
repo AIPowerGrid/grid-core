@@ -110,20 +110,25 @@ async def create_image(
 
         await quota.check_and_consume(dict(user))
 
-        width, height = media.parse_size(body.size)
-        steps, cfg_scale, sampler = media.diffusion_params(model, extra)
-
-        # Recipe knobs (for recipe-governed image models): pass only caller-set size;
-        # img2img source frame auto-matches output size to it unless `size` is pinned.
         set_fields = body.model_fields_set
+        width, height = media.parse_size(body.size, strict=("size" in set_fields))
+        steps, cfg_scale, sampler = media.diffusion_params(model, extra)
+        seed = media.normalize_seed(extra.get("seed"))
+        seeds = media.seeds_for_outputs(seed, body.n)
+
+        # Recipe knobs (for recipe-governed image models): pass the effective
+        # dimensions every time so recipe dispatch, den, billing, and response
+        # metadata all describe the same job. img2img source frames auto-match
+        # unless the caller pinned `size`.
         recipe_inputs: dict = {}
         source_image_url = None
         if body.image:
             dims, source_image_url = await media.prepare_source_image(
                 model, body.image, size_was_set=("size" in set_fields))
             recipe_inputs.update(dims)
-        if "size" in set_fields:
-            recipe_inputs["width"], recipe_inputs["height"] = width, height
+            if dims:
+                width, height = int(dims["width"]), int(dims["height"])
+        recipe_inputs["width"], recipe_inputs["height"] = width, height
         recipe_inputs.update(media.advanced_knob_inputs(extra))  # shared w/ videos (no drift)
 
         payload = {
@@ -135,9 +140,11 @@ async def create_image(
             "sampler_name": sampler,
             "cfg_scale": cfg_scale,
             "ext": out_ext,
+            "seed": seed,
+            "seeds": seeds,
         }
         # Pass advanced knobs through to the worker when provided.
-        for k in ("seed", "negative_prompt"):
+        for k in ("negative_prompt",):
             if extra.get(k) is not None:
                 payload[k] = extra[k]
         if recipe_inputs:
@@ -153,14 +160,13 @@ async def create_image(
 
         want_b64 = body.response_format == "b64_json"
         data = []
-        for o in outputs:
+        for i, o in enumerate(outputs):
             item = {"revised_prompt": prompt}
             if want_b64:
                 item["b64_json"] = await media.url_to_b64(o["url"])
             else:
                 item["url"] = o["url"]
-            if o.get("seed") is not None:
-                item["seed"] = o["seed"]
+            item["seed"] = o.get("seed") if o.get("seed") is not None else seeds[min(i, len(seeds) - 1)]
             data.append(item)
 
         # `grid` carries who ran the job + how long, so a UI can show per-image

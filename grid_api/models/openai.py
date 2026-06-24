@@ -39,7 +39,7 @@ class ChatCompletionRequest(BaseModel):
     messages: list[ChatMessage]
     temperature: float = Field(default=0.7, ge=0, le=2)
     top_p: float = Field(default=0.9, ge=0, le=1)
-    max_tokens: Optional[int] = Field(default=512, ge=1, le=32768)
+    max_tokens: Optional[int] = Field(default=None, ge=1, le=32768)
     stream: bool = False
     n: int = Field(default=1, ge=1, le=4)
     # Modeled so they're documented + validated; still forwarded verbatim.

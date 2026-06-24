@@ -24,6 +24,7 @@ from ._passthrough import (
     collect_passthrough,
     deep_sanitize,
     new_passthrough_job_id,
+    normalize_output_budget,
     stream_passthrough,
     submit_passthrough_job,
 )
@@ -68,7 +69,7 @@ async def create_response(
         await quota.check_and_consume(dict(user))
 
         raw = deep_sanitize(dict(body))
-        max_len = int(raw.get("max_output_tokens") or raw.get("max_tokens") or 4096)
+        max_len = normalize_output_budget(API_FORMAT, raw)
 
         # Billing: reserve BEFORE dispatch on a grid-side prompt count (never the
         # worker's). Fail closed with 402 on insufficient funds. Settlement (on

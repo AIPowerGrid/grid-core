@@ -16,6 +16,8 @@ import io
 import json
 import logging
 import os
+import re
+import secrets
 from typing import Optional
 from uuid import uuid4
 
@@ -34,6 +36,10 @@ DEFAULT_VIDEO_MODEL = "LTX-2.3"
 # that ties up a GPU (or OOMs the worker).
 MIN_DIM, MAX_DIM = 256, 1536
 MAX_FRAMES = 240  # ~10s @ 24fps ceiling
+MAX_SEED = 2**53 - 1
+MAX_STEPS = int(os.getenv("MEDIA_MAX_STEPS", "80"))
+MAX_CFG_SCALE = float(os.getenv("MEDIA_MAX_CFG_SCALE", "30"))
+_SAMPLER_RE = re.compile(r"^[A-Za-z0-9_.:+-]{1,64}$")
 
 IMAGE_TIMEOUT = 300
 VIDEO_TIMEOUT = 600
@@ -137,12 +143,81 @@ def advanced_knob_inputs(extra: dict) -> dict:
     return out
 
 
-def parse_size(size: str, default=(1024, 1024)) -> tuple[int, int]:
+def parse_size(size: str, default=(1024, 1024), *, strict: bool = False) -> tuple[int, int]:
     try:
         w, h = (int(x) for x in str(size).lower().split("x"))
-        return clamp_dim(w), clamp_dim(h)
     except (ValueError, AttributeError):
+        if strict:
+            raise HTTPException(status_code=422, detail="size must be formatted as WIDTHxHEIGHT")
         return default
+    normalized = clamp_dim(w), clamp_dim(h)
+    if strict and normalized != (w, h):
+        raise HTTPException(
+            status_code=422,
+            detail=f"size dimensions must be multiples of 64 between {MIN_DIM} and {MAX_DIM}",
+        )
+    return normalized
+
+
+def normalize_seed(value) -> int:
+    """Seed contract: omitted/null randomizes; any explicit non-negative int is honored."""
+    if value is None or value == "":
+        return secrets.randbelow(MAX_SEED + 1)
+    try:
+        seed = int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="seed must be an integer")
+    if seed < 0 or seed > MAX_SEED:
+        raise HTTPException(status_code=422, detail=f"seed must be between 0 and {MAX_SEED}")
+    return seed
+
+
+def seeds_for_outputs(seed: int, n: int) -> list[int]:
+    count = max(int(n or 1), 1)
+    return [(int(seed) + i) % (MAX_SEED + 1) for i in range(count)]
+
+
+def normalize_video_timing(seconds: float, fps: int) -> tuple[int, float]:
+    try:
+        fps_i = int(fps)
+        frames = int(round(float(seconds) * fps_i))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="seconds and fps must be numeric")
+    if frames < 1:
+        raise HTTPException(status_code=422, detail="video must contain at least 1 frame")
+    if frames > MAX_FRAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"seconds * fps produces {frames} frames; max is {MAX_FRAMES}",
+        )
+    return frames, frames / fps_i
+
+
+def _validate_int_knob(name: str, value, lo: int, hi: int) -> int:
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail=f"{name} must be an integer")
+    if v < lo or v > hi:
+        raise HTTPException(status_code=422, detail=f"{name} must be between {lo} and {hi}")
+    return v
+
+
+def _validate_float_knob(name: str, value, lo: float, hi: float) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail=f"{name} must be a number")
+    if v < lo or v > hi:
+        raise HTTPException(status_code=422, detail=f"{name} must be between {lo:g} and {hi:g}")
+    return v
+
+
+def _validate_sampler(value) -> str:
+    sampler = str(value)
+    if not _SAMPLER_RE.fullmatch(sampler):
+        raise HTTPException(status_code=422, detail="sampler contains unsupported characters")
+    return sampler
 
 
 def diffusion_params(model: str, overrides: dict) -> tuple[int, float, str]:
@@ -154,10 +229,17 @@ def diffusion_params(model: str, overrides: dict) -> tuple[int, float, str]:
     name = model.lower()
     is_flux = "flux" in name
     is_fast = "klein" in name or "schnell" in name
-    steps = overrides.get("steps") or (4 if is_fast else (20 if is_flux else 30))
-    cfg = overrides.get("cfg_scale") or (1.0 if is_fast else (3.5 if is_flux else 7.5))
-    sampler = overrides.get("sampler") or ("euler" if is_flux else "k_euler")
-    return int(steps), float(cfg), str(sampler)
+    default_steps = 4 if is_fast else (20 if is_flux else 30)
+    default_cfg = 1.0 if is_fast else (3.5 if is_flux else 7.5)
+    default_sampler = "euler" if is_flux else "k_euler"
+    steps = overrides.get("steps") if overrides.get("steps") is not None else default_steps
+    cfg = overrides.get("cfg_scale") if overrides.get("cfg_scale") is not None else default_cfg
+    sampler = overrides.get("sampler") if overrides.get("sampler") is not None else default_sampler
+    return (
+        _validate_int_knob("steps", steps, 1, MAX_STEPS),
+        _validate_float_knob("cfg_scale", cfg, 0, MAX_CFG_SCALE),
+        _validate_sampler(sampler),
+    )
 
 
 async def prepare_source_image(model: str, image_value: str, *, size_was_set: bool) -> tuple[dict, str]:

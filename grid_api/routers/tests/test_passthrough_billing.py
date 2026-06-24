@@ -13,6 +13,7 @@ import json
 import uuid
 
 import pytest
+from fastapi import HTTPException
 
 from grid_api.routers import _passthrough as pt
 from grid_api.services import credits, den, token_stream
@@ -94,6 +95,19 @@ def test_stream_delta_text_both_shapes():
     assert pt._stream_delta_text(resp) == "world"
     assert pt._stream_delta_text(ping) == ""
     assert pt._stream_delta_text("not json") == ""
+
+
+def test_normalize_output_budget_updates_raw_request():
+    anth = {}
+    assert pt.normalize_output_budget("anthropic", anth) == pt.DEFAULT_OUTPUT_TOKENS
+    assert anth["max_tokens"] == pt.DEFAULT_OUTPUT_TOKENS
+
+    resp = {"max_tokens": 123}
+    assert pt.normalize_output_budget("openai-responses", resp) == 123
+    assert resp["max_output_tokens"] == 123
+
+    with pytest.raises(HTTPException):
+        pt.normalize_output_budget("openai-responses", {"max_output_tokens": 0})
 
 
 # ── completion-token helper (what worker_ws bills on) ────────────────────────

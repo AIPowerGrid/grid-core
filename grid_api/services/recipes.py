@@ -241,9 +241,15 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
 
     # Seed: first-class. Default to a fresh one; always echo back (for NFT repro).
     seed = inputs.get("seed")
-    if seed in (None, "", 0):
+    if seed in (None, ""):
         seed = secrets.randbelow(2**53)
-    inputs["seed"] = int(seed)
+    try:
+        seed = int(seed)
+    except (TypeError, ValueError):
+        raise RecipeError(f"'seed' must be an integer, got {seed!r}")
+    if seed < 0 or seed > 2**53 - 1:
+        raise RecipeError(f"'seed' must be between 0 and {2**53 - 1}")
+    inputs["seed"] = seed
 
     for name, path in r.vars.items():
         if name not in inputs or inputs[name] is None:

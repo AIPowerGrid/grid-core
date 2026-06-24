@@ -38,6 +38,37 @@ SSE_HEADERS = {
     "X-Accel-Buffering": "no",
 }
 
+DEFAULT_OUTPUT_TOKENS = 4096
+MAX_OUTPUT_TOKENS = 32768
+
+
+def normalize_output_budget(api_format: str, raw_request: dict) -> int:
+    """Normalize the output cap into the raw request before reserve/dispatch."""
+    if api_format == "anthropic":
+        field = "max_tokens"
+        value = raw_request.get(field)
+    else:
+        field = "max_output_tokens"
+        value = raw_request.get(field)
+        if value is None:
+            value = raw_request.get("max_tokens")
+
+    if value in (None, ""):
+        max_len = DEFAULT_OUTPUT_TOKENS
+    else:
+        try:
+            max_len = int(value)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail=f"{field} must be an integer")
+        if max_len < 1 or max_len > MAX_OUTPUT_TOKENS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{field} must be between 1 and {MAX_OUTPUT_TOKENS}",
+            )
+
+    raw_request[field] = max_len
+    return max_len
+
 
 def deep_sanitize(obj):
     """Recursively scrub credentials from every string in a request body.
