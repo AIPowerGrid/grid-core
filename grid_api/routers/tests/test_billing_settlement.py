@@ -1,18 +1,18 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Router-level money tests for the second billing pass (audit re-review).
+"""Chat collector billing behavior after the durable-settlement refactor.
 
-These prove the invariants the auditor flagged as still-broken in the first pass:
+Design: the HTTP response collectors (`_stream_openai` / `_collect_response`) are
+NO LONGER the settler. LIVE money is settled durably + authoritatively in the
+worker-WS handler (see test_reservation_lifecycle.py). The collectors only:
 
-  * Settlement bills on GRID-counted tokens, NEVER worker-reported `usage`
-    (a lying/silent worker can't zero or inflate the bill).
-  * A client disconnect mid-stream still settles in the `finally` — the held
-    reservation is reconciled, not stranded.
-  * A worker error still settles (so the reserve is released, not stranded).
+  * feed dry-run OBSERVABILITY (log would-charge on grid counts), and
+  * compute the client-facing usage on grid counts (never zeroed by a silent
+    worker), as faithful display.
 
-They drive `_stream_openai` / `_collect_response` directly with a faked
-`token_stream.subscribe_tokens`, capturing what reaches `credits.reconcile`.
+These tests pin exactly that: dry-run observes on grid counts; live mode does
+NOT settle in the collector; display usage falls back to grid counts.
 """
 
 import uuid
@@ -20,13 +20,12 @@ import uuid
 import pytest
 
 from grid_api.routers import openai as o
-from grid_api.services import credits, token_stream
+from grid_api.services import credits, den, token_stream
 
 MODEL = "gpt-oss-120b"
 
 
 def _fake_subscribe(events):
-    """Return an async-generator function that yields the given events."""
     async def gen(job_id, *a, **kw):
         for e in events:
             yield e
@@ -34,45 +33,58 @@ def _fake_subscribe(events):
 
 
 @pytest.fixture
-def capture_reconcile(monkeypatch):
-    """Charging ON; record every reconcile(...) call instead of touching a DB."""
-    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
-    calls = []
+def spy(monkeypatch):
+    """Record charge_request (dry-run observe) and reconcile (live settle) calls."""
+    charge, reconcile = [], []
 
-    async def rec(user, model, p, c, reserved, job_id):
-        calls.append({"p": p, "c": c, "reserved": reserved, "job_id": job_id})
+    async def fake_charge(user, model, p, c, job_id):
+        charge.append({"p": p, "c": c})
+        return {"status": "dry_run", "charged": 0}
 
-    monkeypatch.setattr(credits, "reconcile", rec)
-    return calls
+    async def fake_reconcile(*a, **k):
+        reconcile.append(a)
+
+    monkeypatch.setattr(credits, "charge_request", fake_charge)
+    monkeypatch.setattr(credits, "reconcile", fake_reconcile)
+    return {"charge": charge, "reconcile": reconcile}
 
 
 @pytest.mark.asyncio
-async def test_collect_bills_grid_count_not_worker_usage(monkeypatch, capture_reconcile):
-    content = "hello world, this is the grid actually speaking back to you"
+async def test_collect_observes_grid_count_in_dry_run(monkeypatch, spy):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", False)
+    answer = "Paris, the capital of France, founded over two thousand years ago."
     events = [
-        {"delta": {"content": content}},
-        # Worker LIES: reports zero usage while real content was delivered.
-        {"text": token_stream.DONE_SENTINEL, "full_text": content,
+        {"delta": {"content": answer}},
+        # Worker LIES with zero usage; the grid must observe its OWN count.
+        {"text": token_stream.DONE_SENTINEL, "full_text": answer,
          "usage": {"prompt_tokens": 0, "completion_tokens": 0}, "finish_reason": "stop"},
     ]
     monkeypatch.setattr(o.token_stream, "subscribe_tokens", _fake_subscribe(events))
 
-    resp = await o._collect_response(
-        "job-c", MODEL, {"account_id": uuid.uuid4()}, seed=None, reserved=999, prompt_toks=42
-    )
+    resp = await o._collect_response("j1", MODEL, {"account_id": uuid.uuid4()}, seed=None, prompt_toks=11)
 
-    assert len(capture_reconcile) == 1
-    call = capture_reconcile[0]
-    assert call["p"] == 42                              # grid prompt count, threaded in
-    assert call["c"] == o.den.count_tokens(content)     # grid count, NOT worker's 0
-    assert call["c"] > 0
-    assert call["reserved"] == 999
-    # Client-facing usage falls back to grid counts when the worker zeroes them.
-    assert resp["usage"]["completion_tokens"] == o.den.count_tokens(content)
+    assert len(spy["charge"]) == 1 and not spy["reconcile"]   # observed, did not settle
+    assert spy["charge"][0]["p"] == 11
+    assert spy["charge"][0]["c"] == den.count_tokens(answer) > 0
+    # Display usage falls back to grid count when the worker zeroes it.
+    assert resp["usage"]["completion_tokens"] == den.count_tokens(answer)
 
 
 @pytest.mark.asyncio
-async def test_stream_bills_grid_count_not_worker_usage(monkeypatch, capture_reconcile):
+async def test_collect_does_not_settle_in_live(monkeypatch, spy):
+    """LIVE mode: settlement is worker_ws's job, not the collector's."""
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    events = [{"delta": {"content": "hi there"}},
+              {"text": token_stream.DONE_SENTINEL, "full_text": "hi there", "finish_reason": "stop"}]
+    monkeypatch.setattr(o.token_stream, "subscribe_tokens", _fake_subscribe(events))
+
+    await o._collect_response("j2", MODEL, {"account_id": uuid.uuid4()}, seed=None, prompt_toks=3)
+    assert not spy["charge"] and not spy["reconcile"]  # collector is silent in live
+
+
+@pytest.mark.asyncio
+async def test_stream_observes_grid_count_in_dry_run(monkeypatch, spy):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", False)
     parts = ["The last revolution ", "was metered in kWh, ", "this one in tokens."]
     events = [{"delta": {"content": p}} for p in parts] + [
         {"text": token_stream.DONE_SENTINEL,
@@ -80,74 +92,30 @@ async def test_stream_bills_grid_count_not_worker_usage(monkeypatch, capture_rec
     ]
     monkeypatch.setattr(o.token_stream, "subscribe_tokens", _fake_subscribe(events))
 
-    chunks = []
-    async for c in o._stream_openai("job-s", MODEL, "cid", {"account_id": uuid.uuid4()},
-                                    seed=None, reserved=500, prompt_toks=7):
-        chunks.append(c)
-
-    assert len(capture_reconcile) == 1
-    call = capture_reconcile[0]
-    assert call["p"] == 7
-    assert call["c"] == o.den.count_tokens("".join(parts))  # grid count of relayed text
-    assert call["c"] > 0
+    async for _ in o._stream_openai("j3", MODEL, "cid", {"account_id": uuid.uuid4()}, seed=None, prompt_toks=7):
+        pass
+    assert len(spy["charge"]) == 1 and not spy["reconcile"]
+    assert spy["charge"][0]["c"] == den.count_tokens("".join(parts)) > 0
 
 
 @pytest.mark.asyncio
-async def test_stream_settles_on_disconnect(monkeypatch, capture_reconcile):
-    """Client disconnects before DONE → finally settles the reservation."""
-    events = [{"delta": {"content": "partial answer that the client "}},
-              {"delta": {"content": "never finished reading"}},
-              {"delta": {"content": "...and more"}}]
+async def test_stream_does_not_settle_in_live(monkeypatch, spy):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    events = [{"delta": {"content": "abc"}}, {"text": token_stream.DONE_SENTINEL, "finish_reason": "stop"}]
     monkeypatch.setattr(o.token_stream, "subscribe_tokens", _fake_subscribe(events))
-
-    agen = o._stream_openai("job-d", MODEL, "cid", {"account_id": uuid.uuid4()},
-                            seed=None, reserved=500, prompt_toks=3)
-    await agen.__anext__()  # leading role chunk
-    await agen.__anext__()  # first content delta relayed → "partial answer that the client "
-    await agen.aclose()     # client goes away
-
-    assert len(capture_reconcile) == 1          # settled in finally, not stranded
-    call = capture_reconcile[0]
-    assert call["p"] == 3
-    # Billed only for what was actually relayed before the disconnect.
-    assert call["c"] == o.den.count_tokens("partial answer that the client ")
+    async for _ in o._stream_openai("j4", MODEL, "cid", {"account_id": uuid.uuid4()}, seed=None, prompt_toks=2):
+        pass
+    assert not spy["charge"] and not spy["reconcile"]
 
 
 @pytest.mark.asyncio
-async def test_stream_worker_error_still_settles(monkeypatch, capture_reconcile):
-    events = [{"text": token_stream.DONE_SENTINEL, "error": "backend exploded", "code": 502}]
-    monkeypatch.setattr(o.token_stream, "subscribe_tokens", _fake_subscribe(events))
-
-    chunks = []
-    async for c in o._stream_openai("job-e", MODEL, "cid", {"account_id": uuid.uuid4()},
-                                    seed=None, reserved=500, prompt_toks=9):
-        chunks.append(c)
-
-    # Settled exactly once; nothing relayed → completion 0 → reconcile refunds ~all.
-    assert len(capture_reconcile) == 1
-    assert capture_reconcile[0]["c"] == 0
-    assert any("error" in ch for ch in chunks)
-
-
-@pytest.mark.asyncio
-async def test_settle_is_noop_in_dry_run(monkeypatch):
-    """Dry-run: reconcile is never called; charge_request only logs."""
+async def test_stream_observes_once_on_disconnect(monkeypatch, spy):
     monkeypatch.setattr(credits, "CHARGING_ENABLED", False)
-    reconcile_calls, charge_calls = [], []
-
-    async def rec(*a, **k):
-        reconcile_calls.append(a)
-
-    async def charge(*a, **k):
-        charge_calls.append(a)
-
-    monkeypatch.setattr(credits, "reconcile", rec)
-    monkeypatch.setattr(credits, "charge_request", charge)
-    events = [{"delta": {"content": "hi"}},
-              {"text": token_stream.DONE_SENTINEL, "full_text": "hi", "finish_reason": "stop"}]
+    events = [{"delta": {"content": "first part "}}, {"delta": {"content": "second part"}}]
     monkeypatch.setattr(o.token_stream, "subscribe_tokens", _fake_subscribe(events))
-
-    await o._collect_response("job-dry", MODEL, {"account_id": uuid.uuid4()},
-                              seed=None, reserved=0, prompt_toks=1)
-    assert reconcile_calls == []
-    assert len(charge_calls) == 1
+    agen = o._stream_openai("j5", MODEL, "cid", {"account_id": uuid.uuid4()}, seed=None, prompt_toks=1)
+    await agen.__anext__()  # role
+    await agen.__anext__()  # first delta
+    await agen.aclose()     # disconnect
+    assert len(spy["charge"]) == 1  # observed once in finally
+    assert spy["charge"][0]["c"] == den.count_tokens("first part ")

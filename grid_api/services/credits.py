@@ -34,6 +34,7 @@ from sqlalchemy.exc import IntegrityError
 from ..database import new_session
 from ..v2.schema import credit_ledger as ledger_t
 from ..v2.schema import credits as credits_t
+from ..v2.schema import reservations as reservations_t
 from . import pricing
 
 logger = logging.getLogger("grid_api.credits")
@@ -254,3 +255,111 @@ async def refund_reservation(account_id, reserved_micro: int, job_id) -> None:
         await credit(account_id, reserved_micro, reason="refund:media", ref=f"{job_id}:refund")
     except Exception:
         logger.error("media refund failed account=%s job=%s (refund owed)", account_id, job_id, exc_info=True)
+
+
+# ── Durable per-job reservation lifecycle (worker-WS is the sole settler) ─────
+#
+# The HTTP request handler reserves before dispatch and records a 'held' row.
+# The worker-WS handler — which reaches a terminal state for EVERY job whether
+# or not the client stayed connected — calls settle_job / release_job on the
+# job's outcome. The held→settled UPDATE is the exactly-once guard: only the
+# winning UPDATE moves money, so a duplicate/retried terminal is a no-op and a
+# disconnected client can never strand or double-settle a reservation.
+
+
+async def open_reservation(job_id, account_id, model: str, reserved_micro: int, prompt_toks: int) -> None:
+    """Record durable billing context for a job so the worker-WS terminal handler
+    can settle it without the HTTP collector. Idempotent on job_id (a requeued
+    job keeps its ORIGINAL held row + reservation). Best-effort; never raises.
+    No-op in dry-run so the system still ships dark (no credit-table writes)."""
+    if not CHARGING_ENABLED:
+        return
+    try:
+        async with await new_session() as s:
+            try:
+                await s.execute(sa.insert(reservations_t).values(
+                    job_id=str(job_id), account_id=account_id, model=model,
+                    reserved_micro=int(reserved_micro or 0), prompt_toks=int(prompt_toks or 0),
+                    status="held", created=_now(),
+                ))
+                await s.commit()
+            except IntegrityError:
+                await s.rollback()  # already opened (retry/requeue) — keep the original
+    except Exception:
+        logger.error("open_reservation failed job=%s (settlement context missing)", job_id, exc_info=True)
+
+
+async def _claim_terminal(job_id) -> dict | None:
+    """Flip the reservation held→settled exactly once. Returns the pre-settle
+    context if THIS call won the claim, else None (already settled / unknown)."""
+    async with await new_session() as s:
+        row = (await s.execute(
+            sa.select(reservations_t.c.account_id, reservations_t.c.model,
+                      reservations_t.c.reserved_micro, reservations_t.c.prompt_toks)
+            .where(reservations_t.c.job_id == str(job_id))
+        )).first()
+        if not row:
+            return None
+        res = await s.execute(
+            sa.update(reservations_t)
+            .where(sa.and_(reservations_t.c.job_id == str(job_id),
+                           reservations_t.c.status == "held"))
+            .values(status="settled", settled=_now())
+        )
+        await s.commit()
+        if res.rowcount == 0:
+            return None  # lost the race — another terminal already settled it
+        return {"account_id": row[0], "model": row[1],
+                "reserved_micro": int(row[2] or 0), "prompt_toks": int(row[3] or 0)}
+
+
+async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> None:
+    """Authoritative terminal settlement (called from the worker-WS handler).
+
+    Flips the reservation held→settled exactly once, then reconciles the held
+    amount against ACTUAL grid-counted usage (refund the unused remainder /
+    collect any shortfall). Pass status='failed' for a job that produced nothing
+    billable → full release (refund). The completion count MUST be a grid-side
+    figure (server tiktoken of relayed text), never worker-reported usage.
+    Best-effort + loud on error: a settlement failure is money owed, never a
+    giveaway, and must not crash the worker loop."""
+    try:
+        ctx = await _claim_terminal(job_id)
+        if ctx is None:
+            return  # no reservation, or already settled
+        aid, model = ctx["account_id"], ctx["model"]
+        reserved, prompt_toks = ctx["reserved_micro"], ctx["prompt_toks"]
+
+        if not CHARGING_ENABLED:
+            # Dry-run observability — what we WOULD bill, against grid counts.
+            if status == "ok":
+                cost = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
+                logger.info("[settle:dry] job=%s account=%s model=%s in=%d out=%d "
+                            "would_charge=%d micro-USD ($%.4f)", job_id, aid, model,
+                            prompt_toks, completion_tokens, cost, cost / 1_000_000)
+            else:
+                logger.info("[settle:dry] job=%s released (status=%s)", job_id, status)
+            return
+
+        if not aid or reserved <= 0:
+            return
+        if status != "ok":
+            await credit(aid, reserved, reason="release:failed", ref=f"{job_id}:refund", model=model)
+            return
+        actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
+        diff = reserved - actual
+        if diff > 0:
+            await credit(aid, diff, reason="reconcile:refund", ref=f"{job_id}:refund", model=model)
+        elif diff < 0:
+            extra = await debit(aid, -diff, reason="reconcile:extra", ref=f"{job_id}:extra", model=model)
+            if extra != "ok":
+                logger.warning("settle under-collected account=%s job=%s by %d micro-USD (%s)",
+                               aid, job_id, -diff, extra)
+    except Exception:
+        logger.error("settle_job failed job=%s (refund may be owed)", job_id, exc_info=True)
+
+
+async def release_job(job_id) -> None:
+    """Terminal release for a job that produced nothing billable (client error,
+    worker fault surfaced, give-up). Full refund of the held reservation, once."""
+    await settle_job(job_id, 0, status="failed")

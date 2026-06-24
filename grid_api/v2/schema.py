@@ -238,6 +238,28 @@ credit_ledger = sa.Table(
 )
 
 
+# Durable per-job reservation state. A reserve writes one 'held' row before
+# dispatch; the worker-WS handler (the authority that reaches a terminal state
+# for EVERY job regardless of whether the client stayed connected) flips it
+# held→settled exactly once and reconciles/refunds against the actual
+# grid-counted usage. Keyed by job_id so settlement never depends on the HTTP
+# response collector. account_id/reserved are 0/NULL-tolerant for dry-run rows.
+reservations = sa.Table(
+    "grid_reservations",
+    metadata,
+    sa.Column("job_id", sa.String(64), primary_key=True),
+    sa.Column("account_id", sa.Uuid, nullable=True),  # nullable: legacy/dry-run jobs
+    sa.Column("model", sa.String(255), nullable=False),
+    sa.Column("reserved_micro", sa.BigInteger, nullable=False, default=0),
+    sa.Column("prompt_toks", sa.Integer, nullable=False, default=0),
+    # 'held' until a terminal state settles it; the held→settled UPDATE is the
+    # exactly-once guard (only the winning UPDATE moves money).
+    sa.Column("status", sa.String(16), nullable=False, default="held", index=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+    sa.Column("settled", sa.DateTime(timezone=True), nullable=True),
+)
+
+
 # ── Epochs / settlement (truth, mirrors chain) ──────────────────────────
 
 epochs = sa.Table(

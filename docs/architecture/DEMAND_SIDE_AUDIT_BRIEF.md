@@ -36,14 +36,21 @@ on). These are hard gates, not suggestions:
 - [~] **B1 (SUBSTANTIALLY DONE — core reserve path landed b8d4ca2; second pass
   hardened the leaks) — Prepaid enforcement.** Reserve/authorize *before* dispatch;
   return **402 before queueing** on insufficient funds; reconcile/refund after
-  actual usage. Second-pass fixes (this branch): settlement now bills on
-  **grid-counted** tokens, never worker-reported `usage` (a silent/lying worker
-  can't zero the bill); stranded reservations closed (refund on `submit_job`
-  failure; stream generator settles in a `finally` on client disconnect/cancel);
-  `max_tokens=null` no longer under-reserves. **Remaining before flip:** the
-  reserve→settle is per-request best-effort, not yet bound to job completion at
-  the worker-WS layer (a settlement crash mid-finally could still leak a reserve —
-  acceptable for dry-run, revisit with a sweeper before live).
+  actual usage. Second-pass fixes: settlement bills on **grid-counted** tokens,
+  never worker-reported `usage` (a silent/lying worker can't zero the bill);
+  `max_tokens=null` no longer under-reserves.
+  Third pass — **durable reservation lifecycle** (this branch): a reserve writes a
+  `grid_reservations` 'held' row (Alembic 0004) and the **worker-WS handler is now
+  the sole settler** — it reaches a terminal state for EVERY job (success /
+  client-error / worker-fault / dispatch give-up) regardless of whether the client
+  stayed connected, and flips held→settled **exactly once** (the conditional UPDATE
+  is the guard), reconciling against its own grid-counted completion. The HTTP
+  collectors no longer settle (dry-run observe + display only), so a disconnect can
+  neither strand nor double-settle. **Remaining before flip:** (a) the raw
+  passthrough formats still settle in their HTTP collector (durable-lifecycle
+  migration pending — text only so far); (b) a process crash between reserve and
+  the worker-WS terminal leaves an orphaned 'held' row — needs a periodic sweeper
+  that releases stale holds (funds are recorded, not lost, but owed back).
 - [ ] **B2 — Scoped API keys.** Add key scopes/classes
   (`inference.submit`, `account.admin`, `billing.manage`, `workers.manage`,
   `identity.assert`). Account/payout/key-mgmt routes require admin scope; a

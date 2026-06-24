@@ -39,7 +39,7 @@ from ..database import (
 )
 from ..redis_client import get_redis
 from ..services import accounts as accounts_svc
-from ..services import job_queue, storage, token_stream
+from ..services import credits, job_queue, storage, token_stream
 from ..services import ledger as ledger_svc
 from ..services.den import calculate_den, calculate_media_den, count_tokens
 from ..v2.schema import workers as v2_workers_table
@@ -486,6 +486,7 @@ async def worker_websocket(ws: WebSocket):
                             f"No worker available for the requested model(s): "
                             f"{', '.join(job_models) if job_models else 'unspecified'}.",
                         )
+                        await credits.release_job(job["job_id"])  # gave up → refund the hold
                     continue
 
                 selected_model = matching[0]
@@ -504,6 +505,7 @@ async def worker_websocket(ws: WebSocket):
                             f"No worker available serving the '{job_format}' API for "
                             f"model(s): {', '.join(job_models) if job_models else 'unspecified'}.",
                         )
+                        await credits.release_job(job["job_id"])  # gave up → refund the hold
                     continue
 
                 # Track current job for retry on disconnect
@@ -600,6 +602,7 @@ async def worker_websocket(ws: WebSocket):
                     await token_stream.publish_error(job["job_id"], client_error, code=400)
                     record_job_failed()
                     await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
+                    await credits.release_job(job["job_id"])  # terminal: refund the hold
                     current_job = None
                     continue
 
@@ -627,6 +630,10 @@ async def worker_websocket(ws: WebSocket):
                             job["job_id"], "Worker failed mid-generation; please retry."
                         )
                         await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
+                        # Terminal (surfaced to client, not requeued): refund the hold.
+                        # NB: the token_count==0 branch above REQUEUES, so the
+                        # reservation stays held for the retry — do not release there.
+                        await credits.release_job(job["job_id"])
                     current_job = None
 
                     if strikes >= MAX_STRIKES:
@@ -712,6 +719,15 @@ async def worker_websocket(ws: WebSocket):
 
                 # Record metrics
                 record_job_complete(tokens=effective_tokens, den=den_awarded, duration=gen_time)
+
+                # ── Demand-side settlement (authoritative, durable) ──
+                # We are the terminal authority for this job: settle the held
+                # reservation against a GRID-counted completion (server tiktoken,
+                # capped at the requested max), never the worker's self-report.
+                # Idempotent on the reservation's held→settled flip; a no-op in
+                # dry-run / for jobs that carried no reservation.
+                bill_completion = min(server_token_count, requested_max)
+                await credits.settle_job(job["job_id"], bill_completion)
         finally:
             poll_task.cancel()
 

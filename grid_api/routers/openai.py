@@ -41,24 +41,23 @@ from .worker_ws import get_available_models
 logger = logging.getLogger("grid_api.openai")
 
 
-async def _settle(user, model, prompt_tokens, completion_tokens, job_id, reserved=0):
-    """Settle one completion AFTER the response.
+async def _observe_dry(user, model, prompt_tokens, completion_tokens, job_id):
+    """Dry-run observability ONLY (GRID_CHARGING_ENABLED=0): log the would-charge
+    against grid-counted usage so we can watch pricing on real traffic.
 
-    - dry-run (GRID_CHARGING_ENABLED=0): `charge_request` only LOGS would_charge,
-      never debits — lets us observe pricing against real traffic.
-    - live: `reconcile` the pre-dispatch reservation against actual usage,
-      refunding the unused portion. The charge already happened at reserve time
-      (pre-dispatch), so settlement only adjusts.
-    Settlement must NEVER break a response (it's already sent), so errors are
-    swallowed here — the money-correctness gate is the pre-dispatch reserve."""
+    LIVE settlement is NOT done here — it's durable and authoritative in the
+    worker-WS handler (credits.settle_job), which reaches a terminal state for
+    every job whether or not the client stayed connected. Doing it here too would
+    double-settle and depend on the client staying connected. Never breaks a
+    response (already sent), so errors are swallowed."""
+    if credits.CHARGING_ENABLED:
+        return
     try:
-        p, c = int(prompt_tokens or 0), int(completion_tokens or 0)
-        if credits.CHARGING_ENABLED:
-            await credits.reconcile(user, model, p, c, reserved, job_id)
-        else:
-            await credits.charge_request(user, model, p, c, job_id)
+        await credits.charge_request(
+            user, model, int(prompt_tokens or 0), int(completion_tokens or 0), job_id
+        )
     except Exception:
-        logger.debug("settle failed (non-fatal)", exc_info=True)
+        logger.debug("dry-run observe failed (non-fatal)", exc_info=True)
 
 router = APIRouter()
 
@@ -408,6 +407,11 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
             raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
         reserved = auth["reserved"]
 
+    # Durable reservation: record the held amount + grid prompt count keyed by
+    # job_id so the worker-WS handler (the terminal authority) can settle this job
+    # without depending on the client staying connected. No-op in dry-run.
+    await credits.open_reservation(job_id, user.get("account_id"), model, reserved, prompt_toks)
+
     # Submit to Redis Stream for workers. _legacy_rows tells the WS handler
     # whether the horde bookkeeping rows exist for this job.
     # If dispatch itself fails the job never runs, so the held reservation must be
@@ -416,15 +420,14 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
     try:
         await job_queue.submit_job(job_id, payload, [model])
     except Exception:
-        if reserved and credits.CHARGING_ENABLED:
-            await credits.refund_reservation(user.get("account_id"), reserved, job_id)
+        await credits.release_job(job_id)
         raise
 
     completion_id = fmt._gen_id()
 
     if request.stream:
         return StreamingResponse(
-            _stream_openai(job_id, model, completion_id, user, request.seed, reserved, prompt_toks),
+            _stream_openai(job_id, model, completion_id, user, request.seed, prompt_toks),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -433,31 +436,30 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
             },
         )
     else:
-        return await _collect_response(job_id, model, user, request.seed, reserved, prompt_toks)
+        return await _collect_response(job_id, model, user, request.seed, prompt_toks)
 
 
-async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict | None = None, seed: int | None = None, reserved: int = 0, prompt_toks: int = 0):
+async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict | None = None, seed: int | None = None, prompt_toks: int = 0):
     """SSE generator for OpenAI streaming format.
 
     Faithful passthrough: the grid emits one leading role chunk, then relays
     each backend delta verbatim (content / reasoning_content / tool_calls), and
     finally a finish_reason chunk + an optional usage chunk. The grid stamps
     only id/model/created — it never rewrites the delta payload.
+
+    Billing note: LIVE settlement is durable + authoritative in the worker-WS
+    handler (credits.settle_job), independent of whether the client stays
+    connected. Here we only feed dry-run OBSERVABILITY, counting completion from
+    the text the grid actually relayed (never worker-reported usage).
     """
     # First chunk: role (the grid's single authoritative role delta).
     chunk = fmt.openai_chunk("", model, completion_id, is_first=True)
     yield f"data: {json.dumps(chunk)}\n\n"
 
-    # Grid-side completion accumulator: we count what the grid ACTUALLY relayed
-    # (content + reasoning), not what the worker claims in `usage`. This is the
-    # figure we bill on — a worker can omit/underreport usage but cannot make the
-    # grid relay tokens it didn't forward to the client.
+    # Grid-side completion accumulator for dry-run observability — count what the
+    # grid ACTUALLY relayed (content + reasoning), never worker `usage`.
     relayed = []
-    # Settlement must happen EXACTLY once and must never be skipped: a client that
-    # disconnects mid-stream cancels this generator, so the reservation would be
-    # stranded without a finally. The finally settles on tokens-relayed-so-far
-    # (reconcile refunds the unused remainder).
-    settled = False
+    observed = False  # log the dry-run would-charge exactly once
 
     try:
         async for data in token_stream.subscribe_tokens(job_id):
@@ -469,12 +471,7 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
                 if err:
                     yield f"data: {json.dumps({'error': {'message': err, 'type': 'invalid_request_error' if data.get('code') == 400 else 'upstream_error'}})}\n\n"
                     yield "data: [DONE]\n\n"
-                    # Job failed: settle on whatever was relayed before the error
-                    # (usually nothing → full refund). Never strand the reserve.
-                    bill_completion = den.count_tokens("".join(relayed))
-                    await _settle(user, model, prompt_toks, bill_completion, job_id, reserved)
-                    settled = True
-                    return
+                    return  # live settlement happens in worker_ws; nothing to observe on error
                 # Terminal finish_reason chunk, then optional usage chunk.
                 finish = data.get("finish_reason") or "stop"
                 yield f"data: {json.dumps(fmt.openai_chunk_raw({}, model, completion_id, finish_reason=finish))}\n\n"
@@ -489,10 +486,8 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
                     if grid_meta:
                         usage_chunk["grid"] = grid_meta
                     yield f"data: {json.dumps(usage_chunk)}\n\n"
-                # Settle on GRID-counted tokens, never worker-reported usage.
-                bill_completion = den.count_tokens("".join(relayed))
-                await _settle(user, model, prompt_toks, bill_completion, job_id, reserved)
-                settled = True
+                await _observe_dry(user, model, prompt_toks, den.count_tokens("".join(relayed)), job_id)
+                observed = True
                 break
 
             delta = data.get("delta")
@@ -515,15 +510,13 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
 
         yield "data: [DONE]\n\n"
     finally:
-        # Disconnect / cancellation / unexpected exit: settle once on what we
-        # relayed so the held reservation is reconciled (and the remainder
-        # refunded) instead of stranded. _settle swallows its own errors.
-        if not settled:
-            bill_completion = den.count_tokens("".join(relayed))
-            await _settle(user, model, prompt_toks, bill_completion, job_id, reserved)
+        # Dry-run only: observe the would-charge once even on disconnect/cancel.
+        # (LIVE money is settled in worker_ws regardless of this generator.)
+        if not observed:
+            await _observe_dry(user, model, prompt_toks, den.count_tokens("".join(relayed)), job_id)
 
 
-async def _collect_response(job_id: str, model: str, user: dict | None = None, seed: int | None = None, reserved: int = 0, prompt_toks: int = 0) -> dict:
+async def _collect_response(job_id: str, model: str, user: dict | None = None, seed: int | None = None, prompt_toks: int = 0) -> dict:
     """Collect the stream and return a single non-streaming response.
 
     The worker always streams; the grid assembles. The DONE event carries the
@@ -564,12 +557,11 @@ async def _collect_response(job_id: str, model: str, user: dict | None = None, s
         else:
             content += data.get("text", "")
 
-    # BILL on grid-counted tokens: the prompt count we computed pre-dispatch and a
-    # fresh tiktoken count of the content+reasoning the grid actually assembled.
-    # Worker `usage` is for client DISPLAY only (faithful passthrough); it never
-    # moves money. Falls back to the grid count if the worker omits usage.
+    # Grid-counted completion (tiktoken of the content+reasoning the grid actually
+    # assembled) — used for dry-run observability and as the display fallback.
+    # LIVE money is settled durably in worker_ws (credits.settle_job), never here.
     bill_completion = den.count_tokens(content + reasoning)
-    await _settle(user, model, prompt_toks, bill_completion, job_id, reserved)
+    await _observe_dry(user, model, prompt_toks, bill_completion, job_id)
 
     # Client-facing usage: prefer the worker's report (faithful), fall back to the
     # grid count so the envelope is never zeroed by a silent worker.
