@@ -33,6 +33,7 @@ from ..database import new_session
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
 from ..v2.schema import api_keys as api_keys_table
+from ..v2.schema import workers as workers_table
 
 logger = logging.getLogger("grid_api.accounts_api")
 
@@ -317,6 +318,63 @@ async def set_payout_wallet(
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
     return {"payout_wallet": value or ""}
+
+
+@router.get("/v1/account/workers")
+async def get_account_workers(
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Workers registered to the signed-in account, with live online status.
+
+    Ownership is by account_id (workers connect with just an API key). `online`
+    is the live Redis presence set; den_earned/jobs_completed are the running
+    counters (authoritative totals always derivable from the ledger)."""
+    user = await _require_v2(apikey, authorization)
+    async with await new_session() as session:
+        rows = (
+            await session.execute(
+                sa.select(
+                    workers_table.c.name,
+                    workers_table.c.type,
+                    workers_table.c.models,
+                    workers_table.c.den_earned,
+                    workers_table.c.jobs_completed,
+                    workers_table.c.last_seen,
+                    workers_table.c.maintenance,
+                ).where(workers_table.c.account_id == user["account_id"])
+            )
+        ).mappings().all()
+
+    # Live presence by worker name (same source as /v1/workers).
+    online_names: set[str] = set()
+    try:
+        from .stats import _active_workers
+
+        online_names = {w.get("name") for w in await _active_workers()}
+    except Exception:
+        logger.debug("account workers: presence lookup failed", exc_info=True)
+
+    workers = [
+        {
+            "name": r["name"],
+            "type": r["type"],
+            "models": r["models"] or [],
+            "den_earned": r["den_earned"] or 0,
+            "jobs_completed": r["jobs_completed"] or 0,
+            "last_seen": r["last_seen"].isoformat() if r["last_seen"] else None,
+            "maintenance": bool(r["maintenance"]),
+            "online": r["name"] in online_names,
+        }
+        for r in rows
+    ]
+    return {
+        "count": len(workers),
+        "online": sum(1 for w in workers if w["online"]),
+        "den_earned": sum(w["den_earned"] for w in workers),
+        "jobs_completed": sum(w["jobs_completed"] for w in workers),
+        "workers": workers,
+    }
 
 
 @router.post("/v1/account/keys")

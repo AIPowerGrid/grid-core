@@ -186,7 +186,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 <div class="card">
 <h3>API Dashboard</h3>
 <p>Interactive API reference with Scalar UI</p>
-<a href="https://dashboard.aipowergrid.io/api-doc">dashboard.aipowergrid.io/api-doc</a>
+<a href="https://console.aipowergrid.io/api-doc">console.aipowergrid.io/api-doc</a>
 </div>
 
 <div class="card">
