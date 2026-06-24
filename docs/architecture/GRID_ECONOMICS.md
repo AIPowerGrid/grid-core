@@ -99,12 +99,15 @@ its own silo and nothing unifies.
 | --- | --- | --- |
 | Console | OAuth/SIWE → grid account ✅ | done |
 | Gallery | grid `/v1` | confirm per-user account, not shared key |
-| Chat (Onyx) | own users, **one shared grid key** | provision a grid account per chat user; send inference with *their* key |
+| Chat (Onyx) | own users, **one shared grid key** | provision a grid account per chat user; chat authenticates with a **scoped bridge key** + a **short-lived signed user assertion** (not a raw header, not the user's raw key threaded through LiteLLM) — see DEMAND_SIDE_AUDIT_BRIEF §2 / B2+B3 |
 | Third-party apps | their API key = a grid account | already native |
 | Agents | API key / x402 wallet | native via x402 |
 
 The chat bridge mirrors what the console already does: on sign-in, find-or-create
-a grid account (internal-token session), and route that user's inference with
+a grid account (internal-token session). Inference is then submitted by a scoped
+bridge key carrying a signed assertion for that user (B2+B3), not the user's raw
+key — equivalent attribution, safer trust model. (Earlier drafts said "send with
+their own key"; superseded by the audit.) Route that user's inference with
 their own key. The moment a user is a grid account, **metering, credits, limits,
 and revenue-share all work for them automatically, everywhere.**
 

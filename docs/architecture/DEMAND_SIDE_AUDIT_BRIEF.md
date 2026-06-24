@@ -25,6 +25,51 @@ in **dry-run** — it computes and logs what it *would* charge but never debits 
 blocks. Nothing in production moves customer money today. We want this audited
 **before** we flip it live.
 
+---
+
+## GO-LIVE BLOCKER CHECKLIST (from the audit — must be ✅ before `GRID_CHARGING_ENABLED=1`)
+
+The independent review (2026-06) confirmed the brief asks the right questions and
+that several risks are **already real in code** (they only bite once charging is
+on). These are hard gates, not suggestions:
+
+- [ ] **B1 — Prepaid enforcement.** Reserve/authorize *before* dispatch; return
+  **402 before queueing** on insufficient funds; reconcile/refund after actual
+  usage. Stop swallowing charge failures in live mode. *(Today: `_meter_charge`
+  swallows errors and charges after the response — streaming charges after it's
+  already streamed → free usage. THE top blocker.)*
+- [ ] **B2 — Scoped API keys.** Add key scopes/classes
+  (`inference.submit`, `account.admin`, `billing.manage`, `workers.manage`,
+  `identity.assert`). Account/payout/key-mgmt routes require admin scope; a
+  bridge key gets `inference.submit` + `identity.assert` only. *(Today: any v2
+  key can do everything.)*
+- [ ] **B3 — Signed user assertions (not a raw header).** Resolves the doc
+  contradiction (see §2). The chat bridge sends a short-lived **signed**
+  assertion (`iss/sub/aud/exp/nonce`) from a scoped bridge key; the grid verifies
+  the signature. No raw `X-Grid-User` trust.
+- [ ] **B4 — Universal metering for ALL job types.** One reserve/debit/reconcile
+  abstraction for chat **and** image **and** video (incl. chat-routed media).
+  Add image/video pricing. *(Today: media does quota only, no credit debit.)*
+- [ ] **B5 — Default-deny unpriced models in enforce mode.** Flip
+  `BLOCK_UNPRICED` semantics so an unpriced/renamed model can't be free when
+  charging is on.
+- [ ] **B6 — Idempotency is structural, not caller-discipline.** `ref` **non-null
+  required** for value-moving ledger rows (Postgres allows multiple NULLs through
+  the unique index); validate in code; tests.
+- [ ] **B7 — Migration ↔ schema reconciliation.** Alembic must match `schema.py`
+  metadata (`grid_ledger.job_id` UNIQUE, telemetry columns, credit-ledger
+  constraints) so ledger invariants are actually enforced + reproducible.
+- [ ] **B8 — Sybil / free-credit hard rules.** Wallet/email uniqueness, rate
+  limits, friction (CAPTCHA / device-IP), abuse scoring; and quota infra must
+  **fail closed (or degrade), not fail open**, on Redis error.
+- [ ] **B9 — Money-invariant tests.** Duplicate-ref idempotent, null-ref
+  rejected, concurrent-debit can't overdraft, insufficient blocks **before**
+  dispatch, stream reserve/refund, media-job charging, unpriced blocked in
+  enforce mode.
+
+**Recommended build order:** B1+B6+B5 (+ tests) → B4 (universal metering) →
+B2+B3 (scoped keys + signed bridge identity) → B7 → B8.
+
 The single most security-sensitive new piece is the **identity bridge** for chat
 (trusting a caller-supplied user header). Please focus there.
 
@@ -70,7 +115,17 @@ conversion UX, developer revenue-share. These are design only.
 *all* chat traffic as a single account — per-user metering/credits/limits are
 impossible as-is.
 
-**Proposed fix — trusted-caller + user header.** The chat keeps its shared key
+**RESOLVED (post-audit): signed user assertions, not a raw header.** The earlier
+"trusted `X-Grid-User` header" idea is **superseded** (it also contradicted
+`GRID_ECONOMICS.md`, which proposed per-user keys). Adopted model = **B2 + B3**:
+the chat authenticates with a **scoped bridge key** (`inference.submit` +
+`identity.assert` only) and sends a **short-lived signed assertion**
+(`iss/sub/aud/exp/nonce`) identifying the end user; the grid verifies the
+signature and meters/attributes to that user. No raw-header trust; the bridge
+key cannot mint keys, change payout wallets, or manage workers. The original
+header proposal is kept below only as the rejected baseline / threat reference.
+
+**Rejected baseline — trusted-caller + user header.** The chat keeps its shared key
 but passes the signed-in user's identity per call (`X-Grid-User: <onyx-user-id>`).
 The grid resolves that to a grid account and meters/enforces against it.
 
