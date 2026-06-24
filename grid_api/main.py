@@ -50,6 +50,23 @@ async def _stale_job_reclaimer():
         await asyncio.sleep(60)  # Check every minute
 
 
+async def _reservation_sweeper():
+    """Background task: release reservations stuck in 'held' past a generous
+    deadline — the safety net for a process crash between reserve and the
+    worker-WS terminal. No-op while charging is dark. Interval/threshold via
+    RESERVATION_SWEEP_SECONDS / RESERVATION_STALE_SECONDS."""
+    import os
+    from .services.credits import sweep_stale_reservations
+    interval = int(os.getenv("RESERVATION_SWEEP_SECONDS", "300") or 300)
+    stale = int(os.getenv("RESERVATION_STALE_SECONDS", "3600") or 3600)
+    while True:
+        try:
+            await sweep_stale_reservations(older_than_seconds=stale)
+        except Exception as e:
+            logger.error(f"Reservation sweeper error: {e}")
+        await asyncio.sleep(interval)
+
+
 async def _recipe_sync_loop():
     """Background task: refresh approved recipes from on-chain RecipeVault.
     No-ops until RECIPEVAULT_ADDRESS/BASE_RPC_URL are set; curated local recipes
@@ -86,11 +103,13 @@ async def lifespan(app: FastAPI):
     # /v1/styles and applied server-side when a request carries `style`.
     _styles.load_local_styles(os.path.join(_base, "styles"))
     recipe_sync = asyncio.create_task(_recipe_sync_loop())
+    sweeper = asyncio.create_task(_reservation_sweeper())
     logger.info("Grid Streaming API ready.")
     yield
     logger.info("Shutting down Grid Streaming API...")
     reclaimer.cancel()
     recipe_sync.cancel()
+    sweeper.cancel()
     await close_p2p()  # Shutdown P2P
     await close_redis()
     await close_database()

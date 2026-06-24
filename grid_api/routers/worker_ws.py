@@ -790,6 +790,7 @@ async def _handle_media_job(
     except Exception as e:
         logger.error(f"Presign failed for job {job_id}: {e}")
         await token_stream.publish_error(job_id, "Storage unavailable; please retry.")
+        await credits.release_job(job_id)  # terminal: never dispatched → refund the hold
         return True
 
     await ws.send_json({
@@ -881,6 +882,9 @@ async def _handle_media_job(
             )
             await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
             record_job_complete(tokens=0, den=den_awarded, duration=gen_time)
+            # Media reserves the EXACT cost up front, so success just lets the hold
+            # stand — flip held→settled with no ledger movement (exactly-once).
+            await credits.settle_exact(job_id)
             return True
 
         elif msg_type == "pong":
@@ -890,6 +894,7 @@ async def _handle_media_job(
             logger.error(f"Worker error on media job {job_id}: {msg.get('message')}")
             await token_stream.publish_error(job_id, msg.get("message", "Worker error"))
             record_job_failed()
+            await credits.release_job(job_id)  # terminal failure → refund the hold
             return True
 
 
@@ -975,6 +980,14 @@ async def _handle_raw_passthrough(
             )
             await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
             record_job_complete(tokens=effective_tokens, den=den_awarded, duration=gen_time)
+
+            # Demand-side settlement (authoritative, durable): bill on a GRID count
+            # of the relayed/assembled output, never the backend's `usage`. Reuses
+            # the held reservation opened atomically at reserve time; no-op in
+            # dry-run / for jobs without a reservation.
+            from ._passthrough import completion_tokens as _pt_completion
+            api_format = payload.get("api_format", "openai-chat")
+            await credits.settle_job(job_id, _pt_completion(api_format, accumulated, full_json))
             return True
 
         elif mtype == "pong":
@@ -989,6 +1002,7 @@ async def _handle_raw_passthrough(
                 logger.error(f"Worker error on raw job {job_id}: {message}")
                 await token_stream.publish_error(job_id, message, code=502)
             record_job_failed()
+            await credits.release_job(job_id)  # terminal failure → refund the hold
             return True
 
 

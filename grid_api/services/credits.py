@@ -302,13 +302,17 @@ async def reconcile(user: dict, model: str, prompt_tokens: int, completion_token
         logger.error("reconcile failed account=%s job=%s (refund may be owed)", aid, job_id, exc_info=True)
 
 
-async def authorize_media(account_id, model: str, job_type: str, n: int, seconds, job_id) -> dict:
+async def authorize_media(account_id, model: str, job_type: str, n: int, seconds, job_id,
+                          *, record_reservation: bool = False) -> dict:
     """Pre-dispatch billing gate for media (image/video). Unlike text, media cost
     is deterministic from the request (n images / video seconds), so we reserve
-    the EXACT cost up front; on success it stands, on failure the caller refunds
-    (see refund_reservation). Same enforce policy as authorize_request:
+    the EXACT cost up front; on success it stands (settle_exact), on failure it's
+    released (release_job). Same enforce policy as authorize_request:
     unpriced / no-account / insufficient → blocked. Returns {ok, reserved, status}.
-    """
+
+    When `record_reservation=True`, the debit and `grid_reservations` row commit
+    in one transaction — the durable worker-WS lifecycle (prompt_toks=0 since media
+    isn't token-priced; settle_exact ignores it)."""
     if not CHARGING_ENABLED:
         return {"ok": True, "reserved": 0, "status": "dry_run"}
     if not pricing.is_priced(model):
@@ -323,6 +327,40 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
     if not account_id:
         return {"ok": False, "reserved": 0, "status": "no_account",
                 "reason": "billing requires a v2 account"}
+    if record_reservation:
+        async with await new_session() as s:
+            try:
+                status = await _debit_in_session(s, account_id, cost,
+                                                 reason=f"reserve:{job_type}", ref=str(job_id), model=model)
+            except IntegrityError:
+                await s.rollback()
+                reserved = await _reservation_reserved_micro(job_id)
+                if reserved is not None:
+                    return {"ok": True, "reserved": reserved, "status": "already"}
+                logger.error("media reserve debit exists without reservation row job=%s account=%s", job_id, account_id)
+                return {"ok": False, "reserved": 0, "status": "reservation_missing",
+                        "reason": "billing reservation is inconsistent; retry with a new request id"}
+            if status == "insufficient":
+                await s.rollback()
+                logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD: insufficient", account_id, model, cost)
+                return {"ok": False, "reserved": 0, "status": "insufficient", "reason": "insufficient credits"}
+            try:
+                await _insert_reservation_in_session(s, job_id, account_id, model, cost, 0)
+            except IntegrityError:
+                await s.rollback()
+                reserved = await _reservation_reserved_micro(job_id)
+                if reserved is not None:
+                    return {"ok": True, "reserved": reserved, "status": "already"}
+                return {"ok": False, "reserved": 0, "status": "reservation_failed",
+                        "reason": "billing reservation failed"}
+            except Exception:
+                await s.rollback()
+                logger.error("media reservation insert failed job=%s account=%s", job_id, account_id, exc_info=True)
+                return {"ok": False, "reserved": 0, "status": "reservation_failed",
+                        "reason": "billing reservation failed"}
+            await s.commit()
+            return {"ok": True, "reserved": cost, "status": "ok"}
+
     status = await debit(account_id, cost, reason=f"reserve:{job_type}", ref=str(job_id), model=model)
     if status in ("ok", "already"):
         return {"ok": True, "reserved": cost, "status": status}
@@ -433,7 +471,53 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
         logger.error("settle_job failed job=%s (refund may be owed)", job_id, exc_info=True)
 
 
+async def settle_exact(job_id) -> None:
+    """Terminal settlement for a job whose cost was reserved EXACTLY (media): the
+    held amount already equals the charge, so the reservation simply stands — flip
+    held→settled with no ledger movement. Exactly-once via the conditional UPDATE;
+    a no-op on a duplicate terminal or unknown job. Best-effort; never raises."""
+    try:
+        async with await new_session() as s:
+            res = await s.execute(
+                sa.update(reservations_t)
+                .where(sa.and_(reservations_t.c.job_id == str(job_id),
+                               reservations_t.c.status == "held"))
+                .values(status="settled", settled=_now())
+            )
+            await s.commit()
+            if res.rowcount == 0:
+                return  # already settled / unknown job
+    except Exception:
+        logger.error("settle_exact failed job=%s", job_id, exc_info=True)
+
+
 async def release_job(job_id) -> None:
     """Terminal release for a job that produced nothing billable (client error,
     worker fault surfaced, give-up). Full refund of the held reservation, once."""
     await settle_job(job_id, 0, status="failed")
+
+
+async def sweep_stale_reservations(older_than_seconds: int = 3600, limit: int = 500) -> int:
+    """Safety net for the rare crash between reserve and the worker-WS terminal,
+    which would otherwise strand a hold. Releases (full refund) reservations stuck
+    in 'held' past a GENEROUS deadline — the threshold must exceed the longest job
+    timeout so an in-flight job is never swept. Returns the count released.
+    No-op in dry-run. Idempotent: release_job re-flips already-settled rows to a
+    no-op, so overlapping sweeps don't double-refund."""
+    if not CHARGING_ENABLED:
+        return 0
+    cutoff = _now() - _dt.timedelta(seconds=older_than_seconds)
+    async with await new_session() as s:
+        rows = (await s.execute(
+            sa.select(reservations_t.c.job_id)
+            .where(sa.and_(reservations_t.c.status == "held",
+                           reservations_t.c.created < cutoff))
+            .limit(limit)
+        )).all()
+    job_ids = [r[0] for r in rows]
+    for jid in job_ids:
+        await release_job(jid)  # full refund + flip to settled, idempotent
+    if job_ids:
+        logger.warning("swept %d stale held reservation(s) older than %ds (refunded)",
+                       len(job_ids), older_than_seconds)
+    return len(job_ids)

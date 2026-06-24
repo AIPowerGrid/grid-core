@@ -25,16 +25,18 @@ def _fake_subscribe(events):
     return gen
 
 
-@pytest.fixture
-def capture_reconcile(monkeypatch):
-    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
-    calls = []
+def dry_observe(monkeypatch):
+    """Dry-run: the collectors OBSERVE via charge_request (LIVE settlement is in
+    worker_ws, tested in test_reservation_lifecycle.py). Record the would-charge."""
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", False)
+    charge = []
 
-    async def rec(user, model, p, c, reserved, job_id):
-        calls.append({"p": p, "c": c, "reserved": reserved})
+    async def fake_charge(user, model, p, c, job_id):
+        charge.append({"p": p, "c": c})
+        return {"status": "dry_run", "charged": 0}
 
-    monkeypatch.setattr(credits, "reconcile", rec)
-    return calls
+    monkeypatch.setattr(credits, "charge_request", fake_charge)
+    return charge
 
 
 # ── pure extractors ──────────────────────────────────────────────────────────
@@ -94,11 +96,26 @@ def test_stream_delta_text_both_shapes():
     assert pt._stream_delta_text("not json") == ""
 
 
-# ── collect: bill grid count, not worker usage ───────────────────────────────
+# ── completion-token helper (what worker_ws bills on) ────────────────────────
+
+
+def test_completion_tokens_prefers_full_json():
+    full = {"content": [{"type": "text", "text": "the assembled answer body"}]}
+    assert pt.completion_tokens("anthropic", ["ignored"], full) == den.count_tokens("the assembled answer body")
+
+
+def test_completion_tokens_falls_back_to_stream_deltas():
+    deltas = [json.dumps({"delta": {"type": "text_delta", "text": "a "}}),
+              json.dumps({"delta": {"type": "text_delta", "text": "b c"}})]
+    assert pt.completion_tokens("anthropic", deltas, None) == den.count_tokens("a b c")
+
+
+# ── collect/stream: dry-run OBSERVE on grid counts; never settle in collector ──
 
 
 @pytest.mark.asyncio
-async def test_collect_bills_grid_output_not_worker_usage(monkeypatch, capture_reconcile):
+async def test_collect_observes_grid_output_in_dry_run(monkeypatch):
+    charge = dry_observe(monkeypatch)
     answer = "Paris is the capital of France, a well known fact."
     full = {"content": [{"type": "text", "text": answer}],
             "usage": {"input_tokens": 0, "output_tokens": 0}}  # worker LIES
@@ -106,66 +123,70 @@ async def test_collect_bills_grid_output_not_worker_usage(monkeypatch, capture_r
     monkeypatch.setattr(pt.token_stream, "subscribe_tokens", _fake_subscribe(events))
 
     out = await pt.collect_passthrough(
-        "j1", api_format="anthropic", user={"account_id": uuid.uuid4()},
-        model="claude-x", reserved=500, prompt_toks=11,
-    )
+        "j1", api_format="anthropic", user={"account_id": uuid.uuid4()}, model="claude-x", prompt_toks=11)
     assert out == full
-    assert len(capture_reconcile) == 1
-    call = capture_reconcile[0]
-    assert call["p"] == 11
-    assert call["c"] == den.count_tokens(answer) > 0
+    assert len(charge) == 1 and charge[0]["p"] == 11
+    assert charge[0]["c"] == den.count_tokens(answer) > 0
 
 
 @pytest.mark.asyncio
-async def test_collect_error_settles_zero_and_raises(monkeypatch, capture_reconcile):
+async def test_collect_does_not_settle_in_live(monkeypatch):
+    """LIVE: the collector neither charges nor reconciles — worker_ws settles."""
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    charged = []
+    monkeypatch.setattr(credits, "charge_request",
+                        lambda *a, **k: charged.append(a) or {"status": "ok"})
+    full = {"content": [{"type": "text", "text": "hello"}]}
+    events = [{"text": token_stream.DONE_SENTINEL, "full_json": full}]
+    monkeypatch.setattr(pt.token_stream, "subscribe_tokens", _fake_subscribe(events))
+    out = await pt.collect_passthrough("j2", api_format="anthropic",
+                                       user={"account_id": uuid.uuid4()}, model="m", prompt_toks=7)
+    assert out == full and not charged
+
+
+@pytest.mark.asyncio
+async def test_collect_error_raises_without_charging(monkeypatch):
     from fastapi import HTTPException
+    charge = dry_observe(monkeypatch)
     events = [{"text": token_stream.DONE_SENTINEL, "error": "backend down", "code": 502}]
     monkeypatch.setattr(pt.token_stream, "subscribe_tokens", _fake_subscribe(events))
-
     with pytest.raises(HTTPException):
-        await pt.collect_passthrough("j2", api_format="anthropic",
-                                     user={"account_id": uuid.uuid4()}, model="m",
-                                     reserved=500, prompt_toks=7)
-    assert len(capture_reconcile) == 1
-    assert capture_reconcile[0]["c"] == 0  # full refund of the reservation
-
-
-# ── stream: bill on relayed deltas; settle once even on disconnect ───────────
+        await pt.collect_passthrough("j3", api_format="anthropic",
+                                     user={"account_id": uuid.uuid4()}, model="m", prompt_toks=7)
+    assert not charge  # error path doesn't observe a charge
 
 
 @pytest.mark.asyncio
-async def test_stream_bills_relayed_deltas(monkeypatch, capture_reconcile):
+async def test_stream_observes_relayed_deltas_in_dry_run(monkeypatch):
+    charge = dry_observe(monkeypatch)
     deltas = ["The grid ", "meters in ", "tokens."]
     events = [{"raw": True, "event": "content_block_delta",
                "data": json.dumps({"delta": {"type": "text_delta", "text": d}})} for d in deltas]
     events.append({"text": token_stream.DONE_SENTINEL})
     monkeypatch.setattr(pt.token_stream, "subscribe_tokens", _fake_subscribe(events))
 
-    chunks = []
-    async for c in pt.stream_passthrough("j3", api_format="anthropic",
-                                         user={"account_id": uuid.uuid4()}, model="m",
-                                         reserved=500, prompt_toks=4):
-        chunks.append(c)
-    assert len(capture_reconcile) == 1
-    assert capture_reconcile[0]["c"] == den.count_tokens("".join(deltas)) > 0
+    async for _ in pt.stream_passthrough("j4", api_format="anthropic",
+                                         user={"account_id": uuid.uuid4()}, model="m", prompt_toks=4):
+        pass
+    assert len(charge) == 1
+    assert charge[0]["c"] == den.count_tokens("".join(deltas)) > 0
 
 
 @pytest.mark.asyncio
-async def test_stream_settles_on_disconnect(monkeypatch, capture_reconcile):
+async def test_stream_observes_once_on_disconnect(monkeypatch):
+    charge = dry_observe(monkeypatch)
     events = [
         {"raw": True, "event": "x", "data": json.dumps({"delta": "first piece "})},
         {"raw": True, "event": "x", "data": json.dumps({"delta": "second piece"})},
     ]
     monkeypatch.setattr(pt.token_stream, "subscribe_tokens", _fake_subscribe(events))
 
-    agen = pt.stream_passthrough("j4", api_format="openai-responses",
-                                 user={"account_id": uuid.uuid4()}, model="m",
-                                 reserved=500, prompt_toks=2)
+    agen = pt.stream_passthrough("j5", api_format="openai-responses",
+                                 user={"account_id": uuid.uuid4()}, model="m", prompt_toks=2)
     await agen.__anext__()  # first relayed event → "first piece "
     await agen.aclose()     # client disconnects
-
-    assert len(capture_reconcile) == 1
-    assert capture_reconcile[0]["c"] == den.count_tokens("first piece ")
+    assert len(charge) == 1
+    assert charge[0]["c"] == den.count_tokens("first piece ")
 
 
 @pytest.mark.asyncio

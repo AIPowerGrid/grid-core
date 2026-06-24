@@ -77,15 +77,11 @@ async def create_response(
         auth = await authorize_passthrough(user, model, API_FORMAT, raw, max_len, job_id)
         if not auth["ok"]:
             raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
-        reserved, prompt_toks = auth["reserved"], auth["prompt_toks"]
+        prompt_toks = auth["prompt_toks"]
 
-        await submit_passthrough_job(
-            job_id, model, API_FORMAT, raw, max_len,
-            account_id=user.get("account_id"), reserved=reserved,
-        )
+        await submit_passthrough_job(job_id, model, API_FORMAT, raw, max_len)
 
-        bill = dict(api_format=API_FORMAT, user=user, model=model,
-                    reserved=reserved, prompt_toks=prompt_toks)
+        bill = dict(api_format=API_FORMAT, user=user, model=model, prompt_toks=prompt_toks)
         if raw.get("stream"):
             return StreamingResponse(
                 stream_passthrough(job_id, **bill), media_type="text/event-stream", headers=SSE_HEADERS

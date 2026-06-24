@@ -46,11 +46,17 @@ on). These are hard gates, not suggestions:
   stayed connected, and flips held→settled **exactly once** (the conditional UPDATE
   is the guard), reconciling against its own grid-counted completion. The HTTP
   collectors no longer settle (dry-run observe + display only), so a disconnect can
-  neither strand nor double-settle. **Remaining before flip:** (a) the raw
-  passthrough formats still settle in their HTTP collector (durable-lifecycle
-  migration pending — text only so far); (b) a process crash between reserve and
-  the worker-WS terminal leaves an orphaned 'held' row — needs a periodic sweeper
-  that releases stale holds (funds are recorded, not lost, but owed back).
+  neither strand nor double-settle.
+  Fourth pass — **lifecycle extended to ALL job types + crash safety net**: the raw
+  passthrough formats (`/responses`,`/messages`) and media (image/video) now reserve
+  atomically (`record_reservation`) and settle in the worker-WS terminal too —
+  passthrough via `settle_job` on a grid-counted output, media via `settle_exact`
+  (exact reserve stands) / `release_job` on failure. A **periodic sweeper**
+  (`sweep_stale_reservations`, `_reservation_sweeper` in main.py) releases any 'held'
+  row older than `RESERVATION_STALE_SECONDS` (default 1h) — the safety net for a
+  crash between reserve and terminal. **Remaining before flip:** atomicity of the
+  text terminal flip+refund is proven on SQLite only (needs a Postgres concurrency
+  test); media price peg.
 - [ ] **B2 — Scoped API keys.** Add key scopes/classes
   (`inference.submit`, `account.admin`, `billing.manage`, `workers.manage`,
   `identity.assert`). Account/payout/key-mgmt routes require admin scope; a

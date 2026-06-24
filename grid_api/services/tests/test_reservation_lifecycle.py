@@ -205,3 +205,57 @@ async def test_open_reservation_noop_in_dry_run(db, monkeypatch):
     # No row → settle is a no-op; balance untouched (there is none).
     await credits.settle_job("jobE", 50)
     assert await credits.get_balance(aid) == 0
+
+
+# ── media: exact reserve → settle_exact stands; release refunds ──
+
+IMG = "z-image-turbo"
+
+
+@pytest.mark.asyncio
+async def test_media_authorize_records_row_and_settle_exact_stands(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 1_000_000, "topup", ref="seed")
+    auth = await credits.authorize_media(aid, IMG, "image", 2, None, "mjobA", record_reservation=True)
+    cost = pricing.quote_image(IMG, 2)
+    assert auth["ok"] and auth["reserved"] == cost and await _reservation_status("mjobA") == "held"
+    assert await credits.get_balance(aid) == 1_000_000 - cost
+
+    await credits.settle_exact("mjobA")               # success → exact charge stands
+    assert await _reservation_status("mjobA") == "settled"
+    assert await credits.get_balance(aid) == 1_000_000 - cost
+    await credits.settle_exact("mjobA")               # idempotent
+    assert await credits.get_balance(aid) == 1_000_000 - cost
+
+
+@pytest.mark.asyncio
+async def test_media_release_refunds_full(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 1_000_000, "topup", ref="seed")
+    cost = (await credits.authorize_media(aid, IMG, "image", 1, None, "mjobB",
+                                          record_reservation=True))["reserved"]
+    assert await credits.get_balance(aid) == 1_000_000 - cost
+    await credits.release_job("mjobB")                # failure → full refund
+    assert await credits.get_balance(aid) == 1_000_000
+    # settle_exact after release is a no-op (already settled)
+    await credits.settle_exact("mjobB")
+    assert await credits.get_balance(aid) == 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_sweep_releases_stale_held(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 10_000_000, "topup", ref="seed")
+    reserved = await _reserve(aid, "jobStale")
+    assert await credits.get_balance(aid) == 10_000_000 - reserved
+    # Nothing settled it (simulated crash). A sweep with threshold 0 releases it.
+    n = await credits.sweep_stale_reservations(older_than_seconds=0)
+    assert n == 1
+    assert await credits.get_balance(aid) == 10_000_000
+    assert await _reservation_status("jobStale") == "settled"
+    # Fresh held reservation is NOT swept by a long threshold.
+    await _reserve(aid, "jobFresh")
+    assert await credits.sweep_stale_reservations(older_than_seconds=3600) == 0

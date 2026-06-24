@@ -141,6 +141,19 @@ def _stream_delta_text(raw_data: str) -> str:
     return ""
 
 
+def completion_tokens(api_format: str, accumulated: list[str] | None, full_json: dict | None) -> int:
+    """Grid-side completion token count for billing a passthrough job.
+
+    Prefer the assembled non-streaming body (`full_json`); otherwise sum the text
+    from the relayed stream deltas. Counted by the grid (tiktoken), never the
+    worker/backend `usage`. Used by the worker-WS terminal handler to settle."""
+    if full_json:
+        text = extract_output_text(api_format, full_json)
+    else:
+        text = "".join(_stream_delta_text(d) for d in (accumulated or []))
+    return den.count_tokens(text)
+
+
 def extract_output_text(api_format: str, full_json: dict) -> str:
     """Assemble the completion text from a non-streaming response body."""
     if not isinstance(full_json, dict):
@@ -179,27 +192,32 @@ async def authorize_passthrough(user: dict, model: str, api_format: str,
                                 raw_request: dict, max_len: int, job_id: str) -> dict:
     """Count the prompt grid-side and reserve before dispatch.
 
+    Reserves atomically (debit + grid_reservations row in one transaction) so the
+    worker-WS handler is the durable, sole settler — same lifecycle as chat.
     Returns the authorize_request dict augmented with `prompt_toks`. In dry-run
     (charging off) it's a no-op: ok, reserved=0. The caller shapes its own
     402 from `{ok: False, reason}` so each endpoint keeps its native error body."""
     prompt_toks = den.count_tokens(extract_prompt_text(api_format, raw_request))
     if not credits.CHARGING_ENABLED:
         return {"ok": True, "reserved": 0, "prompt_toks": prompt_toks, "status": "dry_run"}
-    auth = dict(await credits.authorize_request(user, model, prompt_toks, max_len, job_id))
+    auth = dict(await credits.authorize_request(
+        user, model, prompt_toks, max_len, job_id, record_reservation=True))
     auth["prompt_toks"] = prompt_toks
     return auth
 
 
-async def _settle_passthrough(user, model, prompt_toks, completion_toks, reserved, job_id):
-    """Settle one passthrough job on GRID counts. Never breaks a response."""
+async def _observe_dry_passthrough(user, model, prompt_toks, completion_toks, job_id):
+    """Dry-run observability ONLY: log the would-charge on grid counts. LIVE
+    settlement is durable + authoritative in the worker-WS handler
+    (credits.settle_job) — doing it here too would double-settle and depend on the
+    client staying connected. Never breaks a response."""
+    if credits.CHARGING_ENABLED:
+        return
     try:
-        p, c = int(prompt_toks or 0), int(completion_toks or 0)
-        if credits.CHARGING_ENABLED:
-            await credits.reconcile(user, model, p, c, reserved, job_id)
-        else:
-            await credits.charge_request(user, model, p, c, job_id)
+        await credits.charge_request(
+            user, model, int(prompt_toks or 0), int(completion_toks or 0), job_id)
     except Exception:
-        logger.debug("passthrough settle failed (non-fatal)", exc_info=True)
+        logger.debug("passthrough dry-run observe failed (non-fatal)", exc_info=True)
 
 
 def new_passthrough_job_id() -> str:
@@ -207,10 +225,9 @@ def new_passthrough_job_id() -> str:
 
 
 async def submit_passthrough_job(job_id: str, model: str, api_format: str,
-                                 raw_request: dict, max_length: int,
-                                 *, account_id=None, reserved: int = 0) -> None:
-    """Queue a raw-passthrough job. If dispatch fails, release the reservation
-    (otherwise the held funds would be stranded with no settlement path)."""
+                                 raw_request: dict, max_length: int) -> None:
+    """Queue a raw-passthrough job. If dispatch fails, release the held
+    reservation (otherwise the funds would be stranded with no settlement path)."""
     payload = {
         "request": raw_request,
         "api_format": api_format,
@@ -221,20 +238,20 @@ async def submit_passthrough_job(job_id: str, model: str, api_format: str,
     try:
         await job_queue.submit_job(job_id, payload, [model])
     except Exception:
-        if reserved and credits.CHARGING_ENABLED:
-            await credits.refund_reservation(account_id, reserved, job_id)
+        # Dispatch failed → release the held reservation (refund + flip settled).
+        await credits.release_job(job_id)
         raise
 
 
 async def stream_passthrough(job_id: str, *, api_format: str = "", user: dict | None = None,
-                             model: str = "", reserved: int = 0, prompt_toks: int = 0):
-    """Relay raw upstream SSE events verbatim; meter on grid-counted output.
+                             model: str = "", prompt_toks: int = 0):
+    """Relay raw upstream SSE events verbatim.
 
-    Settlement runs exactly once: on the terminal event, or in `finally` if the
-    client disconnects mid-stream (so the reservation is reconciled, billing only
-    the tokens actually relayed, and refunding the rest)."""
+    LIVE billing is settled durably + authoritatively in the worker-WS handler
+    (credits.settle_job), independent of whether the client stays connected. Here
+    we only feed dry-run OBSERVABILITY on grid-counted output."""
     relayed: list[str] = []
-    settled = False
+    observed = False
     try:
         async for data in token_stream.subscribe_tokens(job_id):
             if data.get("text") == token_stream.DONE_SENTINEL:
@@ -242,9 +259,9 @@ async def stream_passthrough(job_id: str, *, api_format: str = "", user: dict | 
                 if err:
                     body = json.dumps({"type": "error", "error": {"type": "api_error", "message": err}})
                     yield f"event: error\ndata: {body}\n\n"
-                bill = den.count_tokens("".join(relayed))
-                await _settle_passthrough(user, model, prompt_toks, bill, reserved, job_id)
-                settled = True
+                    return  # live settlement is worker_ws's job; nothing to observe on error
+                await _observe_dry_passthrough(user, model, prompt_toks, den.count_tokens("".join(relayed)), job_id)
+                observed = True
                 return
             if data.get("raw"):
                 ev = data.get("event")
@@ -257,31 +274,22 @@ async def stream_passthrough(job_id: str, *, api_format: str = "", user: dict | 
                 else:
                     yield f"data: {d}\n\n"
     finally:
-        if not settled:
-            bill = den.count_tokens("".join(relayed))
-            await _settle_passthrough(user, model, prompt_toks, bill, reserved, job_id)
+        # Dry-run only: observe once even on disconnect (live money is worker_ws's).
+        if not observed:
+            await _observe_dry_passthrough(user, model, prompt_toks, den.count_tokens("".join(relayed)), job_id)
 
 
 async def collect_passthrough(job_id: str, *, api_format: str = "", user: dict | None = None,
-                              model: str = "", reserved: int = 0, prompt_toks: int = 0) -> dict:
-    """Return the complete upstream JSON body; meter on grid-counted output."""
-    settled = False
-    try:
-        async for data in token_stream.subscribe_tokens(job_id):
-            if data.get("text") == token_stream.DONE_SENTINEL:
-                err = data.get("error")
-                if err:
-                    # Job failed → settle on zero (refund the reservation) then raise.
-                    await _settle_passthrough(user, model, prompt_toks, 0, reserved, job_id)
-                    settled = True
-                    raise HTTPException(status_code=data.get("code") or 502, detail=err)
-                full = data.get("full_json") or {}
-                bill = den.count_tokens(extract_output_text(api_format, full))
-                await _settle_passthrough(user, model, prompt_toks, bill, reserved, job_id)
-                settled = True
-                return full
-        raise HTTPException(status_code=504, detail="No response from worker")
-    finally:
-        if not settled:
-            # No terminal event (timeout/cancel): release the hold.
-            await _settle_passthrough(user, model, prompt_toks, 0, reserved, job_id)
+                              model: str = "", prompt_toks: int = 0) -> dict:
+    """Return the complete upstream JSON body. LIVE billing is settled in
+    worker_ws; here we only feed dry-run observability on grid-counted output."""
+    async for data in token_stream.subscribe_tokens(job_id):
+        if data.get("text") == token_stream.DONE_SENTINEL:
+            err = data.get("error")
+            if err:
+                raise HTTPException(status_code=data.get("code") or 502, detail=err)
+            full = data.get("full_json") or {}
+            await _observe_dry_passthrough(
+                user, model, prompt_toks, den.count_tokens(extract_output_text(api_format, full)), job_id)
+            return full
+    raise HTTPException(status_code=504, detail="No response from worker")

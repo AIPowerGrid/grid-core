@@ -234,6 +234,10 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
     # fail CLOSED with 402 if funds can't be held. Refund on every non-running
     # path (429 / fault / timeout) so a job that didn't produce output is never
     # charged. No-op in dry-run. Same enforce policy as text (unpriced/no-acct).
+    # Reserve the EXACT cost + write the durable reservation row in one
+    # transaction (record_reservation), so the worker-WS handler is the sole
+    # settler (settle_exact on success / release_job on failure) and a crash can't
+    # strand the hold — the sweeper releases stale 'held' rows. No-op in dry-run.
     reserved = 0
     if account_id is not None and credits.CHARGING_ENABLED:
         n = int(payload.get("n", 1) or 1)
@@ -242,15 +246,16 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
             # the recipe's baked default duration isn't known to the grid; bill a
             # conservative default rather than letting it slip through free.
             seconds = DEFAULT_VIDEO_SECONDS
-        auth = await credits.authorize_media(account_id, model, job_type, n, seconds, job_id)
+        auth = await credits.authorize_media(account_id, model, job_type, n, seconds, job_id,
+                                             record_reservation=True)
         if not auth["ok"]:
             raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
         reserved = auth["reserved"]
 
     if account_id is not None and concurrency_limit:
         if not await _inflight_acquire(account_id, concurrency_limit):
-            if reserved:
-                await credits.refund_reservation(account_id, reserved, job_id)
+            # Rejected BEFORE dispatch — worker_ws never sees it, so release here.
+            await credits.release_job(job_id)
             raise HTTPException(status_code=429,
                                 detail=f"Too many concurrent jobs (limit {concurrency_limit}). Retry shortly.")
     try:
@@ -258,9 +263,10 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
                                             preferred_worker=preferred_worker,
                                             progress_token=progress_token)
     except Exception:
-        # Generation failed/timed out → refund the reservation (best-effort).
-        if reserved:
-            await credits.refund_reservation(account_id, reserved, job_id)
+        # Generation failed/timed out/never-dispatched → release the hold. Idempotent
+        # with worker_ws's terminal settle via the held→settled conditional UPDATE
+        # (whoever reaches terminal first wins; the other is a no-op).
+        await credits.release_job(job_id)
         raise
     finally:
         if account_id is not None and concurrency_limit:
