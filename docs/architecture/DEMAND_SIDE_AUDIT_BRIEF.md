@@ -33,7 +33,7 @@ The independent review (2026-06) confirmed the brief asks the right questions an
 that several risks are **already real in code** (they only bite once charging is
 on). These are hard gates, not suggestions:
 
-- [ ] **B1 — Prepaid enforcement.** Reserve/authorize *before* dispatch; return
+- [x] **B1 (DONE, b8d4ca2) — Prepaid enforcement.** Reserve/authorize *before* dispatch; return
   **402 before queueing** on insufficient funds; reconcile/refund after actual
   usage. Stop swallowing charge failures in live mode. *(Today: `_meter_charge`
   swallows errors and charges after the response — streaming charges after it's
@@ -47,13 +47,13 @@ on). These are hard gates, not suggestions:
   contradiction (see §2). The chat bridge sends a short-lived **signed**
   assertion (`iss/sub/aud/exp/nonce`) from a scoped bridge key; the grid verifies
   the signature. No raw `X-Grid-User` trust.
-- [ ] **B4 — Universal metering for ALL job types.** One reserve/debit/reconcile
+- [x] **B4 (DONE, 89e1b5d) — Universal metering for ALL job types.** One reserve/debit/reconcile
   abstraction for chat **and** image **and** video (incl. chat-routed media).
   Add image/video pricing. *(Today: media does quota only, no credit debit.)*
-- [ ] **B5 — Default-deny unpriced models in enforce mode.** Flip
+- [x] **B5 (DONE, b8d4ca2) — Default-deny unpriced models in enforce mode.** Flip
   `BLOCK_UNPRICED` semantics so an unpriced/renamed model can't be free when
   charging is on.
-- [ ] **B6 — Idempotency is structural, not caller-discipline.** `ref` **non-null
+- [x] **B6 (code-guard DONE, b8d4ca2; hard DB constraint → B7) — Idempotency is structural, not caller-discipline.** `ref` **non-null
   required** for value-moving ledger rows (Postgres allows multiple NULLs through
   the unique index); validate in code; tests.
 - [ ] **B7 — Migration ↔ schema reconciliation.** Alembic must match `schema.py`
@@ -62,7 +62,7 @@ on). These are hard gates, not suggestions:
 - [ ] **B8 — Sybil / free-credit hard rules.** Wallet/email uniqueness, rate
   limits, friction (CAPTCHA / device-IP), abuse scoring; and quota infra must
   **fail closed (or degrade), not fail open**, on Redis error.
-- [ ] **B9 — Money-invariant tests.** Duplicate-ref idempotent, null-ref
+- [~] **B9 (PARTIAL — reserve/refund/idempotency/unpriced covered; Postgres-concurrency + Stripe/deposit tests pending) — Money-invariant tests.** Duplicate-ref idempotent, null-ref
   rejected, concurrent-debit can't overdraft, insufficient blocks **before**
   dispatch, stream reserve/refund, media-job charging, unpriced blocked in
   enforce mode.
