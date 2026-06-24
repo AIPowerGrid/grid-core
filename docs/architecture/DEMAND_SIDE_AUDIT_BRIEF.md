@@ -57,12 +57,16 @@ on). These are hard gates, not suggestions:
   this branch) — Universal metering for ALL job types.** One reserve/debit/reconcile
   abstraction for chat **and** image **and** video (incl. chat-routed media), with
   the media `account_id` bug fixed (was passing `user["id"]` not the account UUID).
-  Second-pass fix: the raw passthrough endpoints (`/v1/responses`, `/v1/messages`)
-  have **no trusted grid-side meter** (verbatim relay), so they now **fail closed
-  with 402 when charging is on** instead of silently serving paid work for free.
-  **Remaining before flip:** wire real metering for those two formats (parse
-  input/output server-side, or reserve+reconcile) so they're billable, not just
-  blocked; peg media prices (currently placeholders).
+  The raw passthrough endpoints (`/v1/responses`, `/v1/messages`) are now **metered
+  grid-side**: the prompt is counted by flattening the request per-format
+  (system/instructions + messages/input + tool defs) and the completion by counting
+  the text the grid actually relayed (stream deltas) or assembled (`full_json`) —
+  never the worker/backend `usage`. They reserve before dispatch (402 on
+  insufficient funds, native error envelope) and reconcile/refund on the terminal
+  event or in a `finally` on disconnect, same as chat.
+  **Remaining before flip:** peg media prices (currently placeholders); the
+  per-format flatten is a tiktoken proxy (o200k_base), not each backend's native
+  tokenizer, so counts are approximate — acceptable as a billing proxy, document it.
 - [x] **B5 (DONE, b8d4ca2) — Default-deny unpriced models in enforce mode.** Flip
   `BLOCK_UNPRICED` semantics so an unpriced/renamed model can't be free when
   charging is on.

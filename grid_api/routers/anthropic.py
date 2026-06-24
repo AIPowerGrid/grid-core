@@ -22,11 +22,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
-from ..services import credits, quota
+from ..services import quota
 from ._passthrough import (
     SSE_HEADERS,
+    authorize_passthrough,
     collect_passthrough,
     deep_sanitize,
+    new_passthrough_job_id,
     stream_passthrough,
     submit_passthrough_job,
 )
@@ -75,26 +77,32 @@ async def create_message(
                 f"Model '{model}' is not available via the Anthropic Messages API. Online: {available}",
             )
 
-        # Billing gate: raw passthrough has no trusted grid-side meter (the grid
-        # relays Anthropic SSE verbatim), so we fail CLOSED when charging is on
-        # rather than serve paid work for free. See responses.py for the same gate.
-        if credits.CHARGING_ENABLED:
-            raise _err(
-                402, "billing_error",
-                "Per-request billing is not yet available for the Messages API; use /v1/chat/completions.",
-            )
-
         await quota.check_and_consume(dict(user))
 
         raw = deep_sanitize(dict(body))
         max_len = int(raw.get("max_tokens") or 4096)
-        job_id = await submit_passthrough_job(model, API_FORMAT, raw, max_len)
 
+        # Billing: reserve BEFORE dispatch on a grid-side prompt count (never the
+        # worker's). 402 (Anthropic-shaped) on insufficient funds. Settlement on
+        # grid-counted output happens in the stream/collect terminal handler.
+        job_id = new_passthrough_job_id()
+        auth = await authorize_passthrough(user, model, API_FORMAT, raw, max_len, job_id)
+        if not auth["ok"]:
+            raise _err(402, "billing_error", auth.get("reason", "Insufficient credits."))
+        reserved, prompt_toks = auth["reserved"], auth["prompt_toks"]
+
+        await submit_passthrough_job(
+            job_id, model, API_FORMAT, raw, max_len,
+            account_id=user.get("account_id"), reserved=reserved,
+        )
+
+        bill = dict(api_format=API_FORMAT, user=user, model=model,
+                    reserved=reserved, prompt_toks=prompt_toks)
         if raw.get("stream"):
             return StreamingResponse(
-                stream_passthrough(job_id), media_type="text/event-stream", headers=SSE_HEADERS
+                stream_passthrough(job_id, **bill), media_type="text/event-stream", headers=SSE_HEADERS
             )
-        return JSONResponse(await collect_passthrough(job_id))
+        return JSONResponse(await collect_passthrough(job_id, **bill))
     except HTTPException:
         raise
     except Exception as e:

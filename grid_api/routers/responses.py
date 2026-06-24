@@ -17,11 +17,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from ..auth import extract_api_key
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
-from ..services import credits, quota
+from ..services import quota
 from ._passthrough import (
     SSE_HEADERS,
+    authorize_passthrough,
     collect_passthrough,
     deep_sanitize,
+    new_passthrough_job_id,
     stream_passthrough,
     submit_passthrough_job,
 )
@@ -63,28 +65,32 @@ async def create_response(
                 detail=f"Model '{model}' is not available via the Responses API. Online: {available}",
             )
 
-        # Billing gate: this is a RAW passthrough — the grid relays upstream
-        # events verbatim and cannot reliably count tokens grid-side for this
-        # format, so it has no trusted meter. Until per-request metering is wired
-        # (parse Responses `input`/output server-side, or reserve+reconcile), we
-        # fail CLOSED when charging is on rather than serve paid work for free.
-        if credits.CHARGING_ENABLED:
-            raise HTTPException(
-                status_code=402,
-                detail="Per-request billing is not yet available for the Responses API; use /v1/chat/completions.",
-            )
-
         await quota.check_and_consume(dict(user))
 
         raw = deep_sanitize(dict(body))
         max_len = int(raw.get("max_output_tokens") or raw.get("max_tokens") or 4096)
-        job_id = await submit_passthrough_job(model, API_FORMAT, raw, max_len)
 
+        # Billing: reserve BEFORE dispatch on a grid-side prompt count (never the
+        # worker's). Fail closed with 402 on insufficient funds. Settlement (on
+        # grid-counted output) happens in the stream/collect terminal handler.
+        job_id = new_passthrough_job_id()
+        auth = await authorize_passthrough(user, model, API_FORMAT, raw, max_len, job_id)
+        if not auth["ok"]:
+            raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
+        reserved, prompt_toks = auth["reserved"], auth["prompt_toks"]
+
+        await submit_passthrough_job(
+            job_id, model, API_FORMAT, raw, max_len,
+            account_id=user.get("account_id"), reserved=reserved,
+        )
+
+        bill = dict(api_format=API_FORMAT, user=user, model=model,
+                    reserved=reserved, prompt_toks=prompt_toks)
         if raw.get("stream"):
             return StreamingResponse(
-                stream_passthrough(job_id), media_type="text/event-stream", headers=SSE_HEADERS
+                stream_passthrough(job_id, **bill), media_type="text/event-stream", headers=SSE_HEADERS
             )
-        return JSONResponse(await collect_passthrough(job_id))
+        return JSONResponse(await collect_passthrough(job_id, **bill))
     except HTTPException:
         raise
     except Exception as e:
