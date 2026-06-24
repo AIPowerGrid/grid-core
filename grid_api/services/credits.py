@@ -542,8 +542,14 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
                 .values(status="settled", settled=_now())
             )
             if res.rowcount == 0:
-                await s.commit()  # ledger stands; reservation already settled elsewhere
-                return "already_settled"
+                # A reservation EXISTS but is no longer held — it was already
+                # settled/released elsewhere (e.g. a timeout release or the
+                # sweeper). The demand side is closed (likely refunded), so paying
+                # the worker now would be unbalanced: ROLL BACK the ledger insert.
+                # No payout, no charge — the wasted work is the tradeoff for the
+                # race. (Caller logs; this never silently double-accounts.)
+                await s.rollback()
+                return "stale_no_payout"
 
             aid, model = row[0], row[1]
             reserved, prompt_toks = int(row[2] or 0), int(row[3] or 0)

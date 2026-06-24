@@ -65,10 +65,19 @@ on). These are hard gates, not suggestions:
   exclusive (only a dead-lettered requeue errors + releases), so a retried job can't
   be refunded-then-completed-for-free. Also fixed `grid_ledger.id` SQLite
   autoincrement (dialect variant) — surfaced because the old `record_completion`
-  swallowed the failure. **Remaining before flip:** Postgres concurrency test
-  (atomicity proven on SQLite only); media-HTTP-timeout vs worker-timeout ordering
-  (a media job that completes AFTER the client's wait timeout can still race the
-  release — keep HTTP timeout ≥ worker receive timeout); media price peg.
+  swallowed the failure.
+  Sixth pass — **settlement-gated finalize + no-payout-after-release + migration
+  parity**: the queue ack, the worker ack, and the client's DONE are now DEFERRED
+  until `record_and_settle` returns a committed state, across text/passthrough/media
+  — a settlement 'error' publishes an error and leaves the job UNACKED for
+  stale-reclaim instead of becoming free inference + unpaid worker
+  (`_handle_worker_generation` no longer self-publishes DONE; media/passthrough
+  return False to suppress the ack). `record_and_settle` ROLLS BACK the payout row
+  when a reservation exists but is no longer held ('stale_no_payout'), so a
+  refunded job can't later mint a worker payout. Alembic 0001 genesis brought to
+  parity with schema.py (grid_ledger.job_id UNIQUE — the idempotency guard — plus
+  duration/ttft). **Remaining before flip:** Postgres concurrency test (atomicity
+  proven on SQLite only); media price peg.
 - [ ] **B2 — Scoped API keys.** Add key scopes/classes
   (`inference.submit`, `account.admin`, `billing.manage`, `workers.manage`,
   `identity.assert`). Account/payout/key-mgmt routes require admin scope; a

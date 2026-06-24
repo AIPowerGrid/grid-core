@@ -99,13 +99,19 @@ def upgrade() -> None:
         "grid_ledger",
         sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
         sa.Column("epoch_id", sa.String(32), nullable=True, index=True),
-        sa.Column("job_id", sa.Uuid, nullable=False, index=True),
+        # UNIQUE: one settled completion per job — the structural guard that makes
+        # record_completion idempotent (a double dispatch can't double-pay). Must
+        # match schema.py; a non-unique index here silently breaks that invariant.
+        sa.Column("job_id", sa.Uuid, nullable=False, unique=True),
         sa.Column("worker_id", sa.Uuid, nullable=False, index=True),
         sa.Column("wallet", sa.String(42), nullable=True, index=True),
         sa.Column("model", sa.String(255), nullable=False),
         sa.Column("job_type", sa.String(16), nullable=False),
         sa.Column("den", sa.Float, nullable=False),
         sa.Column("output_units", sa.Integer, nullable=False),
+        # Performance telemetry (match schema.py) — per-model t/s / TTFT / latency.
+        sa.Column("duration", sa.Float, nullable=True),
+        sa.Column("ttft", sa.Float, nullable=True),
         sa.Column("prompt_hash", sa.String(64), nullable=True),
         sa.Column("result_hash", sa.String(64), nullable=True),
         sa.Column("worker_sig", sa.String(132), nullable=True),

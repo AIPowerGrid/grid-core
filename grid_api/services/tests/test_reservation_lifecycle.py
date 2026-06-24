@@ -295,6 +295,46 @@ async def test_record_and_settle_writes_ledger_and_settles(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_record_and_settle_stale_no_payout_after_release(db, monkeypatch):
+    """Release-then-late-success: a reservation already released (refunded) must
+    NOT then produce a worker payout — record_and_settle rolls back, no ledger row."""
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    job = str(uuid.uuid4())
+    await credits.credit(aid, 10_000_000, "topup", ref="seed")
+    await _reserve(aid, job)
+    await credits.release_job(job)                      # demand side refunded
+    assert await credits.get_balance(aid) == 10_000_000
+
+    out = await credits.record_and_settle(ledger_values=_ledger_values(job), completion_tokens=100)
+    assert out == "stale_no_payout"
+    assert await credits._ledger_completion(job) is None   # worker NOT paid
+    assert await credits.get_balance(aid) == 10_000_000     # nothing moved
+
+
+@pytest.mark.asyncio
+async def test_record_and_settle_error_commits_nothing(db, monkeypatch):
+    """If the terminal transaction throws, NOTHING commits — no ledger row, the
+    reservation stays held (retryable / sweeper-recoverable), balance unchanged."""
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    job = str(uuid.uuid4())
+    await credits.credit(aid, 10_000_000, "topup", ref="seed")
+    reserved = await _reserve(aid, job)
+    held_balance = await credits.get_balance(aid)
+
+    async def boom(*a, **k):
+        raise RuntimeError("db blip")
+
+    monkeypatch.setattr(ledger_svc, "record_completion_in_session", boom)
+    out = await credits.record_and_settle(ledger_values=_ledger_values(job), completion_tokens=100)
+    assert out == "error"
+    assert await credits._ledger_completion(job) is None      # no payout
+    assert await _reservation_status(job) == "held"           # still recoverable
+    assert await credits.get_balance(aid) == held_balance == 10_000_000 - reserved
+
+
+@pytest.mark.asyncio
 async def test_record_and_settle_media_exact_stands(db, monkeypatch):
     monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
     aid = uuid.uuid4()

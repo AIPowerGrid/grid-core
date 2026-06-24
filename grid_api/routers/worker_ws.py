@@ -591,7 +591,12 @@ async def worker_websocket(ws: WebSocket):
                 # Wait for tokens + done
                 import time as _time
                 gen_start = _time.time()
-                full_text, token_count, failed, client_error, ttft = await _handle_worker_generation(ws, job, worker_info)
+                gen = await _handle_worker_generation(ws, job, worker_info)
+                full_text = gen["full_text"]
+                token_count = gen["metered"]
+                failed = gen["failed"]
+                client_error = gen["client_error"]
+                ttft = gen["ttft"]
                 gen_time = _time.time() - gen_start
 
                 if client_error is not None:
@@ -646,9 +651,11 @@ async def worker_websocket(ws: WebSocket):
                     continue
 
                 # Job completed successfully — clear any prior strikes.
+                # NOTE: the queue ack, the worker ack, and the client's DONE are
+                # all deferred until AFTER the atomic terminal commits — so a
+                # settlement failure is never treated as success (no acked-but-
+                # unsettled job, no DONE on an unpaid/uncharged completion).
                 await _clear_strikes(worker_id)
-                current_job = None
-                await job_queue.ack_job(job["stream_id"])
 
                 # Calculate den reward — but harden against gaming first.
                 #
@@ -704,7 +711,7 @@ async def worker_websocket(ws: WebSocket):
                 # on the reservation's held→settled flip; no-op for jobs with no
                 # reservation (dry-run / legacy).
                 bill_completion = min(server_token_count, requested_max)
-                await credits.record_and_settle(
+                settle_result = await credits.record_and_settle(
                     ledger_values=dict(
                         job_id=job["job_id"],
                         worker_id=worker_id,
@@ -721,13 +728,37 @@ async def worker_websocket(ws: WebSocket):
                     completion_tokens=bill_completion,
                 )
 
+                if settle_result == "error":
+                    # The terminal transaction did NOT commit (DB blip): no ledger
+                    # row, reservation still held. Treat as NOT done — surface an
+                    # error to the client and DO NOT ack the queue or the worker, so
+                    # the message is reclaimed and re-served rather than silently
+                    # becoming free inference with an unpaid worker. (current_job
+                    # stays set → the disconnect/reclaim path recovers it.)
+                    logger.critical(
+                        f"Terminal settlement failed for job {job['job_id']} — not acking; "
+                        f"leaving for stale-reclaim"
+                    )
+                    await token_stream.publish_error(
+                        job["job_id"], "Settlement failed; please retry."
+                    )
+                    record_job_failed()
+                    continue
+
+                # Committed → NOW it's safe to finalize: tell the client it's DONE,
+                # ack the queue + the worker, and record metrics.
+                current_job = None
+                await token_stream.publish_done(
+                    job["job_id"], full_text, gen["full_reasoning"],
+                    tool_calls=gen["tool_calls"], usage=gen["usage"],
+                    finish_reason=gen["finish_reason"], grid=gen["grid_meta"],
+                )
+                await job_queue.ack_job(job["stream_id"])
                 await ws.send_json({
                     "type": "ack",
                     "id": job["job_id"],
                     "den": den_awarded,
                 })
-
-                # Record metrics
                 record_job_complete(tokens=effective_tokens, den=den_awarded, duration=gen_time)
         finally:
             poll_task.cancel()
@@ -872,7 +903,7 @@ async def _handle_media_job(
             # ATOMIC terminal: worker-payout row + demand settlement in one txn.
             # Media reserves the EXACT cost up front, so success just lets the hold
             # stand (exact=True → flip held→settled, no ledger movement).
-            await credits.record_and_settle(
+            settle_result = await credits.record_and_settle(
                 ledger_values=dict(
                     job_id=job_id,
                     worker_id=worker_id,
@@ -887,6 +918,12 @@ async def _handle_media_job(
                 ),
                 exact=True,
             )
+            if settle_result == "error":
+                # Terminal didn't commit → error out and DON'T ack (return False),
+                # leaving the job for stale-reclaim rather than acking unsettled.
+                logger.critical(f"Terminal settlement failed for media job {job_id} — not acking")
+                await token_stream.publish_error(job_id, "Settlement failed; please retry.")
+                return False
 
             await token_stream.publish_done(
                 job_id, json.dumps({
@@ -956,7 +993,8 @@ async def _handle_raw_passthrough(
             gen_time = _time.time() - gen_start
             usage = msg.get("usage") or usage
             full_json = msg.get("full_json")
-            await token_stream.publish_done(job_id, usage=usage, full_json=full_json)
+            # DONE is published AFTER settlement commits (see below) so the client
+            # never gets a success terminator on an unsettled job.
 
             # Metering: trust the backend-reported usage (we tee it), but cap the
             # output at the job's requested max and the prompt at the worker's
@@ -985,7 +1023,7 @@ async def _handle_raw_passthrough(
             # reserve time; no-op in dry-run / for jobs without a reservation.
             from ._passthrough import completion_tokens as _pt_completion
             api_format = payload.get("api_format", "openai-chat")
-            await credits.record_and_settle(
+            settle_result = await credits.record_and_settle(
                 ledger_values=dict(
                     job_id=job_id,
                     worker_id=worker_id,
@@ -1001,6 +1039,15 @@ async def _handle_raw_passthrough(
                 ),
                 completion_tokens=_pt_completion(api_format, accumulated, full_json),
             )
+            if settle_result == "error":
+                # Terminal didn't commit → surface an error and DON'T ack (return
+                # False), so the caller leaves the queue message for stale-reclaim
+                # instead of acking an unsettled job.
+                logger.critical(f"Terminal settlement failed for raw job {job_id} — not acking")
+                await token_stream.publish_error(job_id, "Settlement failed; please retry.")
+                return False
+            # Committed → finalize: tell the client DONE, ack the worker, metrics.
+            await token_stream.publish_done(job_id, usage=usage, full_json=full_json)
             await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
             record_job_complete(tokens=effective_tokens, den=den_awarded, duration=gen_time)
             return True
@@ -1046,7 +1093,20 @@ def _merge_tool_call_deltas(acc: dict, deltas: list):
             slot["function"]["arguments"] += fn["arguments"]
 
 
-async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict) -> tuple[str, int, bool, str | None, float | None]:
+def _gen_result(*, full_text="", full_reasoning="", tool_calls=None, usage=None,
+                finish_reason="stop", grid_meta=None, metered=0,
+                failed=False, client_error=None, ttft=None) -> dict:
+    """Structured result of one worker generation. On SUCCESS the caller publishes
+    DONE only AFTER settlement commits (so the client's completion signal, the
+    queue ack, and the worker ack all gate on a committed terminal)."""
+    return {
+        "full_text": full_text, "full_reasoning": full_reasoning, "tool_calls": tool_calls,
+        "usage": usage, "finish_reason": finish_reason, "grid_meta": grid_meta,
+        "metered": metered, "failed": failed, "client_error": client_error, "ttft": ttft,
+    }
+
+
+async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict) -> dict:
     """Receive the worker's stream, relay it faithfully, and tee a copy.
 
     OBSERVE-mode passthrough: each `token` message carries the inference
@@ -1131,7 +1191,7 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
             )
             if not produced_output:
                 logger.warning(f"Worker returned EMPTY completion for job {job_id} — treating as failure")
-                return full_text, 0, True, None, ttft
+                return _gen_result(full_text=full_text, metered=0, failed=True, ttft=ttft)
 
             # Provenance the API surfaces with the reply: who ran it + how fast.
             # tokens_per_s here is an at-completion estimate (metered tokens over
@@ -1144,11 +1204,8 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
                 "ttft": round(ttft, 2) if ttft is not None else None,
                 "tokens_per_s": round(metered_now / gen_elapsed, 1) if gen_elapsed > 0 and metered_now else None,
             }
-            await token_stream.publish_done(
-                job_id, full_text, full_reasoning,
-                tool_calls=tool_calls, usage=usage, finish_reason=finish_reason,
-                grid=grid_meta,
-            )
+            # NOTE: DONE is published by the CALLER, only after settlement commits —
+            # so the client never gets a success terminator on an unsettled job.
 
             # Prefer the backend's authoritative completion_tokens for metering;
             # fall back to the delta count. (The den path still caps this against
@@ -1157,7 +1214,11 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
             metered = token_count
             if usage and isinstance(usage.get("completion_tokens"), int):
                 metered = usage["completion_tokens"]
-            return full_text, metered, False, None, ttft
+            return _gen_result(
+                full_text=full_text, full_reasoning=full_reasoning, tool_calls=tool_calls,
+                usage=usage, finish_reason=finish_reason, grid_meta=grid_meta,
+                metered=metered, failed=False, ttft=ttft,
+            )
 
         elif msg_type == "pong":
             continue
@@ -1167,6 +1228,7 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
             if msg.get("client_error"):
                 # Deterministic caller fault (bad request); not the worker's fault.
                 logger.info(f"Client error on job {job_id}: {message[:200]}")
-                return full_text, token_count, True, message, ttft
+                return _gen_result(full_text=full_text, metered=token_count, failed=True,
+                                   client_error=message, ttft=ttft)
             logger.error(f"Worker error on job {job_id}: {message}")
-            return full_text, token_count, True, None, ttft
+            return _gen_result(full_text=full_text, metered=token_count, failed=True, ttft=ttft)
