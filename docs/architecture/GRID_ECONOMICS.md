@@ -20,6 +20,43 @@ is in the settlement docs; this doc references where the two planes meet.
 
 ---
 
+## 0. Thesis & positioning (read this first)
+
+We stress-tested this against the mission and cut the part that didn't survive.
+
+**What we are NOT building:** a cheaper ChatGPT. Competing on "half the price"
+in the consumer chat market is a no-moat race to the bottom against subsidized
+incumbents. A standalone $10/mo chat subscription has no story.
+
+**What we ARE building:** a permissionless, agent-native compute network whose
+moat is **decentralized supply** (independent GPU workers earning) and whose
+demand is **machine-native** (agents paying per call, no signup). One pricing +
+metering engine in the grid; everything else is a door onto it.
+
+Two doors, one credits core:
+
+- **The Pass** — humans buy one ecosystem pass (Stripe or crypto) → credits
+  spendable across *every* AIPG front-end (chat + gallery + API). Positioned as
+  *"everything AIPG, one pass, funding a decentralized network — not a megacorp,"*
+  **never** as "cheap AI." It's an ecosystem bundle and a token sink, and it
+  closes the loop by funding worker payouts.
+- **x402** — agents pay per call in USDC on Base, account-less. The
+  differentiated, on-brand wedge and the headline of the *story*.
+
+Discipline this implies:
+- The pricing/metering engine is the only thing that must be excellent. The Pass
+  is just `Stripe → credit grant` on top of it (cheap). x402 is the same meter
+  with a different settlement.
+- Keep the consumer **funnel lean** — free with a sane limit → "get the Pass /
+  connect a wallet." Do not build a conversion-optimization machine into a chat
+  wrapper.
+- **Lead the messaging with the network + agent story**, not the Pass. Chat and
+  gallery are the shop window, not the cash register.
+- The one piece required either way, and worth doing well: the **identity
+  keystone** (every front-end user resolves to one grid account).
+
+---
+
 ## 1. Actors and value flows
 
 ```
