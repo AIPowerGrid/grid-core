@@ -34,6 +34,7 @@ from sqlalchemy.exc import IntegrityError
 from ..database import new_session
 from ..v2.schema import credit_ledger as ledger_t
 from ..v2.schema import credits as credits_t
+from ..v2.schema import ledger as grid_ledger_t
 from ..v2.schema import reservations as reservations_t
 from . import pricing
 
@@ -497,13 +498,96 @@ async def release_job(job_id) -> None:
     await settle_job(job_id, 0, status="failed")
 
 
+async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
+                            exact: bool = False) -> str:
+    """ATOMIC terminal for a SUCCESSFUL job: write the worker-payout ledger row
+    AND settle the demand reservation in ONE transaction — both commit or neither.
+
+    This closes the window where a crash between the (separate) ledger write and
+    settlement could leave a paid worker with a still-`held`, later-refunded
+    reservation (or charge the user while the worker payout row was lost).
+
+    `ledger_values` are the record_completion_in_session kwargs. `exact=True`
+    (media) lets the exact reserve stand; otherwise reconcile against
+    `completion_tokens` (text/passthrough). Returns:
+      'duplicate'      — job already in grid_ledger (double dispatch) → nothing done
+      'settled'        — ledger written + reservation reconciled
+      'no_reservation' — ledger written; no held row (dry-run / legacy / free)
+      'already_settled'— ledger written; reservation already settled elsewhere
+      'error'          — nothing committed (retryable; the sweeper recovers)
+    Best-effort: never raises into the worker loop."""
+    from . import ledger as ledger_svc
+    job_id = str(ledger_values["job_id"])
+    try:
+        async with await new_session() as s:
+            try:
+                await ledger_svc.record_completion_in_session(s, **ledger_values)
+            except IntegrityError:
+                await s.rollback()
+                return "duplicate"  # already settled by a prior dispatch — do nothing
+
+            row = (await s.execute(
+                sa.select(reservations_t.c.account_id, reservations_t.c.model,
+                          reservations_t.c.reserved_micro, reservations_t.c.prompt_toks)
+                .where(reservations_t.c.job_id == job_id)
+            )).first()
+            if not row:
+                await s.commit()  # ledger stands; nothing to settle (dry-run/legacy/free)
+                return "no_reservation"
+
+            res = await s.execute(
+                sa.update(reservations_t)
+                .where(sa.and_(reservations_t.c.job_id == job_id,
+                               reservations_t.c.status == "held"))
+                .values(status="settled", settled=_now())
+            )
+            if res.rowcount == 0:
+                await s.commit()  # ledger stands; reservation already settled elsewhere
+                return "already_settled"
+
+            aid, model = row[0], row[1]
+            reserved, prompt_toks = int(row[2] or 0), int(row[3] or 0)
+            if CHARGING_ENABLED and aid and reserved > 0 and not exact:
+                actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
+                diff = reserved - actual
+                if diff > 0:
+                    await _credit_in_session(s, aid, diff, "reconcile:refund", f"{job_id}:refund", model)
+                elif diff < 0:
+                    ok = await _try_extra_debit_in_session(s, aid, -diff, f"{job_id}:extra", model)
+                    if not ok:
+                        logger.warning("settle under-collected account=%s job=%s by %d micro-USD (insufficient)",
+                                       aid, job_id, -diff)
+            await s.commit()
+            return "settled"
+    except Exception:
+        logger.error("record_and_settle failed job=%s (terminal not committed; retryable)", job_id, exc_info=True)
+        return "error"
+
+
+async def _ledger_completion(job_id):
+    """(job_type, output_units) if a worker-payout row exists for this job, else None."""
+    from . import ledger as ledger_svc
+    async with await new_session() as s:
+        row = (await s.execute(
+            sa.select(grid_ledger_t.c.job_type, grid_ledger_t.c.output_units)
+            .where(grid_ledger_t.c.job_id == ledger_svc.as_uuid(job_id))
+        )).first()
+        return (row[0], int(row[1] or 0)) if row else None
+
+
 async def sweep_stale_reservations(older_than_seconds: int = 3600, limit: int = 500) -> int:
     """Safety net for the rare crash between reserve and the worker-WS terminal,
-    which would otherwise strand a hold. Releases (full refund) reservations stuck
-    in 'held' past a GENEROUS deadline — the threshold must exceed the longest job
-    timeout so an in-flight job is never swept. Returns the count released.
-    No-op in dry-run. Idempotent: release_job re-flips already-settled rows to a
-    no-op, so overlapping sweeps don't double-refund."""
+    which would otherwise strand a hold. Acts on reservations stuck in 'held' past
+    a GENEROUS deadline (the threshold must exceed the longest job timeout so an
+    in-flight job is never touched).
+
+    LEDGER-AWARE — a held row is NOT blindly refunded:
+      * if a worker-payout row EXISTS for the job, the worker did the work but
+        settlement didn't commit (crash between ledger + settle) → SETTLE it
+        (charge), never refund.
+      * otherwise the job never produced output → RELEASE (full refund).
+    Returns the total number of reservations acted on. No-op in dry-run.
+    Idempotent: settle/release re-flip already-settled rows to a no-op."""
     if not CHARGING_ENABLED:
         return 0
     cutoff = _now() - _dt.timedelta(seconds=older_than_seconds)
@@ -515,9 +599,20 @@ async def sweep_stale_reservations(older_than_seconds: int = 3600, limit: int = 
             .limit(limit)
         )).all()
     job_ids = [r[0] for r in rows]
+    released = settled = 0
     for jid in job_ids:
-        await release_job(jid)  # full refund + flip to settled, idempotent
+        led = await _ledger_completion(jid)
+        if led is None:
+            await release_job(jid)            # never ran → refund the hold
+            released += 1
+        else:
+            job_type, units = led
+            if job_type in ("image", "video"):
+                await settle_exact(jid)        # media: exact reserve stands
+            else:
+                await settle_job(jid, units)   # text/passthrough: charge grid usage
+            settled += 1
     if job_ids:
-        logger.warning("swept %d stale held reservation(s) older than %ds (refunded)",
-                       len(job_ids), older_than_seconds)
-    return len(job_ids)
+        logger.warning("swept stale held reservations older than %ds: %d released, %d settled-from-ledger",
+                       older_than_seconds, released, settled)
+    return released + settled

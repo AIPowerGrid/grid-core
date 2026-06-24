@@ -54,9 +54,21 @@ on). These are hard gates, not suggestions:
   (exact reserve stands) / `release_job` on failure. A **periodic sweeper**
   (`sweep_stale_reservations`, `_reservation_sweeper` in main.py) releases any 'held'
   row older than `RESERVATION_STALE_SECONDS` (default 1h) — the safety net for a
-  crash between reserve and terminal. **Remaining before flip:** atomicity of the
-  text terminal flip+refund is proven on SQLite only (needs a Postgres concurrency
-  test); media price peg.
+  crash between reserve and terminal.
+  Fifth pass — **atomic terminal + ledger-aware sweeper** (closes the terminal-success
+  edges): the worker-payout ledger row and the demand settlement now commit in ONE
+  transaction (`credits.record_and_settle` + `ledger.record_completion_in_session`),
+  so a crash between them can't leave a paid worker with a refundable hold. The
+  sweeper is **ledger-aware**: a stale 'held' row WITH a completion row is settled
+  (charged), not refunded; only rows with no completion are released. The disconnect
+  path no longer both errors AND requeues — requeue and terminal-error are mutually
+  exclusive (only a dead-lettered requeue errors + releases), so a retried job can't
+  be refunded-then-completed-for-free. Also fixed `grid_ledger.id` SQLite
+  autoincrement (dialect variant) — surfaced because the old `record_completion`
+  swallowed the failure. **Remaining before flip:** Postgres concurrency test
+  (atomicity proven on SQLite only); media-HTTP-timeout vs worker-timeout ordering
+  (a media job that completes AFTER the client's wait timeout can still race the
+  release — keep HTTP timeout ≥ worker receive timeout); media price peg.
 - [ ] **B2 — Scoped API keys.** Add key scopes/classes
   (`inference.submit`, `account.admin`, `billing.manage`, `workers.manage`,
   `identity.assert`). Account/payout/key-mgmt routes require admin scope; a

@@ -248,14 +248,91 @@ async def test_media_release_refunds_full(db, monkeypatch):
 async def test_sweep_releases_stale_held(db, monkeypatch):
     monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
     aid = uuid.uuid4()
+    job = str(uuid.uuid4())
     await credits.credit(aid, 10_000_000, "topup", ref="seed")
-    reserved = await _reserve(aid, "jobStale")
+    reserved = await _reserve(aid, job)
     assert await credits.get_balance(aid) == 10_000_000 - reserved
-    # Nothing settled it (simulated crash). A sweep with threshold 0 releases it.
+    # No ledger row (job never produced output / crashed) → sweep RELEASES (refund).
     n = await credits.sweep_stale_reservations(older_than_seconds=0)
     assert n == 1
     assert await credits.get_balance(aid) == 10_000_000
-    assert await _reservation_status("jobStale") == "settled"
+    assert await _reservation_status(job) == "settled"
     # Fresh held reservation is NOT swept by a long threshold.
-    await _reserve(aid, "jobFresh")
+    await _reserve(aid, str(uuid.uuid4()))
     assert await credits.sweep_stale_reservations(older_than_seconds=3600) == 0
+
+
+# ── atomic terminal (record_and_settle) + ledger-aware sweeper ──
+
+from grid_api.services import ledger as ledger_svc  # noqa: E402
+
+
+def _ledger_values(job_id, *, output_units=100, job_type="text", den=1.0):
+    return dict(job_id=job_id, worker_id=uuid.uuid4(), wallet="", model=PRICED,
+                job_type=job_type, den=den, output_units=output_units,
+                prompt_hash="ph", result_hash="rh", duration=1.0, ttft=0.1)
+
+
+@pytest.mark.asyncio
+async def test_record_and_settle_writes_ledger_and_settles(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    job = str(uuid.uuid4())
+    await credits.credit(aid, 10_000_000, "topup", ref="seed")
+    reserved = await _reserve(aid, job)
+    assert await credits.get_balance(aid) == 10_000_000 - reserved
+
+    out = await credits.record_and_settle(ledger_values=_ledger_values(job), completion_tokens=100)
+    assert out == "settled"
+    # ledger row written AND reservation reconciled, atomically.
+    assert await credits._ledger_completion(job) == ("text", 100)
+    actual = pricing.quote_text(PRICED, 1000, 100)
+    assert await credits.get_balance(aid) == 10_000_000 - actual
+    assert await _reservation_status(job) == "settled"
+    # Duplicate dispatch → ledger unique(job_id) → strict no-op, no double-settle.
+    assert await credits.record_and_settle(ledger_values=_ledger_values(job), completion_tokens=100) == "duplicate"
+    assert await credits.get_balance(aid) == 10_000_000 - actual
+
+
+@pytest.mark.asyncio
+async def test_record_and_settle_media_exact_stands(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    job = str(uuid.uuid4())
+    await credits.credit(aid, 1_000_000, "topup", ref="seed")
+    cost = (await credits.authorize_media(aid, IMG, "image", 1, None, job, record_reservation=True))["reserved"]
+    out = await credits.record_and_settle(
+        ledger_values=_ledger_values(job, job_type="image", output_units=1), exact=True)
+    assert out == "settled"
+    assert await credits.get_balance(aid) == 1_000_000 - cost  # exact reserve stands
+
+
+@pytest.mark.asyncio
+async def test_record_and_settle_no_reservation_still_writes_ledger(db, monkeypatch):
+    """Dry-run / legacy: no held row, but the worker-payout ledger row must land."""
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    job = str(uuid.uuid4())
+    out = await credits.record_and_settle(ledger_values=_ledger_values(job), completion_tokens=50)
+    assert out == "no_reservation"
+    assert await credits._ledger_completion(job) == ("text", 100)
+
+
+@pytest.mark.asyncio
+async def test_sweep_settles_ledgered_held_not_refund(db, monkeypatch):
+    """P0 fix: a stale held row that HAS a worker-payout row means the worker did
+    the work but settlement didn't commit — sweep must SETTLE (charge), not refund."""
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    job = str(uuid.uuid4())
+    await credits.credit(aid, 10_000_000, "topup", ref="seed")
+    reserved = await _reserve(aid, job)
+    # Simulate "ledger committed but settlement crashed": write only the ledger row.
+    await ledger_svc.record_completion(**_ledger_values(job, output_units=100))
+    assert await _reservation_status(job) == "held"
+
+    n = await credits.sweep_stale_reservations(older_than_seconds=0)
+    assert n == 1
+    actual = pricing.quote_text(PRICED, 1000, 100)
+    # Charged (reconciled), NOT refunded — worker was paid, so the user pays.
+    assert await credits.get_balance(aid) == 10_000_000 - actual
+    assert await _reservation_status(job) == "settled"

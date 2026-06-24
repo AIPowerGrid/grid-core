@@ -161,7 +161,11 @@ jobs = sa.Table(
 ledger = sa.Table(
     "grid_ledger",
     metadata,
-    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    # BigInteger on Postgres; Integer on SQLite so the autoincrement PK actually
+    # works there (BIGINT PKs don't autoincrement on SQLite) — same dialect-portable
+    # fix as grid_credit_ledger, keeps the gateway-in-a-box / test path honest.
+    sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"),
+              primary_key=True, autoincrement=True),
     sa.Column("epoch_id", sa.String(32), nullable=True, index=True),  # set at settlement
     # Unique: one settled completion per job. Makes record_completion idempotent
     # so a stale-job reclaim + the original worker both finishing can't double-pay.

@@ -694,21 +694,31 @@ async def worker_websocket(ws: WebSocket):
                     )
                     await session.commit()
 
-                # Append the completion to the grid_ledger — the source of
-                # truth the on-chain settlement pays against, carrying the
-                # prompt/result hashes that make the work attestable.
-                await ledger_svc.record_completion(
-                    job_id=job["job_id"],
-                    worker_id=worker_id,
-                    wallet=worker_info.get("wallet_address", ""),
-                    model=selected_model,
-                    job_type="text",
-                    den=den_awarded,
-                    output_units=effective_tokens,
-                    duration=gen_time,
-                    ttft=ttft,
-                    prompt_hash=ledger_svc.text_hash(prompt_text),
-                    result_hash=ledger_svc.text_hash(full_text),
+                # ── ATOMIC terminal: worker-payout ledger row + demand
+                # settlement commit together (or neither). grid_ledger is the
+                # source of truth the on-chain settlement pays against; the
+                # reservation is reconciled against a GRID-counted completion
+                # (server tiktoken, capped at the requested max), never the
+                # worker's self-report. A crash can't leave a paid worker with a
+                # refundable hold. Idempotent on job_id (duplicate dispatch) and
+                # on the reservation's held→settled flip; no-op for jobs with no
+                # reservation (dry-run / legacy).
+                bill_completion = min(server_token_count, requested_max)
+                await credits.record_and_settle(
+                    ledger_values=dict(
+                        job_id=job["job_id"],
+                        worker_id=worker_id,
+                        wallet=worker_info.get("wallet_address", ""),
+                        model=selected_model,
+                        job_type="text",
+                        den=den_awarded,
+                        output_units=effective_tokens,
+                        duration=gen_time,
+                        ttft=ttft,
+                        prompt_hash=ledger_svc.text_hash(prompt_text),
+                        result_hash=ledger_svc.text_hash(full_text),
+                    ),
+                    completion_tokens=bill_completion,
                 )
 
                 await ws.send_json({
@@ -719,15 +729,6 @@ async def worker_websocket(ws: WebSocket):
 
                 # Record metrics
                 record_job_complete(tokens=effective_tokens, den=den_awarded, duration=gen_time)
-
-                # ── Demand-side settlement (authoritative, durable) ──
-                # We are the terminal authority for this job: settle the held
-                # reservation against a GRID-counted completion (server tiktoken,
-                # capped at the requested max), never the worker's self-report.
-                # Idempotent on the reservation's held→settled flip; a no-op in
-                # dry-run / for jobs that carried no reservation.
-                bill_completion = min(server_token_count, requested_max)
-                await credits.settle_job(job["job_id"], bill_completion)
         finally:
             poll_task.cancel()
 
@@ -744,12 +745,15 @@ async def worker_websocket(ws: WebSocket):
             await unregister_worker(worker_id, worker_name or "")
 
         if current_job:
-            # Worker disconnected with a job in progress — notify client and requeue
+            # Worker disconnected with a job in progress — try to requeue it onto
+            # another worker. Requeue and a terminal error are MUTUALLY EXCLUSIVE:
+            # if the job lives on, we must NOT publish a terminal error or release
+            # the hold (the same job_id continues; the next worker publishes to the
+            # client's channel and the held reservation carries over). Only when the
+            # requeue gives up (dead-lettered) is this terminal → error + release.
             job_id = current_job["job_id"]
-            logger.warning(f"Worker disconnected with job {job_id} in progress — sending error to client and requeuing")
             record_job_failed()
-            await token_stream.publish_error(job_id, "Worker disconnected during generation. Job requeued.")
-            await job_queue.requeue_job(
+            new_id = await job_queue.requeue_job(
                 job_id,
                 current_job["payload"],
                 current_job["models"],
@@ -759,6 +763,12 @@ async def worker_websocket(ws: WebSocket):
                 preferred_worker=current_job.get("preferred_worker", ""),
                 affinity_passes=current_job.get("affinity_passes", 0),
             )
+            if new_id:
+                logger.warning(f"Worker disconnected with job {job_id} in progress — requeued as {new_id}")
+            else:
+                logger.error(f"Worker disconnected with job {job_id}; requeue gave up — failing to client")
+                await token_stream.publish_error(job_id, "Worker disconnected during generation; no capacity to retry.")
+                await credits.release_job(job_id)  # terminal: refund the hold
 
         if worker_info:
             logger.info(f"Worker '{worker_info['name']}' cleaned up")
@@ -859,17 +869,23 @@ async def _handle_media_job(
             result_hash = ledger_svc.canonical_hash(
                 [o.get("sha256") or o["key"] for o in outputs]
             )
-            await ledger_svc.record_completion(
-                job_id=job_id,
-                worker_id=worker_id,
-                wallet=worker_info.get("wallet_address", ""),
-                model=selected_model,
-                job_type=job_type,
-                den=den_awarded,
-                output_units=max(n, int(payload.get("frames", 0) or 0)),
-                duration=gen_time,
-                prompt_hash=ledger_svc.canonical_hash(payload),
-                result_hash=result_hash,
+            # ATOMIC terminal: worker-payout row + demand settlement in one txn.
+            # Media reserves the EXACT cost up front, so success just lets the hold
+            # stand (exact=True → flip held→settled, no ledger movement).
+            await credits.record_and_settle(
+                ledger_values=dict(
+                    job_id=job_id,
+                    worker_id=worker_id,
+                    wallet=worker_info.get("wallet_address", ""),
+                    model=selected_model,
+                    job_type=job_type,
+                    den=den_awarded,
+                    output_units=max(n, int(payload.get("frames", 0) or 0)),
+                    duration=gen_time,
+                    prompt_hash=ledger_svc.canonical_hash(payload),
+                    result_hash=result_hash,
+                ),
+                exact=True,
             )
 
             await token_stream.publish_done(
@@ -882,9 +898,6 @@ async def _handle_media_job(
             )
             await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
             record_job_complete(tokens=0, den=den_awarded, duration=gen_time)
-            # Media reserves the EXACT cost up front, so success just lets the hold
-            # stand — flip held→settled with no ledger movement (exactly-once).
-            await credits.settle_exact(job_id)
             return True
 
         elif msg_type == "pong":
@@ -965,29 +978,31 @@ async def _handle_raw_passthrough(
             )
             await _clear_strikes(worker_id)
             result_src = "".join(accumulated) if accumulated else json.dumps(full_json or {})
-            await ledger_svc.record_completion(
-                job_id=job_id,
-                worker_id=worker_id,
-                wallet=worker_info.get("wallet_address", ""),
-                model=selected_model,
-                job_type="text",
-                den=den_awarded,
-                output_units=effective_tokens,
-                duration=gen_time,
-                ttft=ttft,
-                prompt_hash=ledger_svc.text_hash(json.dumps(payload.get("request", {}), sort_keys=True)[:20000]),
-                result_hash=ledger_svc.text_hash(result_src[:20000]),
+
+            # ATOMIC terminal: worker-payout row + demand settlement in one txn.
+            # Bill on a GRID count of the relayed/assembled output, never the
+            # backend's `usage`. Reuses the reservation opened atomically at
+            # reserve time; no-op in dry-run / for jobs without a reservation.
+            from ._passthrough import completion_tokens as _pt_completion
+            api_format = payload.get("api_format", "openai-chat")
+            await credits.record_and_settle(
+                ledger_values=dict(
+                    job_id=job_id,
+                    worker_id=worker_id,
+                    wallet=worker_info.get("wallet_address", ""),
+                    model=selected_model,
+                    job_type="text",
+                    den=den_awarded,
+                    output_units=effective_tokens,
+                    duration=gen_time,
+                    ttft=ttft,
+                    prompt_hash=ledger_svc.text_hash(json.dumps(payload.get("request", {}), sort_keys=True)[:20000]),
+                    result_hash=ledger_svc.text_hash(result_src[:20000]),
+                ),
+                completion_tokens=_pt_completion(api_format, accumulated, full_json),
             )
             await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
             record_job_complete(tokens=effective_tokens, den=den_awarded, duration=gen_time)
-
-            # Demand-side settlement (authoritative, durable): bill on a GRID count
-            # of the relayed/assembled output, never the backend's `usage`. Reuses
-            # the held reservation opened atomically at reserve time; no-op in
-            # dry-run / for jobs without a reservation.
-            from ._passthrough import completion_tokens as _pt_completion
-            api_format = payload.get("api_format", "openai-chat")
-            await credits.settle_job(job_id, _pt_completion(api_format, accumulated, full_json))
             return True
 
         elif mtype == "pong":
