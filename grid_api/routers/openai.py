@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import time
 from datetime import datetime, timedelta
 from typing import Optional
@@ -308,6 +309,14 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
     # fallback payload for pre-passthrough workers.
     prompt = _messages_to_prompt(clean_messages)
 
+    # Seed: grid-side randomization. If the caller didn't pin a seed, mint a
+    # fresh one here so output varies per request regardless of the backend
+    # engine's default RNG behavior (don't rely on each heterogeneous worker's
+    # engine to randomize) — and echo it back for reproducibility. A
+    # client-supplied seed is always honored. Mirrors the media path.
+    if request.seed is None:
+        request.seed = secrets.randbelow(2**53)
+
     # Faithful request: forward the developer's request as-is (tools,
     # tool_choice, multimodal content, seed, response_format, any extra params)
     # with only the sanitized messages swapped in. The worker overrides `model`
@@ -378,7 +387,7 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
 
     if request.stream:
         return StreamingResponse(
-            _stream_openai(job_id, model, completion_id, user),
+            _stream_openai(job_id, model, completion_id, user, request.seed),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -387,10 +396,10 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
             },
         )
     else:
-        return await _collect_response(job_id, model, user)
+        return await _collect_response(job_id, model, user, request.seed)
 
 
-async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict | None = None):
+async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict | None = None, seed: int | None = None):
     """SSE generator for OpenAI streaming format.
 
     Faithful passthrough: the grid emits one leading role chunk, then relays
@@ -417,6 +426,8 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
             yield f"data: {json.dumps(fmt.openai_chunk_raw({}, model, completion_id, finish_reason=finish))}\n\n"
             usage = data.get("usage")
             grid_meta = data.get("grid")
+            if seed is not None:
+                grid_meta = {**(grid_meta or {}), "seed": seed}
             if usage or grid_meta:
                 usage_chunk = fmt.openai_usage_chunk(model, completion_id, usage or {})
                 # Additive provenance on the final chunk (worker, gen_time, ttft,
@@ -445,7 +456,7 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
     yield "data: [DONE]\n\n"
 
 
-async def _collect_response(job_id: str, model: str, user: dict | None = None) -> dict:
+async def _collect_response(job_id: str, model: str, user: dict | None = None, seed: int | None = None) -> dict:
     """Collect the stream and return a single non-streaming response.
 
     The worker always streams; the grid assembles. The DONE event carries the
@@ -500,6 +511,8 @@ async def _collect_response(job_id: str, model: str, user: dict | None = None) -
     )
     # Additive provenance sibling (worker, gen_time, ttft, tokens_per_s). Standard
     # OpenAI clients ignore unknown top-level fields; UIs that want it read `grid`.
+    if seed is not None:
+        grid_meta = {**(grid_meta or {}), "seed": seed}
     if grid_meta:
         resp["grid"] = grid_meta
     return resp
