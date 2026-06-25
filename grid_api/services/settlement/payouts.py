@@ -20,6 +20,7 @@ import asyncio
 import datetime as _dt
 import logging
 import os
+import uuid as _uuid
 
 import sqlalchemy as sa
 
@@ -103,7 +104,20 @@ async def preview_period(start, end, budget_aipg: float) -> dict:
 
 # ── persistence (idempotent per period+account) ──────────────────────────────
 
+def _as_uuid(v):
+    """Coerce account_id to a uuid.UUID for queries against the Uuid column.
+    Aggregation returns account_id as a str; comparing that to a sa.Uuid column
+    crashes ('str' has no attribute 'hex') on sqlite/CI. Idempotent for UUIDs/None."""
+    if v is None or isinstance(v, _uuid.UUID):
+        return v
+    try:
+        return _uuid.UUID(str(v))
+    except (ValueError, TypeError):
+        return v
+
+
 async def _row(period_id, account_id) -> dict | None:
+    account_id = _as_uuid(account_id)
     async with await new_session() as s:
         r = (await s.execute(sa.select(payouts_t.c.status, payouts_t.c.nonce).where(
             payouts_t.c.period_id == period_id, payouts_t.c.account_id == account_id))).first()
@@ -123,6 +137,7 @@ async def _write(period_id, account_id, *, address, den, aipg, status,
                  tx_hash=None, nonce=None, paid=False, set_tx=True):
     """Upsert a payout row. set_tx=False preserves the existing tx_hash (used when
     marking sent via the nonce check, where the winning hash may differ)."""
+    account_id = _as_uuid(account_id)
     async with await new_session() as s:
         existing = (await s.execute(sa.select(payouts_t.c.id).where(
             payouts_t.c.period_id == period_id, payouts_t.c.account_id == account_id))).first()

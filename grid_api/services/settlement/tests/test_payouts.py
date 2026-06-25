@@ -3,7 +3,9 @@
 
 """Pure-math tests for account-based custodial payout splitting (no DB/web3)."""
 
-from grid_api.services.settlement.payouts import compute_account_payouts
+import uuid
+
+from grid_api.services.settlement.payouts import compute_account_payouts, _as_uuid
 
 
 def test_prorata_split_by_den_sums_to_budget():
@@ -38,3 +40,14 @@ def test_dust_dropped_and_sorted_desc():
 def test_empty_and_zero_budget():
     assert compute_account_payouts([], 100.0) == []
     assert compute_account_payouts([{"account_id": "A", "den": 5.0, "payout_address": "0x"}], 0.0) == []
+
+
+def test_as_uuid_coerces_str_account_id():
+    # Regression: aggregation returns account_id as a str; comparing that to the
+    # sa.Uuid column crashed ("'str' has no attribute 'hex'") on sqlite/CI.
+    u = uuid.uuid4()
+    assert _as_uuid(str(u)) == u                 # str → UUID
+    assert _as_uuid(u) is u                       # UUID passes through
+    assert _as_uuid(None) is None                 # None passes through
+    assert isinstance(_as_uuid(str(u)), uuid.UUID)
+    assert _as_uuid("not-a-uuid") == "not-a-uuid" # garbage passes through (no crash)
