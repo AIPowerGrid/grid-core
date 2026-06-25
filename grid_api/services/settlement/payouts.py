@@ -154,7 +154,15 @@ async def _transfer(Web3, w3, acct, token, decimals, to_addr, aipg, nonce) -> st
         "maxFeePerGas": max_fee, "maxPriorityFeePerGas": priority,
     })
     signed = acct.sign_transaction(tx)
-    return w3.eth.send_raw_transaction(signed.raw_transaction).hex()
+    raw = w3.eth.send_raw_transaction(signed.raw_transaction)
+    # send_raw_transaction returns on BROADCAST, not inclusion. Wait for the
+    # receipt so a dropped/underpriced tx is never recorded 'sent' with a hash
+    # that never lands (BaseScan "tx not found"). Raise on timeout/revert so the
+    # caller marks it 'failed' (retryable) instead of phantom-sent.
+    receipt = w3.eth.wait_for_transaction_receipt(raw, timeout=180, poll_latency=2)
+    if receipt.get("status") != 1:
+        raise RuntimeError(f"payout tx reverted on-chain: {raw.hex()}")
+    return raw.hex()
 
 
 async def send_period(start, end, budget_aipg: float, period_id: str) -> dict:
@@ -226,6 +234,37 @@ async def pay_accrued() -> dict:
     return {"paid": paid, "still_accrued": len(rows) - paid}
 
 
+async def retry_failed() -> dict:
+    """Re-send payouts stuck in 'failed' (a dropped/underpriced/reverted tx). Pays
+    the recorded address+amount; with the receipt-confirmed _transfer a row only
+    leaves 'failed' once the tx actually mines — so this self-heals transient
+    on-chain failures without a manual per-period re-run."""
+    async with await new_session() as s:
+        rows = (await s.execute(
+            sa.select(payouts_t.c.period_id, payouts_t.c.account_id, payouts_t.c.address,
+                      payouts_t.c.aipg_amount, payouts_t.c.den)
+            .where(payouts_t.c.status == "failed", payouts_t.c.address.isnot(None))
+        )).all()
+    if not rows:
+        return {"retried": 0, "still_failed": 0}
+    Web3, w3, acct, token = _w3()
+    decimals = token.functions.decimals().call()
+    nonce = w3.eth.get_transaction_count(acct.address)
+    sent = 0
+    for r in rows:
+        try:
+            txh = await _transfer(Web3, w3, acct, token, decimals, r.address, float(r.aipg_amount), nonce)
+            nonce += 1
+            await _write(r.period_id, r.account_id, address=r.address, den=float(r.den or 0),
+                         aipg=float(r.aipg_amount), status="sent", tx_hash=txh, paid=True)
+            sent += 1
+        except Exception as e:
+            await _write(r.period_id, r.account_id, address=r.address, den=float(r.den or 0),
+                         aipg=float(r.aipg_amount), status="failed", tx_hash=str(e)[:60])
+            logger.error("retry_failed %s/%s: %s", r.period_id, r.account_id, e)
+    return {"retried": sent, "still_failed": len(rows) - sent}
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def _print_preview(pv, period_id):
@@ -249,9 +288,12 @@ async def _amain():
     ap.add_argument("--budget", type=float, help="total AIPG to distribute this period")
     ap.add_argument("--send", action="store_true", help="EXECUTE transfers (default: dry-run)")
     ap.add_argument("--pay-accrued", action="store_true", help="pay all accrued balances whose account now has a wallet")
+    ap.add_argument("--retry-failed", action="store_true", help="re-send payouts stuck in 'failed' (dropped/underpriced tx)")
     a = ap.parse_args()
     await init_database()
     try:
+        if a.retry_failed:
+            print("retrying failed payouts ...", await retry_failed()); return
         if a.pay_accrued:
             print("paying accrued balances ...", await pay_accrued()); return
         if a.budget is None:
