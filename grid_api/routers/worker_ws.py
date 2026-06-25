@@ -76,7 +76,12 @@ _local_ws: dict[str, WebSocket] = {}
 # share of every job (the 2026-06-14 "empty every other message" outage).
 MAX_STRIKES = 6
 STRIKE_DECAY_S = 300       # strikes reset after 5 min without a failure
-EVICT_COOLDOWN_S = 30     # barred from re-registering after eviction
+# Escalating quarantine: each eviction within EVICT_COUNT_DECAY_S ramps the
+# re-register bar (30s → 2m → 10m → 1h) so a chronically-broken backend backs
+# off instead of flapping back every 30s and eating fresh jobs. The repeat
+# counter (per worker name) decays after a clean hour, so a one-off blip stays cheap.
+EVICT_COOLDOWN_LADDER_S = [30, 120, 600, 3600]
+EVICT_COUNT_DECAY_S = 3600
 
 
 async def _record_strike(worker_id: str) -> int:
@@ -94,12 +99,21 @@ async def _clear_strikes(worker_id: str):
     await r.delete(f"{WORKER_STATUS_PREFIX}{worker_id}:strikes")
 
 
-async def _evict_worker(worker_id: str, worker_name: str):
-    """Deregister an unhealthy worker and bar it from re-registering briefly."""
+async def _evict_worker(worker_id: str, worker_name: str) -> int:
+    """Deregister an unhealthy worker and bar it from re-registering, with an
+    escalating cooldown per repeat eviction. Returns the cooldown (seconds)."""
     r = get_redis()
     await unregister_worker(worker_id, worker_name)
-    await r.setex(f"grid:worker:cooldown:{worker_name}", EVICT_COOLDOWN_S, "evicted")
+    # Count evictions for this logical worker — keyed by NAME, since worker_id
+    # changes on every reconnect. Walk up the ladder; counter decays after a
+    # clean hour so a recovered worker returns to the cheap 30s rung.
+    ecount_key = f"grid:worker:evictions:{worker_name}"
+    n = await r.incr(ecount_key)
+    await r.expire(ecount_key, EVICT_COUNT_DECAY_S)
+    cooldown = EVICT_COOLDOWN_LADDER_S[min(n - 1, len(EVICT_COOLDOWN_LADDER_S) - 1)]
+    await r.setex(f"grid:worker:cooldown:{worker_name}", cooldown, "evicted")
     await r.delete(f"{WORKER_STATUS_PREFIX}{worker_id}:strikes")
+    return cooldown
 
 
 async def _is_in_cooldown(worker_name: str) -> bool:
@@ -642,11 +656,11 @@ async def worker_websocket(ws: WebSocket):
                     current_job = None
 
                     if strikes >= MAX_STRIKES:
+                        cooldown = await _evict_worker(worker_id, worker_name)
                         logger.error(
                             f"Worker '{worker_name}' ({worker_id}) hit {MAX_STRIKES} "
-                            f"strikes — evicting and barring re-register for {EVICT_COOLDOWN_S}s"
+                            f"strikes — evicting and barring re-register for {cooldown}s"
                         )
-                        await _evict_worker(worker_id, worker_name)
                         break  # drop the WS; cooldown blocks immediate rejoin
                     continue
 
