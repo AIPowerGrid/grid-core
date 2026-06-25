@@ -33,6 +33,7 @@ from ..database import new_session
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
 from ..v2.schema import api_keys as api_keys_table
+from ..v2.schema import payouts as payouts_table
 from ..v2.schema import workers as workers_table
 
 logger = logging.getLogger("grid_api.accounts_api")
@@ -374,6 +375,81 @@ async def get_account_workers(
         "den_earned": sum(w["den_earned"] for w in workers),
         "jobs_completed": sum(w["jobs_completed"] for w in workers),
         "workers": workers,
+    }
+
+
+@router.get("/v1/account/payouts")
+async def get_account_payouts(
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Custodial payout history for the signed-in account.
+
+    Sourced from grid_payouts (written by the hourly settlement run): what's
+    been **paid** (with on-chain tx hashes as proof) and what's **accrued**
+    (owed, but parked until a payout wallet is set). Same den source of truth
+    as the ledger; AIPG is distributed pro-rata by den per period."""
+    user = await _require_v2(apikey, authorization)
+    _PAID = ("sent", "confirmed")
+    async with await new_session() as session:
+        # Aggregates over ALL periods, bucketed by status (accurate beyond the
+        # row cap below).
+        agg = (
+            await session.execute(
+                sa.select(
+                    payouts_table.c.status,
+                    sa.func.coalesce(sa.func.sum(payouts_table.c.aipg_amount), 0).label("aipg"),
+                    sa.func.coalesce(sa.func.sum(payouts_table.c.den), 0).label("den"),
+                    sa.func.count().label("n"),
+                )
+                .where(payouts_table.c.account_id == user["account_id"])
+                .group_by(payouts_table.c.status)
+            )
+        ).mappings().all()
+        rows = (
+            await session.execute(
+                sa.select(
+                    payouts_table.c.period_id,
+                    payouts_table.c.den,
+                    payouts_table.c.aipg_amount,
+                    payouts_table.c.status,
+                    payouts_table.c.tx_hash,
+                    payouts_table.c.address,
+                    payouts_table.c.created,
+                    payouts_table.c.paid,
+                )
+                .where(payouts_table.c.account_id == user["account_id"])
+                .order_by(payouts_table.c.created.desc())
+                .limit(200)
+            )
+        ).mappings().all()
+
+    by_status = {a["status"]: a for a in agg}
+
+    def _sum_aipg(*statuses):
+        return float(sum(float(by_status[s]["aipg"]) for s in statuses if s in by_status))
+
+    return {
+        "payout_wallet": user.get("payout_wallet") or "",
+        "accrued_aipg": round(_sum_aipg("accrued"), 6),
+        "paid_aipg": round(_sum_aipg(*_PAID), 6),
+        "total_den": round(float(sum(float(a["den"]) for a in agg)), 4),
+        "periods": int(sum(a["n"] for a in agg)),
+        "payouts": [
+            {
+                "period_id": r["period_id"],
+                "den": float(r["den"]) if r["den"] is not None else 0.0,
+                "aipg": float(r["aipg_amount"]) if r["aipg_amount"] is not None else 0.0,
+                "status": r["status"],
+                # tx_hash is a real hash only for paid rows; failed rows park an
+                # error string here — the UI only links paid hashes.
+                "tx_hash": r["tx_hash"] if r["status"] in _PAID else None,
+                "address": r["address"],
+                "created": r["created"].isoformat() if r["created"] else None,
+                "paid": r["paid"].isoformat() if r["paid"] else None,
+            }
+            for r in rows
+        ],
     }
 
 
