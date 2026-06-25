@@ -26,7 +26,7 @@ import sqlalchemy as sa
 from ...database import close_database, init_database, new_session
 from ...v2.schema import accounts as accounts_t
 from ...v2.schema import payouts as payouts_t
-from .aggregate import aggregate_den_by_account, count_unattributed_den
+from .aggregate import aggregate_den_by_account, total_den_in_window
 
 logger = logging.getLogger("grid_api.payouts")
 
@@ -86,17 +86,18 @@ def _window(days, since, until):
 async def preview_period(start, end, budget_aipg: float) -> dict:
     rows = await aggregate_den_by_account(start, end)
     pay = compute_account_payouts(rows, budget_aipg)
-    unattr = await count_unattributed_den(start, end)
+    attributed = sum(float(r["den"]) for r in rows)
+    no_account_den = round(max(0.0, await total_den_in_window(start, end) - attributed), 2)
     payable = [p for p in pay if p["payable"]]
     accrued = [p for p in pay if not p["payable"]]
     return {
         "accounts": len(rows),
-        "total_den": sum(float(r["den"]) for r in rows),
+        "total_den": attributed,
         "budget_aipg": budget_aipg,
         "payouts": pay,
         "payable_now_aipg": round(sum(p["aipg"] for p in payable), 4), "n_payable": len(payable),
         "accrued_aipg": round(sum(p["aipg"] for p in accrued), 4), "n_accrued": len(accrued),
-        "unattributed": unattr,
+        "no_account_den": no_account_den,   # truly unattributable (no account at all)
     }
 
 
@@ -222,9 +223,8 @@ def _print_preview(pv, period_id):
     print(f"accounts={pv['accounts']}  total_den={pv['total_den']:.2f}  budget={pv['budget_aipg']:.2f} AIPG")
     print(f"payable now: {pv['payable_now_aipg']:.4f} AIPG to {pv['n_payable']} acct(s) | "
           f"ACCRUED (no wallet yet): {pv['accrued_aipg']:.4f} AIPG owed to {pv['n_accrued']} acct(s)")
-    u = pv.get("unattributed") or {}
-    if u:
-        print(f"unattributable (no account at all): {u}")
+    if pv.get("no_account_den"):
+        print(f"den with NO account at all (unattributable): {pv['no_account_den']:.2f}")
     print(f"{'account_id':38}{'den':>12}{'share':>9}{'AIPG':>14}  wallet")
     for p in pv["payouts"]:
         tag = (p['payout_address'][:10] + '…') if p['payable'] else 'ACCRUED (set wallet)'

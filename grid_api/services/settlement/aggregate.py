@@ -70,6 +70,18 @@ async def aggregate_den_by_account(start: datetime, end: datetime, *, min_den: f
         return out
 
 
+async def total_den_in_window(start: datetime, end: datetime) -> float:
+    """All den in [start, end), no attribution filter — for measuring how much
+    truly has NO account (vs the per-account rollup which excludes account_id IS
+    NULL). den_no_account = total - sum(per-account)."""
+    async with await new_session() as session:
+        row = (await session.execute(
+            sa.select(sa.func.coalesce(sa.func.sum(ledger_table.c.den), 0.0))
+            .where(ledger_table.c.created >= start, ledger_table.c.created < end)
+        )).first()
+        return float(row[0] or 0.0)
+
+
 async def aggregate_den_for_period(
     start: datetime,
     end: datetime,
