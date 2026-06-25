@@ -139,9 +139,19 @@ def _w3():
 
 async def _transfer(Web3, w3, acct, token, decimals, to_addr, aipg, nonce) -> str:
     amount_wei = int(round(aipg * (10 ** decimals)))
+    # Derive maxFeePerGas from the LIVE base fee with headroom, never a fixed cap:
+    # a static 0.1 gwei cap got rejected ("max fee per gas less than block base
+    # fee") during a Base fee spike. 3x base + tip survives spikes; Base base fees
+    # are tiny so this stays a fraction of a cent per transfer.
+    priority = w3.to_wei(0.01, "gwei")
+    try:
+        base_fee = w3.eth.get_block("latest")["baseFeePerGas"]
+    except Exception:
+        base_fee = w3.to_wei(0.1, "gwei")
+    max_fee = base_fee * 3 + priority
     tx = token.functions.transfer(Web3.to_checksum_address(to_addr), amount_wei).build_transaction({
         "from": acct.address, "nonce": nonce,
-        "maxFeePerGas": w3.to_wei(0.1, "gwei"), "maxPriorityFeePerGas": w3.to_wei(0.01, "gwei"),
+        "maxFeePerGas": max_fee, "maxPriorityFeePerGas": priority,
     })
     signed = acct.sign_transaction(tx)
     return w3.eth.send_raw_transaction(signed.raw_transaction).hex()
