@@ -91,6 +91,10 @@ async def _perf_by_model(session, since: datetime | None) -> dict[tuple[str, str
         sa.func.count().label("samples"),
         sa.func.avg(ledger_table.c.duration).label("avg_dur"),
         sa.func.sum(ledger_table.c.duration).label("sum_dur"),
+        # Decode-only time (excl. TTFT/prefill) — the denominator for a comparable
+        # tokens/sec. Rows with NULL ttft (media / pre-ttft history) fall back to
+        # full duration via COALESCE.
+        sa.func.sum(ledger_table.c.duration - sa.func.coalesce(ledger_table.c.ttft, 0.0)).label("sum_decode"),
         sa.func.sum(ledger_table.c.output_units).label("sum_units"),
         sa.func.avg(ledger_table.c.ttft).label("avg_ttft"),
     ).where(ledger_table.c.duration.isnot(None), ledger_table.c.duration > 0)
@@ -101,12 +105,14 @@ async def _perf_by_model(session, since: datetime | None) -> dict[tuple[str, str
     out: dict[tuple[str, str], dict] = {}
     for r in rows:
         sum_dur = float(r["sum_dur"] or 0.0)
+        sum_decode = float(r["sum_decode"] or 0.0)
         sum_units = int(r["sum_units"] or 0)
         is_text = r["job_type"] == "text"
         out[(r["model"], r["job_type"])] = {
             "samples": int(r["samples"]),
             "avg_latency_s": round(float(r["avg_dur"]), 2) if r["avg_dur"] is not None else None,
-            "tokens_per_s": round(sum_units / sum_dur, 1) if (is_text and sum_dur > 0) else None,
+            # decode throughput: output tokens / generation time AFTER first token
+            "tokens_per_s": round(sum_units / sum_decode, 1) if (is_text and sum_decode > 0) else None,
             "avg_ttft_s": round(float(r["avg_ttft"]), 2) if r["avg_ttft"] is not None else None,
         }
     return out

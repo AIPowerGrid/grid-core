@@ -1231,15 +1231,20 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
                 return _gen_result(full_text=full_text, metered=0, failed=True, ttft=ttft)
 
             # Provenance the API surfaces with the reply: who ran it + how fast.
-            # tokens_per_s here is an at-completion estimate (metered tokens over
-            # wall-clock); the ledger-derived per-model t/s is authoritative.
+            # tokens_per_s is DECODE throughput (output tokens / generation time
+            # AFTER the first token) — i.e. it excludes TTFT/prefill, which is the
+            # comparable industry number. Dividing by full wall-clock (incl. ttft)
+            # understates t/s badly on prompts with long prefill / short outputs.
             gen_elapsed = _time.time() - recv_start
+            decode_s = gen_elapsed - (ttft or 0.0)   # first-token → last-token
+            if decode_s <= 0:
+                decode_s = gen_elapsed                # 1-token / sub-tick fallback
             metered_now = (usage.get("completion_tokens") if usage and isinstance(usage.get("completion_tokens"), int) else token_count) or 0
             grid_meta = {
                 "worker": worker_info.get("name", ""),
                 "gen_time": round(gen_elapsed, 2),
                 "ttft": round(ttft, 2) if ttft is not None else None,
-                "tokens_per_s": round(metered_now / gen_elapsed, 1) if gen_elapsed > 0 and metered_now else None,
+                "tokens_per_s": round(metered_now / decode_s, 1) if decode_s > 0 and metered_now else None,
             }
             # NOTE: DONE is published by the CALLER, only after settlement commits —
             # so the client never gets a success terminator on an unsettled job.
