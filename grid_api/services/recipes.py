@@ -356,7 +356,25 @@ def resolve_for_model(model: str, inputs: dict | None = None, *, has_source: boo
     cands = recipes_for_model(model)
     if not cands:
         return None
-    chosen = next((r for r in cands if ("image" in r.vars) == has_source), None) or cands[0]
+    # Variant selection. A model may have up to three recipes: t2i (no image),
+    # an edit/reference i2i (image, no denoise), and a latent-blend i2i (image +
+    # denoise/strength). Route by the request: a source frame WITH a denoise/
+    # strength knob → the blend recipe; a source frame alone → the edit recipe;
+    # no source → t2i. Falls back to the old image-presence match, then any recipe.
+    inputs = inputs or {}
+    wants_denoise = has_source and inputs.get("denoise") is not None
+
+    def _matches(r) -> bool:
+        has_img = "image" in r.vars
+        if has_img != has_source:
+            return False
+        if has_img and ("denoise" in r.vars) != bool(wants_denoise):
+            return False
+        return True
+
+    chosen = (next((r for r in cands if _matches(r)), None)
+              or next((r for r in cands if ("image" in r.vars) == has_source), None)
+              or cands[0])
     return resolve(chosen.recipe_root, inputs)
 
 
