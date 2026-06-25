@@ -283,6 +283,10 @@ payouts = sa.Table(
     # accrued (owed, no wallet yet) → pending → sent (tx broadcast) → confirmed | failed
     sa.Column("status", sa.String(16), nullable=False, default="accrued", index=True),
     sa.Column("tx_hash", sa.String(66), nullable=True),
+    # The treasury nonce this payout is BOUND to. A payment is settled iff this
+    # nonce has mined, and each nonce carries exactly one payout — so it can pay
+    # at most once. Retries replace at this nonce, never a new one (double-pay-proof).
+    sa.Column("nonce", sa.BigInteger, nullable=True),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
     sa.Column("paid", sa.DateTime(timezone=True), nullable=True),
     sa.UniqueConstraint("period_id", "account_id", name="uq_grid_payouts_period_acct"),
