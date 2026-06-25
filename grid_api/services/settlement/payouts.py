@@ -119,9 +119,9 @@ def _as_uuid(v):
 async def _row(period_id, account_id) -> dict | None:
     account_id = _as_uuid(account_id)
     async with await new_session() as s:
-        r = (await s.execute(sa.select(payouts_t.c.status, payouts_t.c.nonce).where(
+        r = (await s.execute(sa.select(payouts_t.c.status, payouts_t.c.nonce, payouts_t.c.tx_hash).where(
             payouts_t.c.period_id == period_id, payouts_t.c.account_id == account_id))).first()
-        return {"status": r[0], "nonce": r[1]} if r else None
+        return {"status": r[0], "nonce": r[1], "tx_hash": r[2]} if r else None
 
 
 async def _max_assigned_nonce() -> int:
@@ -191,22 +191,63 @@ def _signed_transfer(Web3, w3, acct, token, decimals, to_addr, aipg, nonce, atte
     return acct.sign_transaction(tx)
 
 
+def _hx(x) -> str:
+    s = x.hex() if hasattr(x, "hex") else str(x)
+    return s.lower()[2:] if s.lower().startswith("0x") else s.lower()
+
+
+def _verify_transfer(w3, tx_hash, expected_to, expected_wei) -> bool:
+    """PROOF that this exact payment landed: tx_hash mined with status==1 AND
+    emitted an AIPG Transfer(_, expected_to, expected_wei). Per-hash receipt
+    lookup (reliable) — never a getLogs range scan. 'nonce advanced' alone is NOT
+    proof (a revert or an unrelated tx also consumes the nonce)."""
+    if not tx_hash:
+        return False
+    try:
+        rec = w3.eth.get_transaction_receipt(tx_hash if str(tx_hash).startswith("0x") else "0x" + str(tx_hash))
+    except Exception:
+        return False
+    if not rec or rec.get("status") != 1:
+        return False
+    topic = _hx(w3.keccak(text="Transfer(address,address,uint256)"))
+    to_pad = ("0" * 24) + expected_to.lower().replace("0x", "")
+    for lg in rec.get("logs", []):
+        try:
+            if lg["address"].lower() != AIPG_TOKEN_ADDRESS.lower():
+                continue
+            topics = [_hx(t) for t in lg["topics"]]
+            if len(topics) >= 3 and topics[0] == topic and topics[2] == to_pad:
+                if int(_hx(lg["data"]) or "0", 16) == expected_wei:
+                    return True
+        except Exception:
+            continue
+    return False
+
+
 async def _settle_one(ctx, *, period_id, account_id, address, den, aipg,
-                      stored_nonce, attempt=0) -> str:
+                      stored_nonce, stored_tx=None, attempt=0) -> str:
     """Idempotently settle ONE (period, account) payout. Double-pay-proof: the
-    payout is BOUND to a nonce — if that nonce has already mined, the payment
-    landed and we never re-send; otherwise we (re)broadcast AT THE BOUND NONCE
-    (a replacement), never a new one. A receipt timeout stays 'pending' (unknown)
-    and is resolved next run by the nonce check. Returns 'sent'|'pending'|'failed'.
-    (Funded-wallet ERC-20 transfers don't revert, so 'nonce mined' ⇒ paid.)"""
+    payout is BOUND to a nonce; once that nonce is consumed we never re-send at a
+    new one (only replace at the bound nonce). We mark 'sent' ONLY after PROVING
+    the on-chain Transfer — a consumed nonce we can't prove becomes 'manual_review'
+    (never auto-'sent', never re-sent). Returns 'sent'|'pending'|'failed'|'manual_review'."""
     Web3, w3, acct, token, decimals = ctx
     mined = w3.eth.get_transaction_count(acct.address)  # 'latest' = mined count
 
-    # (1) Bound nonce already mined → this payment landed. Never re-send.
+    # (1) Bound nonce already consumed → require on-chain PROOF before settling.
     if stored_nonce is not None and mined > stored_nonce:
+        expected_wei = int(round(aipg * (10 ** decimals)))
+        if _verify_transfer(w3, stored_tx, address, expected_wei):
+            await _write(period_id, account_id, address=address, den=den, aipg=aipg,
+                         status="sent", nonce=stored_nonce, paid=True, set_tx=False)
+            return "sent"
+        # Nonce gone but the expected transfer can't be proven (revert / replacement
+        # we didn't record / unrelated tx). Do NOT re-send and do NOT call it paid.
         await _write(period_id, account_id, address=address, den=den, aipg=aipg,
-                     status="sent", nonce=stored_nonce, paid=True, set_tx=False)
-        return "sent"
+                     status="manual_review", nonce=stored_nonce, set_tx=False)
+        logger.error("payout %s/%s: nonce %s consumed but transfer UNPROVEN (tx=%s) — manual_review",
+                     period_id, account_id, stored_nonce, stored_tx)
+        return "manual_review"
 
     # (2) Nonce to use: reuse the bound one (replacement) or assign a fresh,
     # collision-proof one (above both the chain's pending view and any nonce we've
@@ -259,7 +300,7 @@ async def send_period(start, end, budget_aipg: float, period_id: str) -> dict:
     ctx = _ctx() if (any(p["payable"] for p in pay) and BASE_RPC_URL and TREASURY_PK) else None
     for p in pay:
         existing = await _row(period_id, p["account_id"])
-        if existing and existing["status"] in ("sent", "confirmed"):
+        if existing and existing["status"] in ("sent", "confirmed", "manual_review"):
             counts["skipped"] += 1
             continue
         if not p["payable"]:
@@ -273,7 +314,8 @@ async def send_period(start, end, budget_aipg: float, period_id: str) -> dict:
         try:
             st = await _settle_one(ctx, period_id=period_id, account_id=p["account_id"],
                                    address=p["payout_address"], den=p["den"], aipg=p["aipg"],
-                                   stored_nonce=(existing or {}).get("nonce"))
+                                   stored_nonce=(existing or {}).get("nonce"),
+                                   stored_tx=(existing or {}).get("tx_hash"))
             counts[st] = counts.get(st, 0) + 1
         except Exception as e:
             logger.error("payout error account=%s: %s", p["account_id"], e)
@@ -319,18 +361,19 @@ async def reconcile_and_retry() -> dict:
     async with await new_session() as s:
         rows = (await s.execute(
             sa.select(payouts_t.c.period_id, payouts_t.c.account_id, payouts_t.c.address,
-                      payouts_t.c.aipg_amount, payouts_t.c.den, payouts_t.c.nonce)
+                      payouts_t.c.aipg_amount, payouts_t.c.den, payouts_t.c.nonce, payouts_t.c.tx_hash)
             .where(payouts_t.c.status.in_(("pending", "failed")), payouts_t.c.address.isnot(None))
         )).all()
     if not rows:
-        return {"settled": 0, "pending": 0, "failed": 0}
+        return {"settled": 0, "pending": 0, "failed": 0, "manual_review": 0}
     ctx = _ctx()
-    out = {"settled": 0, "pending": 0, "failed": 0}
+    out = {"settled": 0, "pending": 0, "failed": 0, "manual_review": 0}
     for r in rows:
         try:
             st = await _settle_one(ctx, period_id=r.period_id, account_id=r.account_id,
                                    address=r.address, den=float(r.den or 0),
-                                   aipg=float(r.aipg_amount), stored_nonce=r.nonce, attempt=1)
+                                   aipg=float(r.aipg_amount), stored_nonce=r.nonce,
+                                   stored_tx=r.tx_hash, attempt=1)
             out["settled" if st == "sent" else st] += 1
         except Exception as e:
             out["failed"] += 1
@@ -354,6 +397,20 @@ def _print_preview(pv, period_id):
     print()
 
 
+_PAYOUT_LOCK_KEY = 9123847  # fixed pg advisory-lock key — serializes payout runners
+
+
+async def _try_payout_lock(session) -> bool:
+    """Serialize payout runners via a Postgres advisory lock (non-blocking), so two
+    runs can't allocate nonces or send concurrently. Non-Postgres (sqlite tests) is
+    single-process → treat as acquired."""
+    try:
+        return bool((await session.execute(
+            sa.text("SELECT pg_try_advisory_lock(:k)"), {"k": _PAYOUT_LOCK_KEY})).scalar())
+    except Exception:
+        return True
+
+
 async def _amain():
     ap = argparse.ArgumentParser(description="Custodial AIPG worker payouts (account-based, dry-run by default).")
     ap.add_argument("--days", type=float, default=1.0)
@@ -364,7 +421,13 @@ async def _amain():
     ap.add_argument("--retry-failed", action="store_true", help="reconcile pending + retry failed payouts (nonce-bound, idempotent)")
     a = ap.parse_args()
     await init_database()
+    # Hold a single advisory-lock session for the whole run when we may WRITE
+    # transfers; a concurrent runner can't proceed (no duplicate nonce / no race).
+    writes = a.pay_accrued or a.retry_failed or a.send
+    lock_s = await new_session() if writes else None
     try:
+        if lock_s is not None and not await _try_payout_lock(lock_s):
+            print("another payout run holds the lock — exiting"); return
         if a.retry_failed:
             print("reconciling pending + failed payouts ...", await reconcile_and_retry()); return
         if a.pay_accrued:
@@ -380,6 +443,13 @@ async def _amain():
         else:
             print("(dry-run — re-run with --send to execute)")
     finally:
+        if lock_s is not None:
+            try:
+                await lock_s.execute(sa.text("SELECT pg_advisory_unlock(:k)"), {"k": _PAYOUT_LOCK_KEY})
+                await lock_s.commit()
+            except Exception:
+                pass
+            await lock_s.close()
         await close_database()
 
 

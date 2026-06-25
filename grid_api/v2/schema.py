@@ -292,6 +292,12 @@ payouts = sa.Table(
     sa.UniqueConstraint("period_id", "account_id", name="uq_grid_payouts_period_acct"),
 )
 
+# Hard guarantee that two payouts can never bind the SAME treasury nonce (so a
+# concurrent runner can't allocate a duplicate) — partial unique on non-null nonce.
+sa.Index("uq_grid_payouts_nonce", payouts.c.nonce, unique=True,
+         postgresql_where=payouts.c.nonce.isnot(None),
+         sqlite_where=payouts.c.nonce.isnot(None))
+
 
 # ── Epochs / settlement (truth, mirrors chain) ──────────────────────────
 

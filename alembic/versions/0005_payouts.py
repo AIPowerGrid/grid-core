@@ -45,9 +45,14 @@ def upgrade() -> None:
     op.create_index("ix_grid_payouts_period_id", "grid_payouts", ["period_id"])
     op.create_index("ix_grid_payouts_account_id", "grid_payouts", ["account_id"])
     op.create_index("ix_grid_payouts_status", "grid_payouts", ["status"])
+    # Two payouts can never bind the same treasury nonce (partial unique on non-null).
+    op.create_index("uq_grid_payouts_nonce", "grid_payouts", ["nonce"], unique=True,
+                    postgresql_where=sa.text("nonce IS NOT NULL"),
+                    sqlite_where=sa.text("nonce IS NOT NULL"))
 
 
 def downgrade() -> None:
+    op.drop_index("uq_grid_payouts_nonce", table_name="grid_payouts")
     op.drop_index("ix_grid_payouts_status", table_name="grid_payouts")
     op.drop_index("ix_grid_payouts_account_id", table_name="grid_payouts")
     op.drop_index("ix_grid_payouts_period_id", table_name="grid_payouts")
