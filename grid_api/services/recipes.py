@@ -136,6 +136,67 @@ def supports_image(ref: str | int) -> bool:
     return any("image" in r.vars for r in recipes_for_model(ref))
 
 
+def supports_denoise(ref: str | int) -> bool:
+    """True if ANY recipe for the model declares a `denoise` var — a latent-blend
+    img2img *strength* knob (low denoise = stay close to the source). FLUX.2-style
+    reference/edit recipes have no such slot (edit influence is conditioning-based),
+    so a model without it rejects `strength`/`denoise` rather than silently ignoring
+    it — same capability-gate contract as supports_image / supports_loras."""
+    return any("denoise" in r.vars for r in recipes_for_model(ref))
+
+
+# Recipe var names whose client-facing param name differs (the request uses the
+# OpenAI-ish `cfg_scale`; the graph slot is `cfg`).
+_CLIENT_PARAM_NAME = {"cfg": "cfg_scale"}
+
+
+def param_schema(ref: str | int) -> Optional[dict]:
+    """Client-facing parameter schema for a model, derived from its recipe(s).
+
+    Returns None when no recipe serves the model (e.g. a text model). Merges the
+    UNION of vars across a model's variants (t2i + i2i/edit), so `image` shows up
+    for a model that has an edit recipe. Numeric knobs carry their gated [min,max]
+    band (from clamps), categorical knobs their allow-list — i.e. exactly what the
+    resolver will accept (out-of-band → 422, never silently clamped). The caller
+    layers on global media limits (size / n / output_format) not encoded per-recipe.
+    """
+    cands = recipes_for_model(ref)
+    if not cands:
+        return None
+    params: dict[str, dict] = {}
+    for r in cands:
+        for var in r.vars:
+            name = _CLIENT_PARAM_NAME.get(var, var)
+            if name in params:
+                continue
+            if var == "image":
+                params[name] = {"type": "image",
+                                "description": "img2img / edit source — inline base64 or data: URI"}
+            elif var in r.clamps:
+                lo, hi = r.clamps[var][0], r.clamps[var][1]
+                params[name] = {"type": "number", "minimum": lo, "maximum": hi}
+            elif var in r.enums:
+                params[name] = {"type": "enum", "options": list(r.enums[var])}
+            elif var in ("prompt", "negative_prompt"):
+                params[name] = {"type": "string", "max_length": _MAX_PROMPT_CHARS}
+                if var == "prompt":
+                    params[name]["required"] = True
+            elif var == "seed":
+                params[name] = {"type": "integer", "minimum": 0, "maximum": 2**53 - 1}
+            else:
+                params[name] = {"type": "number"}
+    return {
+        "model": cands[0].model_name,
+        "job_type": cands[0].job_type,
+        "capabilities": {
+            "img2img": any("image" in r.vars for r in cands),
+            "loras": any(r.lora_inject for r in cands),
+            "strength": any("denoise" in r.vars for r in cands),
+        },
+        "params": params,
+    }
+
+
 def load_local_recipes(dir_path: str) -> int:
     """Register curated recipes from local `*.json` files (each a {_grid, ...graph}).
     For v1 / pre-RecipeVault: drop a recipe in the dir and it's servable at startup.

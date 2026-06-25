@@ -136,8 +136,12 @@ def advanced_knob_inputs(extra: dict) -> dict:
     Request `cfg_scale` maps to the recipe's `cfg` var. The resolver gates/allow-lists
     each value (or ignores it if the recipe doesn't declare the var)."""
     out: dict = {}
+    # `strength`/`denoise` both target the recipe's `denoise` var (latent-blend
+    # img2img). The router capability-gates them (reject if the model has no denoise
+    # recipe) so they're never silently dropped; the resolver range-gates [lo,hi].
     for req_key, var in (("steps", "steps"), ("cfg_scale", "cfg"),
-                         ("sampler", "sampler"), ("scheduler", "scheduler")):
+                         ("sampler", "sampler"), ("scheduler", "scheduler"),
+                         ("strength", "denoise"), ("denoise", "denoise")):
         if extra.get(req_key) is not None:
             out[var] = extra[req_key]
     return out

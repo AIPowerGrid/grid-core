@@ -20,7 +20,7 @@ from ..auth import extract_api_key
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
 from ..services import loras as loras_svc
-from ..services import media, quota
+from ..services import media, quota, recipes
 from ..services import styles as styles_svc
 from .worker_ws import get_available_models
 
@@ -89,6 +89,15 @@ async def create_video(
             raise HTTPException(
                 status_code=404,
                 detail=f"Model '{model}' is not available. Online video models: {available}",
+            )
+
+        # strength/denoise: reject for models with no latent-blend recipe (e.g. LTX
+        # i2v) rather than silently dropping it.
+        if (extra.get("strength") is not None or extra.get("denoise") is not None) \
+                and not recipes.supports_denoise(model):
+            raise HTTPException(
+                status_code=422,
+                detail=f"model '{model}' does not support strength/denoise",
             )
 
         await quota.check_and_consume(dict(user))

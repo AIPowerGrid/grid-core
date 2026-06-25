@@ -23,7 +23,7 @@ from ..auth import extract_api_key
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
 from ..services import loras as loras_svc
-from ..services import media, quota
+from ..services import media, quota, recipes
 from ..services import styles as styles_svc
 from .worker_ws import get_available_models
 
@@ -102,6 +102,17 @@ async def create_image(
             raise HTTPException(
                 status_code=404,
                 detail=f"Model '{model}' is not available. Online image models: {available}",
+            )
+
+        # strength/denoise is a latent-blend img2img knob. Reject up-front for models
+        # whose recipe has no `denoise` slot (e.g. FLUX.2 reference-edit) so it's never
+        # silently dropped — clients learn the model doesn't support it.
+        if (extra.get("strength") is not None or extra.get("denoise") is not None) \
+                and not recipes.supports_denoise(model):
+            raise HTTPException(
+                status_code=422,
+                detail=f"model '{model}' does not support strength/denoise "
+                       "(no latent-blend img2img recipe; it edits via reference conditioning)",
             )
 
         # Validate cheap stuff BEFORE consuming quota (reject without charging).

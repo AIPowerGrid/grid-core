@@ -612,3 +612,69 @@ async def get_model(model_id: str):
     if model_id not in models:
         raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
     return ModelInfo(id=model_id, owned_by="aipowergrid")
+
+
+def _text_param_schema(model_id: str) -> dict:
+    """Param contract for a TEXT model: the validated OpenAI chat knobs plus a note
+    that any extra sampler params are forwarded faithfully (the grid is a passthrough
+    proxy, so it does not restrict backend-specific samplers)."""
+    return {
+        "model": model_id,
+        "job_type": "text",
+        "passthrough": True,
+        "params": {
+            "temperature": {"type": "number", "minimum": 0, "maximum": 2, "default": 0.7},
+            "top_p": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.9},
+            "max_tokens": {"type": "integer", "minimum": 1, "maximum": DEFAULT_MAX_TOKENS,
+                           "default": DEFAULT_MAX_TOKENS},
+            "n": {"type": "integer", "minimum": 1, "maximum": 4, "default": 1},
+            "stop": {"type": "string|array"},
+            "presence_penalty": {"type": "number", "minimum": -2, "maximum": 2},
+            "frequency_penalty": {"type": "number", "minimum": -2, "maximum": 2},
+            "seed": {"type": "integer"},
+            "stream": {"type": "boolean", "default": False},
+            "tools": {"type": "array"},
+            "tool_choice": {"type": "string|object"},
+            "response_format": {"type": "object", "description": "JSON schema / structured output"},
+        },
+        "passthrough_note": (
+            "Extra sampler params (top_k, min_p, top_a, repetition_penalty, typical_p, "
+            "mirostat, guided_json/regex, grammar, logit_bias) are forwarded to the "
+            "backend untouched."
+        ),
+    }
+
+
+@router.get("/v1/models/{model_id}/params")
+async def get_model_params(model_id: str):
+    """The adjustable parameter schema for a model — ranges, enums, capabilities.
+
+    Media (image/video) models are recipe-governed: every knob is hard-gated to the
+    band shown here (out-of-band values are rejected, not silently clamped), so this
+    is the authoritative "what can I send" for a model. Text models report the
+    standard OpenAI sampler set plus the faithful-passthrough note. Describes the
+    parameter contract, independent of live worker availability.
+    """
+    from ..services import media, recipes
+
+    sch = recipes.param_schema(model_id)
+    if sch is not None:
+        jt, p = sch["job_type"], sch["params"]
+        # Global media limits not encoded per-recipe.
+        p.setdefault("seed", {"type": "integer", "minimum": 0, "maximum": media.MAX_SEED})
+        p.setdefault("size", {"type": "size", "minimum": media.MIN_DIM, "maximum": media.MAX_DIM,
+                              "multiple_of": 64,
+                              "description": "WIDTHxHEIGHT; img2img auto-matches the source if omitted"})
+        p["n"] = {"type": "integer", "minimum": 1, "maximum": 2 if jt == "video" else 4}
+        if jt == "video":
+            p.setdefault("seconds", {"type": "number", "minimum": 1, "maximum": 10})
+            p.setdefault("fps", {"type": "integer", "minimum": 8, "maximum": 30})
+            p["output_format"] = {"type": "enum", "options": ["mp4"]}
+        else:
+            p["output_format"] = {"type": "enum", "options": ["png", "jpeg", "webp"]}
+        p["response_format"] = {"type": "enum", "options": ["url", "b64_json"]}
+        return sch
+
+    if model_id in await get_available_models(job_type="text"):
+        return _text_param_schema(model_id)
+    raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
