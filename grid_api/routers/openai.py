@@ -21,6 +21,11 @@ from uuid import uuid4
 # multi-MB prompt can't amplify CPU/memory (sec audit M3). Generous but bounded.
 MAX_REQUEST_CHARS = int(os.getenv("MAX_REQUEST_CHARS", "200000"))   # ~50k tokens
 MAX_REQUEST_MESSAGES = int(os.getenv("MAX_REQUEST_MESSAGES", "500"))
+# When a client omits max_tokens we must still send SOME cap to the backend (and
+# reserve against it). Default high so responses aren't artificially truncated —
+# the model stops at EOS well before this on normal turns. Pydantic caps input at
+# 32768 (le); keep this in step. Tunable via env.
+DEFAULT_MAX_TOKENS = int(os.getenv("GRID_DEFAULT_MAX_TOKENS", "32768"))
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -329,10 +334,10 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
         request.seed = secrets.randbelow(2**53)
 
     # Normalize max_tokens ONCE so the reservation, the request body, and the
-    # worker cap all agree. A client can send `null` (Optional), which would make
-    # the reserve estimate 0 (under-reserve) while dispatch fell back to 4096 —
-    # they must be the same number.
-    request.max_tokens = request.max_tokens or 4096
+    # worker cap all agree. A client can send `null` (Optional); default it HIGH
+    # (DEFAULT_MAX_TOKENS) so omitting it doesn't truncate the response — not the
+    # old 4096, which was silently capping chat replies.
+    request.max_tokens = request.max_tokens or DEFAULT_MAX_TOKENS
 
     # Faithful request: forward the developer's request as-is (tools,
     # tool_choice, multimodal content, seed, response_format, any extra params)
@@ -349,7 +354,7 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
         "api_format": "openai-chat",
         # Legacy/fallback fields (also read by the den/context caps).
         "prompt": prompt,
-        "max_length": request.max_tokens or 4096,
+        "max_length": request.max_tokens or DEFAULT_MAX_TOKENS,
         "temperature": request.temperature,
         "top_p": request.top_p,
     }
@@ -376,7 +381,7 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
                 worker_blacklist=False,
                 active=True,
                 faulted=False,
-                max_length=request.max_tokens or 4096,
+                max_length=request.max_tokens or DEFAULT_MAX_TOKENS,
                 max_context_length=2048,
                 expiry=datetime.utcnow() + timedelta(minutes=5),
                 created=datetime.utcnow(),

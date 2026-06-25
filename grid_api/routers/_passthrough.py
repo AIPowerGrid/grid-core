@@ -23,6 +23,7 @@ never stranded and a silent worker can't drive the charge to zero.
 
 import json
 import logging
+import os
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -38,7 +39,9 @@ SSE_HEADERS = {
     "X-Accel-Buffering": "no",
 }
 
-DEFAULT_OUTPUT_TOKENS = 4096
+# When the client omits the output cap, default it HIGH so responses aren't
+# truncated (same knob as the chat path's GRID_DEFAULT_MAX_TOKENS).
+DEFAULT_OUTPUT_TOKENS = int(os.getenv("GRID_DEFAULT_MAX_TOKENS", "32768"))
 MAX_OUTPUT_TOKENS = 32768
 
 
