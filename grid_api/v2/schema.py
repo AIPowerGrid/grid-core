@@ -264,24 +264,28 @@ reservations = sa.Table(
 )
 
 
-# Custodial worker payouts (v1, pre-on-chain): one row per (period, address)
-# payout. UNIQUE(period_id, address) is the idempotency guard so a re-run never
-# double-pays. Bootstrap rail before the trustless Merkle-claim contract; the den
-# source of truth (grid_ledger) is the same for both.
+# Custodial worker payouts (v1, pre-on-chain): one row per (period, account).
+# Den is attributed to the ACCOUNT (the worker authenticates with its account key),
+# so earnings never strand for lack of a wallet — an account with no payout_wallet
+# yet is recorded 'accrued' (owed) and paid the moment it sets one. UNIQUE(period_id,
+# account_id) is the idempotency guard. Same den source (grid_ledger) as the future
+# on-chain Merkle-claim rail.
 payouts = sa.Table(
     "grid_payouts",
     metadata,
     sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"),
               primary_key=True, autoincrement=True),
     sa.Column("period_id", sa.String(48), nullable=False, index=True),
-    sa.Column("address", sa.String(42), nullable=False),
+    sa.Column("account_id", sa.Uuid, nullable=True, index=True),     # owed-to identity
+    sa.Column("address", sa.String(42), nullable=True),              # wallet paid (null while accrued)
     sa.Column("den", sa.Float, nullable=False, default=0.0),
-    sa.Column("aipg_amount", sa.Numeric(38, 18), nullable=False),   # AIPG (whole tokens)
-    # pending → sent (tx broadcast) → confirmed | failed
-    sa.Column("status", sa.String(16), nullable=False, default="pending", index=True),
+    sa.Column("aipg_amount", sa.Numeric(38, 18), nullable=False),    # AIPG (whole tokens)
+    # accrued (owed, no wallet yet) → pending → sent (tx broadcast) → confirmed | failed
+    sa.Column("status", sa.String(16), nullable=False, default="accrued", index=True),
     sa.Column("tx_hash", sa.String(66), nullable=True),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
-    sa.UniqueConstraint("period_id", "address", name="uq_grid_payouts_period_addr"),
+    sa.Column("paid", sa.DateTime(timezone=True), nullable=True),
+    sa.UniqueConstraint("period_id", "account_id", name="uq_grid_payouts_period_acct"),
 )
 
 

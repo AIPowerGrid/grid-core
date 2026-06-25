@@ -23,7 +23,51 @@ from datetime import datetime
 import sqlalchemy as sa
 
 from ...database import new_session
+from ...v2.schema import accounts as accounts_table
 from ...v2.schema import ledger as ledger_table
+from ...v2.schema import workers as workers_table
+
+
+async def aggregate_den_by_account(start: datetime, end: datetime, *, min_den: float = 0.0) -> list[dict]:
+    """Roll up den per ACCOUNT for [start, end), resolved through the worker that
+    earned it (grid_ledger.worker_id → grid_workers.account_id → grid_accounts).
+
+    This is the payout-correct attribution: a worker authenticates with its
+    account key, so its earnings belong to the account — payable to the account's
+    `payout_wallet` (falling back to its login `wallet`) whenever that's set, now
+    or later. Den with no resolvable account (legacy/no-account workers) is
+    excluded here and surfaced by count_unattributed_den.
+
+    Returns [{account_id, den, payout_address}] where payout_address is None when
+    the account hasn't set a wallet yet (→ the caller ACCRUES that share)."""
+    j = (
+        ledger_table
+        .join(workers_table, workers_table.c.id == ledger_table.c.worker_id, isouter=True)
+        .join(accounts_table, accounts_table.c.id == workers_table.c.account_id, isouter=True)
+    )
+    async with await new_session() as session:
+        result = await session.execute(
+            sa.select(
+                workers_table.c.account_id.label("account_id"),
+                accounts_table.c.payout_wallet.label("payout_wallet"),
+                accounts_table.c.wallet.label("login_wallet"),
+                sa.func.sum(ledger_table.c.den).label("den"),
+            )
+            .select_from(j)
+            .where(
+                ledger_table.c.created >= start,
+                ledger_table.c.created < end,
+                workers_table.c.account_id.isnot(None),
+            )
+            .group_by(workers_table.c.account_id,
+                      accounts_table.c.payout_wallet, accounts_table.c.wallet)
+            .having(sa.func.sum(ledger_table.c.den) > min_den)
+        )
+        out = []
+        for row in result:
+            addr = (row.payout_wallet or "").strip() or (row.login_wallet or "").strip() or None
+            out.append({"account_id": str(row.account_id), "den": float(row.den), "payout_address": addr})
+        return out
 
 
 async def aggregate_den_for_period(
