@@ -1,154 +1,140 @@
-# Settlement go-live runbook
+# Worker payouts — operations runbook
 
-Turns the den ledger into real on-chain AIPG payouts. The contracts are already
-deployed and verified on Base; this is **configuration + bot ops**, not a deploy.
-
-Money moves at steps 3–4 and step 8. Everything before that is read-only or a
-dry-run. Do them in order; verify each before the next.
-
-```
-Grid diamond : 0x79F39f2a0eA476f53994812e6a8f3C8CFe08c609
-AIPG token   : 0xa1c0deCaFE3E9Bf06A5F29B7015CD373a9854608
-Admin (HW)   : 0xA218db26ed545f3476e6c3E827b595cf2E182533   (107M AIPG, holds ADMIN_ROLE)
-RewardPool   : 0x973a82955A3baC4d7d735330090FcE3FDB8E5082
-DenReporter  : 0xf06dEBc2556CeAc3caE09f934AC9aE9529760fd5
-PaymentRouter: 0x3fF26503539F3e85E136fDA20042Cf2B4E3Ac65A
-```
-
-Current state (verified read-only): facets cut ✓, not paused ✓, `poolBalance=0`,
-`periodAllocation=0`, `periodLengthSeconds=86400`. So steps 3 (fund), 3b (allocate),
-and 5 (grant reporter) are the only on-chain changes needed.
+> **What is LIVE today:** the **custodial payout CLI** (`python -m
+> grid_api.services.settlement.payouts`), run hourly by a systemd timer. It pays
+> each worker's AIPG from a treasury **hot wallet** on Base, pro-rata to den.
+> The trustless on-chain Merkle/claim design (RewardPool / PaymentRouter) is
+> **NOT live** — it's the future direction, kept at the bottom of this doc. Do
+> not follow the on-chain steps thinking they're the running system.
 
 ---
 
-## 0. Sanity: is there anything to pay?
+## 1. What's running
 
-A first payout needs ledger rows **with a wallet attached**. On prod:
-
-```sql
--- den earned in the last closed UTC day, by wallet (NULL/'' wallets are unpayable)
-SELECT wallet, count(*) jobs, sum(den) den
-FROM grid_ledger
-WHERE created >= date_trunc('day', now() - interval '1 day')
-  AND created <  date_trunc('day', now())
-GROUP BY wallet ORDER BY den DESC;
+```
+worker completes jobs ─► den (work units) recorded in grid_ledger
+        │ (hourly, top of the UTC hour)
+        ▼
+aipg-payout.timer ─► aipg-payout.service ─► scripts/payout_hourly.sh
+        │
+        ├─ pays the just-completed clock hour:
+        │   payouts --since <H> --until <H+1> --period-id hour-YYYY-MM-DDTHH
+        │            --budget $PAYOUT_HOURLY_BUDGET --send
+        └─ then self-heals any stragglers:  payouts --retry-failed
+        ▼
+treasury HOT WALLET sends AIPG (ERC-20) → each account's payout_wallet on Base
+        ▼
+recorded in grid_payouts (one row per (period_id, account_id))
 ```
 
-If every row has a NULL/empty wallet, fix worker→wallet attribution first — the
-bot can't pay an address it doesn't have. The dry-run (step 6) also reports this
-as "X den across N jobs has NO wallet".
+- **Custodial:** the grid holds funds (the hot wallet) and pays on workers'
+  behalf. Bootstrap rail until the trustless on-chain claim ships.
+- **Attribution is by ACCOUNT** (a worker authenticates with its account key →
+  `workers.account_id`). An account with no `payout_wallet` **accrues** (owed)
+  and is paid the moment it sets one (`--pay-accrued`). Nothing strands.
+- **den is the single source of truth** (`grid_ledger`) — shared with the future
+  on-chain rail, so moving on-chain swaps the *mechanism*, not the accounting.
 
-## 1. Provision the reporter hot wallet (gas-only, never holds funds)
+## 2. Config (prod)
 
-On prod, generate a fresh key — do NOT reuse the admin or any funded wallet:
+In `/etc/aipg/grid.env` (chmod 600, root; never in git/logs/argv):
+
+| var | meaning |
+|-----|---------|
+| `SETTLEMENT_TREASURY_PK` | the **hot wallet** private key — payout sender. Funded with AIPG (runway) + a little Base ETH (gas). |
+| `BASE_RPC_URL` | Base RPC for reads + sends. **Use a dedicated provider** (Coinbase CDP / Alchemy) — the public `mainnet.base.org` is load-balanced and drops tx submissions. |
+| `PAYOUT_HOURLY_BUDGET` | AIPG distributed per hour (default `208.33` = 5000/day). |
+
+Hot wallet (current): `0x20A82fD11e4A5fC8d4b5A44083C05e4b28dB53B9`.
+AIPG token (Base): `0xa1c0deCaFE3E9Bf06A5F29B7015CD373a9854608`.
+
+## 3. Status lifecycle (grid_payouts.status)
+
+```
+accrued        owed, account has no payout_wallet yet (no tx)
+   │ (wallet set + --pay-accrued, or next hour)
+pending        tx broadcast, BOUND to a treasury nonce (grid_payouts.nonce)
+   │
+   ├─► sent           receipt status==1 AND the matching AIPG Transfer is proven on-chain
+   ├─► failed         broadcast/revert error — retryable (reconcile re-sends at the bound nonce)
+   └─► manual_review  the bound nonce was consumed but the expected Transfer can't be proven
+                      (revert / replacement we didn't record / unrelated tx). NEVER auto-paid,
+                      NEVER auto-resent — a human resolves it (see §6).
+```
+
+## 4. Safety properties (why re-runs / outages don't double-pay)
+
+- **Nonce-bound:** each payout is bound to one treasury nonce; it's settled iff
+  that nonce has mined **and** the AIPG Transfer is proven. One nonce ⇒ one
+  payout ⇒ pays at most once.
+- **Transfer proof:** `sent` requires `Transfer(_, payout_wallet, amount)` in the
+  tx receipt — `status==1` alone is not enough (both confirm paths enforce this).
+- **No new-nonce resends:** retries REPLACE at the bound nonce (escalating tip);
+  a receipt timeout stays `pending` (unknown), resolved next run by the nonce check.
+- **Collision-proof allocation:** fresh nonce = `max(chain pending, max assigned
+  in DB + 1)` + a **partial UNIQUE index** on `nonce` + a **pg advisory lock**
+  around any writing run (serializes concurrent runners).
+
+## 5. Commands (dry-run by default; `--send` executes)
 
 ```bash
-cast wallet new          # prints an address + private key
+cd /home/aipg/system-core && set -a; . /etc/aipg/grid.env; set +a
+
+# Preview a window (NO money):
+.venv/bin/python -m grid_api.services.settlement.payouts --days 1 --budget 5000
+
+# Send a specific hour (idempotent — re-running a settled period skips):
+.venv/bin/python -m grid_api.services.settlement.payouts \
+  --since 2026-06-25T13:00:00+00:00 --until 2026-06-25T14:00:00+00:00 \
+  --period-id hour-2026-06-25T13 --budget 208.33 --send
+
+# Pay accounts that just connected a wallet (their accrued balance):
+.venv/bin/python -m grid_api.services.settlement.payouts --pay-accrued
+
+# Self-heal: reconcile pending + retry failed (nonce-bound, idempotent):
+.venv/bin/python -m grid_api.services.settlement.payouts --retry-failed
 ```
 
-- Put the private key in the bot's chmod-600 env as `SETTLEMENT_REPORTER_PK`
-  (never on argv, never in git/logs).
-- Note the **address** — it gets `REPORTER_ROLE` in step 5.
-- Fund it with a tiny amount of Base ETH for gas (~0.001 ETH covers many periods;
-  Base is cheap and the bot caps at `MAX_GWEI`).
+## 6. Operations
 
-A compromised reporter is bounded to **one period's allocation** (it can only post
-a root for an unreported period; payouts always pull the fixed allocation split by
-den). Keep the allocation small until validator co-signing lands.
+- **Kill switch (stop all automated payouts):** `systemctl stop aipg-payout.timer`
+  (re-enable: `systemctl start aipg-payout.timer`). Nothing settles while stopped;
+  owed den just accrues and pays when re-enabled.
+- **Status:** `systemctl status aipg-payout.timer` / `journalctl -u aipg-payout.service`.
+- **Resolve `manual_review`:** list them
+  (`SELECT period_id, account_id, address, aipg_amount, nonce, tx_hash FROM
+  grid_payouts WHERE status='manual_review'`), check the bound nonce / address on
+  BaseScan. If the worker WAS paid → set `status='sent'` with the real tx_hash.
+  If NOT paid and you want to re-pay → clear the row's nonce+tx_hash, set
+  `status='failed'`, and run `--retry-failed` (it allocates a fresh nonce).
 
-## 2. Decide the starter economics (small — this is a proof)
+## 7. Canary procedure (before re-enabling after any change)
 
-Recommended first numbers (ramp later; `setPeriodAllocation` allows 10×/call):
+A supervised tiny live cycle proves the path end-to-end at ~zero cost (hot→hot
+self-transfer of 1 AIPG through the real `_settle_one`):
 
-| Knob | Starter | Why |
-|------|---------|-----|
-| Pool seed (`DEPOSIT_AIPG`) | `5000` | ~weeks of runway at the starter rate; refillable anytime |
-| Per-day allocation (`ALLOCATION_AIPG`) | `100` | tiny ($≈0.12/day); proves the pipe before real emissions |
-| Period length | `86400` (default) | daily; leave as-is |
+1. With the timer **stopped**, run one settle of a synthetic period to the hot
+   wallet itself; confirm it returns `sent` (which requires the Transfer proof).
+2. Re-run the same period with the bound nonce: must return `sent` with **no
+   second transfer** (nonce unchanged) — idempotency proven.
+3. `--retry-failed` → no-op. Delete the canary row.
+4. Acceptance: no duplicate nonce, no unexpected `manual_review`, no long-lived
+   `pending`, on-chain Transfer to the expected wallet/amount, rerun does not
+   rebroadcast. Only then `systemctl start aipg-payout.timer`.
 
-With one worker, that worker takes the whole allocation regardless of size — so a
-small number is a safe first live test. Ramp via `setPeriodAllocation` once it works.
+---
 
-## 3–5. Fund + allocate + grant reporter (admin hardware wallet)
+## FUTURE (NOT LIVE): trustless on-chain claim
 
-One script does all three (`aipg-smart-contracts/scripts/deployment/configure-rewards.sh`):
+The endgame replaces custodial transfers with **worker-claimed** rewards: the grid
+publishes a per-epoch Merkle root (worker→amount) to an on-chain RewardDistributor
+on Base, funded from emissions; each worker calls `claim(proof, amount)` and pulls
+AIPG directly — the grid can't withhold, and payouts are verifiable on-chain. Same
+`grid_ledger` den feeds it.
 
-```bash
-cd aipg-smart-contracts
-DEPOSIT_AIPG=5000 ALLOCATION_AIPG=100 \
-REPORTER_BOT=0x<reporter-address-from-step-1> \
-HWFLAG=--ledger \
-./scripts/deployment/configure-rewards.sh
-```
-
-It runs: `approve` → `depositRewards` → `setPeriodAllocation` → `grantRole(REPORTER_ROLE, bot)`,
-then prints the new pool balance + allocation. Verify:
-
-```bash
-GRID=0x79F39f2a0eA476f53994812e6a8f3C8CFe08c609
-RPC=https://mainnet.base.org
-cast call $GRID 'poolBalance()(uint256)'      --rpc-url $RPC   # expect 5000e18
-cast call $GRID 'periodAllocation()(uint256)' --rpc-url $RPC   # expect  100e18
-cast call $GRID 'hasRole(bytes32,address)(bool)' \
-  $(cast keccak "REPORTER_ROLE") 0x<reporter-address> --rpc-url $RPC   # expect true
-```
-
-## 6. DRY-RUN the settlement (no transactions)
-
-Configure the bot env on prod (DRY_RUN stays ON by default):
-
-```bash
-export BASE_RPC_URL=https://mainnet.base.org
-export GRID_DIAMOND_ADDRESS=0x79F39f2a0eA476f53994812e6a8f3C8CFe08c609
-export SETTLEMENT_REPORTER_PK=<from step 1>   # not needed for dry-run, fine to set
-export SETTLEMENT_DRY_RUN=1                    # explicit
-python -m grid_api.services.settlement.bot --once     # last closed period
-```
-
-Read the log carefully. It prints the **Merkle root**, `[DRY_RUN] reportPeriod(...)`,
-and `[DRY_RUN] claimBatch(... den_sum=...)`. Confirm:
-- entries match the SQL from step 0 (right wallets, sane den),
-- no large "NO wallet" stranded den,
-- root is non-zero, totalDen > 0.
-
-## 7. Go/no-go
-
-Proceed only if the dry-run looks correct and `poolBalance >= the period's payout`
-(payout ≈ allocation; pool must cover it).
-
-## 8. Flip live — settle ONE period
-
-```bash
-export SETTLEMENT_DRY_RUN=0
-python -m grid_api.services.settlement.bot --once --period <same id as the dry-run>
-```
-
-This submits `reportPeriod` then `claimBatch`. Watch for the two tx hashes in the
-log, then verify on-chain a real payout landed:
-
-```bash
-cast call $GRID 'isClaimed(uint256,address)(bool)' <periodId> 0x<worker-wallet> --rpc-url $RPC  # true
-cast call $GRID 'totalPaidOut()(uint256)' --rpc-url $RPC                                         # > 0
-cast call 0xa1c0deCaFE3E9Bf06A5F29B7015CD373a9854608 \
-  'balanceOf(address)(uint256)' 0x<worker-wallet> --rpc-url $RPC                                 # increased
-```
-
-## 9. Hand off to the daily loop
-
-Once a manual period settles cleanly, run the service (systemd) with
-`SETTLEMENT_DRY_RUN=0`; it sleeps to each period boundary and settles
-autonomously. `SETTLEMENT_STATE_FILE` tracks the last settled period so a
-restart never double-reports or skips. The `--once` runs don't touch that state,
-so your manual go-live period and the loop won't collide (the loop catches up
-from its own saved cursor).
-
-## Rollback / safety
-
-- **Pause everything:** `cast send $GRID 'pause()' --ledger` (PAUSER_ROLE/ADMIN) —
-  blocks deposits, reports, and claims.
-- **Halt emissions only:** `setPeriodAllocation(0, "halt")` — unbounded down to 0.
-- **Stop the bot:** stop the systemd unit; nothing settles while it's down, and it
-  catches up safely when restarted.
-- A reported period is immutable (no double-report); a bad root is bounded to that
-  one period's allocation.
-```
+**Status: not deployed.** Blockers: reward facets not live on the Base diamond;
+`settlement/bot.py` is a scaffold (unfinished integrations); economics (den→AIPG
+rate, model multipliers, emission schedule) not locked; no claim UI. The contract
+addresses/runbook that previously lived here describe that *planned* system, not
+the running one — see `bot.py` and the contracts repo when that work is picked up.
+Until then, the custodial CLI above is the rail.
