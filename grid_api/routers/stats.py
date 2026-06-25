@@ -19,6 +19,7 @@ from fastapi import APIRouter
 from ..database import new_session
 from ..redis_client import get_redis
 from ..v2.schema import ledger as ledger_table
+from ..v2.schema import payouts as payouts_table
 
 logger = logging.getLogger("grid_api.stats")
 
@@ -275,6 +276,60 @@ async def wallet_earnings(address: str):
                 "den": round(float(r["den"]), 2),
                 "at": r["created"].isoformat() if r["created"] else None,
             }
+            for r in recent
+        ],
+    }
+
+
+@router.get("/v1/payouts/public")
+async def payouts_public(limit: int = 50):
+    """PUBLIC, no-auth worker-payout transparency. Aggregate only — NO account
+    IDs / PII; just on-chain payout wallets + tx hashes (already public on Base).
+    Feeds the /transparency page so anyone can verify what's been paid to workers."""
+    PAID = ("sent", "confirmed")
+    limit = max(1, min(int(limit or 50), 200))
+    p = payouts_table
+    async with await new_session() as session:
+        totals = (await session.execute(
+            sa.select(
+                sa.func.coalesce(sa.func.sum(p.c.aipg_amount), 0).label("aipg"),
+                sa.func.count().label("payouts"),
+                sa.func.count(sa.distinct(p.c.address)).label("workers"),
+                sa.func.count(sa.distinct(p.c.period_id)).label("periods"),
+                sa.func.max(p.c.paid).label("last_paid"),
+            ).where(p.c.status.in_(PAID))
+        )).mappings().first()
+        periods = (await session.execute(
+            sa.select(
+                p.c.period_id,
+                sa.func.sum(p.c.aipg_amount).label("aipg"),
+                sa.func.count().label("payouts"),
+                sa.func.max(p.c.paid).label("at"),
+            ).where(p.c.status.in_(PAID))
+            .group_by(p.c.period_id).order_by(sa.func.max(p.c.paid).desc()).limit(limit)
+        )).mappings().all()
+        recent = (await session.execute(
+            sa.select(p.c.period_id, p.c.aipg_amount, p.c.address, p.c.tx_hash, p.c.paid)
+            .where(p.c.status.in_(PAID), p.c.tx_hash.isnot(None))
+            .order_by(p.c.paid.desc()).limit(limit)
+        )).mappings().all()
+    return {
+        "totals": {
+            "aipg_paid": round(float(totals["aipg"] or 0), 4),
+            "payouts": int(totals["payouts"] or 0),
+            "workers_paid": int(totals["workers"] or 0),
+            "periods": int(totals["periods"] or 0),
+            "last_paid": totals["last_paid"].isoformat() if totals["last_paid"] else None,
+        },
+        "periods": [
+            {"period_id": r["period_id"], "aipg": round(float(r["aipg"] or 0), 4),
+             "payouts": int(r["payouts"]), "at": r["at"].isoformat() if r["at"] else None}
+            for r in periods
+        ],
+        "recent": [
+            {"period_id": r["period_id"], "aipg": round(float(r["aipg_amount"] or 0), 4),
+             "address": r["address"], "tx_hash": r["tx_hash"],
+             "at": r["paid"].isoformat() if r["paid"] else None}
             for r in recent
         ],
     }
