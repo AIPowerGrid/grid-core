@@ -196,17 +196,10 @@ def _hx(x) -> str:
     return s.lower()[2:] if s.lower().startswith("0x") else s.lower()
 
 
-def _verify_transfer(w3, tx_hash, expected_to, expected_wei) -> bool:
-    """PROOF that this exact payment landed: tx_hash mined with status==1 AND
-    emitted an AIPG Transfer(_, expected_to, expected_wei). Per-hash receipt
-    lookup (reliable) — never a getLogs range scan. 'nonce advanced' alone is NOT
-    proof (a revert or an unrelated tx also consumes the nonce)."""
-    if not tx_hash:
-        return False
-    try:
-        rec = w3.eth.get_transaction_receipt(tx_hash if str(tx_hash).startswith("0x") else "0x" + str(tx_hash))
-    except Exception:
-        return False
+def _receipt_proves_transfer(w3, rec, expected_to, expected_wei) -> bool:
+    """PROOF from a receipt: mined with status==1 AND it emitted an AIPG
+    Transfer(_, expected_to, expected_wei). status==1 alone is NOT proof — a
+    success receipt can carry no/other logs; only the matching Transfer counts."""
     if not rec or rec.get("status") != 1:
         return False
     topic = _hx(w3.keccak(text="Transfer(address,address,uint256)"))
@@ -222,6 +215,18 @@ def _verify_transfer(w3, tx_hash, expected_to, expected_wei) -> bool:
         except Exception:
             continue
     return False
+
+
+def _verify_transfer(w3, tx_hash, expected_to, expected_wei) -> bool:
+    """Fetch tx_hash's receipt and prove it carried the expected AIPG Transfer.
+    Per-hash receipt lookup (reliable) — never a getLogs range scan."""
+    if not tx_hash:
+        return False
+    try:
+        rec = w3.eth.get_transaction_receipt(tx_hash if str(tx_hash).startswith("0x") else "0x" + str(tx_hash))
+    except Exception:
+        return False
+    return _receipt_proves_transfer(w3, rec, expected_to, expected_wei)
 
 
 async def _settle_one(ctx, *, period_id, account_id, address, den, aipg,
@@ -279,13 +284,25 @@ async def _settle_one(ctx, *, period_id, account_id, address, den, aipg,
                          status="failed", tx_hash=str(e)[:80], nonce=nonce)
             return "failed"
 
-    # (5) Confirm (short). mined→sent, revert→failed, timeout→stay 'pending'.
+    # (5) Confirm (short) — and PROVE the Transfer, never trust status==1 alone.
+    #     mined+Transfer→sent ; revert→failed ; mined-but-no-matching-Transfer→
+    #     manual_review (don't claim paid) ; timeout→stay 'pending'.
     try:
         rec = w3.eth.wait_for_transaction_receipt(h, timeout=90, poll_latency=2)
-        ok = rec.get("status") == 1
+        if rec.get("status") != 1:
+            await _write(period_id, account_id, address=address, den=den, aipg=aipg,
+                         status="failed", tx_hash=h.hex(), nonce=nonce)
+            return "failed"
+        expected_wei = int(round(aipg * (10 ** decimals)))
+        if _receipt_proves_transfer(w3, rec, address, expected_wei):
+            await _write(period_id, account_id, address=address, den=den, aipg=aipg,
+                         status="sent", tx_hash=h.hex(), nonce=nonce, paid=True)
+            return "sent"
         await _write(period_id, account_id, address=address, den=den, aipg=aipg,
-                     status="sent" if ok else "failed", tx_hash=h.hex(), nonce=nonce, paid=ok)
-        return "sent" if ok else "failed"
+                     status="manual_review", tx_hash=h.hex(), nonce=nonce)
+        logger.error("payout %s/%s: receipt status 1 but no matching Transfer (tx=%s) — manual_review",
+                     period_id, account_id, h.hex())
+        return "manual_review"
     except Exception:
         return "pending"  # UNKNOWN — not failed. The nonce check settles it next run.
 
