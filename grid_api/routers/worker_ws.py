@@ -681,7 +681,12 @@ async def worker_websocket(ws: WebSocket):
                 requested_max = int(job["payload"].get("max_length", 512) or 512)
                 # Real tokenizer (tiktoken) server-side — worker-independent and
                 # far more accurate than word-splitting (which undercounts ~25%).
-                server_token_count = count_tokens(full_text)
+                # Count BOTH content and reasoning_content: reasoning tokens are
+                # real generated work (the model spends most of its decode time on
+                # them), so excluding them collapsed t/s for reasoning models to
+                # ~2-3 and under-rewarded their den. Matches OpenAI (reasoning =
+                # output tokens).
+                server_token_count = count_tokens(full_text) + count_tokens(gen.get("full_reasoning") or "")
                 effective_tokens = min(server_token_count, token_count or server_token_count, requested_max)
 
                 # 2) Context: the prompt is user-controlled and the context
