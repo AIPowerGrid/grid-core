@@ -27,7 +27,7 @@ import os
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
-from ...database import new_session
+from ...database import close_database, init_database, new_session
 from ...v2.schema import payouts as payouts_t
 from .aggregate import aggregate_den_for_period, count_unattributed_den
 
@@ -199,15 +199,19 @@ async def _amain():
     start, end, pid = _window(a.days, a.since, a.until)
     if a.period_id:
         pid = a.period_id
-    pv = await preview_period(start, end, a.budget)
-    _print_preview(pv, pid)
-    if a.send:
-        if not pv["payouts"]:
-            print("nothing to send."); return
-        print(f"SENDING {len(pv['payouts'])} payouts for {pid} ...")
-        print(await send_period(start, end, a.budget, pid))
-    else:
-        print("(dry-run — re-run with --send to execute)")
+    await init_database()   # standalone CLI: wire the DB engine the app normally inits
+    try:
+        pv = await preview_period(start, end, a.budget)
+        _print_preview(pv, pid)
+        if a.send:
+            if not pv["payouts"]:
+                print("nothing to send."); return
+            print(f"SENDING {len(pv['payouts'])} payouts for {pid} ...")
+            print(await send_period(start, end, a.budget, pid))
+        else:
+            print("(dry-run — re-run with --send to execute)")
+    finally:
+        await close_database()
 
 
 if __name__ == "__main__":
