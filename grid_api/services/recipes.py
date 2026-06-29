@@ -339,6 +339,7 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
         "seed": inputs["seed"],
         "required_models": r.required_models,
         "lora_inject": r.lora_inject,   # worker splices LoraLoader nodes here (if loras requested)
+        "image_paths": r.vars.get("image"),  # path(s) the worker binds a source image to (image slot is NOT pre-injected)
         "spec": spec,
     }
 

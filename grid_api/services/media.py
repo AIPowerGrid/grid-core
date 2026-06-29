@@ -396,6 +396,11 @@ async def _submit_and_wait_inner(model: str, job_type: str, payload: dict, timeo
         # worker, which downloads/verifies the weights and splices LoraLoader nodes.
         if payload.get("loras") and spec.get("lora_inject"):
             payload["recipe_lora_inject"] = spec["lora_inject"]
+        # Source image: the image slot is NOT pre-injected (the grid doesn't know the
+        # ComfyUI-side filename). Tell the worker which graph path(s) to bind the
+        # uploaded source image to, so it can point the recipe's LoadImage at it.
+        if payload.get("source_image_url") and spec.get("image_paths"):
+            payload["recipe_image_inputs"] = spec["image_paths"]
         logger.info(f"{job_type} job {job_id} resolved recipe {spec['recipe_root']} "
                     f"({spec['name']}, engine={spec['engine']})"
                     + (f" +{len(payload['loras'])} lora(s)" if payload.get('loras') else ""))
