@@ -98,6 +98,10 @@ class ModelInfo(BaseModel):
     object: str = "model"
     created: int = 0
     owned_by: str = "aipowergrid"
+    # Additive capability hint: input modalities the model accepts ("text",
+    # "image", "video"). Standard OpenAI clients ignore the extra field; the chat
+    # UI reads it to enable image upload for vision models. Defaults to text-only.
+    input_modalities: list[str] = ["text"]
 
 
 class ModelListResponse(BaseModel):

@@ -206,6 +206,38 @@ async def get_available_models(job_type: str | None = None, api_format: str | No
     return sorted(models)
 
 
+async def get_model_modalities() -> dict[str, list[str]]:
+    """Map each connected TEXT model → the UNION of input modalities advertised by
+    the workers serving it. A model is image-capable if ANY worker serving it
+    declares "image". Used to surface input_modalities on /v1/models so the chat
+    UI can enable image upload for vision-capable models. Mirrors the worker
+    iteration in get_available_models (one pipelined round-trip)."""
+    r = get_redis()
+    worker_ids = list(await r.smembers(WORKER_ACTIVE_SET))
+    if not worker_ids:
+        return {}
+    keys = [f"{WORKER_STATUS_PREFIX}{wid}{WORKER_STATUS_SUFFIX}" for wid in worker_ids]
+    pipe = r.pipeline()
+    for key in keys:
+        pipe.get(key)
+    results = await pipe.execute()
+    out: dict[str, set] = {}
+    for data in results:
+        if not data:
+            continue
+        info = json.loads(data)
+        if "text" not in (info.get("job_types") or ["text"]):
+            continue
+        mods = info.get("modalities") or ["text"]
+        for m in info.get("models", []):
+            out.setdefault(m, set()).update(mods)
+    # Stable order: text first, then the rest alphabetically.
+    return {
+        model: (["text"] if "text" in mods else []) + sorted(mods - {"text"})
+        for model, mods in out.items()
+    }
+
+
 async def get_connected_worker_count() -> int:
     """Get count of active workers."""
     r = get_redis()
@@ -245,6 +277,11 @@ async def worker_websocket(ws: WebSocket):
         # assumed to be plain OpenAI chat workers.
         api_formats = init_msg.get("api_formats") or ["openai-chat"]
         api_formats = [f for f in api_formats if f in ("openai-chat", "openai-responses", "anthropic")] or ["openai-chat"]
+        # Input modalities the worker's model accepts (operator-declared). Surfaced
+        # on /v1/models as input_modalities so the chat UI enables image upload for
+        # vision models. Defaults to text-only for workers that don't advertise it.
+        modalities = init_msg.get("modalities") or ["text"]
+        modalities = [m for m in modalities if m in ("text", "image", "video")] or ["text"]
         # NOTE: the payout wallet is NOT taken from the worker. It's resolved
         # from the authenticated account below. This means an operator runs
         # workers on any number of rigs with ONLY an API key — no wallet or
@@ -393,6 +430,7 @@ async def worker_websocket(ws: WebSocket):
             "models": models,
             "job_types": job_types,
             "api_formats": api_formats,
+            "modalities": modalities,
             "max_length": max_length,
             "max_context_length": max_context_length,
             "wallet_address": wallet_address,

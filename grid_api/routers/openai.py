@@ -42,6 +42,7 @@ from ..services import accounts as accounts_svc
 from ..services import credits, den, job_queue, media, quota, recipes, token_stream
 from ..services.sanitizer import sanitize_messages
 from .worker_ws import get_available_models
+from .worker_ws import get_model_modalities
 
 logger = logging.getLogger("grid_api.openai")
 
@@ -617,8 +618,16 @@ async def list_models():
     job API, not chat-completions, and must not appear in a chat picker.
     """
     models = await get_available_models(job_type="text")
+    modalities = await get_model_modalities()
     return ModelListResponse(
-        data=[ModelInfo(id=m, owned_by="aipowergrid") for m in models],
+        data=[
+            ModelInfo(
+                id=m,
+                owned_by="aipowergrid",
+                input_modalities=modalities.get(m, ["text"]),
+            )
+            for m in models
+        ],
     )
 
 
