@@ -466,6 +466,7 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
     # grid ACTUALLY relayed (content + reasoning), never worker `usage`.
     relayed = []
     observed = False  # log the dry-run would-charge exactly once
+    terminal = False  # did we reach a natural end (done/error) vs. client disconnect?
 
     try:
         async for data in token_stream.subscribe_tokens(job_id):
@@ -475,6 +476,7 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
                 # instead of a silently-truncated reply.
                 err = data.get("error")
                 if err:
+                    terminal = True
                     yield f"data: {json.dumps({'error': {'message': err, 'type': 'invalid_request_error' if data.get('code') == 400 else 'upstream_error'}})}\n\n"
                     yield "data: [DONE]\n\n"
                     return  # live settlement happens in worker_ws; nothing to observe on error
@@ -514,8 +516,14 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
                 chunk = fmt.openai_chunk(data.get("text", ""), model, completion_id)
             yield f"data: {json.dumps(chunk)}\n\n"
 
+        terminal = True
         yield "data: [DONE]\n\n"
     finally:
+        # If the generator was torn down before a natural finish, the client
+        # disconnected (closed the SSE / pressed stop) — tell the worker to abort
+        # so it stops generating instead of running to completion on the GPU.
+        if not terminal:
+            await token_stream.request_cancel(job_id)
         # Dry-run only: observe the would-charge once even on disconnect/cancel.
         # (LIVE money is settled in worker_ws regardless of this generator.)
         if not observed:
@@ -536,32 +544,41 @@ async def _collect_response(job_id: str, model: str, user: dict | None = None, s
     usage = None
     finish_reason = "stop"
     grid_meta = None
+    terminal = False  # natural finish vs. client disconnect
 
-    async for data in token_stream.subscribe_tokens(job_id):
-        if data.get("text") == token_stream.DONE_SENTINEL:
-            err = data.get("error")
-            if err:
-                # Surface the real failure with a meaningful status (400 for a
-                # caller fault, 502 for an upstream worker/backend failure).
-                raise HTTPException(status_code=data.get("code") or 502, detail=err)
-            content = data.get("full_text") or content
-            reasoning = data.get("full_reasoning") or reasoning
-            tool_calls = data.get("tool_calls") or tool_calls
-            usage = data.get("usage") or usage
-            finish_reason = data.get("finish_reason") or finish_reason
-            grid_meta = data.get("grid") or grid_meta
-            break
+    try:
+        async for data in token_stream.subscribe_tokens(job_id):
+            if data.get("text") == token_stream.DONE_SENTINEL:
+                err = data.get("error")
+                if err:
+                    # Surface the real failure with a meaningful status (400 for a
+                    # caller fault, 502 for an upstream worker/backend failure).
+                    terminal = True
+                    raise HTTPException(status_code=data.get("code") or 502, detail=err)
+                content = data.get("full_text") or content
+                reasoning = data.get("full_reasoning") or reasoning
+                tool_calls = data.get("tool_calls") or tool_calls
+                usage = data.get("usage") or usage
+                finish_reason = data.get("finish_reason") or finish_reason
+                grid_meta = data.get("grid") or grid_meta
+                terminal = True
+                break
 
-        delta = data.get("delta")
-        if delta is not None:
-            if delta.get("content"):
-                content += delta["content"]
-            if delta.get("reasoning_content"):
-                reasoning += delta["reasoning_content"]
-        elif data.get("reasoning"):
-            reasoning += data.get("text", "")
-        else:
-            content += data.get("text", "")
+            delta = data.get("delta")
+            if delta is not None:
+                if delta.get("content"):
+                    content += delta["content"]
+                if delta.get("reasoning_content"):
+                    reasoning += delta["reasoning_content"]
+            elif data.get("reasoning"):
+                reasoning += data.get("text", "")
+            else:
+                content += data.get("text", "")
+    finally:
+        # Client gave up on a non-streaming request before we got the result →
+        # abort the worker rather than letting it finish on the GPU.
+        if not terminal:
+            await token_stream.request_cancel(job_id)
 
     # Grid-counted completion (tiktoken of the content+reasoning the grid actually
     # assembled) — used for dry-run observability and as the display fallback.

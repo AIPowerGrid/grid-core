@@ -1016,10 +1016,22 @@ async def _handle_raw_passthrough(
     accumulated: list[str] = []  # raw data strings, for the result hash
     usage = None
     ttft: float | None = None
+    cancel_sent = False
+    last_cancel_poll = gen_start
 
     while True:
         msg = await asyncio.wait_for(ws.receive_json(), timeout=300)
         mtype = msg.get("type")
+
+        # Forward a client-initiated cancel to the worker (once), throttled.
+        if not cancel_sent:
+            _now = _time.time()
+            if _now - last_cancel_poll >= 0.3:
+                last_cancel_poll = _now
+                if await token_stream.is_cancelled(job_id):
+                    await ws.send_json({"type": "cancel", "id": job_id})
+                    cancel_sent = True
+                    logger.info(f"Forwarded client cancel to worker for raw job {job_id}")
 
         if mtype == "raw":
             if ttft is None:
@@ -1193,10 +1205,25 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
     last_finish = None
     recv_start = _time.time()
     ttft: float | None = None
+    cancel_sent = False
+    last_cancel_poll = recv_start
 
     while True:
         msg = await asyncio.wait_for(ws.receive_json(), timeout=300)
         msg_type = msg.get("type")
+
+        # Forward a client-initiated cancel to the worker (once), throttled so we
+        # don't hit Redis on every token. The worker aborts its backend request
+        # and sends a normal `done` with the partial output, which the branch
+        # below settles as a (partial) success — no special cancel settlement.
+        if not cancel_sent:
+            _now = _time.time()
+            if _now - last_cancel_poll >= 0.3:
+                last_cancel_poll = _now
+                if await token_stream.is_cancelled(job_id):
+                    await ws.send_json({"type": "cancel", "id": job_id})
+                    cancel_sent = True
+                    logger.info(f"Forwarded client cancel to worker for job {job_id}")
 
         if msg_type == "token":
             if ttft is None:
@@ -1228,6 +1255,11 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
                 await token_stream.publish_token(job_id, text, reasoning=is_reasoning)
 
         elif msg_type == "done":
+            # `cancelled` means the worker aborted its backend request because we
+            # forwarded a client cancel. The partial output (possibly empty) is a
+            # legitimate terminal — settle it as a partial success, never a worker
+            # failure (no strike, no requeue).
+            was_cancelled = bool(msg.get("cancelled"))
             full_text = msg.get("full_text", full_text)
             full_reasoning = msg.get("full_reasoning", full_reasoning)
             usage = msg.get("usage") or usage
@@ -1238,14 +1270,15 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
 
             # An empty completion (no content, no reasoning, no tool calls) is a
             # silent backend failure, not a success — don't pay for it or hand
-            # the client a blank reply.
+            # the client a blank reply. A cancelled job is exempt: stopping early
+            # with little/no output is expected, not a fault.
             produced_output = bool(
                 (full_text or "").strip()
                 or (full_reasoning or "").strip()
                 or tool_calls
                 or token_count
             )
-            if not produced_output:
+            if not produced_output and not was_cancelled:
                 logger.warning(f"Worker returned EMPTY completion for job {job_id} — treating as failure")
                 return _gen_result(full_text=full_text, metered=0, failed=True, ttft=ttft)
 

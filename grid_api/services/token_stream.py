@@ -24,8 +24,39 @@ logger = logging.getLogger("grid_api.token_stream")
 
 CHANNEL_PREFIX = "grid:stream:"
 BUFFER_PREFIX = "grid:tokens:"
+CANCEL_PREFIX = "grid:cancel:"
 DONE_SENTINEL = "[DONE]"
 BUFFER_TTL = 300  # 5 minutes
+CANCEL_TTL = 600  # 10 minutes — comfortably longer than any single generation
+
+
+async def request_cancel(job_id: str) -> None:
+    """Mark a job cancelled because the client disconnected / pressed stop.
+
+    Idempotent. The worker-WS receive loop polls `is_cancelled()` and, on seeing
+    the flag, forwards a `cancel` frame to the worker, which aborts the in-flight
+    backend request (freeing the GPU) and returns whatever it produced so far.
+    Settlement then bills only the partial output — no special path needed."""
+    try:
+        await get_redis().set(f"{CANCEL_PREFIX}{job_id}", "1", ex=CANCEL_TTL)
+    except Exception:
+        logger.warning("request_cancel failed for job %s", job_id, exc_info=True)
+
+
+async def is_cancelled(job_id: str) -> bool:
+    """True if a cancel has been requested for this job. Fails closed (False)."""
+    try:
+        return bool(await get_redis().exists(f"{CANCEL_PREFIX}{job_id}"))
+    except Exception:
+        return False
+
+
+async def clear_cancel(job_id: str) -> None:
+    """Best-effort clear of a job's cancel flag (it also TTLs out on its own)."""
+    try:
+        await get_redis().delete(f"{CANCEL_PREFIX}{job_id}")
+    except Exception:
+        pass
 
 
 def event_content_text(data: dict) -> str:

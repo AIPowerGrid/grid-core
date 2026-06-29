@@ -286,16 +286,19 @@ async def stream_passthrough(job_id: str, *, api_format: str = "", user: dict | 
     we only feed dry-run OBSERVABILITY on grid-counted output."""
     relayed: list[str] = []
     observed = False
+    terminal = False  # natural end vs. client disconnect
     try:
         async for data in token_stream.subscribe_tokens(job_id):
             if data.get("text") == token_stream.DONE_SENTINEL:
                 err = data.get("error")
                 if err:
+                    terminal = True
                     body = json.dumps({"type": "error", "error": {"type": "api_error", "message": err}})
                     yield f"event: error\ndata: {body}\n\n"
                     return  # live settlement is worker_ws's job; nothing to observe on error
                 await _observe_dry_passthrough(user, model, prompt_toks, den.count_tokens("".join(relayed)), job_id)
                 observed = True
+                terminal = True
                 return
             if data.get("raw"):
                 ev = data.get("event")
@@ -308,6 +311,9 @@ async def stream_passthrough(job_id: str, *, api_format: str = "", user: dict | 
                 else:
                     yield f"data: {d}\n\n"
     finally:
+        # Torn down before a natural finish → client disconnected; abort the worker.
+        if not terminal:
+            await token_stream.request_cancel(job_id)
         # Dry-run only: observe once even on disconnect (live money is worker_ws's).
         if not observed:
             await _observe_dry_passthrough(user, model, prompt_toks, den.count_tokens("".join(relayed)), job_id)
