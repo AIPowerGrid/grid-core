@@ -225,7 +225,12 @@ async def subscribe_tokens(job_id: str, timeout: int = 300) -> AsyncGenerator[di
         if done:
             return
 
-        # Phase 2: Live pub/sub (skip tokens we already replayed)
+        # Phase 2: Live pub/sub (skip tokens we already replayed).
+        # `timeout` is an IDLE timeout, not a total one: the deadline is pushed out
+        # on every token, so the stream is only abandoned after `timeout` seconds
+        # of SILENCE (a dead/stalled worker). A slow-but-alive stream — a long
+        # reasoning answer, a slow GPU — keeps running as long as tokens flow. A
+        # total request timeout can't tell a slow stream from a dead one.
         live_count = 0
         deadline = asyncio.get_event_loop().time() + timeout
 
@@ -257,6 +262,7 @@ async def subscribe_tokens(job_id: str, timeout: int = 300) -> AsyncGenerator[di
                         yield data
                         return
                     yield data
+                    deadline = asyncio.get_event_loop().time() + timeout  # token = alive; reset idle window
                 continue
 
             if message["type"] == "message":
@@ -269,6 +275,7 @@ async def subscribe_tokens(job_id: str, timeout: int = 300) -> AsyncGenerator[di
                     yield data
                     break
                 yield data
+                deadline = asyncio.get_event_loop().time() + timeout  # token = alive; reset idle window
 
     except asyncio.TimeoutError:
         logger.warning(f"Token stream timeout for job {job_id}")

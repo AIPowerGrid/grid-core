@@ -435,8 +435,21 @@ async def worker_websocket(ws: WebSocket):
             "max_context_length": max_context_length,
             "wallet_address": wallet_address,
         }
-        await register_worker(worker_id, worker_info)
+        # Single active connection per worker. A reconnect (restart / network blip)
+        # can leave the previous WS half-open; if its server-side task is still
+        # running it keeps refreshing the registry with stale data, so a renamed
+        # model flip-flops between the old and new name (phantom). Claim the slot
+        # FIRST (so the old task's cleanup, guarded by `is ws`, won't de-register
+        # us), then close the prior socket so only this connection drives the
+        # registry.
+        _prev_ws = _local_ws.get(worker_id)
         _local_ws[worker_id] = ws
+        if _prev_ws is not None and _prev_ws is not ws:
+            try:
+                await _prev_ws.close(code=1012)  # 1012 = service restart / replaced
+            except Exception:
+                pass
+        await register_worker(worker_id, worker_info)
 
         await ws.send_json({"type": "ready", "worker_id": worker_id})
         logger.info(
@@ -839,8 +852,12 @@ async def worker_websocket(ws: WebSocket):
     finally:
         # ── Cleanup + job retry ──
         if worker_id:
-            _local_ws.pop(worker_id, None)
-            await unregister_worker(worker_id, worker_name or "")
+            # Only tear down the registry if WE are still the active connection for
+            # this worker. A newer connection may have superseded us (reconnect);
+            # its registration must not be clobbered by this stale socket's cleanup.
+            if _local_ws.get(worker_id) is ws:
+                _local_ws.pop(worker_id, None)
+                await unregister_worker(worker_id, worker_name or "")
 
         if current_job:
             # Worker disconnected with a job in progress — try to requeue it onto
