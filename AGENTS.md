@@ -1,4 +1,4 @@
-# system-core - DOX root
+# grid-core (deployed as system-core) - DOX root
 
 ## Purpose
 
@@ -17,7 +17,8 @@ owning AGENTS.md and any affected parent Child DOX Index.
 - `grid_api/` - live v2 FastAPI Grid coordinator for `/v1`, worker WebSockets,
   credits, ledger, den, settlement, recipes, and chain sync.
 - `horde/` - legacy Flask/Horde-compatible app and `/api/v2` compatibility
-  surface; still publicly routed by nginx for legacy clients.
+  surface. Retained in-tree; prod serves the FastAPI `/v1` coordinator, not the
+  `/api/v2` poll queue.
 - `alembic/` - grid-owned database migrations. Must match `grid_api/v2/schema.py`.
 - `deploy/`, `docker/`, root Docker/systemd scripts - production and local
   runtime wiring.
@@ -41,9 +42,10 @@ owning AGENTS.md and any affected parent Child DOX Index.
 - Keep hot inference off-chain. Use Base for consensus-critical registry,
   staking/bonding, signed receipt roots, settlement, and audit anchors; never add
   per-request chain calls in a user request path.
-- The current production shape is hybrid: legacy Flask and new FastAPI both
-  exist. Do not delete or bypass legacy code unless the public route/deploy
-  impact is explicit.
+- Production runs the FastAPI `/v1` coordinator (`grid_api`); workers connect via
+  the WebSocket at `/v1/workers/ws`. Legacy Flask/`horde` code still exists in-tree
+  but is not the prod serving shape. Do not delete or bypass legacy code unless the
+  route/deploy impact is explicit.
 - Money paths must be fail-closed in live mode, idempotent by durable refs, and
   covered by tests. `GRID_CHARGING_ENABLED=0` is dry-run; do not assume money is
   live just because billing helpers exist.

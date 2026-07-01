@@ -13,6 +13,8 @@ validation, worker incentives, and trust boundaries.
   go-live blockers, and current live/dry-run posture.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.
+- `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only
+  invariants, scorecard privacy rules, and future economic gates.
 
 ## Local Contracts
 
@@ -23,6 +25,8 @@ validation, worker incentives, and trust boundaries.
   signed user assertion supersedes raw trusted headers.
 - Validator/slashing docs must not imply automatic slashing exists until
   enforcement and WorkerRegistry integration are wired and reviewed.
+- Validator/fidelity docs must separate reproducible workflow certification
+  from product policies such as NFT minting or marketplace eligibility.
 
 ## Work Guidance
 

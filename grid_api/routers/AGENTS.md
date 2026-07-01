@@ -24,6 +24,13 @@ transport, accounts, stats, health/metrics.
   account profile, payout wallet, worker listing, API-key issue/revoke.
 - `stats.py` - `GET /v1/workers`, progress polling, model status, usage totals,
   model stats, wallet earnings.
+- `validator.py` - validator V0 surface: `GET /v1/validator/capabilities`,
+  `POST /v1/validator/attest` evidence sink, and
+  `GET /v1/validator/workers` inventory, and
+  `GET /v1/validator/scorecards` aggregate evidence view. V0
+  storage/discovery/scorecards only; no routing/reward/slash authority. Worker
+  inventory must advertise `targeted_probe_enabled=false` until
+  `/v1/validator/probe` is real.
 - `styles.py` - `GET /v1/styles` for curated creative presets.
 - `health.py` - `GET /health`.
 - `metrics.py` - `GET /metrics` Prometheus exposition.
@@ -32,7 +39,9 @@ transport, accounts, stats, health/metrics.
 ## Local Contracts
 
 - Faithful passthrough: forward request/response shape unchanged except metering + sanitize.
-- Every endpoint goes through the shared rate limiter (`ratelimit.py`) keyed by API key.
+- Paid inference/media routes go through the shared rate limiter (`ratelimit.py`) keyed by
+  API key. Not every endpoint is limited — `models`, `stats`, `health`/`metrics`, and progress
+  polling are unlimited by design; wire the limiter on new work-submitting routes explicitly.
 - Demand billing must be applied uniformly across all paid inference entry
   points before live charging. Do not add a new work-submitting route without
   reserve/reconcile or an explicit no-charge policy.
@@ -43,6 +52,14 @@ transport, accounts, stats, health/metrics.
 - Worker affinity (`worker` request field) is ownership-gated before queueing.
 - Public stats/health/metrics are unauthenticated by design; keep sensitive
   account/ledger details behind account auth.
+- Validator endpoints are evidence-only until the validator role, assignment
+  quorum, rewards, and dispute process are wired. Do not let `failed`
+  attestations affect worker strikes/slashing from this router.
+- Validator scorecards must aggregate evidence only. Do not expose raw payloads,
+  nonces, signatures, account IDs, or validator identities from scorecard routes.
+- Do not expose targetable validator workers unless targeted probing is fully
+  implemented and tested; half-enabling it causes validator nodes to generate
+  false `failed` evidence.
 - `accounts.py` internal-token routes are for trusted first-party services only.
   Any future bridge identity must use scoped keys plus signed assertions, not raw
   user headers.
