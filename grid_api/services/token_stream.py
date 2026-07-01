@@ -225,13 +225,18 @@ async def subscribe_tokens(job_id: str, timeout: int = 300) -> AsyncGenerator[di
         if done:
             return
 
-        # Phase 2: Live pub/sub (skip tokens we already replayed).
-        # `timeout` is an IDLE timeout, not a total one: the deadline is pushed out
-        # on every token, so the stream is only abandoned after `timeout` seconds
-        # of SILENCE (a dead/stalled worker). A slow-but-alive stream — a long
-        # reasoning answer, a slow GPU — keeps running as long as tokens flow. A
-        # total request timeout can't tell a slow stream from a dead one.
-        live_count = 0
+        # Phase 2: ONE cursor over the replay buffer; pub/sub is only a wakeup.
+        # The buffer list (grid:tokens:{job}) is the ordered source of truth —
+        # every publish rpushes to it AND publishes to the channel. We yield ONLY
+        # from the list, advanced by a single monotonic cursor, and treat channel
+        # messages as nothing more than "something changed, go read the list."
+        # This makes replay idempotent: an event can't be yielded twice (once from
+        # the channel, once from an lrange race) because channel payloads are never
+        # yielded, and it can't be skipped by two counters drifting apart — there
+        # is one cursor. `timeout` stays an IDLE timeout: the deadline is pushed out
+        # on every event, so the stream is abandoned only after `timeout` seconds of
+        # SILENCE (a dead/stalled worker), never during a slow-but-alive stream.
+        cursor = seen_count  # events already yielded from the buffer in Phase 1
         deadline = asyncio.get_event_loop().time() + timeout
 
         while True:
@@ -239,43 +244,27 @@ async def subscribe_tokens(job_id: str, timeout: int = 300) -> AsyncGenerator[di
             if remaining <= 0:
                 break
 
-            # A Redis socket read-timeout here is benign — it just means no
-            # message arrived in the window (the blocking read raced its own
-            # timeout). Treat it as "no message" and keep polling until the
-            # real deadline, rather than letting it bubble up and end the
-            # stream with an empty reply.
+            # Wait for a wakeup (any channel message) or wake ~every second anyway,
+            # so we still drain the buffer if a notification is ever missed. A Redis
+            # socket read-timeout here is benign — it just means no message arrived
+            # in the window; we fall through and poll the list regardless.
             try:
-                message = await asyncio.wait_for(
+                await asyncio.wait_for(
                     pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0),
                     timeout=min(remaining, 5.0),
                 )
             except (asyncio.TimeoutError, redis.exceptions.TimeoutError):
-                message = None
+                pass  # no message — poll the list anyway
 
-            if message is None:
-                # Check buffer for tokens that arrived via replay race
-                new_buffered = await r.lrange(buf_key, seen_count + live_count, -1)
-                for raw in new_buffered:
-                    data = json.loads(raw)
-                    live_count += 1
-                    if data["text"] == DONE_SENTINEL:
-                        yield data
-                        return
-                    yield data
-                    deadline = asyncio.get_event_loop().time() + timeout  # token = alive; reset idle window
-                continue
-
-            if message["type"] == "message":
-                live_count += 1
-                # Skip tokens we already yielded from the buffer
-                if live_count <= seen_count:
-                    continue
-                data = json.loads(message["data"])
+            new_buffered = await r.lrange(buf_key, cursor, -1)
+            for raw in new_buffered:
+                data = json.loads(raw)
+                cursor += 1
                 if data["text"] == DONE_SENTINEL:
                     yield data
-                    break
+                    return
                 yield data
-                deadline = asyncio.get_event_loop().time() + timeout  # token = alive; reset idle window
+                deadline = asyncio.get_event_loop().time() + timeout  # event = alive; reset idle window
 
     except asyncio.TimeoutError:
         logger.warning(f"Token stream timeout for job {job_id}")

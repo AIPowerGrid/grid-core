@@ -487,6 +487,26 @@ async def worker_websocket(ws: WebSocket):
 
         poll_task = asyncio.create_task(_poll_jobs())
 
+        async def _keepalive_registry():
+            """Keep the 60s registry TTL fresh for the WHOLE connection lifetime.
+
+            The idle main loop refreshes on every iteration, but once a job is
+            dispatched control blocks inside a handler's recv loop until the job
+            finishes. A job that runs longer than the 60s TTL (a long video or a
+            slow reasoning stream) would otherwise let the status key expire —
+            dropping a healthy, BUSY worker out of grid:workers:active so
+            /v1/models goes empty and new requests 503. Refresh independently of
+            job state so presence tracks the connection, not the job length.
+            """
+            while True:
+                await asyncio.sleep(20)
+                try:
+                    await refresh_worker(worker_id, worker_info)
+                except Exception:
+                    logger.debug("registry keepalive refresh failed", exc_info=True)
+
+        refresh_task = asyncio.create_task(_keepalive_registry())
+
         try:
             while True:
                 # Wait for the next job, or time out every 10s to keepalive.
@@ -842,6 +862,7 @@ async def worker_websocket(ws: WebSocket):
                     await ws.send_json({"type": "ack", "id": job["job_id"], "den": 0})
         finally:
             poll_task.cancel()
+            refresh_task.cancel()
 
     except WebSocketDisconnect as e:
         logger.info(f"Worker '{worker_info['name'] if worker_info else 'unknown'}' disconnected (code={e.code})")
