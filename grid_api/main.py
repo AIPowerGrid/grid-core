@@ -24,7 +24,7 @@ from slowapi.errors import RateLimitExceeded
 from .database import close_database, init_database
 from .ratelimit import limiter
 from .redis_client import close_redis, init_redis
-from .routers import accounts, anthropic, health, images, metrics, openai, responses, stats, styles, videos, worker_ws
+from .routers import accounts, anthropic, health, images, metrics, openai, responses, stats, styles, validator, videos, worker_ws
 from .services.p2p import init_p2p, close_p2p
 
 logging.basicConfig(
@@ -104,12 +104,17 @@ async def lifespan(app: FastAPI):
     _styles.load_local_styles(os.path.join(_base, "styles"))
     recipe_sync = asyncio.create_task(_recipe_sync_loop())
     sweeper = asyncio.create_task(_reservation_sweeper())
+    # Verification probes ("validator zero") — dormant unless GRID_PROBE_ENABLED;
+    # even ON it only records evidence (no reward/slash). See VERIFICATION_PROBES.md.
+    from .services import probe as _probe
+    prober = asyncio.create_task(_probe.probe_loop())
     logger.info("Grid Streaming API ready.")
     yield
     logger.info("Shutting down Grid Streaming API...")
     reclaimer.cancel()
     recipe_sync.cancel()
     sweeper.cancel()
+    prober.cancel()
     await close_p2p()  # Shutdown P2P
     await close_redis()
     await close_database()
@@ -154,6 +159,7 @@ app.include_router(videos.router)
 app.include_router(worker_ws.router)
 app.include_router(stats.router)
 app.include_router(styles.router)
+app.include_router(validator.router)
 app.include_router(accounts.router)
 app.include_router(health.router)
 app.include_router(metrics.router)
