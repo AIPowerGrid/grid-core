@@ -313,3 +313,46 @@ epochs = sa.Table(
     sa.Column("tx_hash", sa.String(66), nullable=True),
     sa.Column("finalized", sa.Boolean, nullable=False, default=False),
 )
+
+
+# ── Validator attestations (evidence, non-economic in V0) ────────────────
+# Signed validator reports about probe outcomes. V0 stores these as audit
+# evidence only: no routing, rewards, slashing, or payout logic reads this table.
+# Future validator economics can derive scorecards from this append-only evidence
+# after assignment/quorum/dispute rules exist.
+validator_attestations = sa.Table(
+    "grid_validator_attestations",
+    metadata,
+    sa.Column(
+        "id",
+        sa.BigInteger().with_variant(sa.Integer(), "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    ),
+    # sha256(canonical payload + signature) — idempotency for retried submits.
+    sa.Column("attestation_hash", sa.String(64), nullable=False, unique=True),
+    sa.Column(
+        "account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    ),
+    sa.Column("validator_wallet", sa.String(42), nullable=True, index=True),
+    # String rather than FK: V0 model-routed canaries may not know the worker,
+    # and future assignments may use external worker ids before registry sync.
+    sa.Column("worker_id", sa.String(64), nullable=True, index=True),
+    sa.Column("model", sa.String(255), nullable=True, index=True),
+    sa.Column("modality", sa.String(16), nullable=True),
+    sa.Column("capability", sa.String(128), nullable=True),
+    sa.Column("canary_kind", sa.String(64), nullable=True),
+    sa.Column("nonce", sa.String(128), nullable=True),
+    sa.Column("verdict", sa.String(16), nullable=False, index=True),
+    sa.Column("score", sa.Float, nullable=True),
+    sa.Column("latency_ms", sa.Integer, nullable=True),
+    sa.Column("epoch", sa.String(64), nullable=True, index=True),
+    sa.Column("signature", sa.String(132), nullable=True),
+    sa.Column("signature_status", sa.String(32), nullable=False, default="unsigned"),
+    sa.Column("payload", PortableJSON, nullable=False, default=dict),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+)
