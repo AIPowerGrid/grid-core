@@ -35,6 +35,7 @@ from ..services import accounts as accounts_svc
 from ..v2.schema import api_keys as api_keys_table
 from ..v2.schema import payouts as payouts_table
 from ..v2.schema import workers as workers_table
+from ..v2.schema import ledger as ledger_table
 
 logger = logging.getLogger("grid_api.accounts_api")
 
@@ -336,16 +337,36 @@ async def get_account_workers(
         rows = (
             await session.execute(
                 sa.select(
+                    workers_table.c.id,
                     workers_table.c.name,
                     workers_table.c.type,
                     workers_table.c.models,
-                    workers_table.c.den_earned,
-                    workers_table.c.jobs_completed,
                     workers_table.c.last_seen,
                     workers_table.c.maintenance,
                 ).where(workers_table.c.account_id == user["account_id"])
             )
         ).mappings().all()
+
+        # Authoritative den/jobs totals from the append-only ledger. The
+        # den_earned / jobs_completed COLUMNS on grid_workers were never
+        # incremented (always 0 → every operator dashboard showed "0 earned"),
+        # so derive the real totals from grid_ledger in one aggregate keyed by
+        # worker id. This is the stated source of truth (settlement reads it too).
+        worker_ids = [r["id"] for r in rows]
+        led: dict = {}
+        if worker_ids:
+            agg = (
+                await session.execute(
+                    sa.select(
+                        ledger_table.c.worker_id,
+                        sa.func.coalesce(sa.func.sum(ledger_table.c.den), 0.0).label("den"),
+                        sa.func.count().label("jobs"),
+                    )
+                    .where(ledger_table.c.worker_id.in_(worker_ids))
+                    .group_by(ledger_table.c.worker_id)
+                )
+            ).all()
+            led = {row.worker_id: (float(row.den or 0.0), int(row.jobs or 0)) for row in agg}
 
     # Live presence by worker name (same source as /v1/workers).
     online_names: set[str] = set()
@@ -361,8 +382,8 @@ async def get_account_workers(
             "name": r["name"],
             "type": r["type"],
             "models": r["models"] or [],
-            "den_earned": r["den_earned"] or 0,
-            "jobs_completed": r["jobs_completed"] or 0,
+            "den_earned": round(led.get(r["id"], (0.0, 0))[0], 4),
+            "jobs_completed": led.get(r["id"], (0.0, 0))[1],
             "last_seen": r["last_seen"].isoformat() if r["last_seen"] else None,
             "maintenance": bool(r["maintenance"]),
             "online": r["name"] in online_names,
