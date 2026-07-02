@@ -4,7 +4,7 @@
 
 SQLAlchemy metadata for Grid-owned v2 tables: accounts, API keys, workers, jobs,
 completion ledger, prepaid credits, credit ledger, and settlement epochs.
-Also includes validator attestation evidence rows for the V0 validator network.
+Also includes validator assignments and attestation evidence rows.
 
 ## Ownership
 
@@ -18,9 +18,12 @@ Also includes validator attestation evidence rows for the V0 validator network.
 - Ledger tables are economic truth:
   - `grid_ledger` is one completion event per job.
   - `grid_credit_ledger` is append-only signed micro-USD deltas with unique refs.
-- `grid_validator_attestations` is evidence only in V0. Scorecards may aggregate
-  it for operator/console visibility, but it must not be treated as economic
-  truth until validator assignment/quorum/dispute rules are live.
+- `grid_validator_assignments` gates authoritative evidence with Grid-issued
+  assignment ids, nonces, and hard-targeted probe evidence hashes.
+  `grid_validator_attestations` stores both preview and authoritative evidence.
+  Scorecards may aggregate them for
+  operator/console visibility, but they must not be treated as economic truth
+  until reward/dispute rules are live.
 - Account IDs are UUIDs. Quota identities such as `v2:<uuid>` are not DB foreign
   keys and must not be passed to credit ledger functions.
 - New columns need explicit migrations, tests, and backfill/default strategy for

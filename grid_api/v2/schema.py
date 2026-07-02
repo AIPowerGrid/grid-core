@@ -315,7 +315,51 @@ epochs = sa.Table(
 )
 
 
-# ── Validator attestations (evidence, non-economic in V0) ────────────────
+# ── Validator assignments / attestations (evidence, non-economic in V0) ──
+# Assignments are the gate between preview canaries and authoritative evidence:
+# only Grid-issued assignment ids + nonces can produce assignment-bound
+# attestations. Quorum/status fields are intentionally off-chain and
+# non-economic until dispute/reward contracts exist.
+validator_assignments = sa.Table(
+    "grid_validator_assignments",
+    metadata,
+    sa.Column("id", sa.String(96), primary_key=True),
+    sa.Column(
+        "account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("validator_wallet", sa.String(42), nullable=True, index=True),
+    sa.Column("grid_nonce", sa.String(128), nullable=False, unique=True),
+    sa.Column("target_worker_id", sa.String(64), nullable=False, index=True),
+    sa.Column("target_worker_name", sa.String(120), nullable=False, index=True),
+    sa.Column("model", sa.String(255), nullable=False, index=True),
+    sa.Column("modality", sa.String(16), nullable=False, default="text"),
+    sa.Column("capability", sa.String(128), nullable=False),
+    sa.Column("canary_kind", sa.String(64), nullable=False),
+    sa.Column("scoring_policy_id", sa.String(128), nullable=False),
+    sa.Column("challenge", PortableJSON, nullable=False, default=dict),
+    sa.Column("status", sa.String(24), nullable=False, default="pending", index=True),
+    sa.Column("quorum_status", sa.String(24), nullable=False, default="pending", index=True),
+    sa.Column("quorum_outcome", sa.String(24), nullable=True),
+    sa.Column("probe_job_id", sa.String(96), nullable=True, index=True),
+    sa.Column("probe_status", sa.String(24), nullable=False, default="not_started"),
+    # Filled only after the Grid actually receives a hard-targeted probe reply.
+    # Authoritative attestations must match this hash; a nonce alone is not
+    # enough to claim assignment-bound evidence.
+    sa.Column("probe_prompt_hash", sa.String(64), nullable=True),
+    sa.Column("probe_response_hash", sa.String(64), nullable=True),
+    sa.Column("probe_evidence_hash", sa.String(64), nullable=True, index=True),
+    sa.Column("probe_verdict", sa.String(16), nullable=True),
+    sa.Column("probe_latency_ms", sa.Integer, nullable=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+    sa.Column("expires", sa.DateTime(timezone=True), nullable=False, index=True),
+    sa.Column("probed", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("finalized", sa.DateTime(timezone=True), nullable=True),
+)
+
 # Signed validator reports about probe outcomes. V0 stores these as audit
 # evidence only: no routing, rewards, slashing, or payout logic reads this table.
 # Future validator economics can derive scorecards from this append-only evidence
@@ -339,6 +383,20 @@ validator_attestations = sa.Table(
         index=True,
     ),
     sa.Column("validator_wallet", sa.String(42), nullable=True, index=True),
+    sa.Column(
+        "assignment_id",
+        sa.String(96),
+        sa.ForeignKey("grid_validator_assignments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    ),
+    sa.Column("grid_nonce", sa.String(128), nullable=True, index=True),
+    sa.Column("evidence_hash", sa.String(64), nullable=True, index=True),
+    # preview = model-routed/local evidence; authoritative = verified Grid
+    # assignment + nonce + target match. Scorecards that matter must filter on
+    # authoritative; preview stays visible for rollout/debugging only.
+    sa.Column("authority", sa.String(24), nullable=False, default="preview", index=True),
+    sa.Column("quorum_status", sa.String(24), nullable=False, default="pending", index=True),
     # String rather than FK: V0 model-routed canaries may not know the worker,
     # and future assignments may use external worker ids before registry sync.
     sa.Column("worker_id", sa.String(64), nullable=True, index=True),

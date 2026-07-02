@@ -24,13 +24,13 @@ transport, accounts, stats, health/metrics.
   account profile, payout wallet, worker listing, API-key issue/revoke.
 - `stats.py` - `GET /v1/workers`, progress polling, model status, usage totals,
   model stats, wallet earnings.
-- `validator.py` - validator V0 surface: `GET /v1/validator/capabilities`,
-  `POST /v1/validator/attest` evidence sink, and
-  `GET /v1/validator/workers` inventory, and
-  `GET /v1/validator/scorecards` aggregate evidence view. V0
-  storage/discovery/scorecards only; no routing/reward/slash authority. Worker
-  inventory must advertise `targeted_probe_enabled=false` until
-  `/v1/validator/probe` is real.
+- `validator.py` - validator assignment-bound evidence surface:
+  `GET /v1/validator/capabilities`, `GET /v1/validator/assignments`,
+  `POST /v1/validator/probe/{assignment_id}`,
+  `POST /v1/validator/attest`, `GET /v1/validator/workers`,
+  `GET /v1/validator/scorecards`, and
+  `GET /v1/validator/assignments/health`. This enables targeted evidence
+  collection, but still has no routing/reward/slash authority.
 - `styles.py` - `GET /v1/styles` for curated creative presets.
 - `health.py` - `GET /health`.
 - `metrics.py` - `GET /metrics` Prometheus exposition.
@@ -52,14 +52,17 @@ transport, accounts, stats, health/metrics.
 - Worker affinity (`worker` request field) is ownership-gated before queueing.
 - Public stats/health/metrics are unauthenticated by design; keep sensitive
   account/ledger details behind account auth.
-- Validator endpoints are evidence-only until the validator role, assignment
-  quorum, rewards, and dispute process are wired. Do not let `failed`
-  attestations affect worker strikes/slashing from this router.
+- Validator endpoints are evidence-only until the validator role, rewards,
+  and dispute process are wired. Do not let `failed` attestations affect worker
+  strikes/slashing from this router.
+- Assignment-bound evidence must require a Grid-issued `assignment_id`,
+  `grid_nonce`, and matching hard-targeted probe evidence hash before it is
+  marked authoritative. Preview evidence may be stored, but must stay labeled
+  as preview.
 - Validator scorecards must aggregate evidence only. Do not expose raw payloads,
   nonces, signatures, account IDs, or validator identities from scorecard routes.
-- Do not expose targetable validator workers unless targeted probing is fully
-  implemented and tested; half-enabling it causes validator nodes to generate
-  false `failed` evidence.
+- Targeted validator probes must be hard-targeted to the assigned worker and
+  must not bill users, pay den, write worker ledger rows, or strike workers.
 - `accounts.py` internal-token routes are for trusted first-party services only.
   Any future bridge identity must use scoped keys plus signed assertions, not raw
   user headers.

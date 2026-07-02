@@ -24,7 +24,7 @@ from slowapi.errors import RateLimitExceeded
 from .database import close_database, init_database
 from .ratelimit import limiter
 from .redis_client import close_redis, init_redis
-from .routers import accounts, anthropic, health, images, metrics, openai, responses, stats, styles, videos, worker_ws
+from .routers import accounts, anthropic, health, images, metrics, openai, responses, stats, styles, validator, videos, worker_ws
 from .services.p2p import init_p2p, close_p2p
 
 logging.basicConfig(
@@ -159,6 +159,7 @@ app.include_router(videos.router)
 app.include_router(worker_ws.router)
 app.include_router(stats.router)
 app.include_router(styles.router)
+app.include_router(validator.router)
 app.include_router(accounts.router)
 app.include_router(health.router)
 app.include_router(metrics.router)

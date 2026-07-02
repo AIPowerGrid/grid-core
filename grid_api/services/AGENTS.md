@@ -12,9 +12,11 @@ content sanitization, and reward settlement.
   (presigned R2 upload), `enforcement.py` (worker strike/evict).
 - **Economy:** `credits.py`, `quota.py` (free-tier daily), `pricing.py`, `ledger.py`,
   `den.py` (den accounting), `accounts.py`, `model_registry.py` (ModelVault sync).
-- **Validation evidence:** `validators.py` stores validator attestations and
-  builds aggregate scorecards as non-economic evidence. It must not route,
-  reward, slash, or write ledger rows.
+- **Validation evidence:** `validators.py` issues validator assignments, verifies
+  assignment-bound attestations, computes non-economic quorum state, and builds
+  aggregate scorecards. Authoritative evidence must match the Grid-issued
+  assignment id, nonce, and hard-targeted probe evidence hash. It must not route
+  production jobs, reward, slash, or write worker ledger rows.
 - **Model/media governance:** `recipes.py`, `recipe_import.py`, `styles.py`,
   `loras.py`, `model_registry.py`.
 - **Safety:** `sanitizer.py` - **secrets redactor only** (strips API keys/PGP from prompts).
@@ -40,9 +42,12 @@ content sanitization, and reward settlement.
   ModelVault enforcement is live unless the sync is wired and tested.
 - `enforcement.py` records slashable evidence only; it must not directly slash
   bonded funds from a hot request path.
-- Validator attestations and scorecards are V0 evidence only until
-  assignment/quorum/dispute rules exist. A submitted or aggregated `failed`
-  verdict is not a worker strike by itself.
+- Validator attestations and scorecards are evidence only until reward/dispute
+  rules exist. A submitted or aggregated `failed` verdict is not a worker strike
+  by itself.
+- Authoritative validator evidence requires a Grid-issued assignment id, nonce,
+  and matching probe evidence hash. Preview/local evidence stays visible only as
+  preview.
 - Validator attestation identity is evidence identity only, but must still be
   coherent: malformed validator wallet strings are rejected, signed evidence
   requires a claimed wallet, and stored validator wallets are normalized

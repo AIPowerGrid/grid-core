@@ -541,6 +541,25 @@ async def worker_websocket(ws: WebSocket):
 
                 # Got a job → dispatch it (model check + text/media paths below).
 
+                # ── Worker targeting ──
+                # Validator probes use hard targeting. If Redis hands the job to
+                # any other worker, that worker must not execute it and create
+                # evidence for the wrong target.
+                hard_target = job.get("hard_target_worker", "")
+                if hard_target and hard_target != worker_name:
+                    if await _worker_online(hard_target):
+                        bounced = await job_queue.bounce_for_affinity(job)
+                        if bounced:
+                            continue
+                    await token_stream.publish_error(
+                        job["job_id"],
+                        f"Target worker '{hard_target}' did not claim this validator probe.",
+                        code=503,
+                    )
+                    await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
+                    current_job = None
+                    continue
+
                 # ── Worker affinity (soft) ──
                 # If the job prefers a different worker, release it back so that
                 # worker can claim it — but only while the preferred worker is
@@ -611,6 +630,14 @@ async def worker_websocket(ws: WebSocket):
                 # not transform the payload.
                 if job_format != "openai-chat":
                     ok = await _handle_raw_passthrough(ws, job, selected_model, worker_id, worker_info)
+                    if ok:
+                        await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
+                    current_job = None
+                    continue
+
+                # ── Text path ──
+                if job["payload"].get("_validator_probe"):
+                    ok = await _handle_validator_probe(ws, job, selected_model, worker_id, worker_info)
                     if ok:
                         await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
                     current_job = None
@@ -709,6 +736,7 @@ async def worker_websocket(ws: WebSocket):
                             job["job_id"], job["payload"], job["models"],
                             job.get("stream_id"), job_type="text", stream=job.get("stream"),
                             preferred_worker=job.get("preferred_worker", ""),
+                            hard_target_worker=job.get("hard_target_worker", ""),
                             affinity_passes=job.get("affinity_passes", 0),
                         )
                         if new_id is None:
@@ -902,7 +930,9 @@ async def worker_websocket(ws: WebSocket):
             # client's channel and the held reservation carries over). Only when the
             # requeue gives up (dead-lettered) is this terminal → error + release.
             job_id = current_job["job_id"]
-            record_job_failed()
+            is_validator_probe = bool(current_job.get("payload", {}).get("_validator_probe"))
+            if not is_validator_probe:
+                record_job_failed()
             new_id = await job_queue.requeue_job(
                 job_id,
                 current_job["payload"],
@@ -911,6 +941,7 @@ async def worker_websocket(ws: WebSocket):
                 job_type=current_job.get("job_type", "text"),
                 stream=current_job.get("stream"),
                 preferred_worker=current_job.get("preferred_worker", ""),
+                hard_target_worker=current_job.get("hard_target_worker", ""),
                 affinity_passes=current_job.get("affinity_passes", 0),
             )
             if new_id:
@@ -918,10 +949,60 @@ async def worker_websocket(ws: WebSocket):
             else:
                 logger.error(f"Worker disconnected with job {job_id}; requeue gave up — failing to client")
                 await token_stream.publish_error(job_id, "Worker disconnected during generation; no capacity to retry.")
-                await credits.release_job(job_id)  # terminal: refund the hold
+                if not is_validator_probe:
+                    await credits.release_job(job_id)  # terminal: refund the hold
 
         if worker_info:
             logger.info(f"Worker '{worker_info['name']}' cleaned up")
+
+
+async def _handle_validator_probe(
+    ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict
+) -> bool:
+    """Dispatch one assignment-bound validator probe.
+
+    Validator probes are evidence collection, not paid inference. They must not
+    reserve credits, append worker-payout ledger rows, award den, or strike
+    workers directly. Any bad result becomes signed validator evidence later.
+    """
+    job_id = job["job_id"]
+    payload = job["payload"]
+    await ws.send_json({
+        "type": "job",
+        "id": job_id,
+        "model": selected_model,
+        "payload": payload,
+    })
+
+    gen = await _handle_worker_generation(ws, job, worker_info)
+    if gen["client_error"] is not None:
+        await token_stream.publish_error(job_id, gen["client_error"], code=400)
+        await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+        return True
+
+    if gen["failed"]:
+        await token_stream.publish_error(job_id, "Validator probe failed on target worker.", code=502)
+        await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+        return True
+
+    grid_meta = {
+        **(gen["grid_meta"] or {}),
+        "worker_id": worker_id,
+        "assignment_id": payload.get("_validator_assignment_id"),
+        "grid_nonce": payload.get("_validator_grid_nonce"),
+        "economic_effect": "none",
+    }
+    await token_stream.publish_done(
+        job_id,
+        gen["full_text"],
+        gen["full_reasoning"],
+        tool_calls=gen["tool_calls"],
+        usage=gen["usage"],
+        finish_reason=gen["finish_reason"],
+        grid=grid_meta,
+    )
+    await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+    return True
 
 
 async def _handle_media_job(

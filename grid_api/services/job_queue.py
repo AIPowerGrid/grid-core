@@ -53,6 +53,8 @@ MAX_STREAM_LEN = int(os.getenv("GRID_JOB_STREAM_MAXLEN", "10000") or 10000)
 # job has already bounced this many times, in which case it runs wherever it
 # landed (affinity is a preference, never a stall). Kept low: in a small pool the
 # preferred worker reclaims within a couple of XREADGROUP cycles.
+# Validator probes may also set hard_target_worker. That is not a preference:
+# a non-target worker must never execute the job.
 MAX_AFFINITY_BOUNCE = 10
 
 
@@ -67,6 +69,7 @@ async def submit_job(
     requeue_count: int = 0,
     job_type: str = "text",
     preferred_worker: str = "",
+    hard_target_worker: str = "",
     affinity_passes: int = 0,
     progress_token: str = "",
 ) -> str:
@@ -74,6 +77,7 @@ async def submit_job(
 
     `preferred_worker` (a worker NAME, ownership-checked by the caller) lets the
     job express soft affinity — see MAX_AFFINITY_BOUNCE. Empty = no preference.
+    `hard_target_worker` is used by validator probes and forbids fallback.
     `progress_token` (a client-chosen id) lets the worker's live % be polled at
     GET /v1/progress/{token} while the job runs.
     """
@@ -85,6 +89,7 @@ async def submit_job(
         "models": json.dumps(models),
         "requeue_count": str(requeue_count),
         "preferred_worker": preferred_worker or "",
+        "hard_target_worker": hard_target_worker or "",
         "affinity_passes": str(affinity_passes),
         "progress_token": progress_token or "",
     }
@@ -128,6 +133,7 @@ async def pop_job(worker_id: str, timeout_ms: int = 5000, job_types: list[str] |
         # Default 0 for jobs queued before this field existed.
         "requeue_count": int(fields.get("requeue_count", 0)),
         "preferred_worker": fields.get("preferred_worker", ""),
+        "hard_target_worker": fields.get("hard_target_worker", ""),
         "affinity_passes": int(fields.get("affinity_passes", 0)),
         "progress_token": fields.get("progress_token", ""),
     }
@@ -164,6 +170,7 @@ async def requeue_for_mismatch(job: dict) -> bool:
         # Preserve affinity across a model-mismatch bounce, else a preferred
         # worker loses its claim the moment a mismatched worker touches the job.
         preferred_worker=job.get("preferred_worker", ""),
+        hard_target_worker=job.get("hard_target_worker", ""),
         affinity_passes=job.get("affinity_passes", 0),
         progress_token=job.get("progress_token", ""),
     )
@@ -196,6 +203,7 @@ async def bounce_for_affinity(job: dict) -> bool:
         job["job_id"], job["payload"], job["models"],
         requeue_count=job.get("requeue_count", 0), job_type=job_type,
         preferred_worker=job.get("preferred_worker", ""),
+        hard_target_worker=job.get("hard_target_worker", ""),
         affinity_passes=passes + 1,
         progress_token=job.get("progress_token", ""),
     )
@@ -217,6 +225,7 @@ async def requeue_job(
     stream: str | None = None,
     requeue_count: int = 0,
     preferred_worker: str = "",
+    hard_target_worker: str = "",
     affinity_passes: int = 0,
 ):
     """Requeue a failed job back into the stream, carrying + capping the retry
@@ -242,8 +251,13 @@ async def requeue_job(
             f"— dead-lettering instead of requeuing"
         )
         return None
-    new_id = await submit_job(job_id, payload, models, requeue_count=requeue_count + 1, job_type=job_type,
-                              preferred_worker=preferred_worker, affinity_passes=affinity_passes)
+    new_id = await submit_job(
+        job_id, payload, models,
+        requeue_count=requeue_count + 1, job_type=job_type,
+        preferred_worker=preferred_worker,
+        hard_target_worker=hard_target_worker,
+        affinity_passes=affinity_passes,
+    )
     logger.info(f"Requeued job {job_id} as {new_id} (attempt {attempts}/{MAX_REQUEUE})")
     return new_id
 
@@ -278,6 +292,7 @@ async def claim_stale_jobs() -> int:
                     json.loads(fields.get("models", "[]")),
                     job_type=fields.get("job_type", "text"),
                     preferred_worker=fields.get("preferred_worker", ""),
+                    hard_target_worker=fields.get("hard_target_worker", ""),
                     affinity_passes=int(fields.get("affinity_passes", 0)),
                     progress_token=fields.get("progress_token", ""),
                 )
