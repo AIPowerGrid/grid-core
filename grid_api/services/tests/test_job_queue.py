@@ -22,7 +22,9 @@ class FakeRedis:
         self.xadds: list[dict] = []
         self.xacks: list[str] = []
 
-    async def xadd(self, stream, data):
+    async def xadd(self, stream, data, **kwargs):
+        # Accept maxlen/approximate (real redis trims the stream); the fake just
+        # records the payload, so the trim kwargs are irrelevant here.
         self.xadds.append(data)
         return f"fake-{len(self.xadds)}"
 
