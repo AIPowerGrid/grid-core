@@ -59,10 +59,37 @@ and the DB password**, and starts 8 Flask procs + grid_api under systemd.
 | Logs (live) | `journalctl -u aipg-gridapi -f` / `journalctl -u aipg-horde@7001 -f` |
 | Restart API | `systemctl restart aipg-gridapi` |
 | Rolling Flask restart | `for p in {7001..7008}; do systemctl restart aipg-horde@$p; sleep 5; done` |
-| Deploy new code | `sudo -u aipg git -C /home/aipg/system-core pull && rolling restart` |
+| Deploy Grid API code | `sudo -u aipg git -C /home/aipg/system-core pull --ff-only origin main && sudo systemctl restart aipg-gridapi` |
+| Run Grid DB migrations | `cd /home/aipg/system-core && sudo -E -H -u aipg ./.venv/bin/python -m alembic upgrade head` |
 | Status | `systemctl status 'aipg-*'` |
 
-Post-deploy verification checks: see `DEPLOY_grid_api.md` in the repo root.
+### Alembic on the existing production DB
+
+Fresh deployments are Alembic-managed from genesis. The first prod validator
+rollout predated that and created `grid_validator_attestations` outside Alembic,
+so on 2026-07-02 prod was bridged by stamping `0005` once and then upgrading to
+`0006_validator_assignments`. Do not run that stamp on any DB that already has
+an `alembic_version` row.
+
+Run Alembic as the deploy user with `-H`:
+
+```bash
+cd /home/aipg/system-core
+sudo -E -H -u aipg ./.venv/bin/python -m alembic upgrade head
+```
+
+The `-H` matters. Plain `sudo -E` can preserve `HOME=/root`, which makes asyncpg
+look for `/root/.postgresql/postgresql.key` before opening the database
+connection.
+
+Validator preview smoke checks after a deploy:
+
+```bash
+curl -fsS http://127.0.0.1:7010/v1/validator/capabilities
+curl -s -o /dev/null -w '%{http_code}\n' \
+  http://127.0.0.1:7010/v1/validator/assignments
+# expect 401 without a v2 account key
+```
 
 ## Notes
 

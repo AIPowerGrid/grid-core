@@ -1,5 +1,11 @@
 # Deploying the grid_api hardening (feature/p2p-libp2p)
 
+> Historical rollout note. The current production runbook is
+> `deploy/README.md`; use that for day-2 deploys, Alembic migrations, and
+> validator preview smoke checks. This file documents the older
+> `feature/p2p-libp2p` hardening rollout and should not be treated as the
+> canonical deploy path.
+
 This branch contains the production-readiness work: streaming dispatch fix,
 error-leak fix, no-silent-model-substitution, den persistence + anti-gaming,
 free-tier quota, per-API-key rate limiting, and DB pool caps. None of it is

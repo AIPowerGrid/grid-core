@@ -1,7 +1,8 @@
 # Verification Probes — coordinator canaries → validator consensus
 
-**Status:** Phase 1 (coordinator-run, dark) shipping 2026-07-01. Phase 2 (validator
-consensus) designed, not built. This doc is the durable plan.
+**Status:** Coordinator canaries are live evidence-only. The assignment-bound
+validator preview API is live as of 2026-07-02 (`63adc209`, Alembic `0006`).
+Economic validator consensus, rewards, and slashing are still not live.
 
 ## The problem
 
@@ -49,11 +50,18 @@ validator is calling it:
   a real request would get. Records latency + which worker served it.
 - **`record_attestation(...)`** — writes to `grid_validator_attestations` (see below).
 
-## Attestation record (`grid_validator_attestations`)
+## Attestation and assignment records
 
-The schema already exists and was built for this (`canary_kind`, `nonce`, `verdict`,
-`score`, `latency_ms`, `worker_id`, `model`, `modality`, `signature_status`). Coordinator
-attestations set:
+Alembic `0006` owns the validator evidence schema:
+
+- `grid_validator_attestations` stores evidence rows (`canary_kind`, `nonce`,
+  `verdict`, `score`, `latency_ms`, `worker_id`, `model`, `modality`,
+  `signature_status`) plus assignment-era fields (`assignment_id`, `grid_nonce`,
+  `evidence_hash`, `authority`, `quorum_status`).
+- `grid_validator_assignments` stores Grid-issued targets, nonces, challenges,
+  probe results, and quorum lifecycle state.
+
+Coordinator attestations set:
 - `validator_wallet = NULL`, `signature_status = "unsigned"` — coordinator V0 doesn't sign
   (future staked validators sign with EIP-712 and set `signature_status="signed"`).
 - `worker_id` = the worker that served the probe (from the job's `grid` provenance).
@@ -61,8 +69,16 @@ attestations set:
   got} as evidence.
 - `attestation_hash` = sha256 of the canonical record for idempotency.
 
-**This pre-populates the exact table the validator network will later reach consensus
-over.** That is the point.
+External validator evidence can be stored in two authority tiers:
+
+- `authority="preview"` — useful telemetry, visible in scorecards, but not
+  assignment-bound.
+- `authority="authoritative"` — only accepted when the submitted
+  `assignment_id`, `grid_nonce`, target fields, and `evidence_hash` match a
+  Grid-issued assignment and completed targeted probe.
+
+**This pre-populates the exact evidence path the validator network will later
+reach consensus over.** That is the point.
 
 ## Restraint (why this is safe to ship today)
 
@@ -75,33 +91,64 @@ Mirrors the `GRID_CHARGING_ENABLED=0` and Validator-V0 patterns:
 - Conservative cadence (`GRID_PROBE_INTERVAL`, default 300s), tiny prompts (`max_tokens`
   ~24) so probe load on the GPU pool is negligible even in a 1-worker-per-model pool.
 
-## Deployment status (2026-07-01)
+## Assignment-bound validator API (live preview)
+
+Public capability discovery is live:
+
+- `GET /v1/validator/capabilities`
+
+The rest require a v2 account API key and are evidence-only:
+
+- `GET /v1/validator/assignments` — issues short-lived text assignments with a
+  Grid nonce and target worker/model.
+- `POST /v1/validator/probe/{assignment_id}` — runs the assignment against the
+  targeted worker path and records the Grid-side prompt/response hashes, verdict,
+  and latency.
+- `POST /v1/validator/attest` — stores preview evidence, or authoritative
+  evidence only when it matches the Grid-issued assignment, nonce, and evidence
+  hash.
+- `GET /v1/validator/scorecards` — aggregate worker/model evidence without raw
+  payloads, nonces, signatures, account IDs, or validator identities.
+- `GET /v1/validator/assignments/health` — assignment and quorum lifecycle
+  health.
+- `GET /v1/validator/workers` — current worker inventory for validator discovery.
+
+The core records quorum state (`pending`, `accepted`, `disputed`, `finalized`),
+but the whole preview surface has `economic_effect: none`: no routing, reward,
+strike, slash, credit, or payout effect. Text assignments are the only live lane
+in this rollout; image/video validator lanes are future work.
+
+## Deployment status (2026-07-02)
 
 **LIVE on prod, ENABLED, evidence-only.** `GRID_PROBE_ENABLED=1`,
 `GRID_PROBE_INTERVAL=300`, `GRID_PROBE_MAX_TOKENS=256` in `/etc/aipg/grid.env`.
 First attestations recorded (pass/fail/inconclusive) in `grid_validator_attestations`.
 
 Deploy notes / learnings:
-- **Prod deploy was NOT a git checkout.** Prod runs 848b3e6 + ad-hoc working-tree
-  patches; the `validator_attestations` table was appended to prod `schema.py` and
-  `create_all` built it on restart (prod DB is create_all, not alembic). probe.py was
-  scp'd and the lifespan task added by a DIRECT edit to prod `main.py` — NOT the git
-  patch, because the local probe commit (grid-core fd93fa2) accidentally bundled the
-  *uncommitted* validator-router wiring (Jun-26 half-done feature) which prod has no
-  file for; applying it crash-looped prod twice before this was isolated.
+- **Current prod is reconciled to git.** The July 1 hotpatch/create_all rollout was
+  replaced on 2026-07-02 by deploying `system-core/main` at `63adc209` and running
+  Alembic through `0006`. Prod has `grid_validator_assignments`, assignment fields
+  on `grid_validator_attestations`, and `alembic_version = 0006`.
+- **Existing prod DB needed a one-time Alembic bridge.** Because early validator
+  evidence was created outside Alembic, prod was stamped at `0005` and then upgraded
+  to `0006`. Do not repeat that stamp on databases that already have
+  `alembic_version`.
 - **max_tokens must fit reasoning models.** 24 tokens got fully consumed by
   reasoning_content on gpt-oss → empty answer → false "inconclusive". 256 fixed it
   (gpt-oss-20b/120b/Gemma4 now pass 1.0).
+- **Run Alembic with the deploy user's HOME.** On prod, `sudo -E` preserved
+  `HOME=/root`, which made asyncpg inspect `/root/.postgresql/postgresql.key`
+  before connecting. Use `sudo -E -H -u aipg` for Alembic so HOME resolves to
+  `/home/aipg`.
 
 ### Follow-ups (known, not yet done)
-1. **Redis leader-lock** — the loop runs in EVERY uvicorn worker (`--workers 4` → 4
-   concurrent probe loops → 4× the intended rate). Add a Redis lock so exactly one
-   worker probes. Harmless today (evidence-only) but multiplies with worker count.
-2. **Local repo hygiene** — grid-core commit fd93fa2 bundled the accidental validator
-   wiring; reconcile the local half-committed validator feature (validator.py,
-   validators.py, schema change, 0006 migration are untracked) separately.
-3. **Grader hardening** — add semantic grading / a judge model for open-ended canaries;
+1. **Grader hardening** — add semantic grading / a judge model for open-ended canaries;
    current bank is deterministic factual (arithmetic, capitals) only.
+2. **Media/video validator lanes** — keep text-only evidence live until media/video
+   assignment generation, reference comparison, and scoring are designed.
+3. **Economic gates** — do not attach routing, validator rewards, worker strikes, or
+   slashing until assignment targeting, nonce-bound evidence, quorum, and dispute
+   flows have been proven under load.
 
 ## Hardening shipped (2026-07-01, still evidence-only)
 
