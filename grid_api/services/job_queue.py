@@ -38,6 +38,15 @@ def _stale_ms_for(stream: str) -> int:
 # job might bounce through in a healthy heterogeneous pool.
 MAX_REQUEUE = 25
 
+# Cap the job streams so they don't grow without bound. XACK removes a job from
+# the consumer group's pending list but NOT from the stream itself, so without
+# trimming the stream accumulates every job's full payload (prompts included)
+# forever — a slow memory leak + data-retention issue. Approximate trimming (~)
+# is cheap and keeps well above the cap, so in-flight/recent jobs (a handful,
+# near the head) are never trimmed. Generous default; override via env.
+import os
+MAX_STREAM_LEN = int(os.getenv("GRID_JOB_STREAM_MAXLEN", "10000") or 10000)
+
 # Soft worker-affinity: a job may name a preferred_worker (ownership-gated at
 # submit time). A non-preferred worker that pops it releases it back so the
 # preferred worker can claim it — UNLESS the preferred worker is offline or the
@@ -79,7 +88,7 @@ async def submit_job(
         "affinity_passes": str(affinity_passes),
         "progress_token": progress_token or "",
     }
-    return await r.xadd(_stream_for(job_type), data)
+    return await r.xadd(_stream_for(job_type), data, maxlen=MAX_STREAM_LEN, approximate=True)
 
 
 async def pop_job(worker_id: str, timeout_ms: int = 5000, job_types: list[str] | None = None) -> dict | None:

@@ -30,10 +30,23 @@ from .config import get_settings
 logger = logging.getLogger("grid_api.ratelimit")
 
 
-def _api_key_or_ip(request) -> str:
-    """Rate-limit bucket key: the caller's API key if present, else their IP.
+def _looks_like_grid_key(raw: str) -> bool:
+    """Cheap well-formedness check (no DB): a real grid key is `grid_`-prefixed
+    and a sane length. Used only to decide the rate-limit bucket, never for auth."""
+    return raw.startswith("grid_") and 16 <= len(raw) <= 128
 
-    Hash the key so raw secrets never become Redis key names.
+
+def _api_key_or_ip(request) -> str:
+    """Rate-limit bucket key: a WELL-FORMED API key gets its own bucket; missing
+    or malformed keys fall back to the caller's IP.
+
+    Bucketing on the raw *presented* key let an attacker rotate garbage keys to
+    mint a fresh bucket per request — an unthrottled 401 flood, each doing a DB
+    lookup. Requiring a well-formed key before granting a per-key bucket funnels
+    junk-key traffic into the per-IP bucket so it's actually throttled. (Residual:
+    well-formed-but-fake key rotation still gets per-key buckets — a much narrower
+    attack; a per-IP outer ceiling is the follow-up.) Key is hashed so raw
+    secrets never become Redis key names.
     """
     apikey = request.headers.get("apikey")
     auth = request.headers.get("authorization")
@@ -42,7 +55,7 @@ def _api_key_or_ip(request) -> str:
         raw = apikey
     elif auth:
         raw = auth[7:] if auth.lower().startswith("bearer ") else auth
-    if raw:
+    if raw and _looks_like_grid_key(raw):
         return "k:" + hash_api_key(raw)
     return "ip:" + get_remote_address(request)
 

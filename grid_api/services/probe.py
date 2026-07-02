@@ -188,6 +188,19 @@ async def run_once() -> str | None:
     return verdict
 
 
+async def _acquire_leader(ttl: int) -> bool:
+    """Redis leader gate so ONLY ONE uvicorn worker probes per interval window
+    (the loop runs in every worker under `--workers N`; without this, N probes
+    fire each interval). SET NX + EX ttl: whoever grabs the key this window runs;
+    the others skip until it expires (~next interval). Fails CLOSED (skip) on a
+    Redis error to avoid the N-way duplication it exists to prevent."""
+    from ..redis_client import get_redis
+    try:
+        return bool(await get_redis().set("grid:probe:leader", "1", nx=True, ex=max(ttl - 5, 30)))
+    except Exception:
+        return False
+
+
 async def probe_loop() -> None:
     """Background sampling loop. Dormant unless GRID_PROBE_ENABLED. Evidence only."""
     if not PROBE_ENABLED:
@@ -198,7 +211,9 @@ async def probe_loop() -> None:
     await asyncio.sleep(min(30, PROBE_INTERVAL))
     while True:
         try:
-            await run_once()
+            if await _acquire_leader(PROBE_INTERVAL):
+                await run_once()
+            # else: another uvicorn worker holds the probe lease this window.
         except asyncio.CancelledError:
             raise
         except Exception:

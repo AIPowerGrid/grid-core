@@ -121,6 +121,16 @@ async def wallet_verify(request: Request, form: WalletVerifyForm):
     if not await _nonce_consume(nonce):
         raise HTTPException(401, detail="Invalid or expired nonce. Please retry.")
 
+    # Bind the signed message to the EXACT canonical sign-in text (the client
+    # signs this verbatim). Without this, a signature the victim made elsewhere
+    # (another dApp's login, a token approval) that merely contains our nonce
+    # string could be replayed here to mint their session. Requiring the exact
+    # message eliminates that replay class. (Follow-up: upgrade to full EIP-4361
+    # with domain/issued-at when the console/gallery clients migrate.)
+    expected_message = f"Sign in to AIPG Grid\n\nNonce: {nonce}"
+    if form.message != expected_message:
+        raise HTTPException(401, detail="Unexpected sign-in message; refusing to verify.")
+
     try:
         recovered = Account.recover_message(
             encode_defunct(text=form.message), signature=form.signature

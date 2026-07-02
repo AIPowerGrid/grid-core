@@ -705,16 +705,30 @@ async def worker_websocket(ws: WebSocket):
                     strikes = await _record_strike(worker_id)
                     record_job_failed()
                     if token_count == 0:
-                        await job_queue.requeue_job(
+                        new_id = await job_queue.requeue_job(
                             job["job_id"], job["payload"], job["models"],
                             job.get("stream_id"), job_type="text", stream=job.get("stream"),
                             preferred_worker=job.get("preferred_worker", ""),
                             affinity_passes=job.get("affinity_passes", 0),
                         )
-                        logger.warning(
-                            f"Job {job['job_id']} requeued after worker '{worker_name}' "
-                            f"failed it (strike {strikes}/{MAX_STRIKES})"
-                        )
+                        if new_id is None:
+                            # Poison job hit MAX_REQUEUE — requeue_job already acked
+                            # and gave up. This is terminal: surface an error and
+                            # refund, else the client hangs to the idle timeout and
+                            # the reservation stays stranded until the sweeper.
+                            await token_stream.publish_error(
+                                job["job_id"], "No worker could complete this job; giving up."
+                            )
+                            await credits.release_job(job["job_id"])
+                            logger.warning(
+                                f"Job {job['job_id']} dead-lettered after repeated empty "
+                                f"completions (worker '{worker_name}')"
+                            )
+                        else:
+                            logger.warning(
+                                f"Job {job['job_id']} requeued after worker '{worker_name}' "
+                                f"failed it (strike {strikes}/{MAX_STRIKES})"
+                            )
                     else:
                         await token_stream.publish_error(
                             job["job_id"], "Worker failed mid-generation; please retry."
