@@ -36,6 +36,29 @@ PROBE_INTERVAL = int(os.getenv("GRID_PROBE_INTERVAL", "300"))   # seconds betwee
 PROBE_MAX_TOKENS = int(os.getenv("GRID_PROBE_MAX_TOKENS", "24"))
 PROBE_TIMEOUT = int(os.getenv("GRID_PROBE_TIMEOUT", "60"))       # idle timeout for one probe
 
+# Coordinator ("validator zero") signing key — makes each attestation
+# tamper-evident + attributable. Unset → attestations are recorded unsigned
+# (graceful). Future staked validators sign with their OWN keys against the same
+# canonical digest, so scorecards can weight by signer once quorum exists.
+_SIGNING_KEY = os.getenv("GRID_PROBE_SIGNING_KEY", "").strip()
+
+
+def _sign(digest: dict) -> tuple[str | None, str | None, str]:
+    """Sign a canonical attestation digest. Returns (signature, signer_address,
+    status). ECDSA/EIP-191 over the sorted-JSON digest."""
+    if not _SIGNING_KEY:
+        return None, None, "unsigned"
+    try:
+        from eth_account import Account
+        from eth_account.messages import encode_defunct
+        canonical = json.dumps(digest, sort_keys=True, default=str)
+        acct = Account.from_key(_SIGNING_KEY)
+        sig = Account.sign_message(encode_defunct(text=canonical), acct.key).signature.hex()
+        return ("0x" + sig.removeprefix("0x")), acct.address, "signed"
+    except Exception:
+        logger.warning("attestation signing failed", exc_info=True)
+        return None, None, "unsigned"
+
 
 # ── Canary bank ──────────────────────────────────────────────────────────────
 # Each canary embeds a fresh random tag in the prompt (defeats caching / canned
@@ -76,7 +99,27 @@ def _c_capital() -> dict:
     return {"kind": "capital", "prompt": prompt, "expected": cap, "grade": grade}
 
 
-_CANARIES = [_c_arithmetic, _c_capital]
+def _c_hard_arithmetic() -> dict:
+    """Capability-tiered canary: 2-digit × 2-digit multiplication. Small/cheap
+    models routinely botch multi-digit multiplication while the larger models a
+    worker CLAIMS to run get it right — so a `fail` here is a signal the worker
+    may have swapped in a smaller model than advertised (a model-downgrade
+    cheat), not just a bad sample. Evidence only in V0."""
+    a, b = secrets.randbelow(90) + 10, secrets.randbelow(90) + 10
+    ans = str(a * b)
+    prompt = (f"Verification check {secrets.token_hex(4)}. "
+              f"What is {a} multiplied by {b}? Reply with ONLY the number, nothing else.")
+
+    def grade(text: str):
+        digits = re.findall(r"-?\d+", text or "")
+        if not digits:
+            return ("inconclusive", 0.0)
+        return ("pass", 1.0) if digits[-1] == ans else ("fail", 0.0)
+
+    return {"kind": "hard_arithmetic", "prompt": prompt, "expected": ans, "grade": grade}
+
+
+_CANARIES = [_c_arithmetic, _c_capital, _c_hard_arithmetic]
 
 
 def make_canary() -> dict:
@@ -154,6 +197,14 @@ async def _record(model: str, worker_id: str | None, canary: dict,
         sort_keys=True, default=str,
     )
     rec["attestation_hash"] = hashlib.sha256(canonical.encode()).hexdigest()
+    # Sign the attestation (tamper-evident + attributable to validator zero).
+    signature, signer, status = _sign(
+        {"hash": rec["attestation_hash"], "worker_id": rec["worker_id"],
+         "model": rec["model"], "verdict": rec["verdict"], "score": rec["score"]}
+    )
+    rec["signature"] = signature
+    rec["validator_wallet"] = signer
+    rec["signature_status"] = status
     async with await new_session() as session:
         await session.execute(sa.insert(validator_attestations).values(**rec))
         await session.commit()

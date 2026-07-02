@@ -103,6 +103,36 @@ Deploy notes / learnings:
 3. **Grader hardening** — add semantic grading / a judge model for open-ended canaries;
    current bank is deterministic factual (arithmetic, capitals) only.
 
+## Hardening shipped (2026-07-01, still evidence-only)
+
+- **Signed attestations** — the coordinator ("validator zero") signs each attestation
+  (ECDSA/EIP-191 over a canonical digest of hash+worker+model+verdict+score) when
+  `GRID_PROBE_SIGNING_KEY` is set; records `signature` + `validator_wallet` (signer) +
+  `signature_status="signed"`. Tamper-evident + attributable; future staked validators
+  sign the same digest with their own keys.
+- **Capability-tiered canary** (`hard_arithmetic`) — 2-digit × 2-digit multiplication.
+  Small/cheap models routinely botch multi-digit multiplication; the larger model a
+  worker CLAIMS to run gets it right. So a `fail` here is a **model-downgrade signal**
+  (worker swapped in a smaller model than advertised), not just a bad sample — the first
+  real model-swap heuristic. Evidence only.
+
+## Model-swap detection — still needed (the hard part)
+
+Canaries catch a *broken* or *much-weaker* worker. A worker running a same-tier-but-cheaper
+model that still nails multiplication won't be caught by canaries alone. Two robust
+detectors, both blocked on infrastructure we don't have yet:
+- **Cross-worker consensus** — dispatch the SAME deterministic canary (temp=0, fixed seed)
+  to N workers claiming the same model via `preferred_worker` affinity, compare outputs;
+  an outlier is running something different. **Blocked: mostly 1 worker/model today** — no
+  redundancy to compare. Build the mechanism so it activates when a 2nd worker appears.
+- **Logprob / perplexity fingerprint** — a model has a characteristic token-logprob
+  signature; compare the worker's returned logprobs to a reference. **Blocked: workers
+  don't return logprobs by default; heterogeneous backends (vLLM/ollama/llama.cpp) differ
+  numerically.** Needs a logprob-return contract + per-(model,backend) reference.
+- **Throughput fingerprint** (cheap, noisy) — a swapped smaller model runs much faster;
+  flag t/s far off the model's historical median. Weak alone (hardware varies), useful as
+  a corroborating signal.
+
 ## Future gates before verdicts get teeth (do NOT skip)
 
 1. **Signed attestations** — EIP-4361/712 so an attestation is attributable and
