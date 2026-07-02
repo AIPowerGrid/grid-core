@@ -95,6 +95,10 @@ class IssueKeyForm(BaseModel):
     label: Optional[str] = None
 
 
+class ClaimDepositForm(BaseModel):
+    tx_hash: str
+
+
 @router.post("/v1/accounts/wallet/nonce")
 @limiter.limit("30/minute")
 async def wallet_nonce(request: Request):
@@ -482,6 +486,26 @@ async def get_account_payouts(
             for r in rows
         ],
     }
+
+
+@router.post("/v1/account/deposits/claim")
+@limiter.limit("20/minute")
+async def claim_deposit(
+    request: Request,
+    form: ClaimDepositForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Credit the account for a USDC-on-Base deposit to the grid treasury.
+
+    The user sends USDC on Base, then submits the tx hash here; the grid verifies
+    the on-chain transfer (to the treasury, from the account's own wallet, enough
+    confirmations) and credits the prepaid balance 1:1. Idempotent on the tx hash.
+    503 until the grid is configured with a treasury address (GRID_USDC_TREASURY).
+    """
+    user = await _require_v2(apikey, authorization)
+    from ..services import deposits
+    return await deposits.verify_and_credit(form.tx_hash, user)
 
 
 @router.post("/v1/account/keys")
