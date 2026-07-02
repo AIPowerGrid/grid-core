@@ -75,6 +75,34 @@ Mirrors the `GRID_CHARGING_ENABLED=0` and Validator-V0 patterns:
 - Conservative cadence (`GRID_PROBE_INTERVAL`, default 300s), tiny prompts (`max_tokens`
   ~24) so probe load on the GPU pool is negligible even in a 1-worker-per-model pool.
 
+## Deployment status (2026-07-01)
+
+**LIVE on prod, ENABLED, evidence-only.** `GRID_PROBE_ENABLED=1`,
+`GRID_PROBE_INTERVAL=300`, `GRID_PROBE_MAX_TOKENS=256` in `/etc/aipg/grid.env`.
+First attestations recorded (pass/fail/inconclusive) in `grid_validator_attestations`.
+
+Deploy notes / learnings:
+- **Prod deploy was NOT a git checkout.** Prod runs 848b3e6 + ad-hoc working-tree
+  patches; the `validator_attestations` table was appended to prod `schema.py` and
+  `create_all` built it on restart (prod DB is create_all, not alembic). probe.py was
+  scp'd and the lifespan task added by a DIRECT edit to prod `main.py` — NOT the git
+  patch, because the local probe commit (grid-core fd93fa2) accidentally bundled the
+  *uncommitted* validator-router wiring (Jun-26 half-done feature) which prod has no
+  file for; applying it crash-looped prod twice before this was isolated.
+- **max_tokens must fit reasoning models.** 24 tokens got fully consumed by
+  reasoning_content on gpt-oss → empty answer → false "inconclusive". 256 fixed it
+  (gpt-oss-20b/120b/Gemma4 now pass 1.0).
+
+### Follow-ups (known, not yet done)
+1. **Redis leader-lock** — the loop runs in EVERY uvicorn worker (`--workers 4` → 4
+   concurrent probe loops → 4× the intended rate). Add a Redis lock so exactly one
+   worker probes. Harmless today (evidence-only) but multiplies with worker count.
+2. **Local repo hygiene** — grid-core commit fd93fa2 bundled the accidental validator
+   wiring; reconcile the local half-committed validator feature (validator.py,
+   validators.py, schema change, 0006 migration are untracked) separately.
+3. **Grader hardening** — add semantic grading / a judge model for open-ended canaries;
+   current bank is deterministic factual (arithmetic, capitals) only.
+
 ## Future gates before verdicts get teeth (do NOT skip)
 
 1. **Signed attestations** — EIP-4361/712 so an attestation is attributable and
