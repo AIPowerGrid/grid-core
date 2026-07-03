@@ -39,6 +39,11 @@ ASSIGNMENT_TTL_SECONDS = int(os.getenv("VALIDATOR_ASSIGNMENT_TTL_SECONDS", "900"
 PROBE_TIMEOUT_SECONDS = int(os.getenv("VALIDATOR_PROBE_TIMEOUT_SECONDS", "180") or 180)
 PROBE_LATENCY_BUDGET_SECONDS = int(os.getenv("VALIDATOR_PROBE_LATENCY_BUDGET_SECONDS", "30") or 30)
 QUORUM_MIN = max(1, int(os.getenv("VALIDATOR_QUORUM_MIN", "1") or 1))
+# Canary answers are short, but reasoning models (gpt-oss/qwen3/Gemma) spend
+# tokens "thinking" before the final answer. A tight cap (was 32) gets fully
+# consumed by the reasoning phase → empty answer → probe returns no text →
+# the model can't be scored. Give enough room to think AND answer. Overridable.
+PROBE_MAX_TOKENS = max(32, int(os.getenv("VALIDATOR_PROBE_MAX_TOKENS", "512") or 512))
 
 _ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _SIG_RE = re.compile(r"^(0x)?[0-9a-fA-F]{130}$")
@@ -186,7 +191,7 @@ def _make_text_challenge(round_index: int) -> dict[str, Any]:
         "prompt": prompt,
         "expected": expected,
         "expected_hash": _hash_text(expected),
-        "max_tokens": 32,
+        "max_tokens": PROBE_MAX_TOKENS,
         "temperature": 0,
     }
 
