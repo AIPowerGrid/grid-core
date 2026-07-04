@@ -306,7 +306,7 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
     routing_meta = None
     if request.model in router_svc.AUTO_MODELS:
         route_text = _messages_to_prompt([m.model_dump(exclude_none=True) for m in request.messages])
-        request.model, routing_meta = router_svc.resolve_auto(request.model, route_text, available)
+        request.model, routing_meta = await router_svc.resolve_auto_async(request.model, route_text, available)
 
     # Resolve model. Never silently substitute — a client asking for
     # llama-70b must not receive output from whatever random model happens

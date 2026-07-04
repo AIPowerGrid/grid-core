@@ -82,6 +82,28 @@ def test_pin_ignored_when_offline(monkeypatch):
     assert meta.get("pinned") is not True  # fell through to normal routing
 
 
+def test_scores_override_curated_order():
+    # 'code' light tier curates gpt-oss-20b first, but if deepseek scores higher
+    # among online candidates it should win. (Put both in the default light tier.)
+    scores = {"gpt-oss-20b": {"score": 0.2}, "deepseek-v4-flash-nvfp4": {"score": 0.9}}
+    model, meta = r.resolve_auto("auto", "hi there", AVAIL, scores=scores)
+    assert meta["scored"] is True
+    assert model == "deepseek-v4-flash-nvfp4"  # higher score beats curated order
+    assert meta.get("score") == 0.9
+
+
+def test_scores_tie_breaks_to_curated_order():
+    scores = {"gpt-oss-20b": {"score": 0.5}, "deepseek-v4-flash-nvfp4": {"score": 0.5}}
+    model, _ = r.resolve_auto("auto", "hi there", AVAIL, scores=scores)
+    assert model == "gpt-oss-20b"  # curated first wins the tie
+
+
+def test_no_scores_uses_curated_order():
+    model, meta = r.resolve_auto("auto", "hi there", AVAIL, scores=None)
+    assert model == "gpt-oss-20b"
+    assert meta["scored"] is False
+
+
 def test_gate_is_fast():
     _, meta = _route("auto", "hello there")
     assert meta["gate_ms"] < 50  # CPU heuristic, must be cheap
