@@ -101,6 +101,25 @@ def effort(prompt: str, tokens: int, task_class: str, override: str | None = Non
     return "light"
 
 
+def _pin(cfg: dict[str, Any], task_class: str) -> str | None:
+    """Operator override: prefer/force a specific model.
+
+    Precedence: env GRID_ROUTING_PIN (global, instant, no redeploy) > config
+    "pin". Config "pin" may be a string (global) or a {task_class: model} map.
+    The pin is honored only if that model is actually online (else we fall
+    through to normal routing, so a pin can never take `auto` offline).
+    """
+    env = os.getenv("GRID_ROUTING_PIN", "").strip()
+    if env:
+        return env
+    pin = cfg.get("pin")
+    if isinstance(pin, str) and pin:
+        return pin
+    if isinstance(pin, dict):
+        return pin.get(task_class) or pin.get("*")
+    return None
+
+
 def _variant_override(model_field: str) -> str | None:
     if model_field == "auto:fast":
         return "light"
@@ -123,6 +142,20 @@ def resolve_auto(model_field: str, prompt: str, available: list[str]) -> tuple[s
     eff = effort(prompt, tokens, task_class, override=_variant_override(model_field))
 
     avail = set(available)
+
+    # Operator override: a pinned model wins outright when it's online. Keeps the
+    # classified task_class/effort in the metadata for observability.
+    pin = _pin(cfg, task_class)
+    if pin and pin in avail:
+        meta = {
+            "auto": True, "requested": model_field, "resolved_model": pin,
+            "task_class": task_class, "effort": eff,
+            "gate_ms": round((time.time() - t0) * 1000, 2),
+            "fallback": False, "pinned": True,
+        }
+        logger.info(f"auto route: {model_field} -> {pin} (PINNED, class={task_class})")
+        return pin, meta
+
     class_map = cfg["classes"].get(task_class, cfg["default"])
     other = "light" if eff == "heavy" else "heavy"
     # Preference order: chosen tier → other tier → default(chosen) → default(other).

@@ -68,6 +68,20 @@ def test_offline_candidate_skipped():
     assert model == "gpt-oss-20b"
 
 
+def test_env_pin_forces_model(monkeypatch):
+    monkeypatch.setenv("GRID_ROUTING_PIN", "qwen3-27b")
+    model, meta = _route("auto", "hi there")  # would normally be gpt-oss-20b
+    assert model == "qwen3-27b"
+    assert meta["pinned"] is True
+
+
+def test_pin_ignored_when_offline(monkeypatch):
+    monkeypatch.setenv("GRID_ROUTING_PIN", "some-model-not-online")
+    model, meta = _route("auto", "hi there")
+    assert model in AVAIL
+    assert meta.get("pinned") is not True  # fell through to normal routing
+
+
 def test_gate_is_fast():
     _, meta = _route("auto", "hello there")
     assert meta["gate_ms"] < 50  # CPU heuristic, must be cheap
