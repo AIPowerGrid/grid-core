@@ -149,7 +149,7 @@ async def _refresh_scores() -> None:
 
     from ..database import new_session
     from ..v2.schema import validator_attestations as att
-    from ..routers.stats import _model_stats
+    from ..routers.stats import _perf_by_model
 
     cfg = _load_config()
     since = datetime.now(timezone.utc) - timedelta(hours=_SCORE_WINDOW_H)
@@ -174,7 +174,7 @@ async def _refresh_scores() -> None:
                 "avg_score": float(r["avg_score"]) if r["avg_score"] is not None else None,
                 "failed_rate": float(r["failed"] or 0) / n,
             }
-        for (model, jt), st in (await _model_stats(s, since=since)).items():
+        for (model, jt), st in (await _perf_by_model(s, since)).items():
             if jt == "text":
                 speed[model] = {"tps": st.get("tokens_per_s"), "latency": st.get("avg_latency_s")}
 
