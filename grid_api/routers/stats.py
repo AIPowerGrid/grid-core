@@ -11,6 +11,7 @@ settlement pays against, so dashboard numbers and payouts can never disagree.
 
 import json
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 import sqlalchemy as sa
@@ -152,6 +153,26 @@ async def status_models():
             "avg_latency_s": p.get("avg_latency_s"),
         })
     return out
+
+
+@router.get("/v1/status/routing")
+async def status_routing():
+    """Observability for `model: "auto"` — current model scores + weights.
+
+    Shows what the router sees: per-model score (validator quality + live speed),
+    the scoring weights, and the pin (if any). Evidence-only; no side effects.
+    """
+    from ..services import router as router_svc
+    scores = await router_svc.get_model_scores()
+    cfg = router_svc._load_config()
+    ranked = sorted(scores.items(), key=lambda kv: kv[1].get("score", 0.0), reverse=True)
+    return {
+        "scores": dict(ranked),
+        "weights": cfg.get("weights"),
+        "pin": os.getenv("GRID_ROUTING_PIN", "") or cfg.get("pin"),
+        "score_ttl_s": router_svc._SCORE_TTL,
+        "window_hours": router_svc._SCORE_WINDOW_H,
+    }
 
 
 def _since(period: str) -> datetime | None:

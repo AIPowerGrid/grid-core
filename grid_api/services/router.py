@@ -47,7 +47,16 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "creative":     {"light": ["Gemma4-26B_A4B-uncensored"],             "heavy": ["Gemma4-26B_A4B-uncensored", "gpt-oss-120b"]},
     },
     "default": {"light": ["gpt-oss-20b", "deepseek-v4-flash-nvfp4"], "heavy": ["gpt-oss-120b", "qwen3-27b"]},
+    # Step-2 scoring weights (model-level). Tunable via routing.json.
+    "weights": {"quality": 1.0, "throughput": 0.4, "latency": 0.5, "failure": 1.0},
 }
+
+# Score cache (model-level): avoid a DB hit on every request. Refreshed lazily
+# with a TTL; if the refresh ever fails, we keep serving the last good scores
+# (or none → curated order), so scoring can never break routing.
+_SCORE_CACHE: dict[str, Any] = {"ts": 0.0, "scores": {}}
+_SCORE_TTL = float(os.getenv("GRID_ROUTING_SCORE_TTL", "15") or 15)
+_SCORE_WINDOW_H = int(os.getenv("GRID_ROUTING_SCORE_WINDOW_H", "24") or 24)
 
 
 def _load_config() -> dict[str, Any]:
@@ -128,7 +137,87 @@ def _variant_override(model_field: str) -> str | None:
     return None
 
 
-def resolve_auto(model_field: str, prompt: str, available: list[str]) -> tuple[str, dict[str, Any]]:
+async def _refresh_scores() -> None:
+    """Recompute model-level scores from validator quality + live speed.
+
+    Combines: validator avg_score + failed_rate (grid_validator_attestations)
+    and decode throughput / latency (ledger via stats._model_stats). Normalized
+    across the models present. Wrapped by get_model_scores() which guards it.
+    """
+    import sqlalchemy as sa
+    from datetime import datetime, timedelta, timezone
+
+    from ..database import new_session
+    from ..v2.schema import validator_attestations as att
+    from ..routers.stats import _model_stats
+
+    cfg = _load_config()
+    since = datetime.now(timezone.utc) - timedelta(hours=_SCORE_WINDOW_H)
+    quality: dict[str, dict[str, float]] = {}
+    speed: dict[str, dict[str, float | None]] = {}
+    async with await new_session() as s:
+        rows = (
+            await s.execute(
+                sa.select(
+                    att.c.model,
+                    sa.func.count().label("n"),
+                    sa.func.sum(sa.case((att.c.verdict == "failed", 1), else_=0)).label("failed"),
+                    sa.func.avg(att.c.score).label("avg_score"),
+                )
+                .where(att.c.created >= since, att.c.model.isnot(None))
+                .group_by(att.c.model)
+            )
+        ).mappings().all()
+        for r in rows:
+            n = int(r["n"]) or 1
+            quality[r["model"]] = {
+                "avg_score": float(r["avg_score"]) if r["avg_score"] is not None else None,
+                "failed_rate": float(r["failed"] or 0) / n,
+            }
+        for (model, jt), st in (await _model_stats(s, since=since)).items():
+            if jt == "text":
+                speed[model] = {"tps": st.get("tokens_per_s"), "latency": st.get("avg_latency_s")}
+
+    models = set(quality) | set(speed)
+    tps_vals = [speed[m]["tps"] for m in models if speed.get(m, {}).get("tps")]
+    lat_vals = [speed[m]["latency"] for m in models if speed.get(m, {}).get("latency")]
+    tps_max = max(tps_vals) if tps_vals else 1.0
+    lat_max = max(lat_vals) if lat_vals else 1.0
+    w = cfg.get("weights", _DEFAULT_CONFIG["weights"])
+
+    scores: dict[str, dict[str, Any]] = {}
+    for m in models:
+        q = quality.get(m, {})
+        sp = speed.get(m, {})
+        # neutral priors so a model with no data isn't unfairly buried (cold start)
+        qual = q.get("avg_score") if q.get("avg_score") is not None else 0.7
+        failed = q.get("failed_rate", 0.0)
+        tps_n = (sp.get("tps") / tps_max) if (sp.get("tps") and tps_max) else 0.5
+        lat_n = (sp.get("latency") / lat_max) if (sp.get("latency") and lat_max) else 0.5
+        score = (w["quality"] * qual) + (w["throughput"] * tps_n) - (w["latency"] * lat_n) - (w["failure"] * failed)
+        scores[m] = {"score": round(score, 4), "quality": round(qual, 3), "failed_rate": round(failed, 3),
+                     "tps": sp.get("tps"), "latency": sp.get("latency")}
+    _SCORE_CACHE["scores"] = scores
+    _SCORE_CACHE["ts"] = time.time()
+
+
+async def get_model_scores() -> dict[str, dict[str, Any]]:
+    """Cached model scores; refresh lazily past the TTL. Never raises."""
+    if time.time() - _SCORE_CACHE["ts"] > _SCORE_TTL:
+        try:
+            await _refresh_scores()
+        except Exception as e:  # keep last-good / empty; scoring must not break routing
+            logger.warning(f"model score refresh failed: {e}")
+    return _SCORE_CACHE["scores"]
+
+
+async def resolve_auto_async(model_field: str, prompt: str, available: list[str]) -> tuple[str, dict[str, Any]]:
+    """Async entrypoint: fetch cached scores, then resolve. Use this from the API."""
+    scores = await get_model_scores()
+    return resolve_auto(model_field, prompt, available, scores=scores)
+
+
+def resolve_auto(model_field: str, prompt: str, available: list[str], scores: dict | None = None) -> tuple[str, dict[str, Any]]:
     """Resolve `auto*` to a concrete ONLINE model + routing metadata.
 
     Never fails when any text worker is online: candidates that aren't online are
@@ -165,10 +254,18 @@ def resolve_auto(model_field: str, prompt: str, available: list[str]) -> tuple[s
         + cfg["default"].get(eff, [])
         + cfg["default"].get(other, [])
     )
-    chosen = next((m for m in ordered if m in avail), None)
-    fallback = chosen is None
-    if chosen is None:
+    # Online candidates in curated order (deduped). Curation is the prior.
+    seen: set[str] = set()
+    online = [m for m in ordered if m in avail and not (m in seen or seen.add(m))]
+    fallback = not online
+    if not online:
         chosen = available[0] if available else model_field  # last resort
+    elif scores:
+        # Best-scoring online candidate. max() is stable on first-seen for ties, so
+        # curated order breaks ties; live quality/speed can override the prior.
+        chosen = max(online, key=lambda m: scores.get(m, {}).get("score", 0.0))
+    else:
+        chosen = online[0]  # Step-1 behavior: curated order, no scores
 
     meta = {
         "auto": True,
@@ -178,7 +275,10 @@ def resolve_auto(model_field: str, prompt: str, available: list[str]) -> tuple[s
         "effort": eff,
         "gate_ms": round((time.time() - t0) * 1000, 2),
         "fallback": fallback,
+        "scored": bool(scores),
     }
+    if scores and chosen in scores:
+        meta["score"] = scores[chosen].get("score")
     logger.info(
         f"auto route: {model_field} -> {chosen} (class={task_class} effort={eff} "
         f"fallback={fallback} {meta['gate_ms']}ms)"
