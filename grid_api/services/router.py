@@ -54,7 +54,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
 # Score cache (model-level): avoid a DB hit on every request. Refreshed lazily
 # with a TTL; if the refresh ever fails, we keep serving the last good scores
 # (or none → curated order), so scoring can never break routing.
-_SCORE_CACHE: dict[str, Any] = {"ts": 0.0, "scores": {}}
+_SCORE_CACHE: dict[str, Any] = {"ts": 0.0, "scores": {}, "workers": {}}
 _SCORE_TTL = float(os.getenv("GRID_ROUTING_SCORE_TTL", "15") or 15)
 _SCORE_WINDOW_H = int(os.getenv("GRID_ROUTING_SCORE_WINDOW_H", "24") or 24)
 
@@ -151,10 +151,14 @@ async def _refresh_scores() -> None:
     from ..v2.schema import validator_attestations as att
     from ..routers.stats import _perf_by_model
 
+    from ..v2.schema import ledger as led
+
     cfg = _load_config()
     since = datetime.now(timezone.utc) - timedelta(hours=_SCORE_WINDOW_H)
     quality: dict[str, dict[str, float]] = {}
     speed: dict[str, dict[str, float | None]] = {}
+    wq: dict[tuple[str, str], dict[str, float]] = {}   # (model, worker) -> quality
+    wp: dict[tuple[str, str], dict[str, float]] = {}   # (model, worker) -> perf
     async with await new_session() as s:
         rows = (
             await s.execute(
@@ -178,6 +182,38 @@ async def _refresh_scores() -> None:
             if jt == "text":
                 speed[model] = {"tps": st.get("tokens_per_s"), "latency": st.get("avg_latency_s")}
 
+        # Per-WORKER quality (validator attestations, worker_id is String)
+        for r in (await s.execute(
+            sa.select(
+                att.c.worker_id, att.c.model,
+                sa.func.count().label("n"),
+                sa.func.sum(sa.case((att.c.verdict == "failed", 1), else_=0)).label("failed"),
+                sa.func.avg(att.c.score).label("avg_score"),
+            ).where(att.c.created >= since, att.c.worker_id.isnot(None), att.c.model.isnot(None))
+             .group_by(att.c.worker_id, att.c.model)
+        )).mappings().all():
+            n = int(r["n"]) or 1
+            wq[(r["model"], str(r["worker_id"]))] = {
+                "avg_score": float(r["avg_score"]) if r["avg_score"] is not None else None,
+                "failed_rate": float(r["failed"] or 0) / n,
+            }
+        # Per-WORKER perf (ledger, worker_id is Uuid → compare as str)
+        for r in (await s.execute(
+            sa.select(
+                led.c.worker_id, led.c.model,
+                sa.func.avg(led.c.duration).label("avg_dur"),
+                sa.func.sum(led.c.duration - sa.func.coalesce(led.c.ttft, 0.0)).label("sum_decode"),
+                sa.func.sum(led.c.output_units).label("sum_units"),
+            ).where(led.c.created >= since, led.c.worker_id.isnot(None),
+                    led.c.duration.isnot(None), led.c.duration > 0, led.c.job_type == "text")
+             .group_by(led.c.worker_id, led.c.model)
+        )).mappings().all():
+            sd = float(r["sum_decode"] or 0.0)
+            wp[(r["model"], str(r["worker_id"]))] = {
+                "tps": round(int(r["sum_units"] or 0) / sd, 1) if sd > 0 else None,
+                "latency": round(float(r["avg_dur"]), 2) if r["avg_dur"] is not None else None,
+            }
+
     models = set(quality) | set(speed)
     tps_vals = [speed[m]["tps"] for m in models if speed.get(m, {}).get("tps")]
     lat_vals = [speed[m]["latency"] for m in models if speed.get(m, {}).get("latency")]
@@ -197,7 +233,31 @@ async def _refresh_scores() -> None:
         score = (w["quality"] * qual) + (w["throughput"] * tps_n) - (w["latency"] * lat_n) - (w["failure"] * failed)
         scores[m] = {"score": round(score, 4), "quality": round(qual, 3), "failed_rate": round(failed, 3),
                      "tps": sp.get("tps"), "latency": sp.get("latency")}
+
+    # Per-worker scores, normalized within each model (compare replicas of the
+    # same model to each other). Keyed (model, worker_id).
+    wkeys = set(wq) | set(wp)
+    by_model: dict[str, list[float]] = {}
+    for (m, _wid) in wkeys:
+        v = wp.get((m, _wid), {})
+        if v.get("tps"):
+            by_model.setdefault(m, []).append(v["tps"])
+    wscores: dict[str, dict[str, Any]] = {}
+    for (m, wid) in wkeys:
+        q = wq.get((m, wid), {})
+        p = wp.get((m, wid), {})
+        qual = q.get("avg_score") if q.get("avg_score") is not None else 0.7
+        failed = q.get("failed_rate", 0.0)
+        tmax = max(by_model.get(m, [1.0]) or [1.0])
+        lmax = max([wp[(m, k)]["latency"] for (mm, k) in wkeys if mm == m and wp.get((m, k), {}).get("latency")] or [1.0])
+        tps_n = (p.get("tps") / tmax) if (p.get("tps") and tmax) else 0.5
+        lat_n = (p.get("latency") / lmax) if (p.get("latency") and lmax) else 0.5
+        sc = (w["quality"] * qual) + (w["throughput"] * tps_n) - (w["latency"] * lat_n) - (w["failure"] * failed)
+        wscores[f"{m}|{wid}"] = {"score": round(sc, 4), "quality": round(qual, 3),
+                                 "failed_rate": round(failed, 3), "tps": p.get("tps"), "latency": p.get("latency")}
+
     _SCORE_CACHE["scores"] = scores
+    _SCORE_CACHE["workers"] = wscores
     _SCORE_CACHE["ts"] = time.time()
 
 
@@ -209,6 +269,31 @@ async def get_model_scores() -> dict[str, dict[str, Any]]:
         except Exception as e:  # keep last-good / empty; scoring must not break routing
             logger.warning(f"model score refresh failed: {e}")
     return _SCORE_CACHE["scores"]
+
+
+def pick_worker(model: str, workers: list[dict]) -> tuple[str, dict[str, Any]]:
+    """Pick the best-scoring ONLINE worker replica serving `model`.
+
+    Returns (worker_name, meta). Returns ("", ...) when there are 0/1 candidates
+    (no benefit to pinning) or no worker scores yet — the normal dispatch then
+    picks any worker. This is the fix for a single flaky replica: model scores
+    well but one worker 502s, so we steer to the healthier replica.
+    """
+    cands = [w for w in workers if model in (w.get("models") or []) and w.get("online", True)]
+    if len(cands) <= 1:
+        return "", {"candidates": len(cands)}
+    wscores = _SCORE_CACHE.get("workers", {})
+
+    def _sc(w: dict) -> float:
+        wid = w.get("worker_id") or w.get("id") or ""
+        return wscores.get(f"{model}|{wid}", {}).get("score", 0.0)
+
+    best = max(cands, key=_sc)
+    return (best.get("name") or ""), {
+        "candidates": len(cands),
+        "worker": best.get("name"),
+        "worker_score": round(_sc(best), 4),
+    }
 
 
 async def resolve_auto_async(model_field: str, prompt: str, available: list[str]) -> tuple[str, dict[str, Any]]:

@@ -319,6 +319,20 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
             detail=f"Model '{request.model}' is not available. Online models: {available}",
         )
 
+    # Step 3: for auto-routed requests, steer to the best-scoring WORKER replica
+    # of the resolved model (routes around a flaky replica). Soft affinity — if
+    # the preferred worker isn't free the job still runs elsewhere. No-op when a
+    # model has ≤1 online worker.
+    preferred_worker = ""
+    if routing_meta:
+        try:
+            from .stats import _active_workers
+            preferred_worker, _wpick = router_svc.pick_worker(model, await _active_workers())
+            if _wpick:
+                routing_meta["worker_pick"] = _wpick
+        except Exception as e:
+            logger.warning(f"worker pick failed: {e}")
+
     # Free-tier daily quota. Checked here (after auth + worker availability)
     # so a user only spends quota on a request that's actually going to queue.
     await quota.check_and_consume(dict(user))
@@ -434,7 +448,7 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
     # released — otherwise funds are stranded with no settlement path.
     payload["_legacy_rows"] = legacy_rows
     try:
-        await job_queue.submit_job(job_id, payload, [model])
+        await job_queue.submit_job(job_id, payload, [model], preferred_worker=preferred_worker)
     except Exception:
         await credits.release_job(job_id)
         raise

@@ -168,6 +168,7 @@ async def status_routing():
     ranked = sorted(scores.items(), key=lambda kv: kv[1].get("score", 0.0), reverse=True)
     return {
         "scores": dict(ranked),
+        "worker_scores": router_svc._SCORE_CACHE.get("workers", {}),
         "weights": cfg.get("weights"),
         "pin": os.getenv("GRID_ROUTING_PIN", "") or cfg.get("pin"),
         "score_ttl_s": router_svc._SCORE_TTL,

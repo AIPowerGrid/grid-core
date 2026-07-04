@@ -104,6 +104,36 @@ def test_no_scores_uses_curated_order():
     assert meta["scored"] is False
 
 
+def test_pick_worker_single_is_noop():
+    workers = [{"worker_id": "w1", "name": "alpha", "models": ["gpt-oss-20b"], "online": True}]
+    name, meta = r.pick_worker("gpt-oss-20b", workers)
+    assert name == ""  # 1 candidate → don't constrain
+    assert meta["candidates"] == 1
+
+
+def test_pick_worker_chooses_higher_score(monkeypatch):
+    workers = [
+        {"worker_id": "w1", "name": "alpha", "models": ["gpt-oss-20b"], "online": True},
+        {"worker_id": "w2", "name": "bravo", "models": ["gpt-oss-20b"], "online": True},
+    ]
+    monkeypatch.setitem(r._SCORE_CACHE, "workers", {
+        "gpt-oss-20b|w1": {"score": 0.2},
+        "gpt-oss-20b|w2": {"score": 0.9},
+    })
+    name, meta = r.pick_worker("gpt-oss-20b", workers)
+    assert name == "bravo"
+    assert meta["worker"] == "bravo" and meta["candidates"] == 2
+
+
+def test_pick_worker_skips_wrong_model():
+    workers = [
+        {"worker_id": "w1", "name": "alpha", "models": ["qwen3-27b"], "online": True},
+        {"worker_id": "w2", "name": "bravo", "models": ["qwen3-27b"], "online": True},
+    ]
+    name, _ = r.pick_worker("gpt-oss-20b", workers)  # none serve gpt-oss-20b
+    assert name == ""
+
+
 def test_gate_is_fast():
     _, meta = _route("auto", "hello there")
     assert meta["gate_ms"] < 50  # CPU heuristic, must be cheap
