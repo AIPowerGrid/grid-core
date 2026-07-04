@@ -42,6 +42,7 @@ from ..services import accounts as accounts_svc
 from ..services import credits, den, job_queue, media, quota, recipes, token_stream
 from ..services.sanitizer import sanitize_messages
 from .worker_ws import get_available_models
+from ..services import router as router_svc
 from .worker_ws import get_model_modalities
 
 logger = logging.getLogger("grid_api.openai")
@@ -299,6 +300,14 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
             detail="No streaming workers online. Use /api/v2/generate/text/async for the legacy queue.",
         )
 
+    # Resolve the virtual "auto" model to a concrete ONLINE model via the router
+    # (heuristic gate + curated tier map). Only "auto*" is substituted; a real
+    # model name is never silently swapped. routing_meta rides the `grid` block.
+    routing_meta = None
+    if request.model in router_svc.AUTO_MODELS:
+        route_text = _messages_to_prompt([m.model_dump(exclude_none=True) for m in request.messages])
+        request.model, routing_meta = router_svc.resolve_auto(request.model, route_text, available)
+
     # Resolve model. Never silently substitute — a client asking for
     # llama-70b must not receive output from whatever random model happens
     # to be online, labeled as the one they asked for. Return a clear
@@ -434,7 +443,7 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
 
     if request.stream:
         return StreamingResponse(
-            _stream_openai(job_id, model, completion_id, user, request.seed, prompt_toks),
+            _stream_openai(job_id, model, completion_id, user, request.seed, prompt_toks, routing_meta),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -443,10 +452,10 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
             },
         )
     else:
-        return await _collect_response(job_id, model, user, request.seed, prompt_toks)
+        return await _collect_response(job_id, model, user, request.seed, prompt_toks, routing_meta)
 
 
-async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict | None = None, seed: int | None = None, prompt_toks: int = 0):
+async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict | None = None, seed: int | None = None, prompt_toks: int = 0, routing_meta: dict | None = None):
     """SSE generator for OpenAI streaming format.
 
     Faithful passthrough: the grid emits one leading role chunk, then relays
@@ -488,6 +497,8 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
                 grid_meta = data.get("grid")
                 if seed is not None:
                     grid_meta = {**(grid_meta or {}), "seed": seed}
+                if routing_meta:
+                    grid_meta = {**(grid_meta or {}), "routing": routing_meta}
                 if usage or grid_meta:
                     usage_chunk = fmt.openai_usage_chunk(model, completion_id, usage or {})
                     # Additive provenance on the final chunk (worker, gen_time, ttft,
@@ -531,7 +542,7 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
             await _observe_dry(user, model, prompt_toks, den.count_tokens("".join(relayed)), job_id)
 
 
-async def _collect_response(job_id: str, model: str, user: dict | None = None, seed: int | None = None, prompt_toks: int = 0) -> dict:
+async def _collect_response(job_id: str, model: str, user: dict | None = None, seed: int | None = None, prompt_toks: int = 0, routing_meta: dict | None = None) -> dict:
     """Collect the stream and return a single non-streaming response.
 
     The worker always streams; the grid assembles. The DONE event carries the
@@ -604,6 +615,8 @@ async def _collect_response(job_id: str, model: str, user: dict | None = None, s
     # OpenAI clients ignore unknown top-level fields; UIs that want it read `grid`.
     if seed is not None:
         grid_meta = {**(grid_meta or {}), "seed": seed}
+    if routing_meta:
+        grid_meta = {**(grid_meta or {}), "routing": routing_meta}
     if grid_meta:
         resp["grid"] = grid_meta
     return resp
@@ -619,16 +632,21 @@ async def list_models():
     """
     models = await get_available_models(job_type="text")
     modalities = await get_model_modalities()
-    return ModelListResponse(
-        data=[
-            ModelInfo(
-                id=m,
-                owned_by="aipowergrid",
-                input_modalities=modalities.get(m, ["text"]),
-            )
-            for m in models
-        ],
-    )
+    data = [
+        ModelInfo(
+            id=m,
+            owned_by="aipowergrid",
+            input_modalities=modalities.get(m, ["text"]),
+        )
+        for m in models
+    ]
+    # Surface the virtual "auto" model so pickers can offer it — only when at
+    # least one text worker is online (else it'd resolve to nothing).
+    if models:
+        data = [
+            ModelInfo(id="auto", owned_by="aipowergrid", input_modalities=["text"])
+        ] + data
+    return ModelListResponse(data=data)
 
 
 @router.get("/v1/models/{model_id}")
