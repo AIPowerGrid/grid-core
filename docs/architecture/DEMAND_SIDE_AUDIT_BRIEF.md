@@ -78,11 +78,14 @@ on). These are hard gates, not suggestions:
   parity with schema.py (grid_ledger.job_id UNIQUE — the idempotency guard — plus
   duration/ttft). **Remaining before flip:** Postgres concurrency test (atomicity
   proven on SQLite only); media price peg.
-- [ ] **B2 — Scoped API keys.** Add key scopes/classes
-  (`inference.submit`, `account.admin`, `billing.manage`, `workers.manage`,
-  `identity.assert`). Account/payout/key-mgmt routes require admin scope; a
-  bridge key gets `inference.submit` + `identity.assert` only. *(Today: any v2
-  key can do everything.)*
+- [~] **B2 (PARTIAL — session-gating landed `5b7126d3`).** Account-admin actions
+  (change payout wallet, issue/revoke keys) now require a wallet-proven **session
+  key** (`api_keys.is_session`, set only by SIWE wallet-login / dashboard-login;
+  `issue_key` forces it false so it isn't caller-settable). A leaked inference key
+  can no longer redirect earnings or manage keys. **Still TODO for full B2:**
+  finer scopes/classes (`inference.submit`, `billing.manage`, `workers.manage`,
+  `identity.assert`) and a scoped bridge key. *(Was: any v2 key could do
+  everything — no longer true for payout/key-mgmt.)*
 - [ ] **B3 — Signed user assertions (not a raw header).** Resolves the doc
   contradiction (see §2). The chat bridge sends a short-lived **signed**
   assertion (`iss/sub/aud/exp/nonce`) from a scoped bridge key; the grid verifies
@@ -107,9 +110,12 @@ on). These are hard gates, not suggestions:
 - [x] **B6 (code-guard DONE, b8d4ca2; hard DB constraint → B7) — Idempotency is structural, not caller-discipline.** `ref` **non-null
   required** for value-moving ledger rows (Postgres allows multiple NULLs through
   the unique index); validate in code; tests.
-- [ ] **B7 — Migration ↔ schema reconciliation.** Alembic must match `schema.py`
-  metadata (`grid_ledger.job_id` UNIQUE, telemetry columns, credit-ledger
-  constraints) so ledger invariants are actually enforced + reproducible.
+- [~] **B7 (PARTIAL — credit-ledger `ref` NOT NULL landed, alembic `0008` / `229bca16`).**
+  `grid_credit_ledger.ref` is now DB-enforced NOT NULL (+ existing UNIQUE), so the
+  value-moving idempotency invariant is reproducible in migrations, not just guarded
+  in code. **Still TODO for full B7:** reconcile the rest of Alembic with `schema.py`
+  metadata (`grid_ledger.job_id` UNIQUE, telemetry columns) and add a drift check so
+  create_all-vs-migration divergence can't recur.
 - [ ] **B8 — Sybil / free-credit hard rules.** Wallet/email uniqueness, rate
   limits, friction (CAPTCHA / device-IP), abuse scoring; and quota infra must
   **fail closed (or degrade), not fail open**, on Redis error.

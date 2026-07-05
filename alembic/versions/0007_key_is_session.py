@@ -35,11 +35,16 @@ def upgrade() -> None:
             "grid_api_keys",
             sa.Column("is_session", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         )
-    # Back-fill: the historically wallet-proven / dashboard-login keys keep their
-    # ability to manage the account, so nobody is locked out on deploy.
+    # Back-fill ONLY the unambiguously wallet-/dashboard-proven login keys. We do
+    # NOT promote the generic 'default' label: an early `default` key may have been
+    # copied into an app/worker as an inference credential, and marking it a session
+    # key would let that leaked key manage payout wallet + keys — the exact hole
+    # this closes. Accounts whose only key is a `default` key must re-login (SIWE
+    # wallet-login or dashboard session) to obtain a session key; nothing is paid
+    # or charged in the interim (both are dark), so this is safe pre-launch.
     op.execute(
         "UPDATE grid_api_keys SET is_session = true "
-        "WHERE label IN ('wallet-login', 'dashboard-session', 'default')"
+        "WHERE label IN ('wallet-login', 'dashboard-session')"
     )
 
 
