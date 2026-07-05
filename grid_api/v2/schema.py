@@ -86,6 +86,12 @@ api_keys = sa.Table(
         index=True,
     ),
     sa.Column("label", sa.String(100), nullable=True),
+    # True ONLY for wallet-proven session keys (SIWE wallet-login / dashboard
+    # login) and an account's initial login key — never for user-issued keys via
+    # /v1/account/keys. Account-admin actions (change payout wallet, issue/revoke
+    # keys) require a session key, so a leaked inference key can't redirect
+    # earnings. Not caller-settable (issue_key forces False).
+    sa.Column("is_session", sa.Boolean, nullable=False, server_default=sa.text("false"), default=False),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
     sa.Column("last_used", sa.DateTime(timezone=True), nullable=True),
     sa.Column("revoked", sa.Boolean, nullable=False, default=False),
