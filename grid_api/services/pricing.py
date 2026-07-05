@@ -64,12 +64,13 @@ PRICING: dict[str, ModelPrice] = {
     "mimo-v2.5-pro":      half_of(0.435, 0.87),
 
     # ── Media (image per-image, video per-second) ──
-    # PLACEHOLDER PRICES — peg to real competitor floors before live (Justin).
-    # Keys are the lowercased model names workers advertise.
-    "z-image-turbo":        half_of(0, 0, usd_image=0.02),       # fast image
-    "flux.2 klein 4b fp8":  half_of(0, 0, usd_image=0.04),
-    "krea 2 turbo":         half_of(0, 0, usd_image=0.04),
-    "ltx-2.3":              half_of(0, 0, usd_video_sec=0.10),   # video, per second
+    # Pegged 2026-07-05 to competitor floors, HALVED (half_of divides by 2), so the
+    # arg is the competitor floor and the stored price is what we charge. Keys are
+    # the lowercased model names workers advertise. Effective charge in comments.
+    "z-image-turbo":        half_of(0, 0, usd_image=0.006),      # → $0.003/image (turbo/schnell-tier)
+    "flux.2 klein 4b fp8":  half_of(0, 0, usd_image=0.02),       # → $0.010/image (Flux distilled 4B)
+    "krea 2 turbo":         half_of(0, 0, usd_image=0.03),       # → $0.015/image (quality turbo)
+    "ltx-2.3":              half_of(0, 0, usd_video_sec=0.04),   # → $0.020/second video (Justin)
 }
 
 BLOCK_UNPRICED = False  # unpriced model → 0 (free) unless flipped
