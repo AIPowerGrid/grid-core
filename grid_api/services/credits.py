@@ -42,9 +42,53 @@ logger = logging.getLogger("grid_api.credits")
 
 CHARGING_ENABLED = os.getenv("GRID_CHARGING_ENABLED", "0").lower() in ("1", "true", "yes")
 
+# ── >=100k-AIPG holder discount (dark by default) ──────────────────────────
+# A login wallet holding >= GRID_HOLDER_MIN_AIPG AIPG on Base pays a percentage
+# less on every charge. Ties AIPG *holding* to a demand-side benefit (buy-and-hold
+# pressure). Applied identically in reserve / charge / reconcile via a cached
+# balance read (holdings.aipg_balance_raw, ~10 min TTL) so the held, billed and
+# settled amounts always agree. No-op unless GRID_HOLDER_DISCOUNT_ENABLED=1.
+HOLDER_DISCOUNT_ENABLED = os.getenv("GRID_HOLDER_DISCOUNT_ENABLED", "0").lower() in ("1", "true", "yes", "on")
+HOLDER_DISCOUNT_BPS = int(os.getenv("GRID_HOLDER_DISCOUNT_BPS", "2500") or 2500)  # 2500 = 25% off
+HOLDER_MIN_AIPG = int(os.getenv("GRID_HOLDER_MIN_AIPG", "100000") or 100000)      # whole AIPG
+
 
 def _now():
     return _dt.datetime.now(_dt.timezone.utc)
+
+
+async def _wallet_for_account(account_id) -> str | None:
+    """Look up the login wallet for an account (media path has only an id)."""
+    from ..v2.schema import accounts as accounts_t
+    async with await new_session() as s:
+        row = (await s.execute(
+            sa.select(accounts_t.c.wallet).where(accounts_t.c.account_id == account_id)
+        )).first()
+    return row[0] if row and row[0] else None
+
+
+async def apply_holder_discount(cost_micro: int, *, wallet: str | None = None, account_id=None) -> int:
+    """Return the micro-USD cost after the >=100k-AIPG holder discount.
+
+    No-op when the feature is off (default), the cost is non-positive, or the
+    holder doesn't qualify. Never raises — a failed/timed-out balance read just
+    means "no discount", never a blocked or mis-priced charge. Safe to call in
+    dry-run (so the logged would_charge previews the discounted number too)."""
+    if cost_micro <= 0 or not HOLDER_DISCOUNT_ENABLED or HOLDER_DISCOUNT_BPS <= 0:
+        return cost_micro
+    try:
+        if wallet is None and account_id is not None:
+            wallet = await _wallet_for_account(account_id)
+        if not wallet:
+            return cost_micro
+        from . import holdings
+        bal = await holdings.aipg_balance_raw(wallet)
+        if bal < HOLDER_MIN_AIPG * (10 ** holdings.AIPG_DECIMALS):
+            return cost_micro
+        return int(cost_micro * (10_000 - HOLDER_DISCOUNT_BPS) // 10_000)
+    except Exception:
+        logger.warning("holder-discount read failed; charging full price", exc_info=True)
+        return cost_micro
 
 
 async def get_balance(account_id) -> int:
@@ -187,6 +231,7 @@ async def charge_request(user: dict, model: str, prompt_tokens: int, completion_
     aid = _account_id(user)
     if not aid:
         return {"status": "legacy", "charged": 0}
+    cost = await apply_holder_discount(cost, wallet=user.get("wallet"), account_id=aid)
     if not CHARGING_ENABLED:
         logger.info(
             "[charge:dry] account=%s model=%s in=%d out=%d would_charge=%d micro-USD ($%.4f)",
@@ -230,6 +275,7 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
     if not aid:
         return {"ok": False, "reserved": 0, "status": "no_account",
                 "reason": "billing requires a v2 account key"}
+    cost = await apply_holder_discount(cost, wallet=user.get("wallet"), account_id=aid)
     if record_reservation:
         ref = str(job_id)
         async with await new_session() as s:
@@ -288,6 +334,8 @@ async def reconcile(user: dict, model: str, prompt_tokens: int, completion_token
         return
     try:
         actual = pricing.quote_text(model, int(prompt_tokens or 0), int(completion_tokens or 0))
+        # Same discount the reservation used, so the refund math is consistent.
+        actual = await apply_holder_discount(actual, wallet=user.get("wallet"), account_id=aid)
         diff = reserved_micro - actual
         if diff > 0:
             await credit(aid, diff, reason="reconcile:refund", ref=f"{job_id}:refund", model=model)
@@ -328,6 +376,7 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
     if not account_id:
         return {"ok": False, "reserved": 0, "status": "no_account",
                 "reason": "billing requires a v2 account"}
+    cost = await apply_holder_discount(cost, account_id=account_id)
     if record_reservation:
         async with await new_session() as s:
             try:
