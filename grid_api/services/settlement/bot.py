@@ -1,7 +1,12 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Settlement bot — STUB.
+"""Settlement bot — STUB (FUTURE trustless rail, NOT the live payout system).
+
+Workers are paid TODAY by the custodial CLI `payouts.py` in this same package
+(hourly `aipg-payout` systemd timer; treasury hot wallet sends AIPG pro-rata to
+den). This bot is its planned trustless replacement (Merkle root → on-chain
+report → worker-called claim) and is not deployed. See GO_LIVE.md.
 
 Runs a daily loop:
   1. Wait until the current period ends (today 23:59:59 UTC, default)

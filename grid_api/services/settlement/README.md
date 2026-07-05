@@ -1,7 +1,18 @@
-# Settlement bot
+# Settlement bot — FUTURE trustless rail (NOT the live payout system)
 
-Replaces `grid-rewards-sentry`. Runs once per period (default daily) to push
-worker den snapshots on-chain and trigger batch payouts.
+> ⚠️ **This directory is the FUTURE, not-yet-deployed trustless on-chain claim
+> rail** (Merkle root → `DenReporter.reportPeriod` → worker-called
+> `PaymentRouter.claimBatch`). **It is NOT what pays workers today.**
+>
+> The **LIVE** payout rail is the **custodial CLI** — `payouts.py` in this same
+> directory, run hourly by the `aipg-payout` systemd timer: a treasury hot wallet
+> sends AIPG pro-rata to den, nonce-bound and Transfer-proven. See
+> [`GO_LIVE.md`](./GO_LIVE.md) for the running system. `bot.py` here is a **stub**
+> and the Grid Diamond facets are **not deployed**. Do not read this as live.
+
+Eventually replaces the custodial CLI (and `grid-rewards-sentry`). Would run once
+per period (default daily) to push worker den snapshots on-chain and trigger batch
+payouts — see the shape below.
 
 ## What's here
 
