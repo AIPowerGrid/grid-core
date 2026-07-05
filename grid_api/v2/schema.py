@@ -241,8 +241,9 @@ credit_ledger = sa.Table(
     sa.Column("delta_micro", sa.BigInteger, nullable=False),
     sa.Column("reason", sa.String(64), nullable=False),
     # Idempotency key: the charged job_id (debit) or deposit/Stripe event id
-    # (credit). UNIQUE so a retried request / re-seen deposit can't double-apply.
-    sa.Column("ref", sa.String(128), nullable=True, unique=True),
+    # (credit). UNIQUE + NOT NULL so a value-moving row ALWAYS carries a dedup key
+    # — the money invariant is DB-enforced, not just guarded in credit()/debit().
+    sa.Column("ref", sa.String(128), nullable=False, unique=True),
     sa.Column("model", sa.String(255), nullable=True),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
 )
