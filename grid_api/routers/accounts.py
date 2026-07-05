@@ -147,7 +147,7 @@ async def wallet_verify(request: Request, form: WalletVerifyForm):
     wallet = recovered.lower()
     account = await accounts_svc.get_account_by_wallet(wallet)
     if account:
-        key = await accounts_svc.issue_key(account["id"], label="wallet-login")
+        key = await accounts_svc.issue_key(account["id"], label="wallet-login", is_session=True)
         return {
             "account_id": str(account["id"]),
             "wallet": wallet,
@@ -242,7 +242,7 @@ async def account_session(
                 .values(revoked=True)
             )
             await session.commit()
-        key = await accounts_svc.issue_key(account_id, label="dashboard-session")
+        key = await accounts_svc.issue_key(account_id, label="dashboard-session", is_session=True)
     else:
         created = True
         acct, key = await accounts_svc.create_account(
@@ -270,6 +270,22 @@ async def _require_v2(apikey: Optional[str], authorization: Optional[str]) -> di
     if user["source"] != "v2":
         raise HTTPException(
             403, detail="Key management requires a v2 account key (legacy keys are read-only)."
+        )
+    return user
+
+
+async def _require_session(apikey: Optional[str], authorization: Optional[str]) -> dict:
+    """Gate account-admin actions (change payout wallet, issue/revoke keys) to a
+    wallet-proven SESSION key. A user-issued inference key can read the account
+    but cannot redirect earnings or mint/kill keys — so a leaked inference key is
+    not enough to steal payouts. Sign in with your wallet to get a session key."""
+    user = await _require_v2(apikey, authorization)
+    if not user.get("is_session"):
+        raise HTTPException(
+            403,
+            detail="This action needs a wallet session. Sign in with your wallet "
+                   "(or the dashboard) — an inference API key can't change payout "
+                   "settings or manage keys.",
         )
     return user
 
@@ -328,7 +344,7 @@ async def set_payout_wallet(
     (mining-style — point earnings wherever you want); the address is only
     format-checked. Distinct from the login wallet, so an OAuth/username
     operator can receive payouts."""
-    user = await _require_v2(apikey, authorization)
+    user = await _require_session(apikey, authorization)
     try:
         value = await accounts_svc.set_payout_wallet(user["account_id"], form.wallet)
     except ValueError as e:
@@ -535,7 +551,7 @@ async def issue_key(
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
 ):
-    user = await _require_v2(apikey, authorization)
+    user = await _require_session(apikey, authorization)
     key = await accounts_svc.issue_key(user["account_id"], label=form.label or "")
     return {"api_key": key, "label": form.label}
 
@@ -547,7 +563,7 @@ async def revoke_key(
     authorization: Optional[str] = Header(None),
 ):
     """Revoke a key by its 12-char hash prefix (from GET /v1/account)."""
-    user = await _require_v2(apikey, authorization)
+    user = await _require_session(apikey, authorization)
     async with await new_session() as session:
         result = await session.execute(
             sa.update(api_keys_table)

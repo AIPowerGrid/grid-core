@@ -56,6 +56,7 @@ async def resolve_api_key(plain_key: str) -> dict | None:
             await session.execute(
                 sa.select(
                     api_keys_table.c.hash,
+                    api_keys_table.c.is_session,
                     accounts_table.c.id.label("account_id"),
                     accounts_table.c.username,
                     accounts_table.c.wallet,
@@ -96,6 +97,9 @@ async def resolve_api_key(plain_key: str) -> dict | None:
                 "source": "v2",
                 "id": f"v2:{row['account_id']}",
                 "account_id": row["account_id"],
+                # True only for wallet-proven session keys — gates account-admin
+                # actions (payout wallet, key management) against leaked API keys.
+                "is_session": bool(row["is_session"]),
                 "username": row["username"] or "",
                 "wallet": row["wallet"] or "",
                 # Payout address for worker earnings; falls back to the identity
@@ -159,10 +163,13 @@ async def create_account(
     email: str | None = None,
     oauth_sub: str | None = None,
     key_label: str = "default",
+    is_session: bool = True,
 ) -> tuple[dict, str]:
     """Create a grid_account + its first API key.
 
-    Returns (account dict, plaintext key). The key is never stored or logged.
+    The first key is the account's LOGIN credential, so it's a session key by
+    default (can manage payout wallet + keys). Returns (account dict, plaintext
+    key). The key is never stored or logged.
     """
     plain = generate_api_key()
     account_id = uuid4()
@@ -184,6 +191,7 @@ async def create_account(
                 hash=hash_api_key(plain),
                 account_id=account_id,
                 label=key_label,
+                is_session=is_session,
                 created=now,
                 revoked=False,
             )
@@ -193,8 +201,13 @@ async def create_account(
     return {"id": str(account_id), "username": username, "wallet": wallet}, plain
 
 
-async def issue_key(account_id, label: str = "") -> str:
-    """Issue an additional API key for an account; returns plaintext once."""
+async def issue_key(account_id, label: str = "", is_session: bool = False) -> str:
+    """Issue an additional API key for an account; returns plaintext once.
+
+    is_session defaults False: keys minted here (via /v1/account/keys) are
+    inference-only and CANNOT perform account-admin actions. Only the SIWE
+    wallet-login / dashboard-login paths pass is_session=True.
+    """
     plain = generate_api_key()
     async with await new_session() as session:
         await session.execute(
@@ -202,6 +215,7 @@ async def issue_key(account_id, label: str = "") -> str:
                 hash=hash_api_key(plain),
                 account_id=account_id,
                 label=label or None,
+                is_session=is_session,
                 created=datetime.now(timezone.utc),
                 revoked=False,
             )
