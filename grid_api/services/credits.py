@@ -62,7 +62,7 @@ async def _wallet_for_account(account_id) -> str | None:
     from ..v2.schema import accounts as accounts_t
     async with await new_session() as s:
         row = (await s.execute(
-            sa.select(accounts_t.c.wallet).where(accounts_t.c.account_id == account_id)
+            sa.select(accounts_t.c.wallet).where(accounts_t.c.id == account_id)
         )).first()
     return row[0] if row and row[0] else None
 
@@ -605,6 +605,10 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
             reserved, prompt_toks = int(row[2] or 0), int(row[3] or 0)
             if CHARGING_ENABLED and aid and reserved > 0 and not exact:
                 actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
+                # The reservation was held at the discounted rate; settle at the
+                # same rate so the refund/extra math is consistent (else a holder
+                # is over-collected against their discounted hold).
+                actual = await apply_holder_discount(actual, account_id=aid)
                 diff = reserved - actual
                 if diff > 0:
                     await _credit_in_session(s, aid, diff, "reconcile:refund", f"{job_id}:refund", model)
