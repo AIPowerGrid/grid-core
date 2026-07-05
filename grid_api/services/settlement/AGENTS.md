@@ -1,9 +1,16 @@
-# grid_api/services/settlement - on-chain reward settlement
+# grid_api/services/settlement - on-chain reward settlement (FUTURE rail)
+
+> ⚠️ **NOT the live payout system.** This directory is the future trustless
+> on-chain claim rail (Merkle → reportPeriod → worker claim), and `bot.py` is a
+> stub — the Diamond facets are not deployed. Workers are paid TODAY by the
+> **custodial CLI `payouts.py`** (hourly systemd timer, treasury hot wallet) —
+> see `GO_LIVE.md`. Never present this settlement code as the running payout rail.
 
 ## Purpose
 
 Turn metered grid usage into on-chain reward distributions: build cumulative Merkle roots
-of earnings, publish proofs (IPFS), and submit settlement on Base.
+of earnings, publish proofs (IPFS), and submit settlement on Base. This is the *planned*
+trustless replacement for the live custodial `payouts.py` rail, not a running system.
 
 ## Ownership
 
