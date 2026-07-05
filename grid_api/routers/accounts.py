@@ -508,6 +508,27 @@ async def claim_deposit(
     return await deposits.verify_and_credit(form.tx_hash, user)
 
 
+@router.post("/v1/account/deposits/claim-eth")
+@limiter.limit("20/minute")
+async def claim_eth_deposit(
+    request: Request,
+    form: ClaimDepositForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Credit the account for a native-ETH deposit to the grid treasury.
+
+    The user sends ETH on Base, then submits the tx hash here; the grid verifies
+    the transfer (to the treasury, from the account's own wallet, enough
+    confirmations) and credits the prepaid balance in USD, priced ETH→USD via the
+    Chainlink feed at claim time. Idempotent on the tx hash. 503 until the grid is
+    configured with a treasury (GRID_ETH_TREASURY, or the shared GRID_USDC_TREASURY).
+    """
+    user = await _require_v2(apikey, authorization)
+    from ..services import deposits
+    return await deposits.verify_and_credit_eth(form.tx_hash, user)
+
+
 @router.post("/v1/account/keys")
 async def issue_key(
     form: IssueKeyForm,
