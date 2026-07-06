@@ -36,6 +36,7 @@ from ..v2.schema import credit_ledger as ledger_t
 from ..v2.schema import credits as credits_t
 from ..v2.schema import ledger as grid_ledger_t
 from ..v2.schema import reservations as reservations_t
+from . import free_credits
 from . import pricing
 
 logger = logging.getLogger("grid_api.credits")
@@ -232,16 +233,31 @@ async def charge_request(user: dict, model: str, prompt_tokens: int, completion_
     if not aid:
         return {"status": "legacy", "charged": 0}
     cost = await apply_holder_discount(cost, wallet=user.get("wallet"), account_id=aid)
+    wallet = user.get("wallet")
     if not CHARGING_ENABLED:
+        # Preview the free-first split for observability (no consume in dry-run).
+        free_avail = await free_credits.available_micro(aid, wallet)
+        from_free = min(cost, free_avail)
         logger.info(
-            "[charge:dry] account=%s model=%s in=%d out=%d would_charge=%d micro-USD ($%.4f)",
-            aid, model, prompt_tokens, completion_tokens, cost, cost / 1_000_000,
+            "[charge:dry] account=%s model=%s in=%d out=%d would_charge=%d micro-USD "
+            "(free=%d paid=%d, $%.4f)",
+            aid, model, prompt_tokens, completion_tokens, cost, from_free, cost - from_free, cost / 1_000_000,
         )
-        return {"status": "dry_run", "charged": 0, "would_charge": cost}
-    status = await debit(aid, cost, reason="debit:chat", ref=str(job_id), model=model)
+        return {"status": "dry_run", "charged": 0, "would_charge": cost,
+                "from_free": from_free, "from_paid": cost - from_free}
+    # LIVE: draw the daily FREE allowance first, then the purchased balance.
+    from_free = await free_credits.consume(aid, wallet, cost, ref=str(job_id))
+    remainder = cost - from_free
+    if remainder <= 0:
+        return {"status": "ok", "charged": cost, "from_free": from_free, "from_paid": 0}
+    status = await debit(aid, remainder, reason="debit:chat", ref=str(job_id), model=model)
     if status == "insufficient":
-        logger.warning("account=%s insufficient credit for %d micro-USD (model=%s)", aid, cost, model)
-    return {"status": status, "charged": cost if status == "ok" else 0}
+        logger.warning("account=%s insufficient credit for %d micro-USD (model=%s, free-applied=%d)",
+                       aid, remainder, model, from_free)
+    return {"status": status,
+            "charged": cost if status == "ok" else 0,
+            "from_free": from_free,
+            "from_paid": remainder if status == "ok" else 0}
 
 
 async def authorize_request(user: dict, model: str, prompt_tokens: int, max_tokens: int, job_id,
