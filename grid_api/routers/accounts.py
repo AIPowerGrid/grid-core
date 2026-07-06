@@ -545,6 +545,51 @@ async def claim_eth_deposit(
     return await deposits.verify_and_credit_eth(form.tx_hash, user)
 
 
+@router.get("/v1/account/credits")
+async def get_credits(
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """The account's spendable credits — what the front ends show as
+    'X free today' + '$Y balance' + a top-up prompt.
+
+    Two pockets, one USD unit (micro-USD): the daily FREE allowance (resets UTC
+    midnight, use-it-or-lose-it, tiered by AIPG held) and the purchased balance
+    (from on-chain deposits, never expires). Charges draw free-first.
+    """
+    user = await _require_v2(apikey, authorization)
+    aid = user["account_id"]
+    wallet = user.get("wallet") or None
+    from ..services import credits as credits_svc
+    from ..services import free_credits
+
+    paid = await credits_svc.get_balance(aid)
+    cap = await free_credits.daily_cap_micro(wallet)
+    free_left = await free_credits.available_micro(aid, wallet)
+    total = free_left + paid
+
+    def usd(m):
+        return round(m / 1_000_000, 6)
+
+    return {
+        "free": {
+            "daily_cap_micro": cap,
+            "remaining_micro": free_left,
+            "daily_cap_usd": usd(cap),
+            "remaining_usd": usd(free_left),
+            "resets": "utc-midnight",
+            "holder_bonus_active": cap > free_credits.FREE_DAILY_MICRO,  # AIPG-tier bonus applied?
+        },
+        "paid": {
+            "balance_micro": paid,
+            "balance_usd": usd(paid),
+        },
+        "total_available_micro": total,
+        "total_available_usd": usd(total),
+        "charging_enabled": credits_svc.CHARGING_ENABLED,  # false while dark
+    }
+
+
 @router.post("/v1/account/keys")
 async def issue_key(
     form: IssueKeyForm,
