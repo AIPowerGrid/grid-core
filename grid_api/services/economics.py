@@ -76,6 +76,11 @@ DEFAULT_PAYOUT_ASSET = os.getenv("GRID_DEFAULT_PAYOUT_ASSET", "USDC").upper()
 # GRID_PAYOUT_FEE_TO_BUYBACK is on (net-buyer flywheel).
 PAYOUT_CONVERSION_FEE_BPS = _env_bps("GRID_PAYOUT_CONVERSION_FEE_BPS", 50)  # 0.5%
 PAYOUT_FEE_TO_BUYBACK = os.getenv("GRID_PAYOUT_FEE_TO_BUYBACK", "1").lower() in ("1", "true", "yes", "on")
+# Whether the payout RAIL actually consumes payout_asset yet (the P2 batched
+# swap). OFF until then — the live rail (payouts.py) still settles a fixed AIPG
+# budget by den. The account API surfaces this as payout.active so nothing
+# implies USDC/ETH/USDS payouts before the swap ships.
+PAYOUT_ASSET_ROUTING_ENABLED = os.getenv("GRID_PAYOUT_ASSET_ROUTING", "0").lower() in ("1", "true", "yes", "on")
 
 
 def is_par_asset(asset: str | None) -> bool:

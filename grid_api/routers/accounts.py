@@ -324,6 +324,12 @@ async def get_account(
             "assets": list(economics.PAYOUT_ASSETS),
             "par_assets": list(economics.PAYOUT_PAR_ASSETS),
             "conversion_fee_bps": economics.PAYOUT_CONVERSION_FEE_BPS,
+            # Is the preference actually honored by the payout rail yet? Until the
+            # P2 swap ships, no — the live rail settles a fixed AIPG budget by den,
+            # so clients must not imply USDC/ETH/USDS payouts. `live_asset` is what
+            # actually pays today.
+            "active": economics.PAYOUT_ASSET_ROUTING_ENABLED,
+            "live_asset": "AIPG",
         },
         "keys": [
             {
@@ -656,7 +662,16 @@ async def get_credits(
 
     Two pockets, one USD unit (micro-USD): the daily FREE allowance (resets UTC
     midnight, use-it-or-lose-it, tiered by AIPG held) and the purchased balance
-    (from on-chain deposits, never expires). Charges draw free-first.
+    (from on-chain deposits, never expires).
+
+    ⚠️ FREE tier is PREVIEW. The free-first draw currently lives only in
+    charge_request (the dark/dry-run metering path). The LIVE durable reserve
+    path (authorize_request / authorize_media) debits the paid balance directly
+    and does NOT yet consult the free bucket — so when charging flips on, free
+    credits will not be spent until they're integrated into the reservation
+    lifecycle (reserve + release/refund on failure). Report accordingly; do not
+    tell a user free credit will cover a paid charge yet. charging_enabled below
+    is the live gate (dark = nothing is charged).
     """
     user = await _require_v2(apikey, authorization)
     aid = user["account_id"]
