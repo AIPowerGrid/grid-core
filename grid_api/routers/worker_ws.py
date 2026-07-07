@@ -855,7 +855,7 @@ async def worker_websocket(ws: WebSocket):
                         duration=gen_time,
                         ttft=ttft,
                         prompt_hash=ledger_svc.text_hash(prompt_text),
-                        result_hash=ledger_svc.text_hash(full_text),
+                        result_hash=ledger_svc.content_hash(full_text),
                     ),
                     completion_tokens=bill_completion,
                 )
@@ -1237,7 +1237,9 @@ async def _handle_raw_passthrough(
                 generation_time_seconds=gen_time,
             )
             await _clear_strikes(worker_id)
-            result_src = "".join(accumulated) if accumulated else json.dumps(full_json or {})
+            result_src = "".join(accumulated) if accumulated else (
+                json.dumps(full_json, sort_keys=True) if full_json else ""
+            )
 
             # ATOMIC terminal: worker-payout row + demand settlement in one txn.
             # Bill on a GRID count of the relayed/assembled output, never the
@@ -1257,7 +1259,7 @@ async def _handle_raw_passthrough(
                     duration=gen_time,
                     ttft=ttft,
                     prompt_hash=ledger_svc.text_hash(json.dumps(payload.get("request", {}), sort_keys=True)[:20000]),
-                    result_hash=ledger_svc.text_hash(result_src[:20000]),
+                    result_hash=ledger_svc.content_hash(result_src[:20000]),
                 ),
                 completion_tokens=_pt_completion(api_format, accumulated, full_json),
             )
@@ -1431,8 +1433,14 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
             # legitimate terminal — settle it as a partial success, never a worker
             # failure (no strike, no requeue).
             was_cancelled = bool(msg.get("cancelled"))
-            full_text = msg.get("full_text", full_text)
-            full_reasoning = msg.get("full_reasoning", full_reasoning)
+            # Use the worker's final full_text ONLY when it's non-empty. A worker
+            # that streamed deltas but sends an empty full_text in `done` must not
+            # wipe the grid-witnessed stream we accumulated (that's what produced
+            # the misleading sha256("") result hashes). Non-streaming workers send
+            # the whole output here (truthy → used); partial/cancelled output stays
+            # whatever we actually relayed.
+            full_text = msg.get("full_text") or full_text
+            full_reasoning = msg.get("full_reasoning") or full_reasoning
             usage = msg.get("usage") or usage
             tool_calls = [tool_acc[i] for i in sorted(tool_acc)] if tool_acc else None
             finish_reason = msg.get("finish_reason") or last_finish or (
