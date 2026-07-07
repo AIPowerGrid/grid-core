@@ -28,6 +28,7 @@ from ...database import close_database, init_database, new_session
 from ...v2.schema import accounts as accounts_t
 from ...v2.schema import payouts as payouts_t
 from .aggregate import aggregate_den_by_account, total_den_in_window
+from . import sanctions
 
 logger = logging.getLogger("grid_api.payouts")
 
@@ -324,6 +325,18 @@ async def send_period(start, end, budget_aipg: float, period_id: str) -> dict:
             await _write(period_id, p["account_id"], address=None, den=p["den"],
                          aipg=p["aipg"], status="accrued")
             counts["accrued"] += 1
+            continue
+        # OFAC screen before ANY funds move. A sanctioned hit (blocked_sanctions)
+        # or an address we couldn't verify with a configured oracle (review_sanctions)
+        # is recorded terminally and never sent.
+        screen = await sanctions.screen(p["payout_address"])
+        blocked = sanctions.payable_status(screen)
+        if blocked:
+            await _write(period_id, p["account_id"], address=p["payout_address"], den=p["den"],
+                         aipg=p["aipg"], status=blocked)
+            counts[blocked] = counts.get(blocked, 0) + 1
+            logger.warning("payout %s account=%s addr=%s (source=%s)",
+                           blocked, p["account_id"], p["payout_address"], screen.get("source"))
             continue
         if ctx is None:
             counts["failed"] += 1  # has a wallet but no treasury configured → can't send
