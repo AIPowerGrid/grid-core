@@ -62,6 +62,84 @@ async def list_workers():
     }
 
 
+@router.get("/v1/jobs/recent")
+async def jobs_recent(limit: int = 50):
+    """PUBLIC, no-auth recent-jobs feed — the live face of the grid.
+
+    Redacted by design: shows THAT a job happened, on which model, by which
+    worker (handle), how fast, plus its content COMMITMENT (prompt/result
+    hashes + whether the worker signed it) — but NEVER the prompt or result,
+    and NEVER the customer wallet/account. Private inference, public
+    accountability. Source is grid_ledger (the same append-only rows settlement
+    pays against), so this feed and the payouts can never disagree.
+    """
+    limit = max(1, min(limit, 100))
+    lt = ledger_table
+    async with await new_session() as session:
+        rows = (
+            await session.execute(
+                sa.select(
+                    lt.c.job_id,
+                    lt.c.worker_id,
+                    lt.c.model,
+                    lt.c.job_type,
+                    lt.c.den,
+                    lt.c.output_units,
+                    lt.c.duration,
+                    lt.c.ttft,
+                    lt.c.prompt_hash,
+                    lt.c.result_hash,
+                    lt.c.worker_sig,
+                    lt.c.created,
+                )
+                .order_by(lt.c.created.desc())
+                .limit(limit)
+            )
+        ).mappings().all()
+
+    # Enrich worker_id -> public handle for currently-online workers; offline
+    # workers fall back to an opaque pseudonym (never the operator wallet).
+    try:
+        names = {str(w.get("worker_id")): w.get("name") for w in await _active_workers()}
+    except Exception:
+        names = {}
+
+    def worker_label(wid):
+        if wid is None:
+            return "unknown"
+        s = str(wid)
+        return names.get(s) or f"worker-{s[:8]}"
+
+    def tps(row):
+        # decode throughput (text only): output tokens / (duration - ttft)
+        if row["job_type"] == "text" and row["duration"] and row["output_units"]:
+            decode = (row["duration"] or 0) - (row["ttft"] or 0)
+            if decode > 0:
+                return round(row["output_units"] / decode, 1)
+        return None
+
+    return {
+        "jobs": [
+            {
+                "job_id": str(r["job_id"]),
+                "model": r["model"],
+                "type": r["job_type"],
+                "worker": worker_label(r["worker_id"]),
+                "den": round(r["den"] or 0, 3),
+                "output_units": r["output_units"],
+                "duration_s": round(r["duration"] or 0, 2),
+                "ttft_s": round(r["ttft"], 3) if r["ttft"] is not None else None,
+                "tokens_per_s": tps(r),
+                "prompt_hash": r["prompt_hash"],
+                "result_hash": r["result_hash"],
+                "signed": bool(r["worker_sig"]),
+                "created": r["created"].isoformat() if r["created"] else None,
+            }
+            for r in rows
+        ],
+    }
+
+
 @router.get("/v1/progress/{token}")
 async def job_progress(token: str):
     """Latest generation progress (0–100) for a client-supplied progress_token.
