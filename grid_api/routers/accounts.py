@@ -687,6 +687,10 @@ async def get_credits(
     def usd(m):
         return round(m / 1_000_000, 6)
 
+    # Free credit is real value but NOT yet consumed by the live reserve path
+    # (see docstring). `active` says whether it can actually pay for a charge.
+    free_active = free_credits.FREE_ENABLED and free_credits.FREE_SPENDABLE_LIVE
+    spendable = total if free_active else paid
     return {
         "free": {
             "daily_cap_micro": cap,
@@ -695,13 +699,20 @@ async def get_credits(
             "remaining_usd": usd(free_left),
             "resets": "utc-midnight",
             "holder_bonus_active": cap > free_credits.FREE_DAILY_MICRO,  # AIPG-tier bonus applied?
+            # False = shown for transparency but NOT spendable on paid inference yet.
+            "active": free_active,
         },
         "paid": {
             "balance_micro": paid,
             "balance_usd": usd(paid),
         },
-        "total_available_micro": total,
-        "total_available_usd": usd(total),
+        # What can ACTUALLY cover a paid charge right now (free excluded until it's
+        # in the live reserve path). This is the number a client must gate on.
+        "total_spendable_micro": spendable,
+        "total_spendable_usd": usd(spendable),
+        # free + paid — what WILL be spendable once free credits go live. Preview only.
+        "total_preview_micro": total,
+        "total_preview_usd": usd(total),
         "charging_enabled": credits_svc.CHARGING_ENABLED,  # false while dark
     }
 

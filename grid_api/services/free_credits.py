@@ -40,6 +40,11 @@ from ..redis_client import get_redis
 logger = logging.getLogger("grid_api.free_credits")
 
 FREE_ENABLED = os.getenv("GRID_FREE_CREDITS_ENABLED", "1").lower() in ("1", "true", "yes", "on")
+# Whether the free bucket is actually consumed by the LIVE charge path yet. OFF
+# until `consume()` is wired into authorize_request/authorize_media with durable
+# reserve/release (see the PREVIEW note above). Surfaced as free.active so the API
+# never implies free credit can cover a paid charge before that integration ships.
+FREE_SPENDABLE_LIVE = os.getenv("GRID_FREE_SPENDABLE_LIVE", "0").lower() in ("1", "true", "yes", "on")
 # Base free micro-USD per UTC day (250000 = $0.25).
 FREE_DAILY_MICRO = int(os.getenv("GRID_FREE_DAILY_MICRO", "250000"))
 # AIPG-holder bonus: wallets holding >= MIN get + BONUS micro-USD/day on top of base.
