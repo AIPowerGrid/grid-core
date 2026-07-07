@@ -61,6 +61,32 @@ SENTINEL_FEE_BPS = _env_bps("GRID_SENTINEL_FEE_BPS", 300)   # 3%  → verificati
 # AIPG liquidity is thin, so it's safe to target high.
 WORKER_AIPG_SHARE_BPS = _env_bps("GRID_WORKER_AIPG_SHARE_BPS", 0)
 
+# ── Payout asset choice + conversion fee (P1: preference storage only; the
+#    batched DEX swap that consumes it is P2) ──
+# A worker picks the asset they're paid in. USDC (treasury-held) and AIPG (the
+# flywheel asset) are PAR — delivered fee-free. USDS/ETH require a batched swap
+# out of treasury USDC, so they carry the conversion fee below.
+PAYOUT_ASSETS = ("USDC", "USDS", "ETH", "AIPG")
+PAYOUT_PAR_ASSETS = ("USDC", "AIPG")  # fee-free
+DEFAULT_PAYOUT_ASSET = os.getenv("GRID_DEFAULT_PAYOUT_ASSET", "USDC").upper()
+# Fee (bps) on converting a payout into a NON-par asset. Covers the batched swap
+# (DEX fee + gas + slippage) plus a thin margin; MUST stay below what a worker
+# would pay swapping solo, or they'll just take free USDC and DIY. Batching per
+# period is what makes that inequality hold. Fees route to the AIPG buyback when
+# GRID_PAYOUT_FEE_TO_BUYBACK is on (net-buyer flywheel).
+PAYOUT_CONVERSION_FEE_BPS = _env_bps("GRID_PAYOUT_CONVERSION_FEE_BPS", 50)  # 0.5%
+PAYOUT_FEE_TO_BUYBACK = os.getenv("GRID_PAYOUT_FEE_TO_BUYBACK", "1").lower() in ("1", "true", "yes", "on")
+
+
+def is_par_asset(asset: str | None) -> bool:
+    """Par assets deliver the owed USD value 1:1, fee-free."""
+    return (asset or "").upper() in PAYOUT_PAR_ASSETS
+
+
+def conversion_fee_bps(asset: str | None) -> int:
+    """0 for par assets (USDC/AIPG); the conversion fee for swap assets (USDS/ETH)."""
+    return 0 if is_par_asset(asset) else PAYOUT_CONVERSION_FEE_BPS
+
 # ── Customer incentive to pay in AIPG ──
 # Extra credit granted for paying a top-up in AIPG (drives customer-side AIPG
 # demand). A real revenue haircut — keep modest. Launch=0 (off).
