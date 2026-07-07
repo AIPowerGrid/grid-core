@@ -18,6 +18,17 @@ availability reads as 0 and charges fall through to the paid balance. A free
 CREDIT is real value — a store outage must never silently grant unbounded free
 credits. (Letting a few extra *requests* through on a quota outage is cheap;
 granting unbounded *credits* is not.)
+
+⚠️ PREVIEW / NOT YET IN THE LIVE CHARGE PATH. `consume()` is wired only into
+`credits.charge_request` — the dark/dry-run metering path. The LIVE durable
+reserve path (`credits.authorize_request` for text, `authorize_media` for media)
+debits the paid balance directly and does NOT call this bucket. So when charging
+is turned on (GRID_CHARGING_ENABLED=1) BEFORE this is integrated, a user with
+free credit but no paid balance would be 402'd. Integrating means: draw free
+inside authorize_* with durable reserve/release (release the free consumption on
+job failure/refund, mirroring the paid reservation lifecycle) — the free bucket
+is idempotent on `ref`, so a `release(ref)` that decrements is the missing piece.
+Until then, treat daily free credits as preview and keep charging dark.
 """
 
 import logging
