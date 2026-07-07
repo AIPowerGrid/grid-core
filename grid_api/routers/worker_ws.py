@@ -41,6 +41,7 @@ from ..redis_client import get_redis
 from ..services import accounts as accounts_svc
 from ..services import credits, job_queue, storage, token_stream
 from ..services import ledger as ledger_svc
+from ..services import signing
 from ..services.den import calculate_den, calculate_media_den, count_tokens
 from ..v2.schema import workers as v2_workers_table
 from ..services.metrics_state import record_job_complete, record_job_failed
@@ -843,11 +844,19 @@ async def worker_websocket(ws: WebSocket):
                 # on the reservation's held→settled flip; no-op for jobs with no
                 # reservation (dry-run / legacy).
                 bill_completion = min(server_token_count, requested_max)
+                result_hash = ledger_svc.content_hash(full_text)
+                payout_wallet = worker_info.get("wallet_address", "")
+                # OPTIONAL "signed" tier: store the worker's signature ONLY if it
+                # verifies to the payout wallet over this exact output commitment.
+                # Absent/invalid → unsigned (floor). Fail-closed in signing.py.
+                verified_sig = signing.verify_worker_sig(
+                    job["job_id"], result_hash, gen.get("worker_sig"), [payout_wallet]
+                )
                 settle_result = await credits.record_and_settle(
                     ledger_values=dict(
                         job_id=job["job_id"],
                         worker_id=worker_id,
-                        wallet=worker_info.get("wallet_address", ""),
+                        wallet=payout_wallet,
                         model=selected_model,
                         job_type="text",
                         den=den_awarded,
@@ -855,7 +864,8 @@ async def worker_websocket(ws: WebSocket):
                         duration=gen_time,
                         ttft=ttft,
                         prompt_hash=ledger_svc.text_hash(prompt_text),
-                        result_hash=ledger_svc.content_hash(full_text),
+                        result_hash=result_hash,
+                        worker_sig=verified_sig,
                     ),
                     completion_tokens=bill_completion,
                 )
@@ -1336,14 +1346,19 @@ _PAID_SETTLE = ("settled", "no_reservation")
 
 def _gen_result(*, full_text="", full_reasoning="", tool_calls=None, usage=None,
                 finish_reason="stop", grid_meta=None, metered=0,
-                failed=False, client_error=None, ttft=None) -> dict:
+                failed=False, client_error=None, ttft=None, worker_sig=None) -> dict:
     """Structured result of one worker generation. On SUCCESS the caller publishes
     DONE only AFTER settlement commits (so the client's completion signal, the
-    queue ack, and the worker ack all gate on a committed terminal)."""
+    queue ack, and the worker ack all gate on a committed terminal).
+
+    `worker_sig` is the OPTIONAL signature the worker reported in its `done`
+    frame — the caller verifies it against the worker's payout wallet before
+    persisting (unverified/absent → the row is stored unsigned)."""
     return {
         "full_text": full_text, "full_reasoning": full_reasoning, "tool_calls": tool_calls,
         "usage": usage, "finish_reason": finish_reason, "grid_meta": grid_meta,
         "metered": metered, "failed": failed, "client_error": client_error, "ttft": ttft,
+        "worker_sig": worker_sig,
     }
 
 
@@ -1442,6 +1457,9 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
             full_text = msg.get("full_text") or full_text
             full_reasoning = msg.get("full_reasoning") or full_reasoning
             usage = msg.get("usage") or usage
+            # OPTIONAL worker signature over the output commitment (Part B). Just
+            # carried here; verified against the payout wallet at settle time.
+            reported_worker_sig = msg.get("worker_sig")
             tool_calls = [tool_acc[i] for i in sorted(tool_acc)] if tool_acc else None
             finish_reason = msg.get("finish_reason") or last_finish or (
                 "tool_calls" if tool_calls else "stop"
@@ -1490,7 +1508,7 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
             return _gen_result(
                 full_text=full_text, full_reasoning=full_reasoning, tool_calls=tool_calls,
                 usage=usage, finish_reason=finish_reason, grid_meta=grid_meta,
-                metered=metered, failed=False, ttft=ttft,
+                metered=metered, failed=False, ttft=ttft, worker_sig=reported_worker_sig,
             )
 
         elif msg_type == "pong":

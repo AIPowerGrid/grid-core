@@ -76,6 +76,7 @@ async def record_completion_in_session(
     result_hash: str | None,
     duration: float | None = None,
     ttft: float | None = None,
+    worker_sig: str | None = None,
 ) -> None:
     """Insert the completion row on a CALLER-OWNED session WITHOUT committing.
 
@@ -96,6 +97,7 @@ async def record_completion_in_session(
             ttft=ttft,
             prompt_hash=prompt_hash,
             result_hash=result_hash,
+            worker_sig=worker_sig,
             created=datetime.now(timezone.utc),
         )
     )
