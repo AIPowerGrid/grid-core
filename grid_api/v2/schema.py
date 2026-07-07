@@ -449,3 +449,29 @@ revenue = sa.Table(
     sa.Column("ref", sa.String(128), nullable=False, unique=True),  # idempotency
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
 )
+
+
+# ── Payout legs (multi-asset pass-through executor) ───────────────────────────
+# One row per (period, account, asset): the pass-through executor sends each
+# asset leg through its rail (Base for ETH/AIPG/on-chain-USDC, Stripe for
+# fiat/USDC). Generalizes grid_payouts (AIPG-only) — idempotent per leg, records
+# the rail + external id (tx_hash for Base, Stripe transfer id for Stripe). See
+# docs/architecture/PAYOUT_EXECUTOR.md.
+payout_legs = sa.Table(
+    "grid_payout_legs",
+    metadata,
+    sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"),
+              primary_key=True, autoincrement=True),
+    sa.Column("period_id", sa.String(64), nullable=False, index=True),
+    sa.Column("account_id", sa.Uuid, nullable=False, index=True),
+    sa.Column("address", sa.String(42), nullable=True),          # Base dest; null for Stripe/accrued
+    sa.Column("asset", sa.String(12), nullable=False),           # USDC | ETH | AIPG
+    sa.Column("rail", sa.String(16), nullable=False, default="base"),  # base | stripe
+    sa.Column("amount", sa.Numeric(38, 18), nullable=False),     # native units
+    sa.Column("status", sa.String(24), nullable=False),          # accrued|pending|sent|failed|manual_review|blocked_sanctions|review_sanctions
+    sa.Column("external_id", sa.String(128), nullable=True),     # tx_hash | stripe transfer id
+    sa.Column("nonce", sa.BigInteger, nullable=True),            # Base rail nonce binding
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+    sa.Column("paid", sa.DateTime(timezone=True), nullable=True),
+    sa.UniqueConstraint("period_id", "account_id", "asset", name="uq_payout_leg"),
+)
