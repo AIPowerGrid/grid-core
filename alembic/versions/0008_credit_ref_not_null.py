@@ -41,8 +41,12 @@ def upgrade() -> None:
         raise RuntimeError(
             f"{nulls} grid_credit_ledger rows have a NULL ref; resolve before enforcing NOT NULL"
         )
-    op.alter_column("grid_credit_ledger", "ref", existing_type=sa.String(128), nullable=False)
+    # batch_alter_table so this works on SQLite too (SQLite can't ALTER COLUMN
+    # in place — batch mode recreates the table; a plain ALTER on Postgres).
+    with op.batch_alter_table("grid_credit_ledger") as batch_op:
+        batch_op.alter_column("ref", existing_type=sa.String(128), nullable=False)
 
 
 def downgrade() -> None:
-    op.alter_column("grid_credit_ledger", "ref", existing_type=sa.String(128), nullable=True)
+    with op.batch_alter_table("grid_credit_ledger") as batch_op:
+        batch_op.alter_column("ref", existing_type=sa.String(128), nullable=True)
