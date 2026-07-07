@@ -126,12 +126,16 @@ async def _row(period_id, account_id) -> dict | None:
 
 
 async def _max_assigned_nonce() -> int:
-    """Highest treasury nonce ever bound to a payout. Fresh assignments go above
-    this so a new payment can't collide with one already in flight even when the
-    chain's pending-nonce view is stale (e.g. during a Base outage)."""
+    """Highest treasury nonce ever bound to a payout — across BOTH rails (this
+    AIPG rail's grid_payouts AND the multi-asset rail's grid_payout_legs; one
+    treasury account = one nonce space). Fresh assignments go above this so a new
+    payment can't collide with one already in flight even when the chain's
+    pending-nonce view is stale (e.g. during a Base outage)."""
+    from ...v2.schema import payout_legs as legs_t
     async with await new_session() as s:
-        v = (await s.execute(sa.select(sa.func.max(payouts_t.c.nonce)))).scalar()
-    return int(v) if v is not None else -1
+        a = (await s.execute(sa.select(sa.func.max(payouts_t.c.nonce)))).scalar()
+        b = (await s.execute(sa.select(sa.func.max(legs_t.c.nonce)))).scalar()
+    return max(int(a) if a is not None else -1, int(b) if b is not None else -1)
 
 
 async def _write(period_id, account_id, *, address, den, aipg, status,
