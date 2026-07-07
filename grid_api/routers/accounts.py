@@ -664,14 +664,12 @@ async def get_credits(
     midnight, use-it-or-lose-it, tiered by AIPG held) and the purchased balance
     (from on-chain deposits, never expires).
 
-    ⚠️ FREE tier is PREVIEW. The free-first draw currently lives only in
-    charge_request (the dark/dry-run metering path). The LIVE durable reserve
-    path (authorize_request / authorize_media) debits the paid balance directly
-    and does NOT yet consult the free bucket — so when charging flips on, free
-    credits will not be spent until they're integrated into the reservation
-    lifecycle (reserve + release/refund on failure). Report accordingly; do not
-    tell a user free credit will cover a paid charge yet. charging_enabled below
-    is the live gate (dark = nothing is charged).
+    The free-first draw IS integrated into the live durable reserve path
+    (authorize_request / authorize_media hold free-first with reserve/release
+    semantics), gated on GRID_FREE_SPENDABLE_LIVE. `free.active` below reflects
+    that flag: false → free is display-only and total_spendable = paid only;
+    true → charges draw free-first and total_spendable includes it.
+    charging_enabled is the overall live gate (dark = nothing is charged).
     """
     user = await _require_v2(apikey, authorization)
     aid = user["account_id"]
