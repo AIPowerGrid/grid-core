@@ -83,6 +83,17 @@ PAYOUT_FEE_TO_BUYBACK = os.getenv("GRID_PAYOUT_FEE_TO_BUYBACK", "1").lower() in 
 PAYOUT_ASSET_ROUTING_ENABLED = os.getenv("GRID_PAYOUT_ASSET_ROUTING", "0").lower() in ("1", "true", "yes", "on")
 
 
+def worker_share_bps() -> int:
+    """Worker pool = revenue minus the protocol + sentinel slices. Applied
+    PER ASSET in the pass-through payout — the same basket in, same basket out."""
+    return max(0, BPS - PROTOCOL_FEE_BPS - SENTINEL_FEE_BPS)
+
+
+def worker_share_of(amount: float) -> float:
+    """The worker pool's cut of one asset's gross revenue for a period."""
+    return amount * worker_share_bps() / BPS
+
+
 def is_par_asset(asset: str | None) -> bool:
     """Par assets deliver the owed USD value 1:1, fee-free."""
     return (asset or "").upper() in PAYOUT_PAR_ASSETS

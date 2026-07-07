@@ -428,3 +428,24 @@ validator_attestations = sa.Table(
     sa.Column("payload", PortableJSON, nullable=False, default=dict),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
 )
+
+
+# ── Revenue pool (pro-rata pass-through payouts) ──────────────────────────────
+# What customers actually paid, per asset, that is DISTRIBUTABLE to workers this
+# period. Workers are paid their den-share of each asset pot (USDC/ETH/AIPG) — the
+# same basket that came in, no conversion. Amounts are NATIVE asset units (a
+# Numeric wide enough for 18-dec wei). Idempotent on `ref`. See
+# services/settlement/revenue.py for the intake-feed policy (earned/consumption,
+# not raw deposits) — dark until charging + a treasury exist.
+revenue = sa.Table(
+    "grid_revenue",
+    metadata,
+    sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"),
+              primary_key=True, autoincrement=True),
+    sa.Column("period_id", sa.String(64), nullable=False, index=True),
+    sa.Column("asset", sa.String(12), nullable=False),          # USDC | ETH | AIPG | …
+    sa.Column("amount", sa.Numeric(38, 18), nullable=False),    # native units
+    sa.Column("source", sa.String(32), nullable=False),         # consumption | deposit | manual
+    sa.Column("ref", sa.String(128), nullable=False, unique=True),  # idempotency
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+)
