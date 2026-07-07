@@ -398,6 +398,61 @@ async def set_payout_preference(
     }
 
 
+@router.get("/v1/account/jobs")
+async def get_account_jobs(
+    limit: int = 50,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """The caller's own worker jobs — the operator trust view. What my workers
+    served, the den each earned, its output commitment, and whether it was
+    signed. Scoped to my payout wallet (the same key settlement pays against, so
+    this can't disagree with what I'm owed). Same privacy rule as the public
+    feed: no prompt/result content, only hashes."""
+    user = await _require_v2(apikey, authorization)
+    wallet = (user.get("payout_wallet") or "").lower()
+    limit = max(1, min(limit, 100))
+    if not wallet:
+        return {"payout_wallet": "", "jobs": [],
+                "note": "set a payout wallet to attribute + settle your worker jobs"}
+    from ..v2.schema import ledger as ledger_table
+
+    lt = ledger_table
+    async with await new_session() as session:
+        rows = (
+            await session.execute(
+                sa.select(
+                    lt.c.job_id, lt.c.worker_id, lt.c.model, lt.c.job_type,
+                    lt.c.den, lt.c.output_units, lt.c.duration, lt.c.ttft,
+                    lt.c.result_hash, lt.c.worker_sig, lt.c.epoch_id, lt.c.created,
+                )
+                .where(lt.c.wallet == wallet)
+                .order_by(lt.c.created.desc())
+                .limit(limit)
+            )
+        ).mappings().all()
+    return {
+        "payout_wallet": wallet,
+        "total_den": round(sum(float(r["den"] or 0) for r in rows), 3),
+        "jobs": [
+            {
+                "job_id": str(r["job_id"]),
+                "model": r["model"],
+                "type": r["job_type"],
+                "den": round(r["den"] or 0, 3),
+                "output_units": r["output_units"],
+                "duration_s": round(r["duration"] or 0, 2),
+                "ttft_s": round(r["ttft"], 3) if r["ttft"] is not None else None,
+                "result_hash": r["result_hash"],
+                "signed": bool(r["worker_sig"]),
+                "epoch_id": r["epoch_id"],
+                "created": r["created"].isoformat() if r["created"] else None,
+            }
+            for r in rows
+        ],
+    }
+
+
 @router.get("/v1/account/workers")
 async def get_account_workers(
     apikey: Optional[str] = Header(None),
