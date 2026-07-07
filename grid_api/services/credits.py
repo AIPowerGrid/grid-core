@@ -133,12 +133,29 @@ async def _debit_in_session(s, account_id, amount_micro: int, reason: str, ref: 
     return "ok" if res.rowcount else "insufficient"
 
 
-async def _insert_reservation_in_session(s, job_id, account_id, model: str, reserved_micro: int, prompt_toks: int) -> None:
+async def _insert_reservation_in_session(s, job_id, account_id, model: str, reserved_micro: int,
+                                          prompt_toks: int, free_micro: int = 0) -> None:
     await s.execute(sa.insert(reservations_t).values(
         job_id=str(job_id), account_id=account_id, model=model,
-        reserved_micro=int(reserved_micro or 0), prompt_toks=int(prompt_toks or 0),
+        reserved_micro=int(reserved_micro or 0), free_micro=int(free_micro or 0),
+        prompt_toks=int(prompt_toks or 0),
         status="held", created=_now(),
     ))
+
+
+async def _free_first(account_id, wallet: str | None, cost: int, ref: str) -> int:
+    """Draw the daily FREE allowance before the paid balance (live mode only).
+    Returns the micro-USD covered by free; the caller holds only the remainder
+    from paid. Gated on GRID_FREE_SPENDABLE_LIVE so the /v1/account/credits
+    `free.active` flag stays truthful: flag off → free is display-only and the
+    whole cost is held from paid, exactly as the API reports. Atomic + idempotent
+    on `ref` (a retried authorize returns the same split); 0 on any failure
+    (fail-closed — free never over-grants, paid covers it)."""
+    if not (free_credits.FREE_ENABLED and free_credits.FREE_SPENDABLE_LIVE):
+        return 0
+    if wallet is None:
+        wallet = await _wallet_for_account(account_id)
+    return await free_credits.consume(account_id, wallet, cost, ref=ref)
 
 
 async def _reservation_reserved_micro(job_id) -> int | None:
@@ -292,11 +309,21 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
         return {"ok": False, "reserved": 0, "status": "no_account",
                 "reason": "billing requires a v2 account key"}
     cost = await apply_holder_discount(cost, wallet=user.get("wallet"), account_id=aid)
+    # FREE-FIRST: cover what today's free allowance can, hold only the remainder
+    # from paid. Idempotent on job_id — a retry sees the same split. The free
+    # consume is a Redis op outside the SQL txn: every failure path below releases
+    # it, so the worst crash case forfeits part of ONE day's free allowance
+    # (self-heals at midnight), never paid money.
+    ref = str(job_id)
+    from_free = await _free_first(aid, user.get("wallet"), cost, ref)
+    remainder = cost - from_free
     if record_reservation:
-        ref = str(job_id)
         async with await new_session() as s:
             try:
-                status = await _debit_in_session(s, aid, cost, reason="reserve:chat", ref=ref, model=model)
+                if remainder > 0:
+                    status = await _debit_in_session(s, aid, remainder, reason="reserve:chat", ref=ref, model=model)
+                else:
+                    status = "ok"  # free covered everything — nothing held from paid
             except IntegrityError:
                 await s.rollback()
                 reserved = await _reservation_reserved_micro(job_id)
@@ -307,31 +334,41 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
                         "reason": "billing reservation is inconsistent; retry with a new request id"}
             if status == "insufficient":
                 await s.rollback()
-                logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD: insufficient", aid, model, cost)
+                await free_credits.release(aid, ref)  # give back the free we just took
+                logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD (free=%d): insufficient",
+                            aid, model, cost, from_free)
                 return {"ok": False, "reserved": 0, "status": "insufficient",
                         "reason": "insufficient credits"}
             try:
-                await _insert_reservation_in_session(s, job_id, aid, model, cost, prompt_tokens)
+                await _insert_reservation_in_session(s, job_id, aid, model, cost, prompt_tokens,
+                                                     free_micro=from_free)
             except IntegrityError:
                 await s.rollback()
                 reserved = await _reservation_reserved_micro(job_id)
                 if reserved is not None:
                     return {"ok": True, "reserved": reserved, "status": "already"}
                 logger.error("reservation insert conflicted without readable row job=%s account=%s", job_id, aid)
+                await free_credits.release(aid, ref)
                 return {"ok": False, "reserved": 0, "status": "reservation_failed",
                         "reason": "billing reservation failed"}
             except Exception:
                 await s.rollback()
                 logger.error("reservation insert failed job=%s account=%s", job_id, aid, exc_info=True)
+                await free_credits.release(aid, ref)
                 return {"ok": False, "reserved": 0, "status": "reservation_failed",
                         "reason": "billing reservation failed"}
             await s.commit()
-            return {"ok": True, "reserved": cost, "status": "ok"}
+            return {"ok": True, "reserved": cost, "status": "ok", "from_free": from_free}
 
-    status = await debit(aid, cost, reason="reserve:chat", ref=str(job_id), model=model)
+    if remainder > 0:
+        status = await debit(aid, remainder, reason="reserve:chat", ref=ref, model=model)
+    else:
+        status = "ok"
     if status in ("ok", "already"):
-        return {"ok": True, "reserved": cost, "status": status}
-    logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD: insufficient", aid, model, cost)
+        return {"ok": True, "reserved": cost, "status": status, "from_free": from_free}
+    await free_credits.release(aid, ref)
+    logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD (free=%d): insufficient",
+                aid, model, cost, from_free)
     return {"ok": False, "reserved": 0, "status": "insufficient",
             "reason": "insufficient credits"}
 
@@ -393,11 +430,18 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
         return {"ok": False, "reserved": 0, "status": "no_account",
                 "reason": "billing requires a v2 account"}
     cost = await apply_holder_discount(cost, account_id=account_id)
+    # FREE-FIRST (same contract as authorize_request; wallet resolved from the account).
+    ref = str(job_id)
+    from_free = await _free_first(account_id, None, cost, ref)
+    remainder = cost - from_free
     if record_reservation:
         async with await new_session() as s:
             try:
-                status = await _debit_in_session(s, account_id, cost,
-                                                 reason=f"reserve:{job_type}", ref=str(job_id), model=model)
+                if remainder > 0:
+                    status = await _debit_in_session(s, account_id, remainder,
+                                                     reason=f"reserve:{job_type}", ref=ref, model=model)
+                else:
+                    status = "ok"  # free covered everything
             except IntegrityError:
                 await s.rollback()
                 reserved = await _reservation_reserved_micro(job_id)
@@ -408,39 +452,54 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                         "reason": "billing reservation is inconsistent; retry with a new request id"}
             if status == "insufficient":
                 await s.rollback()
-                logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD: insufficient", account_id, model, cost)
+                await free_credits.release(account_id, ref)
+                logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD (free=%d): insufficient",
+                            account_id, model, cost, from_free)
                 return {"ok": False, "reserved": 0, "status": "insufficient", "reason": "insufficient credits"}
             try:
-                await _insert_reservation_in_session(s, job_id, account_id, model, cost, 0)
+                await _insert_reservation_in_session(s, job_id, account_id, model, cost, 0,
+                                                     free_micro=from_free)
             except IntegrityError:
                 await s.rollback()
                 reserved = await _reservation_reserved_micro(job_id)
                 if reserved is not None:
                     return {"ok": True, "reserved": reserved, "status": "already"}
+                await free_credits.release(account_id, ref)
                 return {"ok": False, "reserved": 0, "status": "reservation_failed",
                         "reason": "billing reservation failed"}
             except Exception:
                 await s.rollback()
                 logger.error("media reservation insert failed job=%s account=%s", job_id, account_id, exc_info=True)
+                await free_credits.release(account_id, ref)
                 return {"ok": False, "reserved": 0, "status": "reservation_failed",
                         "reason": "billing reservation failed"}
             await s.commit()
-            return {"ok": True, "reserved": cost, "status": "ok"}
+            return {"ok": True, "reserved": cost, "status": "ok", "from_free": from_free}
 
-    status = await debit(account_id, cost, reason=f"reserve:{job_type}", ref=str(job_id), model=model)
+    if remainder > 0:
+        status = await debit(account_id, remainder, reason=f"reserve:{job_type}", ref=ref, model=model)
+    else:
+        status = "ok"
     if status in ("ok", "already"):
-        return {"ok": True, "reserved": cost, "status": status}
-    logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD: insufficient", account_id, model, cost)
+        return {"ok": True, "reserved": cost, "status": status, "from_free": from_free}
+    await free_credits.release(account_id, ref)
+    logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD (free=%d): insufficient",
+                account_id, model, cost, from_free)
     return {"ok": False, "reserved": 0, "status": "insufficient", "reason": "insufficient credits"}
 
 
 async def refund_reservation(account_id, reserved_micro: int, job_id) -> None:
     """Refund a media reservation when the job didn't run (fault / timeout / 429).
-    Best-effort + idempotent on the `:refund` ref; never raises into the caller."""
+    Free-aware: the free portion (recorded under the job ref) goes back to the
+    day's allowance; only the paid remainder is credited. Best-effort +
+    idempotent on the `:refund` ref and the free ref; never raises."""
     if not CHARGING_ENABLED or not account_id or reserved_micro <= 0:
         return
     try:
-        await credit(account_id, reserved_micro, reason="refund:media", ref=f"{job_id}:refund")
+        freed = await free_credits.release(account_id, str(job_id))
+        paid_portion = max(int(reserved_micro) - int(freed or 0), 0)
+        if paid_portion > 0:
+            await credit(account_id, paid_portion, reason="refund:media", ref=f"{job_id}:refund")
     except Exception:
         logger.error("media refund failed account=%s job=%s (refund owed)", account_id, job_id, exc_info=True)
 
@@ -485,11 +544,13 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
     giveaway, and must not crash the worker loop. Because the status flip and
     ledger movement commit together, a failed refund leaves the reservation held
     and retryable instead of marking it settled prematurely."""
+    free_restore = None  # (account_id, keep_micro) — applied AFTER the SQL commit
     try:
         async with await new_session() as s:
             row = (await s.execute(
                 sa.select(reservations_t.c.account_id, reservations_t.c.model,
-                          reservations_t.c.reserved_micro, reservations_t.c.prompt_toks)
+                          reservations_t.c.reserved_micro, reservations_t.c.prompt_toks,
+                          reservations_t.c.free_micro)
                 .where(reservations_t.c.job_id == str(job_id))
             )).first()
             if not row:
@@ -507,6 +568,8 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
 
             aid, model = row[0], row[1]
             reserved, prompt_toks = int(row[2] or 0), int(row[3] or 0)
+            free_held = int(row[4] or 0)
+            paid_held = reserved - free_held
 
             if not CHARGING_ENABLED:
                 if status == "ok":
@@ -520,19 +583,32 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
                 return
 
             if aid and reserved > 0:
+                # Two pockets, never converted: the paid refund moves in THIS txn;
+                # the free restore is a Redis op queued for after commit (a crash
+                # between them forfeits free-day allowance, never paid money).
                 if status != "ok":
-                    await _credit_in_session(s, aid, reserved, "release:failed", f"{job_id}:refund", model)
+                    if paid_held > 0:
+                        await _credit_in_session(s, aid, paid_held, "release:failed", f"{job_id}:refund", model)
+                    if free_held > 0:
+                        free_restore = (aid, 0)  # full free release
                 else:
                     actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
-                    diff = reserved - actual
-                    if diff > 0:
-                        await _credit_in_session(s, aid, diff, "reconcile:refund", f"{job_id}:refund", model)
-                    elif diff < 0:
-                        extra_ok = await _try_extra_debit_in_session(s, aid, -diff, f"{job_id}:extra", model)
+                    # Attribute consumption free-first (matches how it was drawn).
+                    free_spent = min(free_held, actual)
+                    paid_spent = actual - free_spent
+                    if free_held > free_spent:
+                        free_restore = (aid, free_spent)  # keep the spent part consumed
+                    paid_diff = paid_held - paid_spent
+                    if paid_diff > 0:
+                        await _credit_in_session(s, aid, paid_diff, "reconcile:refund", f"{job_id}:refund", model)
+                    elif paid_diff < 0:
+                        extra_ok = await _try_extra_debit_in_session(s, aid, -paid_diff, f"{job_id}:extra", model)
                         if not extra_ok:
                             logger.warning("settle under-collected account=%s job=%s by %d micro-USD (insufficient)",
-                                           aid, job_id, -diff)
+                                           aid, job_id, -paid_diff)
             await s.commit()
+        if free_restore is not None:
+            await free_credits.release(free_restore[0], str(job_id), keep_micro=free_restore[1])
     except Exception:
         logger.error("settle_job failed job=%s (refund may be owed)", job_id, exc_info=True)
 
@@ -594,7 +670,8 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
 
             row = (await s.execute(
                 sa.select(reservations_t.c.account_id, reservations_t.c.model,
-                          reservations_t.c.reserved_micro, reservations_t.c.prompt_toks)
+                          reservations_t.c.reserved_micro, reservations_t.c.prompt_toks,
+                          reservations_t.c.free_micro)
                 .where(reservations_t.c.job_id == job_id)
             )).first()
             if not row:
@@ -619,21 +696,34 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
 
             aid, model = row[0], row[1]
             reserved, prompt_toks = int(row[2] or 0), int(row[3] or 0)
+            free_held = int(row[4] or 0)
+            free_restore = None  # (keep_micro) — Redis, applied after commit
             if CHARGING_ENABLED and aid and reserved > 0 and not exact:
                 actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
                 # The reservation was held at the discounted rate; settle at the
                 # same rate so the refund/extra math is consistent (else a holder
                 # is over-collected against their discounted hold).
                 actual = await apply_holder_discount(actual, account_id=aid)
-                diff = reserved - actual
-                if diff > 0:
-                    await _credit_in_session(s, aid, diff, "reconcile:refund", f"{job_id}:refund", model)
-                elif diff < 0:
-                    ok = await _try_extra_debit_in_session(s, aid, -diff, f"{job_id}:extra", model)
+                # Two pockets, never converted: consumption attributes free-first
+                # (matching the draw); the paid refund/extra moves in THIS txn,
+                # the free restore follows the commit (crash between = free-day
+                # allowance forfeited, never paid money).
+                free_spent = min(free_held, actual)
+                paid_held = reserved - free_held
+                paid_spent = actual - free_spent
+                if free_held > free_spent:
+                    free_restore = free_spent
+                paid_diff = paid_held - paid_spent
+                if paid_diff > 0:
+                    await _credit_in_session(s, aid, paid_diff, "reconcile:refund", f"{job_id}:refund", model)
+                elif paid_diff < 0:
+                    ok = await _try_extra_debit_in_session(s, aid, -paid_diff, f"{job_id}:extra", model)
                     if not ok:
                         logger.warning("settle under-collected account=%s job=%s by %d micro-USD (insufficient)",
-                                       aid, job_id, -diff)
+                                       aid, job_id, -paid_diff)
             await s.commit()
+            if free_restore is not None:
+                await free_credits.release(aid, job_id, keep_micro=free_restore)
             return "settled"
     except Exception:
         logger.error("record_and_settle failed job=%s (terminal not committed; retryable)", job_id, exc_info=True)

@@ -269,6 +269,10 @@ reservations = sa.Table(
     sa.Column("account_id", sa.Uuid, nullable=True),  # nullable: legacy/dry-run jobs
     sa.Column("model", sa.String(255), nullable=False),
     sa.Column("reserved_micro", sa.BigInteger, nullable=False, default=0),
+    # Portion of reserved_micro drawn from the daily FREE allowance (the rest was
+    # held from the paid balance). Settlement restores free-to-free and refunds
+    # paid-to-paid — the two pockets never convert into each other.
+    sa.Column("free_micro", sa.BigInteger, nullable=False, server_default=sa.text("0"), default=0),
     sa.Column("prompt_toks", sa.Integer, nullable=False, default=0),
     # 'held' until a terminal state settles it; the held→settled UPDATE is the
     # exactly-once guard (only the winning UPDATE moves money).

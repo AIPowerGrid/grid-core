@@ -19,16 +19,14 @@ CREDIT is real value — a store outage must never silently grant unbounded free
 credits. (Letting a few extra *requests* through on a quota outage is cheap;
 granting unbounded *credits* is not.)
 
-⚠️ PREVIEW / NOT YET IN THE LIVE CHARGE PATH. `consume()` is wired only into
-`credits.charge_request` — the dark/dry-run metering path. The LIVE durable
-reserve path (`credits.authorize_request` for text, `authorize_media` for media)
-debits the paid balance directly and does NOT call this bucket. So when charging
-is turned on (GRID_CHARGING_ENABLED=1) BEFORE this is integrated, a user with
-free credit but no paid balance would be 402'd. Integrating means: draw free
-inside authorize_* with durable reserve/release (release the free consumption on
-job failure/refund, mirroring the paid reservation lifecycle) — the free bucket
-is idempotent on `ref`, so a `release(ref)` that decrements is the missing piece.
-Until then, treat daily free credits as preview and keep charging dark.
+LIVE-PATH INTEGRATION (done, flag-gated): `consume()` is wired into the durable
+reserve path — `credits.authorize_request` / `authorize_media` draw free-first
+and hold only the remainder from paid; the reservation row records the split
+(`grid_reservations.free_micro`); settlement restores free-to-free (`release()`)
+and refunds paid-to-paid — the pockets never convert. The whole draw is gated on
+**GRID_FREE_SPENDABLE_LIVE** (default OFF): flag off → free is display-only and
+`/v1/account/credits` reports free.active=false / total_spendable=paid, exactly
+matching behavior. Flip it together with GRID_CHARGING_ENABLED at go-live.
 """
 
 import logging
@@ -129,7 +127,11 @@ return take
 async def consume(account_id, wallet: str | None, want_micro: int, ref: str) -> int:
     """Consume up to `want_micro` from today's free allowance. Atomic + idempotent
     on `ref` (a retried job returns the same amount, never double-consumes).
-    Returns micro-USD taken from free. 0 on failure → caller charges paid balance."""
+    Returns micro-USD taken from free. 0 on failure → caller charges paid balance.
+
+    The ref record lives until end-of-day (+1h) so a settlement/refund hours
+    later can still `release()` it; releasing past midnight is moot anyway (the
+    allowance already reset)."""
     if not FREE_ENABLED or not account_id or want_micro <= 0 or not ref:
         return 0
     cap = await daily_cap_micro(wallet)
@@ -139,11 +141,55 @@ async def consume(account_id, wallet: str | None, want_micro: int, ref: str) -> 
         r = get_redis()
         day_key = f"{_PREFIX}{account_id}:{_day()}"
         ref_key = f"{_REF_PREFIX}{ref}"
+        ttl = _secs_to_midnight()
         taken = await r.eval(
             _CONSUME_LUA, 2, day_key, ref_key,
-            cap, int(want_micro), _secs_to_midnight(), 3600,
+            cap, int(want_micro), ttl, ttl + 3600,
         )
         return int(taken or 0)
     except Exception as e:
         logger.warning("free_credits consume failed (charging paid instead) account=%s: %s", account_id, e)
+        return 0
+
+
+# Atomic "give back what `ref` consumed beyond keep_micro" — the free-bucket
+# mirror of a paid refund. Idempotent: the ref record is rewritten to keep_micro,
+# so a repeat release computes delta 0. Only decrements a day key that still
+# exists (past midnight the allowance already reset — nothing to restore).
+_RELEASE_LUA = """
+local consumed = tonumber(redis.call('GET', KEYS[2]) or '0')
+local keep = tonumber(ARGV[1])
+local delta = consumed - keep
+if delta <= 0 then return 0 end
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  local spent = tonumber(redis.call('GET', KEYS[1]) or '0')
+  local newspent = spent - delta
+  if newspent < 0 then newspent = 0 end
+  redis.call('SET', KEYS[1], newspent, 'KEEPTTL')
+end
+redis.call('SET', KEYS[2], keep, 'EX', tonumber(ARGV[2]))
+return delta
+"""
+
+
+async def release(account_id, ref: str, keep_micro: int = 0) -> int:
+    """Release the free consumption recorded under `ref` back to today's
+    allowance, keeping `keep_micro` consumed (0 = full release on failure;
+    keep = the actually-spent portion on an under-run settle). Atomic +
+    idempotent — a duplicate terminal releases nothing twice. Returns the
+    micro-USD restored. Best-effort: 0 on any failure (worst case the user
+    loses part of ONE day's free allowance, never paid money)."""
+    if not FREE_ENABLED or not account_id or not ref:
+        return 0
+    try:
+        r = get_redis()
+        day_key = f"{_PREFIX}{account_id}:{_day()}"
+        ref_key = f"{_REF_PREFIX}{ref}"
+        released = await r.eval(
+            _RELEASE_LUA, 2, day_key, ref_key,
+            max(int(keep_micro), 0), _secs_to_midnight() + 3600,
+        )
+        return int(released or 0)
+    except Exception as e:
+        logger.warning("free_credits release failed account=%s ref=%s: %s", account_id, ref, e)
         return 0
