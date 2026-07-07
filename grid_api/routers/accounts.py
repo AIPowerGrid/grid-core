@@ -32,6 +32,7 @@ from ..auth import extract_api_key
 from ..database import new_session
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
+from ..services import economics
 from ..v2.schema import api_keys as api_keys_table
 from ..v2.schema import payouts as payouts_table
 from ..v2.schema import workers as workers_table
@@ -313,6 +314,17 @@ async def get_account(
         "username": user["username"],
         "wallet": user["wallet"],
         "payout_wallet": user.get("payout_wallet") or "",
+        # Worker payout preference, resolved (NULL prefs fall back to grid
+        # defaults) + the option metadata the dashboard renders the picker from.
+        "payout": {
+            "asset": user.get("payout_asset") or economics.DEFAULT_PAYOUT_ASSET,
+            "aipg_bps": user.get("payout_aipg_bps")
+            if user.get("payout_aipg_bps") is not None
+            else economics.WORKER_AIPG_SHARE_BPS,
+            "assets": list(economics.PAYOUT_ASSETS),
+            "par_assets": list(economics.PAYOUT_PAR_ASSETS),
+            "conversion_fee_bps": economics.PAYOUT_CONVERSION_FEE_BPS,
+        },
         "keys": [
             {
                 # Identify keys by hash prefix only — enough to manage, useless to forge.
@@ -330,6 +342,13 @@ async def get_account(
 class PayoutWalletForm(BaseModel):
     # Empty string / null clears the payout address.
     wallet: Optional[str] = None
+
+
+class PayoutPreferenceForm(BaseModel):
+    # Which asset to be paid in (USDC/USDS/ETH/AIPG) and/or the AIPG-slice
+    # override (bps). Only the provided fields change.
+    asset: Optional[str] = None
+    aipg_bps: Optional[int] = None
 
 
 @router.post("/v1/account/payout-wallet")
@@ -350,6 +369,33 @@ async def set_payout_wallet(
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
     return {"payout_wallet": value or ""}
+
+
+@router.post("/v1/account/payout-preference")
+@limiter.limit("20/minute")
+async def set_payout_preference(
+    request: Request,
+    form: PayoutPreferenceForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Set the worker's payout asset (USDC/USDS/ETH/AIPG) and/or AIPG-slice
+    override. Session-gated — a leaked inference key must not be able to change
+    HOW you're paid, same as payout-wallet."""
+    user = await _require_session(apikey, authorization)
+    try:
+        await accounts_svc.set_payout_preference(
+            user["account_id"], asset=form.asset, aipg_bps=form.aipg_bps
+        )
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+    return {
+        "asset": (form.asset.upper() if form.asset
+                  else (user.get("payout_asset") or economics.DEFAULT_PAYOUT_ASSET)),
+        "aipg_bps": (form.aipg_bps if form.aipg_bps is not None
+                     else (user.get("payout_aipg_bps") if user.get("payout_aipg_bps") is not None
+                           else economics.WORKER_AIPG_SHARE_BPS)),
+    }
 
 
 @router.get("/v1/account/workers")

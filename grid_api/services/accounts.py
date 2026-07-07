@@ -61,6 +61,8 @@ async def resolve_api_key(plain_key: str) -> dict | None:
                     accounts_table.c.username,
                     accounts_table.c.wallet,
                     accounts_table.c.payout_wallet,
+                    accounts_table.c.payout_asset,
+                    accounts_table.c.payout_aipg_bps,
                     accounts_table.c.flags,
                 )
                 .select_from(
@@ -105,6 +107,10 @@ async def resolve_api_key(plain_key: str) -> dict | None:
                 # Payout address for worker earnings; falls back to the identity
                 # wallet so SIWE users are paid without setting a separate one.
                 "payout_wallet": row["payout_wallet"] or row["wallet"] or "",
+                # Worker payout preference (NULL → grid defaults, resolved by the
+                # payout path). Carried on the auth'd user for the settle path.
+                "payout_asset": row["payout_asset"],
+                "payout_aipg_bps": row["payout_aipg_bps"],
                 # Legacy paid-tier signal: quota.is_paid checks kudos against
                 # the threshold, so map the v2 paid flag onto it.
                 "kudos": PAID_KUDOS_THRESHOLD if flags.get("paid") else 0,
@@ -262,3 +268,35 @@ async def set_payout_wallet(account_id, address: str | None) -> str | None:
         await session.commit()
     logger.info(f"payout_wallet set: account={account_id} -> {value or '(cleared)'}")
     return value
+
+
+async def set_payout_preference(account_id, *, asset=None, aipg_bps=None) -> dict:
+    """Set the worker's payout asset and/or AIPG-slice override. Only the fields
+    provided are changed. Validates against the allowed asset set + bps range;
+    raises ValueError on bad input. Stored preference is consumed by the
+    multi-asset payout path (until then it's dashboard-only)."""
+    from . import economics
+
+    vals: dict = {}
+    if asset is not None:
+        a = (asset or "").upper()
+        if a not in economics.PAYOUT_ASSETS:
+            raise ValueError(f"payout asset must be one of {list(economics.PAYOUT_ASSETS)}")
+        vals["payout_asset"] = a
+    if aipg_bps is not None:
+        try:
+            b = int(aipg_bps)
+        except (TypeError, ValueError):
+            raise ValueError("payout_aipg_bps must be an integer 0..10000")
+        if not (0 <= b <= 10_000):
+            raise ValueError("payout_aipg_bps must be between 0 and 10000")
+        vals["payout_aipg_bps"] = b
+    if not vals:
+        return {}
+    async with await new_session() as session:
+        await session.execute(
+            sa.update(accounts_table).where(accounts_table.c.id == account_id).values(**vals)
+        )
+        await session.commit()
+    logger.info(f"payout preference set: account={account_id} -> {vals}")
+    return vals

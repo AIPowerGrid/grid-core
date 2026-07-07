@@ -65,6 +65,13 @@ accounts = sa.Table(
     sa.Column("payout_wallet", sa.String(42), nullable=True),
     sa.Column("email", sa.String(254), unique=True, nullable=True),
     sa.Column("oauth_sub", sa.String(255), unique=True, nullable=True),
+    # Worker payout preference. `payout_asset` (USDC/USDS/ETH/AIPG; NULL → the
+    # grid default) is which asset earnings are paid in; `payout_aipg_bps`
+    # (NULL → the global WORKER_AIPG_SHARE_BPS) lets a worker opt for a bigger
+    # AIPG slice. Consumed by the multi-asset payout path (P2 swap); until then
+    # it's stored + shown in the dashboard only.
+    sa.Column("payout_asset", sa.String(8), nullable=True),
+    sa.Column("payout_aipg_bps", sa.Integer, nullable=True),
     sa.Column("username", sa.String(100), nullable=True),
     # admin / trusted / paid-tier flags etc. Schema-free on purpose: flags
     # change faster than migrations should.
