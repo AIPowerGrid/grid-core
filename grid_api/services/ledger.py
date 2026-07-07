@@ -49,6 +49,19 @@ def text_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def content_hash(text: str | None) -> str | None:
+    """Content commitment over WITNESSED output — a real sha256, or NULL when
+    there was nothing to commit to.
+
+    Never returns sha256("") (`e3b0c442…b855`): a real-looking hash that actually
+    means "no output" is a lie the ledger + explorer would carry forever. An
+    empty/absent result records as NULL so a downstream reader (feed, validator,
+    signature verifier) can tell "committed to this exact output" apart from
+    "nothing was attested." This is the honest substrate the worker signature
+    (Part B) signs over."""
+    return text_hash(text) if text else None
+
+
 async def record_completion_in_session(
     session,
     *,
