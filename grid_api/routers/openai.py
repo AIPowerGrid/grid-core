@@ -21,6 +21,10 @@ from uuid import uuid4
 # multi-MB prompt can't amplify CPU/memory (sec audit M3). Generous but bounded.
 MAX_REQUEST_CHARS = int(os.getenv("MAX_REQUEST_CHARS", "200000"))   # ~50k tokens
 MAX_REQUEST_MESSAGES = int(os.getenv("MAX_REQUEST_MESSAGES", "500"))
+# Per-account in-flight cap on concurrent TEXT requests (each holds a worker slot
+# + a token-stream subscription for the life of the stream). Generous by default
+# — text is light; this only fences a runaway flood. Fail-open on Redis error.
+TEXT_CONCURRENCY = int(os.getenv("GRID_TEXT_CONCURRENCY", "24"))
 # When a client omits max_tokens we must still send SOME cap to the backend (and
 # reserve against it). Default high so responses aren't artificially truncated —
 # the model stops at EOS well before this on normal turns. Pydantic caps input at
@@ -39,6 +43,7 @@ from .. import format as fmt
 from ..database import new_session, processing_gens_table, waiting_prompts_table
 from ..models.openai import ChatCompletionRequest, ModelInfo, ModelListResponse
 from ..services import accounts as accounts_svc
+from ..services import concurrency
 from ..services import credits, den, job_queue, media, quota, recipes, token_stream
 from ..services.sanitizer import sanitize_messages
 from .worker_ws import get_available_models
@@ -434,42 +439,59 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
     # money. Computed once so the reservation and the final settlement agree.
     prompt_toks = den.count_tokens(prompt)
 
-    if credits.CHARGING_ENABLED:
-        auth = await credits.authorize_request(
-            user, model, prompt_toks, request.max_tokens, job_id,
-            record_reservation=True,
-        )
-        if not auth["ok"]:
-            raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
-
-    # Submit to Redis Stream for workers. _legacy_rows tells the WS handler
-    # whether the horde bookkeeping rows exist for this job.
-    # If dispatch itself fails the job never runs, so the held reservation must be
-    # released — otherwise funds are stranded with no settlement path.
-    payload["_legacy_rows"] = legacy_rows
+    # Per-account in-flight cap BEFORE reserving/dispatching — a flooding account
+    # is 429'd without holding credits or a worker slot. Fail-open (Redis blip →
+    # allowed). Released in the finally below (collect/error) or, for a stream,
+    # handed to the generator's finally (which fires on finish AND disconnect).
+    aid = (user or {}).get("account_id")
+    if aid and not await concurrency.acquire(aid, "text", TEXT_CONCURRENCY):
+        raise HTTPException(status_code=429,
+                            detail=f"Too many concurrent requests (limit {TEXT_CONCURRENCY}). Retry shortly.")
+    inflight_held = bool(aid)
     try:
-        await job_queue.submit_job(job_id, payload, [model], preferred_worker=preferred_worker)
-    except Exception:
-        await credits.release_job(job_id)
-        raise
+        if credits.CHARGING_ENABLED:
+            auth = await credits.authorize_request(
+                user, model, prompt_toks, request.max_tokens, job_id,
+                record_reservation=True,
+            )
+            if not auth["ok"]:
+                raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
 
-    completion_id = fmt._gen_id()
+        # Submit to Redis Stream for workers. _legacy_rows tells the WS handler
+        # whether the horde bookkeeping rows exist for this job.
+        # If dispatch itself fails the job never runs, so the held reservation must be
+        # released — otherwise funds are stranded with no settlement path.
+        payload["_legacy_rows"] = legacy_rows
+        try:
+            await job_queue.submit_job(job_id, payload, [model], preferred_worker=preferred_worker)
+        except Exception:
+            await credits.release_job(job_id)
+            raise
 
-    if request.stream:
-        return StreamingResponse(
-            _stream_openai(job_id, model, completion_id, user, request.seed, prompt_toks, routing_meta),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
-    else:
-        return await _collect_response(job_id, model, user, request.seed, prompt_toks, routing_meta)
+        completion_id = fmt._gen_id()
+
+        if request.stream:
+            resp = StreamingResponse(
+                _stream_openai(job_id, model, completion_id, user, request.seed, prompt_toks,
+                               routing_meta, inflight_account=aid if inflight_held else None),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+            inflight_held = False  # ownership transferred to the generator's finally
+            return resp
+        else:
+            # Awaited → the handler stays alive through it; the finally releases.
+            return await _collect_response(job_id, model, user, request.seed, prompt_toks, routing_meta)
+    finally:
+        if inflight_held:
+            await concurrency.release(aid, "text")
 
 
-async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict | None = None, seed: int | None = None, prompt_toks: int = 0, routing_meta: dict | None = None):
+async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict | None = None, seed: int | None = None, prompt_toks: int = 0, routing_meta: dict | None = None, inflight_account=None):
     """SSE generator for OpenAI streaming format.
 
     Faithful passthrough: the grid emits one leading role chunk, then relays
@@ -554,6 +576,10 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
         # (LIVE money is settled in worker_ws regardless of this generator.)
         if not observed:
             await _observe_dry(user, model, prompt_toks, den.count_tokens("".join(relayed)), job_id)
+        # Release the in-flight slot the handler transferred to us — on natural
+        # finish AND on client disconnect (this finally runs in both).
+        if inflight_account:
+            await concurrency.release(inflight_account, "text")
 
 
 async def _collect_response(job_id: str, model: str, user: dict | None = None, seed: int | None = None, prompt_toks: int = 0, routing_meta: dict | None = None) -> dict:
