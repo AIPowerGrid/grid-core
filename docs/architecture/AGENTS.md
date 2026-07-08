@@ -11,6 +11,9 @@ validation, worker incentives, and trust boundaries.
   incentives, and worker/protocol economics.
 - `DEMAND_SIDE_AUDIT_BRIEF.md` - audit-oriented billing threat model,
   go-live blockers, and current live/dry-run posture.
+- `RECIPE_DISPATCH.md` - how to add a media workflow: recipe = governed ComfyUI
+  graph (`_grid` node map), the importer CLI, authoring steps, dispatch flow, and
+  the coordinator/worker split. Start here to add an image/video model.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only

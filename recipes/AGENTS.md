@@ -5,6 +5,10 @@
 Curated local recipe JSON loaded by `grid_api.services.recipes` at startup. These
 serve as approved workflow definitions until or alongside RecipeVault sync.
 
+**Adding a workflow? Start with `docs/architecture/RECIPE_DISPATCH.md`** — the
+end-to-end guide (export → `recipe_import` CLI auto-detects the node map → fill
+knobs → validate → drop here).
+
 ## Ownership
 
 - `*.json` - ComfyUI workflow JSON with a `_grid` metadata block describing
