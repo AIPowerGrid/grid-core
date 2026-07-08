@@ -34,7 +34,11 @@ that several risks are **already real in code** (they only bite once charging is
 on). These are hard gates, not suggestions:
 
 - [~] **B1 (SUBSTANTIALLY DONE — core reserve path landed b8d4ca2; second pass
-  hardened the leaks) — Prepaid enforcement.** Reserve/authorize *before* dispatch;
+  hardened the leaks; fifth pass `b02ada2c` added FREE-FIRST: authorize_request/
+  authorize_media draw the daily free allowance before paid, split durable in
+  grid_reservations.free_micro, settlement restores free-to-free / refunds
+  paid-to-paid, gated on GRID_FREE_SPENDABLE_LIVE — a free-only user with zero
+  paid balance is no longer 402'd, 47/47 tests) — Prepaid enforcement.** Reserve/authorize *before* dispatch;
   return **402 before queueing** on insufficient funds; reconcile/refund after
   actual usage. Second-pass fixes: settlement bills on **grid-counted** tokens,
   never worker-reported `usage` (a silent/lying worker can't zero the bill);
@@ -113,13 +117,22 @@ on). These are hard gates, not suggestions:
 - [~] **B7 (PARTIAL — credit-ledger `ref` NOT NULL landed, alembic `0008` / `229bca16`).**
   `grid_credit_ledger.ref` is now DB-enforced NOT NULL (+ existing UNIQUE), so the
   value-moving idempotency invariant is reproducible in migrations, not just guarded
-  in code. **Still TODO for full B7:** reconcile the rest of Alembic with `schema.py`
+  in code. Since extended: `0009` payout-preference cols (HOT-auth-path — must run
+  before the code that SELECTs them), `0010` grid_revenue, `0011` grid_payout_legs,
+  `0012` grid_reservations.free_micro; `0008` made SQLite-safe (batch_alter_table).
+  **Still TODO for full B7:** reconcile the rest of Alembic with `schema.py`
   metadata (`grid_ledger.job_id` UNIQUE, telemetry columns) and add a drift check so
   create_all-vs-migration divergence can't recur.
-- [ ] **B8 — Sybil / free-credit hard rules.** Wallet/email uniqueness, rate
-  limits, friction (CAPTCHA / device-IP), abuse scoring; and quota infra must
-  **fail closed (or degrade), not fail open**, on Redis error.
-- [~] **B9 (PARTIAL — reserve/refund/idempotency/unpriced covered; Postgres-concurrency + Stripe/deposit tests pending) — Money-invariant tests.** Duplicate-ref idempotent, null-ref
+- [~] **B8 (BACKEND HALF DONE) — Sybil / free-credit hard rules.** Done:
+  wallet/email/oauth_sub uniqueness (unique cols), per-key rate limits, and the
+  free CREDIT bucket **fails closed** by design (Redis down → free=0, paid
+  covers; `quota.py` request-COUNT fail-open is the documented cheap tradeoff,
+  distinct from credit value). **Remaining (product decisions, front-end
+  involving):** signup friction (CAPTCHA / device-IP) + abuse scoring.
+- [~] **B9 (MOSTLY DONE — reserve/refund/idempotency/unpriced covered; real-Postgres
+  concurrency landed `9f40ce76` (overdraft race 25v5 → exactly 5 win, dup-ref 12x →
+  once); free-first durable suite `b02ada2c` 47/47; Stripe/deposit integration tests
+  still pending) — Money-invariant tests.** Duplicate-ref idempotent, null-ref
   rejected, concurrent-debit can't overdraft, insufficient blocks **before**
   dispatch, stream reserve/refund, media-job charging, unpriced blocked in
   enforce mode.
