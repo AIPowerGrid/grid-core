@@ -90,10 +90,29 @@ on). These are hard gates, not suggestions:
   finer scopes/classes (`inference.submit`, `billing.manage`, `workers.manage`,
   `identity.assert`) and a scoped bridge key. *(Was: any v2 key could do
   everything — no longer true for payout/key-mgmt.)*
+- [x] **B3a (P0 FIXED `cf0cfd08`, 2026-07-08) — Identity-bridge confused deputy.**
+  `POST /v1/accounts/session` OR-matched oauth_sub|wallet|email then `.first()`
+  (no ORDER BY) and minted a dashboard-session key for the arbitrary winner.
+  Because the console forwards an **unverified** OAuth-asserted email, an attacker
+  whose provider profile email = a victim's could be handed a session key for the
+  VICTIM's account → change payout wallet → redirect earnings. **Fixed:**
+  `_session_match` resolves on exactly ONE authoritative identity (oauth_sub >
+  wallet > email *iff* sole-identifier AND `email_verified`); email is never a
+  supplement to OAuth/SIWE; create attaches email only if unowned (no merge, no
+  unique-collision crash). **Regression proof (prod, both throwaway accounts
+  cleaned up):** an OAuth login asserting the victim's email received a *different*
+  account (victim untouched); unverified-sole-email → 400. Unit + DB tests in
+  `services/tests/test_session_bridge.py` (8 passing) reproduce the exact takeover
+  shape. *Also hardened same commit:* passthrough body bounds
+  (`_passthrough.guard_passthrough_body`, 413 on >200k chars / depth>64 before the
+  recursive sanitize; verified live) and worker-cleanup drain of the prefetched
+  `local_jobs` (requeue immediately vs stale-reclaim).
 - [ ] **B3 — Signed user assertions (not a raw header).** Resolves the doc
   contradiction (see §2). The chat bridge sends a short-lived **signed**
   assertion (`iss/sub/aud/exp/nonce`) from a scoped bridge key; the grid verifies
-  the signature. No raw `X-Grid-User` trust.
+  the signature. No raw `X-Grid-User` trust. *(B3a above closed the acute
+  takeover; B3 is still the full solution — a scoped, signed bridge assertion so
+  the grid never resolves identity from caller-supplied fields at all.)*
 - [~] **B4 (SUBSTANTIALLY DONE — chat + media metered 89e1b5d; passthrough gated
   this branch) — Universal metering for ALL job types.** One reserve/debit/reconcile
   abstraction for chat **and** image **and** video (incl. chat-routed media), with
