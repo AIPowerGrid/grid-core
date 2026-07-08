@@ -10,8 +10,21 @@ content sanitization, and reward settlement.
 - **Dispatch:** `job_queue.py` (Redis streams - the ONE live queue), `token_stream.py`
   (worker->client token relay), `media.py` (image/video job abstraction), `storage.py`
   (presigned R2 upload), `enforcement.py` (worker strike/evict).
-- **Economy:** `credits.py`, `quota.py` (free-tier daily), `pricing.py`, `ledger.py`,
-  `den.py` (den accounting), `accounts.py`, `model_registry.py` (ModelVault sync).
+- **Economy:** `credits.py` (reserve/settle lifecycle; draws FREE-first via
+  `free_credits` gated on `GRID_FREE_SPENDABLE_LIVE`), `free_credits.py`
+  (daily free CREDIT allowance, Redis, FAIL-CLOSED, atomic consume/release
+  idempotent on ref), `quota.py` (free-tier request COUNT, fail-open — distinct
+  from credit value), `pricing.py`, `ledger.py` (incl. `content_hash` — real
+  sha256 of witnessed output or NULL, never sha256("")), `den.py` (den
+  accounting), `accounts.py` (incl. payout preference), `economics.py`
+  (splits, payout-asset + conversion-fee knobs, `worker_share_bps`),
+  `holdings.py` (cached on-chain AIPG balance + Chainlink ETH/USD),
+  `deposits.py` (USDC/ETH deposit claims), `model_registry.py` (ModelVault sync).
+- **Worker trust:** `signing.py` - opt-in worker output signatures. Verifies an
+  EIP-191 sig over `aipg-job:{job_id}:{result_hash}` recovers to the worker's
+  PAYOUT wallet (attribution = payment = future slashable stake; no separate
+  PKI). FAIL-CLOSED: only a positively-verified sig is stored; unsigned workers
+  ("floor" tier) run and earn unchanged.
 - **Validation evidence:** `validators.py` issues validator assignments, verifies
   assignment-bound attestations, computes non-economic quorum state, and builds
   aggregate scorecards. Authoritative evidence must match the Grid-issued
@@ -35,6 +48,13 @@ content sanitization, and reward settlement.
 - Media billing reserves exact deterministic cost before dispatch and refunds on
   non-running paths; text billing reserves max cost and reconciles against trusted
   usage.
+- **Two credit pockets, never converted:** charges draw FREE-first (when
+  `GRID_FREE_SPENDABLE_LIVE`), the split is durable on the reservation row
+  (`grid_reservations.free_micro`), and settlement restores free-to-free /
+  refunds paid-to-paid. Paid movements commit in the SQL txn; the Redis free
+  restore follows the commit (a crash between forfeits free-day allowance,
+  never paid money). The stale-reservation sweeper inherits this via
+  settle_job/release_job/settle_exact.
 - `ledger.py` writes one completion event per job. Settlement and stats depend on
   `grid_ledger`; do not revive orphan den tables for new v2 payouts.
 - On-chain reads only via sync loops, cached; never per-request.

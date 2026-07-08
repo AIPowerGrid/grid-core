@@ -21,9 +21,20 @@ transport, accounts, stats, health/metrics.
   **God-file (~1.1K LOC); split target = registration / dispatch / health / stream.** Highest
   bug history (eviction cascade, idle-redelivery) - change carefully, add tests.
 - `accounts.py` - wallet auth, dashboard/internal account/session creation,
-  account profile, payout wallet, worker listing, API-key issue/revoke.
+  account profile (incl. resolved `payout{asset, aipg_bps, active, live_asset}`),
+  payout wallet + `POST /v1/account/payout-preference` (both SESSION-gated),
+  worker listing, API-key issue/revoke, `GET /v1/account/credits` (free/paid
+  pockets; `total_spendable_*` = what can pay NOW vs `total_preview_*`;
+  `free.active` tracks GRID_FREE_SPENDABLE_LIVE), `GET /v1/account/jobs`
+  (operator trust view: my workers' jobs + den + result_hash + signed flag,
+  scoped to the payout wallet), deposit claims (USDC + Chainlink-priced ETH).
+  `POST /v1/accounts/session` is the identity bridge: find-or-create by
+  oauth_sub/wallet/email, internal-token gated.
 - `stats.py` - `GET /v1/workers`, progress polling, model status, usage totals,
-  model stats, wallet earnings.
+  model stats, wallet earnings, `GET /v1/payouts/public` (aggregate payout
+  transparency), `GET /v1/jobs/recent` (PUBLIC redacted job feed: model, worker
+  handle, timing, den, prompt/result hashes + signed flag — NEVER content,
+  NEVER customer wallet/account).
 - `validator.py` - validator assignment-bound evidence surface:
   `GET /v1/validator/capabilities`, `GET /v1/validator/assignments`,
   `POST /v1/validator/probe/{assignment_id}`,
