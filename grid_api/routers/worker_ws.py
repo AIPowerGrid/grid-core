@@ -962,6 +962,30 @@ async def worker_websocket(ws: WebSocket):
                 if not is_validator_probe:
                     await credits.release_job(job_id)  # terminal: refund the hold
 
+        # Drain a PREFETCHED-but-undispatched job (local_jobs, maxsize=1) so it
+        # requeues immediately instead of waiting out the stale-reclaim loop. The
+        # poller is already cancelled (inner finally), so nothing races this.
+        try:
+            prefetched = local_jobs.get_nowait()
+        except Exception:
+            prefetched = None  # empty, or the socket died before local_jobs existed
+        if prefetched and prefetched.get("job_id") != (current_job or {}).get("job_id"):
+            try:
+                pid = prefetched["job_id"]
+                nid = await job_queue.requeue_job(
+                    pid, prefetched["payload"], prefetched["models"],
+                    prefetched.get("stream_id"),
+                    job_type=prefetched.get("job_type", "text"),
+                    stream=prefetched.get("stream"),
+                    preferred_worker=prefetched.get("preferred_worker", ""),
+                    hard_target_worker=prefetched.get("hard_target_worker", ""),
+                    affinity_passes=prefetched.get("affinity_passes", 0),
+                )
+                logger.warning("Requeued prefetched-but-undispatched job %s%s",
+                               pid, f" as {nid}" if nid else " (gave up)")
+            except Exception:
+                logger.error("failed to requeue prefetched job on cleanup", exc_info=True)
+
         if worker_info:
             logger.info(f"Worker '{worker_info['name']}' cleaned up")
 

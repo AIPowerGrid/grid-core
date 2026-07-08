@@ -90,6 +90,28 @@ class SessionForm(BaseModel):
     email: Optional[str] = None
     wallet: Optional[str] = None
     username: Optional[str] = None
+    # True only when the caller has VERIFIED the email (e.g. a magic-link login).
+    # Email is an authoritative match/login key ONLY when it is the sole identity
+    # and verified — never a supplement to OAuth/SIWE (see _session_match).
+    email_verified: Optional[bool] = False
+
+
+def _session_match(form: "SessionForm"):
+    """Pick the ONE authoritative identity to resolve a session on. Precedence:
+    oauth_sub > wallet > (email iff it is the sole identifier AND verified).
+
+    NEVER OR across fields: a secondary, caller-influenceable field — above all an
+    UNVERIFIED OAuth-asserted email — must not be able to join into a *different*
+    account. That is the confused-deputy / account-takeover path. Returns
+    ("oauth_sub"|"wallet"|"email", value) or None when nothing authoritative is
+    usable (e.g. only an unverified/supplemental email was provided)."""
+    if form.oauth_sub:
+        return ("oauth_sub", form.oauth_sub)
+    if form.wallet:
+        return ("wallet", form.wallet.lower())
+    if form.email and form.email_verified:
+        return ("email", form.email)
+    return None
 
 
 class IssueKeyForm(BaseModel):
@@ -209,22 +231,19 @@ async def account_session(
     expected = os.getenv("GRID_INTERNAL_TOKEN", "")
     if not expected or x_internal_token != expected:
         raise HTTPException(403, detail="Internal token required")
-    if not (form.oauth_sub or form.wallet or form.email):
-        raise HTTPException(400, detail="Provide oauth_sub, wallet, or email")
+    match = _session_match(form)
+    if match is None:
+        raise HTTPException(
+            400, detail="Provide an authoritative identity: oauth_sub, wallet, or a verified email")
+    match_field, match_val = match
 
     from ..v2.schema import accounts as accounts_table
 
+    match_col = getattr(accounts_table.c, match_field)
     async with await new_session() as session:
-        conds = []
-        if form.oauth_sub:
-            conds.append(accounts_table.c.oauth_sub == form.oauth_sub)
-        if form.wallet:
-            conds.append(accounts_table.c.wallet == form.wallet.lower())
-        if form.email:
-            conds.append(accounts_table.c.email == form.email)
         row = (
             await session.execute(
-                sa.select(accounts_table).where(sa.or_(*conds))
+                sa.select(accounts_table).where(match_col == match_val)
             )
         ).mappings().first()
 
@@ -246,9 +265,21 @@ async def account_session(
         key = await accounts_svc.issue_key(account_id, label="dashboard-session", is_session=True)
     else:
         created = True
+        # Attach the email for display/receipts, but ONLY if no OTHER account
+        # already owns it (email is UNIQUE). Never merge, never crash on a
+        # collision — and since email is not a login/match key here (see
+        # _session_match), storing an unverified one can't be used to hijack.
+        attach_email = form.email
+        if attach_email:
+            async with await new_session() as s2:
+                taken = (await s2.execute(
+                    sa.select(accounts_table.c.id).where(accounts_table.c.email == attach_email)
+                )).first()
+            if taken:
+                attach_email = None  # owned elsewhere — drop it, don't merge
         acct, key = await accounts_svc.create_account(
             username=form.username,
-            email=form.email,
+            email=attach_email,
             oauth_sub=form.oauth_sub,
             wallet=form.wallet,
             key_label="dashboard-session",

@@ -73,18 +73,56 @@ def normalize_output_budget(api_format: str, raw_request: dict) -> int:
     return max_len
 
 
-def deep_sanitize(obj):
+# Passthrough bodies (Anthropic /v1/messages, /v1/responses) are accepted raw
+# and recursively walked. Bound them so a huge or pathologically-nested body
+# can't burn CPU/stack in deep_sanitize. (Reuses the OpenAI char budget.)
+MAX_PASSTHROUGH_CHARS = int(os.getenv("MAX_PASSTHROUGH_CHARS", os.getenv("MAX_REQUEST_CHARS", "200000")))
+MAX_PASSTHROUGH_DEPTH = int(os.getenv("MAX_PASSTHROUGH_DEPTH", "64"))
+
+
+def _nesting_depth(obj, _d=0):
+    if _d > MAX_PASSTHROUGH_DEPTH:
+        return _d  # deep enough to reject; stop counting
+    if isinstance(obj, dict):
+        return max((_nesting_depth(v, _d + 1) for v in obj.values()), default=_d)
+    if isinstance(obj, list):
+        return max((_nesting_depth(v, _d + 1) for v in obj), default=_d)
+    return _d
+
+
+def guard_passthrough_body(body) -> None:
+    """Reject an oversized or too-deeply-nested passthrough body BEFORE the
+    recursive sanitize/serialize walks it. Raises HTTPException(413/400)."""
+    if not isinstance(body, (dict, list)):
+        return
+    try:
+        size = len(json.dumps(body, default=str))
+    except Exception:
+        raise HTTPException(status_code=400, detail="unserializable request body")
+    if size > MAX_PASSTHROUGH_CHARS:
+        raise HTTPException(status_code=413,
+                            detail=f"request too large ({size} chars; max {MAX_PASSTHROUGH_CHARS})")
+    if _nesting_depth(body) > MAX_PASSTHROUGH_DEPTH:
+        raise HTTPException(status_code=400,
+                            detail=f"request nesting too deep (max {MAX_PASSTHROUGH_DEPTH})")
+
+
+def deep_sanitize(obj, _depth=0):
     """Recursively scrub credentials from every string in a request body.
 
     Format-agnostic: works for Anthropic messages, Responses `input`, tool
     arguments, etc. Structure and keys are preserved; only string *values* are
-    passed through the secret sanitizer (which is a no-op on normal text)."""
+    passed through the secret sanitizer (which is a no-op on normal text).
+    Depth-capped as a defensive backstop (callers should `guard_passthrough_body`
+    first): past the cap the subtree is returned unwalked rather than overflowing."""
+    if _depth > MAX_PASSTHROUGH_DEPTH:
+        return obj
     if isinstance(obj, str):
         return sanitize(obj).text
     if isinstance(obj, list):
-        return [deep_sanitize(x) for x in obj]
+        return [deep_sanitize(x, _depth + 1) for x in obj]
     if isinstance(obj, dict):
-        return {k: deep_sanitize(v) for k, v in obj.items()}
+        return {k: deep_sanitize(v, _depth + 1) for k, v in obj.items()}
     return obj
 
 

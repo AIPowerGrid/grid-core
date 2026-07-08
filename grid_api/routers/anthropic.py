@@ -28,6 +28,7 @@ from ._passthrough import (
     authorize_passthrough,
     collect_passthrough,
     deep_sanitize,
+    guard_passthrough_body,
     new_passthrough_job_id,
     normalize_output_budget,
     stream_passthrough,
@@ -57,6 +58,7 @@ async def create_message(
 ):
     """Anthropic-compatible messages endpoint (raw passthrough to a capable worker)."""
     try:
+        guard_passthrough_body(body)  # bound size/depth before the recursive walk
         # Anthropic SDKs send x-api-key; accept a bearer token too.
         key = x_api_key
         if not key and authorization:
