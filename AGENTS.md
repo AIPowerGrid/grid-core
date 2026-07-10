@@ -78,6 +78,8 @@ owning AGENTS.md and any affected parent Child DOX Index.
 ## Verification
 
 - Full Python sanity: `pytest` from `system-core`.
+- Dependency gate: `pip-audit -r requirements.txt`; investigate every skipped
+  non-PyPI dependency separately.
 - Grid-focused: `pytest grid_api/`.
 - Service units: `pytest grid_api/services/`.
 - Router billing/settlement coverage: `pytest grid_api/routers/`.
