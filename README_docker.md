@@ -6,6 +6,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Running ai-horde with Docker
 
+> **Legacy Flask container guide.** This does not start the complete production
+> FastAPI `/v1` coordinator, migrations, Redis queue, worker WebSocket, or payout
+> services. Use `README.md` for development and `deploy/README.md` for the
+> existing production host.
+
 ---
 
 ## Prerequisites

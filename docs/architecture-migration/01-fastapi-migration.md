@@ -6,6 +6,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Phase 1: FastAPI Migration
 
+> **Historical proposal.** FastAPI `/v1` is now the production coordinator.
+> Examples below that mount Horde `/api/v2` routes or describe future migration
+> work are not the current implementation contract.
+
 ## Overview
 
 Migrate from Flask/Waitress to FastAPI/Uvicorn for native async support.

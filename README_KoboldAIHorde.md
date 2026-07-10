@@ -6,6 +6,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # AI Horde LLM Generation
 
+> **Legacy Horde client documentation.** This is retained for upstream history
+> and does not describe the current Grid text worker or `/v1` chat API.
+
 Information specific to the Text generation
 
 # Generating Prompts

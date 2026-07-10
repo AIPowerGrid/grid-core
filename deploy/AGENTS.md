@@ -2,13 +2,14 @@
 
 ## Purpose
 
-Bootstrap, environment, nginx, and systemd assets for running system-core in
-production: legacy Flask workers plus FastAPI Grid API behind nginx.
+Existing-host operations plus inherited bootstrap, nginx, and systemd assets for
+grid-core (deployed from the historical `/home/aipg/system-core` path).
 
 ## Ownership
 
-- `bootstrap.sh` - fresh VM bootstrap: packages, repo, venv, Postgres, Redis,
-  secrets, systemd, nginx.
+- `bootstrap.sh` - **quarantined legacy fresh-VM bootstrap**. It still targets an
+  obsolete repo/branch and mixed Flask topology; do not run until rewritten and
+  reviewed.
 - `env.template` - `/etc/aipg/grid.env` source of production env names.
 - `README.md` - deploy/cutover/runbook notes.
 - `nginx/aipg-api.conf` - public route split between `/v1`, `/api/v2`, `/v2`,
@@ -32,8 +33,8 @@ production: legacy Flask workers plus FastAPI Grid API behind nginx.
 
 - When adding services, document ports, health checks, restart behavior, and
   firewall/nginx impact.
-- Keep `GRID_SALT` shared across Flask, Grid API, and dashboard; API keys break
-  if salts diverge.
+- Keep `GRID_SALT` shared only by server processes that validate the same legacy
+  hashes. The developer console has no local DB/salt path and must not receive it.
 - If you rename Base/contract env vars, update `docs/`, `grid_api/services/*`,
   and any SDK examples in the same change.
 

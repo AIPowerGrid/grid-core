@@ -6,6 +6,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # AI Horde Image Generation
 
+> **Legacy Horde client documentation.** This is retained for upstream history
+> and does not describe the current Grid media worker or `/v1/images` API.
+
 Information specific to the Stable Diffusion image generation.
 
 # Generating Prompts

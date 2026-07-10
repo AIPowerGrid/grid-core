@@ -22,9 +22,8 @@ class GridSettings(BaseSettings):
     grid_api_host: str = "0.0.0.0"
     grid_api_port: int = 7002
 
-    # Base URL of the legacy Flask API that grid_api proxies image/video jobs to.
-    # Defaults to the co-located Flask pool on localhost. Override (FLASK_API_BASE)
-    # to point at a separate API/Flask VM when the stateless tier is split out.
+    # Legacy compatibility setting. Current /v1 media dispatch does not read
+    # this value; keep it only until remaining Flask consumers are removed.
     flask_api_base: str = "http://127.0.0.1:7001"
 
     # Timeouts

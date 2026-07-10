@@ -206,21 +206,22 @@ client → /v1/images (model="My Model", prompt, seed, steps…)
   → worker (bridge/ws_worker.py) runs recipe_spec on ComfyUI verbatim
 ```
 
-The worker binds the source image (if any) into the `image` slot and splices LoRA
-loaders at `loraInject` — it does **not** re-map or template anything else. The
-graph it runs is exactly what the coordinator resolved.
+The worker binds the source image (if any) into the `image` slot and otherwise
+executes the resolved graph without re-mapping it. **LoRA splicing is not yet
+implemented in the resolved-recipe executor:** `recipe_lora_inject` currently
+produces a worker warning and does not modify the graph. Do not advertise LoRA
+support for this path until the executor and end-to-end tests land.
 
 ---
 
 ## Migration state (read before you deploy)
 
-Two switches gate the end-to-end recipe path. Until both are set, a new recipe
-authors and validates fine but won't *execute* on the live worker:
+The repository path is implemented, but deployment and chain sourcing are
+separate facts:
 
-1. **Worker executor** — running a resolved `recipe_spec` is the branch
-   `feat/recipe-dispatch` in **grid-media-worker**, currently **unmerged**. The
-   deployed worker (`main`) still uses the legacy `_bridge` path. Merge + deploy it
-   before recipes run live.
+1. **Worker executor** — resolved `recipe_spec` execution is merged on
+   **grid-media-worker/main**. Confirm the deployed worker version before relying
+   on it; repository state alone does not prove a particular host was upgraded.
 2. **On-chain source** — `RECIPEVAULT_ADDRESS` is **unset** on prod, so recipes
    come from local `recipes/*.json`, not the chain. Setting it flips the source with
    no authoring change.
@@ -244,6 +245,6 @@ ungoverned (no clamps/enums) and is superseded by recipes. **Do not author new
 
 - `grid_api/services/recipes.py` — resolver, capability gates, RecipeVault sync.
 - `grid_api/services/recipe_import.py` — the importer/CLI + `validate_recipe`.
-- `recipes/*.json` — six worked examples (t2i, i2i, i2i-blend, i2v, turbo).
+- `recipes/*.json` — current worked examples (t2i, i2i, i2i-blend, i2v, turbo).
 - `recipes/AGENTS.md` — one-screen authoring contract.
 - Tests: `grid_api/services/tests/test_recipes.py`, `test_media_contract.py`.

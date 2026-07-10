@@ -6,6 +6,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Integrating to the AI Horde
 
+> **Legacy integration reference.** The submit/poll `/api/v2` flow below is not
+> the supported Grid integration. New clients use the synchronous/streaming
+> OpenAI-compatible `/v1` API documented by `README.md` and the current OpenAPI
+> schema.
+
 This readme will provide information on how you can build software which uses the AI Horde
 
 ## REST API

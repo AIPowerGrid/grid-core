@@ -6,6 +6,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # How to run AI Horde locally.
 
+> **Legacy Flask contributor guide.** These commands run the inherited Horde
+> compatibility service, not the production FastAPI Grid coordinator. For
+> current `/v1` development use the root `README.md` and follow `AGENTS.md`.
+
 * Git clone this repository
 * copy `.env_template` into `.env` and edit it according to its comments. The horde should start if you leave it unedited
 * install python requirements with `python -m pip install -r requirements.txt --user`
