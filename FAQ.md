@@ -6,6 +6,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Frequently Asked Questions
 
+> **Legacy Horde FAQ.** This describes the inherited Kudos and `/api/v2`
+> product, not the current AI Power Grid `/v1` API, USD credit ledger, worker
+> WebSockets, Base contracts, or payout rail. Keep it only for compatibility
+> history; current users should start with `README.md` and the public docs.
+
 ## How does this all work?
 
 This is a very big subject which will be later be expanded in a devlog. But putting it simply:

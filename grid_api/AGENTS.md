@@ -36,8 +36,9 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 
 ## Work Guidance
 
-- Config: a typed `config.py` is the target; today env reads are scattered (~46 across the
-  tree) - consolidate, don't add more ad-hoc `getenv`.
+- Config: a typed `config.py` is the target; feature-specific env reads remain
+  scattered across the tree. Keep `deploy/env.template` current and consolidate
+  rather than adding another ad-hoc `getenv`.
 - Every router needs a contract test. Existing coverage is strongest in services
   and billing helper paths; route/worker interop remains the risky seam.
 - Errors: structured envelope; no bare `except:`.

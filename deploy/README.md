@@ -1,100 +1,90 @@
-# Fresh production deployment (Proxmox)
+# Grid core production operations
 
-Replaces the legacy single-box deployment (pkill/nohup, hardcoded salt,
-shared-everything). Fresh VM, fresh database, generated secrets, systemd,
-journald logs, nginx in front.
+## Current status
 
-**Why fresh DB:** every API key in the old database was hashed with the
-publicly-known hardcoded salt (`s0m3s3cr3t` — the .env secret never got
-parsed). The new code refuses to boot with that salt. Users re-register;
-the userbase is small enough that a clean break beats a migration.
+Production serves the FastAPI `grid_api` application from the `main` branch of
+`AIPowerGrid/grid-core`. Database changes are Alembic-managed. The existing host
+uses `/home/aipg/system-core` as its checkout path for historical reasons; the
+repository name and remote are `grid-core`.
 
-## 1. Provision the VM (Proxmox)
+`bootstrap.sh`, the legacy Flask fleet unit, and the nginx split were written for
+the old mixed Horde cutover. **Do not use `bootstrap.sh` for a new production
+host in its current form.** It still clones an obsolete repository/branch and
+assumes console salt sharing that no longer exists. Rebuild and review that path
+before using it for fresh infrastructure.
 
-- Ubuntu Server 24.04, 8+ vCPU, 16+ GB RAM, 100+ GB disk
-- Public IP (or NAT + port-forward 80/443)
+This file documents updates to the existing managed host. It does not authorize
+deploying from an agent or moving money.
 
-## 2. Bootstrap
+## Preflight
 
-```bash
-git clone https://github.com/AIPowerGrid/system-core.git
-cd system-core && sudo bash deploy/bootstrap.sh
-```
+1. Confirm the target commit is reviewed and `origin/main` is the intended
+   source.
+2. Back up PostgreSQL before schema changes.
+3. Inspect pending migrations with `python -m alembic current` and
+   `python -m alembic heads`.
+4. Confirm `/etc/aipg/grid.env` is readable only by the service account and has
+   the required current variables.
+5. Record the state of `aipg-gridapi`, Redis, PostgreSQL, and any payout timer.
 
-The script installs everything, creates the fresh DB, **generates GRID_SALT
-and the DB password**, and starts 8 Flask procs + grid_api under systemd.
+## Existing-host deploy
 
-## 3. The two manual secrets steps
-
-1. **Dashboard salt sync** — copy the generated salt into grid-frontend's
-   Vercel env (`GRID_SALT`) and redeploy the dashboard. All three systems
-   (Flask, grid_api, dashboard) must share it.
-   ```bash
-   grep GRID_SALT /etc/aipg/grid.env
-   ```
-2. **TLS** — once DNS for `api.aipowergrid.io` points at the new box:
-   ```bash
-   certbot --nginx -d api.aipowergrid.io
-   ```
-
-## 4. Cutover
-
-1. Verify locally on the box first:
-   ```bash
-   curl -s http://127.0.0.1:7010/v1/models            # grid_api up
-   curl -s http://127.0.0.1:7001/api/v2/status/models  # flask up
-   ```
-2. Lower the DNS TTL ahead of time; flip `api.aipowergrid.io` A record
-   (Cloudflare) to the new IP.
-3. Old box: stop accepting new work, let in-flight jobs drain, then shut
-   the services down. Keep the old DB dump archived (it contains no
-   plaintext keys, but history may be useful).
-4. Announce re-registration: keys from the old system no longer work
-   (Discord + a banner on the register page).
-
-## 5. Day-2 operations
-
-| Task | Command |
-|---|---|
-| Logs (live) | `journalctl -u aipg-gridapi -f` / `journalctl -u aipg-horde@7001 -f` |
-| Restart API | `systemctl restart aipg-gridapi` |
-| Rolling Flask restart | `for p in {7001..7008}; do systemctl restart aipg-horde@$p; sleep 5; done` |
-| Deploy Grid API code | `sudo -u aipg git -C /home/aipg/system-core pull --ff-only origin main && sudo systemctl restart aipg-gridapi` |
-| Run Grid DB migrations | `cd /home/aipg/system-core && sudo -E -H -u aipg ./.venv/bin/python -m alembic upgrade head` |
-| Status | `systemctl status 'aipg-*'` |
-
-### Alembic on the existing production DB
-
-Fresh deployments are Alembic-managed from genesis. The first prod validator
-rollout predated that and created `grid_validator_attestations` outside Alembic,
-so on 2026-07-02 prod was bridged by stamping `0005` once and then upgrading to
-`0006_validator_assignments`. Do not run that stamp on any DB that already has
-an `alembic_version` row.
-
-Run Alembic as the deploy user with `-H`:
+Run as an operator on the production host:
 
 ```bash
+sudo -u aipg git -C /home/aipg/system-core fetch origin
+sudo -u aipg git -C /home/aipg/system-core pull --ff-only origin main
+sudo -u aipg /home/aipg/system-core/.venv/bin/pip install -r /home/aipg/system-core/requirements.txt
 cd /home/aipg/system-core
 sudo -E -H -u aipg ./.venv/bin/python -m alembic upgrade head
+sudo systemctl restart aipg-gridapi
 ```
 
-The `-H` matters. Plain `sudo -E` can preserve `HOME=/root`, which makes asyncpg
-look for `/root/.postgresql/postgresql.key` before opening the database
-connection.
+`-H` is intentional: asyncpg may otherwise inspect root's PostgreSQL client
+certificate path.
 
-Validator preview smoke checks after a deploy:
+Do not restart the legacy Flask fleet unless a compatibility route or shared
+legacy dependency actually changed.
+
+## Verification
 
 ```bash
+systemctl status aipg-gridapi --no-pager
+journalctl -u aipg-gridapi -n 200 --no-pager
+curl -fsS http://127.0.0.1:7010/health
+curl -fsS http://127.0.0.1:7010/v1/models
 curl -fsS http://127.0.0.1:7010/v1/validator/capabilities
 curl -s -o /dev/null -w '%{http_code}\n' \
   http://127.0.0.1:7010/v1/validator/assignments
-# expect 401 without a v2 account key
 ```
 
-## Notes
+The unauthenticated validator-assignment request should return `401`. Also smoke
+one authenticated non-money request through the public hostname and inspect
+worker reconnects before declaring the deploy healthy.
 
-- grid_api runs on **7010**; Flask owns 7001-7008 (images.py proxies to 7001).
-- `grid_den_events` and Flask tables are created automatically on first boot
-  against the empty database.
-- Rate limiting + quota use Redis DB 7 and fail open if Redis is down.
-- Workers and the registration page need no changes — same public URLs.
+## Money-path controls
+
+- `GRID_CHARGING_ENABLED=0` keeps demand charging in dry-run. Do not flip it as
+  part of an unrelated deploy.
+- `GRID_FREE_SPENDABLE_LIVE` is a separate free-credit spending gate.
+- `aipg-payout.timer` drives the live custodial worker payout CLI. Stop/restart
+  it only under the settlement runbook in
+  `grid_api/services/settlement/GO_LIVE.md`.
+- Private payout/reporter keys stay in the service environment or secret store;
+  never print them during verification.
+
+## Rollback
+
+Code rollback and schema rollback are separate decisions. Do not downgrade a
+database by checking out old code and hoping Alembic reverses itself. Choose a
+known-good commit compatible with the migrated schema, deploy it explicitly,
+restart `aipg-gridapi`, and repeat the verification above. Restore a database
+backup only under an incident plan.
+
+## Asset status
+
+- `systemd/aipg-gridapi.service` is the FastAPI unit template.
+- `systemd/aipg-horde@.service` and the `/api/v2` nginx routing are legacy
+  compatibility assets.
+- `bootstrap.sh` is quarantined until its repo URL, branch, service topology,
+  migrations, secrets, and fresh-host checks are rewritten and tested.

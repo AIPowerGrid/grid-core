@@ -28,8 +28,10 @@ transport, accounts, stats, health/metrics.
   `free.active` tracks GRID_FREE_SPENDABLE_LIVE), `GET /v1/account/jobs`
   (operator trust view: my workers' jobs + den + result_hash + signed flag,
   scoped to the payout wallet), deposit claims (USDC + Chainlink-priced ETH).
-  `POST /v1/accounts/session` is the identity bridge: find-or-create by
-  oauth_sub/wallet/email, internal-token gated.
+  `POST /v1/accounts/session` is the internal-token-gated identity bridge. It
+  resolves on exactly one authoritative identity (`oauth_sub` first, then
+  wallet, then verified email only when it is the sole identity); supplemental
+  or unverified email must never join accounts.
 - `stats.py` - `GET /v1/workers`, progress polling, model status, usage totals,
   model stats, wallet earnings, `GET /v1/payouts/public` (aggregate payout
   transparency), `GET /v1/jobs/recent` (PUBLIC redacted job feed: model, worker

@@ -5,7 +5,9 @@
 > pass-through multi-asset rail (`revenue.py` + `multiasset.py`) — the DECIDED
 > payout model, gated on funded treasury + live charging. (3) **FUTURE, STUB:**
 > the trustless on-chain claim rail (`bot.py` Merkle → reportPeriod → claim) —
-> Diamond facets not deployed. Never present (3) as running.
+> RewardPool, DenReporter, and PaymentRouter facets are deployed on the Base
+> diamond, but the publisher/claim operation is not live. Never present (3) as
+> the current worker payout rail.
 
 ## Purpose
 

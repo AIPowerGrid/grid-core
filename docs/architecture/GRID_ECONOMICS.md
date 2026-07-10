@@ -1,5 +1,13 @@
 # Grid Economics — Demand Side, Developer Incentives & Funding
 
+> **Mixed implementation blueprint, not a live-product description.** The core
+> has USD micro-credit, reservation/reconciliation, payout-preference, and
+> settlement components, but demand charging and free-credit spending remain
+> independently gated. The live worker rail is still an hourly fixed AIPG
+> budget distributed pro-rata to den. Stripe Pass, x402, buybacks, developer
+> revenue share, and multi-asset payout routing are roadmap/dark paths unless a
+> deployment explicitly enables and proves them.
+
 > The last revolution was metered in kilowatt-hours. This one is metered in tokens.
 
 This is the blueprint for the money layer of the AI Power Grid. The governing
@@ -68,7 +76,7 @@ Discipline this implies:
    (apps, agents,     │  one USD balance per account│         (rev-share / margin)
     styles, recipes)  │                             │
                       │                             │──earn──▶ WORKERS
-   WORKERS ──compute──▶└─────────────────────────────┘         (USDC + AIPG, supply side)
+   WORKERS ──compute──▶└─────────────────────────────┘         (AIPG live; multi-asset target)
                                     │
                                  protocol fee
                                     │
@@ -81,7 +89,8 @@ Four ways to make money *with* the grid, one way the grid makes money:
 - **Developers** build apps and agents on the grid and **keep a margin** on the
   usage they drive.
 - **Creators** publish styles / recipes / models and earn a royalty per use.
-- **Workers** provide GPU compute and earn (USDC + AIPG) — supply side.
+- **Workers** provide GPU compute and currently share the AIPG period budget;
+  USD-valued multi-asset settlement is the supply-side target.
 - **The protocol** takes a fee on throughput; a slice funds AIPG buybacks
   (see the treasury & buyback policy, §7).
 

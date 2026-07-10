@@ -96,6 +96,8 @@ owning AGENTS.md and any affected parent Child DOX Index.
 - [horde/AGENTS.md](horde/AGENTS.md) - legacy Flask/Horde API and compatibility
   runtime.
 - [recipes/AGENTS.md](recipes/AGENTS.md) - curated ComfyUI recipe JSON.
+- [scripts/AGENTS.md](scripts/AGENTS.md) - payout timer entrypoint, monitoring,
+  and one-off operator/developer scripts.
 - [sdk/modelvault-worker-sdk/AGENTS.md](sdk/modelvault-worker-sdk/AGENTS.md) -
   TypeScript ModelVault worker SDK package.
 - [sql_statements/AGENTS.md](sql_statements/AGENTS.md) - legacy SQL migrations,

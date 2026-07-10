@@ -6,6 +6,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # AIPG Core Architecture Migration Guide
 
+> **Historical design series.** The production coordinator has already moved to
+> FastAPI `/v1`, Redis Streams, and worker WebSockets. The proposed paths and
+> phases below are retained as migration rationale and are not a current deploy
+> or API contract.
+
 ## Overview
 
 This guide covers migrating from the current Flask/Waitress + HTTP polling architecture to FastAPI + Redis Streams + SSE for a production-grade worker coordination system.
