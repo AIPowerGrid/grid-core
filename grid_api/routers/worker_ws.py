@@ -202,6 +202,19 @@ async def get_available_models(job_type: str | None = None, api_format: str | No
         if api_format and api_format not in (info.get("api_formats") or ["openai-chat"]):
             continue
         models.update(info.get("models", []))
+    # Recipe-backed models: a media recipe can define a NEW model name served by an
+    # EXISTING checkpoint (e.g. "LTX-2.3 Audio" runs on an "LTX-2.3" worker). Advertise
+    # it when ALL its requiredModels are present among online workers of this modality,
+    # so "add a recipe = new model" needs zero worker-side change. Media only.
+    if job_type in ("image", "video") and not api_format:
+        try:
+            from ..services import recipes as _recipes
+            for rc in _recipes.list_recipes():
+                if (rc.job_type == job_type and rc.required_models
+                        and all(m in models for m in rc.required_models)):
+                    models.add(rc.model_name)
+        except Exception as e:
+            logger.debug("recipe-backed model advertisement skipped: %s", e)
     if stale:
         await r.srem(WORKER_ACTIVE_SET, *stale)
     return sorted(models)
