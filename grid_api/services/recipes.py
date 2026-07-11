@@ -46,6 +46,7 @@ class Recipe:
     job_type: str = "image"          # image | video
     model_name: str = ""             # advertised model this recipe serves (≥1 recipe/model)
     lora_inject: Optional[dict] = None  # if set, recipe supports LoRAs (worker splices loaders here)
+    seed_max: int = 2**53 - 1        # cap the seed to the model's range (e.g. TRELLIS = 2**31-1)
 
 
 # recipe_root (lower hex) -> Recipe ; plus id + name indexes for convenience refs.
@@ -78,6 +79,7 @@ def register_recipe(recipe_root: str, name: str, workflow: dict, *,
         job_type=str(meta.get("jobType") or "image"),
         model_name=str(meta.get("modelName") or name),
         lora_inject=(meta.get("loraInject") or None),
+        seed_max=int(meta.get("seedMax") or (2**53 - 1)),
     )
     _BY_ROOT[r.recipe_root] = r
     _BY_NAME[name.lower()] = r
@@ -301,15 +303,20 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
     spec = copy.deepcopy(r.spec)
 
     # Seed: first-class. Default to a fresh one; always echo back (for NFT repro).
+    # Cap to the recipe's seed_max — some models (e.g. TRELLIS) reject seeds above
+    # 2**31-1; a supplied over-range seed is folded (mod), never rejected.
+    smax = r.seed_max
     seed = inputs.get("seed")
     if seed in (None, ""):
-        seed = secrets.randbelow(2**53)
+        seed = secrets.randbelow(smax + 1)
     try:
         seed = int(seed)
     except (TypeError, ValueError):
         raise RecipeError(f"'seed' must be an integer, got {seed!r}")
-    if seed < 0 or seed > 2**53 - 1:
-        raise RecipeError(f"'seed' must be between 0 and {2**53 - 1}")
+    if seed < 0:
+        raise RecipeError("'seed' must be non-negative")
+    if seed > smax:
+        seed = seed % (smax + 1)
     inputs["seed"] = seed
 
     for name, path in r.vars.items():
