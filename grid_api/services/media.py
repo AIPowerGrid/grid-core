@@ -405,9 +405,15 @@ async def _submit_and_wait_inner(model: str, job_type: str, payload: dict, timeo
                     f"({spec['name']}, engine={spec['engine']})"
                     + (f" +{len(payload['loras'])} lora(s)" if payload.get('loras') else ""))
 
-    await job_queue.submit_job(job_id, payload, [model], job_type=job_type,
+    # Route on the recipe's requiredModels (the checkpoint names WORKERS advertise),
+    # not the recipe's display name: a recipe can define a NEW model ("LTX-2.3 Audio")
+    # served by an EXISTING checkpoint ("LTX-2.3"). The worker matches on what it has and
+    # runs the resolved recipe_spec regardless of display name. Falls back to the model
+    # name for the legacy path (no recipe) or a recipe with no requiredModels.
+    route_models = (spec.get("required_models") if spec and spec.get("required_models") else [model])
+    await job_queue.submit_job(job_id, payload, route_models, job_type=job_type,
                                preferred_worker=preferred_worker, progress_token=progress_token)
-    logger.info(f"{job_type} job {job_id} queued model={model}"
+    logger.info(f"{job_type} job {job_id} queued model={model} route={route_models}"
                 + (f" preferred_worker={preferred_worker}" if preferred_worker else ""))
 
     async for event in token_stream.subscribe_tokens(job_id, timeout=timeout):
