@@ -24,7 +24,8 @@ def _async(value):
 async def test_daily_cap_base_no_wallet(monkeypatch):
     monkeypatch.setattr(free_credits, "FREE_ENABLED", True)
     monkeypatch.setattr(free_credits, "FREE_DAILY_MICRO", 250_000)
-    assert await free_credits.daily_cap_micro(None) == 250_000
+    monkeypatch.setattr(free_credits, "_has_verified_google", _async(True))
+    assert await free_credits.daily_cap_micro("account", None) == 250_000
 
 
 @pytest.mark.asyncio
@@ -33,22 +34,42 @@ async def test_daily_cap_holder_gets_bonus(monkeypatch):
     monkeypatch.setattr(free_credits, "FREE_DAILY_MICRO", 250_000)
     monkeypatch.setattr(free_credits, "FREE_HOLDER_MIN_AIPG", 100_000)
     monkeypatch.setattr(free_credits, "FREE_HOLDER_BONUS_MICRO", 1_000_000)
+    monkeypatch.setattr(free_credits, "_has_verified_google", _async(True))
     monkeypatch.setattr(holdings, "aipg_balance_raw", _async(150_000 * 10 ** holdings.AIPG_DECIMALS))
-    assert await free_credits.daily_cap_micro("0xabc") == 1_250_000  # base + bonus
+    assert await free_credits.daily_cap_micro("account", "0xabc") == 1_250_000  # base + bonus
 
 
 @pytest.mark.asyncio
 async def test_daily_cap_below_threshold_base_only(monkeypatch):
     monkeypatch.setattr(free_credits, "FREE_ENABLED", True)
     monkeypatch.setattr(free_credits, "FREE_DAILY_MICRO", 250_000)
+    monkeypatch.setattr(free_credits, "_has_verified_google", _async(True))
     monkeypatch.setattr(holdings, "aipg_balance_raw", _async(99_999 * 10 ** holdings.AIPG_DECIMALS))
-    assert await free_credits.daily_cap_micro("0xabc") == 250_000
+    assert await free_credits.daily_cap_micro("account", "0xabc") == 250_000
+
+
+@pytest.mark.asyncio
+async def test_wallet_only_non_holder_gets_no_free_faucet(monkeypatch):
+    monkeypatch.setattr(free_credits, "FREE_ENABLED", True)
+    monkeypatch.setattr(free_credits, "_has_verified_google", _async(False))
+    monkeypatch.setattr(holdings, "aipg_balance_raw", _async(0))
+    assert await free_credits.daily_cap_micro("wallet-account", "0xabc") == 0
+
+
+@pytest.mark.asyncio
+async def test_wallet_only_holder_gets_holder_bonus(monkeypatch):
+    monkeypatch.setattr(free_credits, "FREE_ENABLED", True)
+    monkeypatch.setattr(free_credits, "FREE_HOLDER_MIN_AIPG", 100_000)
+    monkeypatch.setattr(free_credits, "FREE_HOLDER_BONUS_MICRO", 200_000)
+    monkeypatch.setattr(free_credits, "_has_verified_google", _async(False))
+    monkeypatch.setattr(holdings, "aipg_balance_raw", _async(100_000 * 10 ** holdings.AIPG_DECIMALS))
+    assert await free_credits.daily_cap_micro("wallet-account", "0xabc") == 200_000
 
 
 @pytest.mark.asyncio
 async def test_daily_cap_disabled_is_zero(monkeypatch):
     monkeypatch.setattr(free_credits, "FREE_ENABLED", False)
-    assert await free_credits.daily_cap_micro(None) == 0
+    assert await free_credits.daily_cap_micro(None, None) == 0
     assert await free_credits.available_micro("acct", "0xabc") == 0
 
 

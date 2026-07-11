@@ -3,9 +3,9 @@
 
 """Daily FREE credit allowance — the credit-denominated free tier.
 
-"Free AI for everyone, funded by paid usage." Every account gets a daily
-allowance of micro-USD credits, reset at UTC midnight (use-it-or-lose-it),
-tiered by AIPG held on Base. A charge draws from this FREE bucket BEFORE the
+Verified-human accounts get a daily allowance of micro-USD credits, reset at
+UTC midnight (use-it-or-lose-it). AIPG-holding wallets can earn a separate
+holder allowance without Google. A charge draws from this FREE bucket before the
 purchased balance (see credits.charge_request). Tracked in Redis (per-account
 -per-day key, auto-expiring) — no cleanup job, no unbounded growth.
 
@@ -33,7 +33,11 @@ import logging
 import os
 from datetime import datetime, timezone
 
+import sqlalchemy as sa
+
+from ..database import new_session
 from ..redis_client import get_redis
+from ..v2.schema import account_identities
 
 logger = logging.getLogger("grid_api.free_credits")
 
@@ -43,11 +47,11 @@ FREE_ENABLED = os.getenv("GRID_FREE_CREDITS_ENABLED", "1").lower() in ("1", "tru
 # reserve/release (see the PREVIEW note above). Surfaced as free.active so the API
 # never implies free credit can cover a paid charge before that integration ships.
 FREE_SPENDABLE_LIVE = os.getenv("GRID_FREE_SPENDABLE_LIVE", "0").lower() in ("1", "true", "yes", "on")
-# Base free micro-USD per UTC day (250000 = $0.25).
-FREE_DAILY_MICRO = int(os.getenv("GRID_FREE_DAILY_MICRO", "250000"))
+# Base free micro-USD per UTC day (50000 = $0.05).
+FREE_DAILY_MICRO = int(os.getenv("GRID_FREE_DAILY_MICRO", "50000"))
 # AIPG-holder bonus: wallets holding >= MIN get + BONUS micro-USD/day on top of base.
 FREE_HOLDER_MIN_AIPG = int(os.getenv("GRID_FREE_HOLDER_MIN_AIPG", "100000"))
-FREE_HOLDER_BONUS_MICRO = int(os.getenv("GRID_FREE_HOLDER_BONUS_MICRO", "1000000"))  # +$1.00/day
+FREE_HOLDER_BONUS_MICRO = int(os.getenv("GRID_FREE_HOLDER_BONUS_MICRO", "200000"))  # +$0.20/day
 
 _PREFIX = "grid:freecredit:"       # {_PREFIX}{account_id}:{day} -> micro spent today
 _REF_PREFIX = "grid:freeconsumed:" # {_REF_PREFIX}{ref} -> micro consumed for that job (idempotency)
@@ -63,11 +67,29 @@ def _secs_to_midnight() -> int:
     return max(86400 - int((now - start).total_seconds()), 1)
 
 
-async def daily_cap_micro(wallet: str | None) -> int:
-    """Free micro-USD/day for this account: base + AIPG-holder bonus (read on Base)."""
+async def _has_verified_google(account_id) -> bool:
+    if not account_id:
+        return False
+    try:
+        async with await new_session() as session:
+            return bool(await session.scalar(
+                sa.select(sa.literal(True)).where(sa.exists(
+                    sa.select(account_identities.c.id).where(
+                        account_identities.c.account_id == account_id,
+                        account_identities.c.kind == "google",
+                        account_identities.c.verified_at.is_not(None),
+                    )
+                ))
+            ))
+    except Exception:
+        return False
+
+
+async def daily_cap_micro(account_id, wallet: str | None) -> int:
+    """Daily cap: verified-Google base plus an independent AIPG-holder bonus."""
     if not FREE_ENABLED:
         return 0
-    cap = FREE_DAILY_MICRO
+    cap = FREE_DAILY_MICRO if await _has_verified_google(account_id) else 0
     if wallet and FREE_HOLDER_BONUS_MICRO > 0:
         try:
             from . import holdings
@@ -75,7 +97,7 @@ async def daily_cap_micro(wallet: str | None) -> int:
             if bal >= FREE_HOLDER_MIN_AIPG * (10 ** holdings.AIPG_DECIMALS):
                 cap += FREE_HOLDER_BONUS_MICRO
         except Exception:
-            logger.debug("holder-bonus read failed; base cap only", exc_info=True)
+            logger.debug("holder-bonus read failed; verified base only", exc_info=True)
     return cap
 
 
@@ -92,7 +114,7 @@ async def available_micro(account_id, wallet: str | None) -> int:
     Read-only — for previews, the balance endpoint, and dry-run logging."""
     if not FREE_ENABLED or not account_id:
         return 0
-    cap = await daily_cap_micro(wallet)
+    cap = await daily_cap_micro(account_id, wallet)
     if cap <= 0:
         return 0
     try:
@@ -134,7 +156,7 @@ async def consume(account_id, wallet: str | None, want_micro: int, ref: str) -> 
     allowance already reset)."""
     if not FREE_ENABLED or not account_id or want_micro <= 0 or not ref:
         return 0
-    cap = await daily_cap_micro(wallet)
+    cap = await daily_cap_micro(account_id, wallet)
     if cap <= 0:
         return 0
     try:

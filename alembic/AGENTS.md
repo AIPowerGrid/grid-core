@@ -10,9 +10,10 @@ production database match `grid_api/v2/schema.py` without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current head: `0012`
+- `versions/` - ordered migration revisions. Current head: `0013`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
-  `0012` reservations.free_micro).
+  `0012` reservations.free_micro, `0013` universal identities, scoped keys,
+  promotional grants, and reservations.promo_micro).
 
 ## Local Contracts
 

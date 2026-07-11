@@ -18,6 +18,8 @@ validation, worker incentives, and trust boundaries.
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only
   invariants, scorecard privacy rules, and future economic gates.
+- `UNIVERSAL_ACCOUNTS.md` - canonical identity, frontend assertion, linking,
+  merge, and three-pocket credit contracts.
 
 ## Local Contracts
 

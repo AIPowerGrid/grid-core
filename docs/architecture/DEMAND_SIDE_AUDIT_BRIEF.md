@@ -82,14 +82,14 @@ on). These are hard gates, not suggestions:
   parity with schema.py (grid_ledger.job_id UNIQUE — the idempotency guard — plus
   duration/ttft). **Remaining before flip:** Postgres concurrency test (atomicity
   proven on SQLite only); media price peg.
-- [~] **B2 (PARTIAL — session-gating landed `5b7126d3`).** Account-admin actions
+- [~] **B2 (SUBSTANTIALLY DONE).** Account-admin actions
   (change payout wallet, issue/revoke keys) now require a wallet-proven **session
   key** (`api_keys.is_session`, set only by SIWE wallet-login / dashboard-login;
   `issue_key` forces it false so it isn't caller-settable). A leaked inference key
-  can no longer redirect earnings or manage keys. **Still TODO for full B2:**
-  finer scopes/classes (`inference.submit`, `billing.manage`, `workers.manage`,
-  `identity.assert`) and a scoped bridge key. *(Was: any v2 key could do
-  everything — no longer true for payout/key-mgmt.)*
+  can no longer redirect earnings or manage keys. API keys now carry capability
+  scopes and Core can bootstrap bridge keys limited to `inference.submit` plus
+  `identity.assert`. **Still TODO:** split the remaining session-level account
+  authority into finer billing/worker scopes after client migration.
 - [x] **B3a (P0 FIXED `cf0cfd08`, 2026-07-08) — Identity-bridge confused deputy.**
   `POST /v1/accounts/session` OR-matched oauth_sub|wallet|email then `.first()`
   (no ORDER BY) and minted a dashboard-session key for the arbitrary winner.
@@ -107,12 +107,12 @@ on). These are hard gates, not suggestions:
   (`_passthrough.guard_passthrough_body`, 413 on >200k chars / depth>64 before the
   recursive sanitize; verified live) and worker-cleanup drain of the prefetched
   `local_jobs` (requeue immediately vs stale-reclaim).
-- [ ] **B3 — Signed user assertions (not a raw header).** Resolves the doc
-  contradiction (see §2). The chat bridge sends a short-lived **signed**
-  assertion (`iss/sub/aud/exp/nonce`) from a scoped bridge key; the grid verifies
-  the signature. No raw `X-Grid-User` trust. *(B3a above closed the acute
-  takeover; B3 is still the full solution — a scoped, signed bridge assertion so
-  the grid never resolves identity from caller-supplied fields at all.)*
+- [~] **B3 — Core built, client rollout pending.** All generation routes accept a
+  signed `X-Grid-User-Assertion` only from a scoped bridge key. Core verifies
+  `iss/sub/provider/aud/iat/exp/nonce`, caps lifetime at 60 seconds, and consumes
+  the nonce through fail-closed Redis replay protection before resolving the
+  canonical account. Assertions grant inference identity only. Art, Chat, and
+  Console must migrate before the legacy internal session bridge is retired.
 - [~] **B4 (SUBSTANTIALLY DONE — chat + media metered 89e1b5d; passthrough gated
   this branch) — Universal metering for ALL job types.** One reserve/debit/reconcile
   abstraction for chat **and** image **and** video (incl. chat-routed media), with
@@ -142,12 +142,15 @@ on). These are hard gates, not suggestions:
   **Still TODO for full B7:** reconcile the rest of Alembic with `schema.py`
   metadata (`grid_ledger.job_id` UNIQUE, telemetry columns) and add a drift check so
   create_all-vs-migration divergence can't recur.
-- [~] **B8 (BACKEND HALF DONE) — Sybil / free-credit hard rules.** Done:
-  wallet/email/oauth_sub uniqueness (unique cols), per-key rate limits, and the
+- [~] **B8 (SUBSTANTIALLY DONE) — Sybil / free-credit hard rules.** Done:
+  canonical provider identity uniqueness, per-key rate limits, a finite welcome
+  campaign budget, verified-Google gating for welcome plus daily baseline, and
+  holder-only eligibility for wallet-only free value. The
   free CREDIT bucket **fails closed** by design (Redis down → free=0, paid
   covers; `quota.py` request-COUNT fail-open is the documented cheap tradeoff,
   distinct from credit value). **Remaining (product decisions, front-end
-  involving):** signup friction (CAPTCHA / device-IP) + abuse scoring.
+  involving):** device/IP abuse scoring and campaign monitoring before broad
+  promotional rollout.
 - [~] **B9 (MOSTLY DONE — reserve/refund/idempotency/unpriced covered; real-Postgres
   concurrency landed `9f40ce76` (overdraft race 25v5 → exactly 5 win, dup-ref 12x →
   once); free-first durable suite `b02ada2c` 47/47; Stripe/deposit integration tests
@@ -191,9 +194,11 @@ All in `system-core/grid_api`, deployed to prod, gated OFF.
   per-user key), per-account API keys, `/v1/account`, `/v1/account/workers`.
   Console uses this end-to-end.
 
-**Not yet built / proposed:** funding rails (Stripe, deposit watcher, x402),
-tiered free-credit grants + enforcement, the chat identity bridge, the chat
-conversion UX, developer revenue-share. These are design only.
+**Built ship-dark / migrating:** durable promotional grants, reduced daily free
+credit, three-pocket reserve/reconcile, canonical identities and merge aliases,
+and the signed frontend bridge. Client migration and shadow-accounting parity are
+still required before enabling free/promo spend. **Still proposed:** Stripe,
+x402, chat conversion UX, and developer revenue-share.
 
 ---
 

@@ -49,11 +49,14 @@ async def create_3d(
     body: ThreeDRequest,
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
+    x_grid_user_assertion: Optional[str] = Header(None),
 ):
     """Image-to-3D mesh generation (grid-native envelope)."""
     try:
         key = extract_api_key(apikey, authorization)
-        user = await accounts_svc.authenticate(key)
+        user = await accounts_svc.authenticate(
+            key, x_grid_user_assertion, required_scope="inference.submit",
+        )
 
         if body.worker:
             await accounts_svc.assert_owns_worker(user, body.worker)

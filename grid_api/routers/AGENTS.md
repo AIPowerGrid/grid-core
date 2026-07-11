@@ -23,7 +23,7 @@ transport, accounts, stats, health/metrics.
 - `accounts.py` - wallet auth, dashboard/internal account/session creation,
   account profile (incl. resolved `payout{asset, aipg_bps, active, live_asset}`),
   payout wallet + `POST /v1/account/payout-preference` (both SESSION-gated),
-  worker listing, API-key issue/revoke, `GET /v1/account/credits` (free/paid
+  worker listing, API-key issue/revoke, `GET /v1/account/credits` (promotional/free/paid
   pockets; `total_spendable_*` = what can pay NOW vs `total_preview_*`;
   `free.active` tracks GRID_FREE_SPENDABLE_LIVE), `GET /v1/account/jobs`
   (operator trust view: my workers' jobs + den + result_hash + signed flag,
@@ -32,6 +32,9 @@ transport, accounts, stats, health/metrics.
   resolves on exactly one authoritative identity (`oauth_sub` first, then
   wallet, then verified email only when it is the sole identity); supplemental
   or unverified email must never join accounts.
+  `POST /v1/account/identities/wallet/link` requires an account-management
+  session plus an exact-purpose wallet signature. `POST /v1/accounts/bridges`
+  bootstraps an internal least-privilege identity bridge.
 - `stats.py` - `GET /v1/workers`, progress polling, model status, usage totals,
   model stats, wallet earnings, `GET /v1/payouts/public` (aggregate payout
   transparency), `GET /v1/jobs/recent` (PUBLIC redacted job feed: model, worker
@@ -77,8 +80,9 @@ transport, accounts, stats, health/metrics.
 - Targeted validator probes must be hard-targeted to the assigned worker and
   must not bill users, pay den, write worker ledger rows, or strike workers.
 - `accounts.py` internal-token routes are for trusted first-party services only.
-  Any future bridge identity must use scoped keys plus signed assertions, not raw
-  user headers.
+  Generation routes accept `X-Grid-User-Assertion` only from scoped bridge keys;
+  assertions are signed, at most 60 seconds old, and Redis-replay-protected.
+  They grant inference identity, never account-management authority.
 
 ## Work Guidance
 
