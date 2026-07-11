@@ -281,7 +281,7 @@ async def worker_websocket(ws: WebSocket):
         # Job types this worker serves. Accepts the new `job_types` list or the
         # legacy single `worker_type`; defaults to text for old text workers.
         job_types = init_msg.get("job_types") or [init_msg.get("worker_type", "text")]
-        job_types = [t for t in job_types if t in ("text", "image", "video")] or ["text"]
+        job_types = [t for t in job_types if t in ("text", "image", "video", "3d")] or ["text"]
         # API formats this worker's backend natively serves. The worker probes
         # its inference engine and advertises only what actually answers (vLLM
         # exposes openai-chat + openai-responses but NOT anthropic, for example).
@@ -1072,7 +1072,8 @@ async def _handle_media_job(
     job_type = job.get("job_type", "image")
 
     n = int(payload.get("n", 1) or 1)
-    ext = payload.get("ext") or ("mp4" if job_type == "video" else "webp")
+    ext = payload.get("ext") or ("mp4" if job_type == "video"
+                                 else "glb" if job_type == "3d" else "webp")
     try:
         upload_slots = storage.presign_outputs(job_id, n, ext, job_type=job_type)
     except Exception as e:

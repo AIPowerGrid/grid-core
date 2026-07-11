@@ -25,6 +25,11 @@ CONTENT_TYPES = {
     "jpg": "image/jpeg",
     "mp4": "video/mp4",
     "webm": "video/webm",
+    # 3D mesh artifacts (TRELLIS etc.)
+    "glb": "model/gltf-binary",
+    "gltf": "model/gltf+json",
+    "ply": "application/octet-stream",
+    "obj": "text/plain",
 }
 
 

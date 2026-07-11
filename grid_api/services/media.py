@@ -31,6 +31,7 @@ logger = logging.getLogger("grid_api.media")
 
 DEFAULT_IMAGE_MODEL = "FLUX.2 [klein]"
 DEFAULT_VIDEO_MODEL = "LTX-2.3"
+DEFAULT_3D_MODEL = "TRELLIS2"
 
 # Output dimension clamps — a client must not be able to push an arbitrary size
 # that ties up a GPU (or OOMs the worker).
@@ -43,6 +44,7 @@ _SAMPLER_RE = re.compile(r"^[A-Za-z0-9_.:+-]{1,64}$")
 
 IMAGE_TIMEOUT = 300
 VIDEO_TIMEOUT = 600
+THREED_TIMEOUT = 900   # TRELLIS image->3D is slow (model load + sparse ops)
 
 # Billing fallback: when a video request omits `seconds`, the recipe's baked
 # default duration isn't known to the grid — bill this rather than free.
