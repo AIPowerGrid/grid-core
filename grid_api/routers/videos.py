@@ -53,11 +53,14 @@ async def create_video(
     body: VideoRequest,
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
+    x_grid_user_assertion: Optional[str] = Header(None),
 ):
     """Text-to-video generation (grid-native, OpenAI-style envelope)."""
     try:
         key = extract_api_key(apikey, authorization)
-        user = await accounts_svc.authenticate(key)
+        user = await accounts_svc.authenticate(
+            key, x_grid_user_assertion, required_scope="inference.submit",
+        )
 
         if body.worker:
             await accounts_svc.assert_owns_worker(user, body.worker)

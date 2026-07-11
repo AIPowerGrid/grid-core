@@ -33,6 +33,7 @@ from ..database import new_session
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
 from ..services import economics
+from ..services import identities as identities_svc
 from ..v2.schema import api_keys as api_keys_table
 from ..v2.schema import payouts as payouts_table
 from ..v2.schema import workers as workers_table
@@ -62,13 +63,16 @@ async def _nonce_consume(nonce: str) -> bool:
         return False
     from ..redis_client import get_redis
     r = get_redis()
-    # GETDEL is atomic single-use; fall back to get+delete if the server is old.
+    key = f"{_NONCE_PREFIX}{nonce}"
+    # GETDEL is atomic single-use; use one Lua operation on older Redis.
     try:
-        val = await r.getdel(f"{_NONCE_PREFIX}{nonce}")
+        val = await r.getdel(key)
     except Exception:
-        val = await r.get(f"{_NONCE_PREFIX}{nonce}")
-        if val:
-            await r.delete(f"{_NONCE_PREFIX}{nonce}")
+        val = await r.eval(
+            "local v=redis.call('GET',KEYS[1]); "
+            "if v then redis.call('DEL',KEYS[1]) end; return v",
+            1, key,
+        )
     return bool(val)
 
 
@@ -77,6 +81,12 @@ class WalletVerifyForm(BaseModel):
     signature: str
     address: str
     username: Optional[str] = None
+
+
+class WalletLinkForm(BaseModel):
+    message: str
+    signature: str
+    address: str
 
 
 class CreateAccountForm(BaseModel):
@@ -116,6 +126,10 @@ def _session_match(form: "SessionForm"):
 
 class IssueKeyForm(BaseModel):
     label: Optional[str] = None
+
+
+class CreateBridgeForm(BaseModel):
+    label: str
 
 
 class ClaimDepositForm(BaseModel):
@@ -193,6 +207,63 @@ async def wallet_verify(request: Request, form: WalletVerifyForm):
     }
 
 
+@router.post("/v1/account/identities/wallet/link")
+@limiter.limit("10/minute")
+async def link_wallet(
+    request: Request,
+    form: WalletLinkForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Attach a wallet to the current canonical account with proof of both sides.
+
+    The session key proves the destination account; the exact-purpose signature
+    proves the wallet. If that wallet already owns a separate account, the
+    tested merge path conserves balances and retires the source credentials.
+    """
+    user = await _require_session(apikey, authorization)
+    try:
+        from eth_account import Account
+        from eth_account.messages import encode_defunct
+    except ImportError:
+        raise HTTPException(501, detail="Wallet auth unavailable (eth-account not installed)")
+
+    match = re.fullmatch(
+        r"Link wallet to AIPG Grid account ([0-9a-fA-F-]{36})\n\nNonce: ([0-9a-fA-F]+)",
+        form.message,
+    )
+    if not match or match.group(1).lower() != str(user["account_id"]).lower():
+        raise HTTPException(401, detail="Unexpected wallet-link message")
+    nonce = match.group(2)
+    if not await _nonce_consume(nonce):
+        raise HTTPException(401, detail="Invalid or expired nonce. Please retry.")
+    try:
+        recovered = Account.recover_message(
+            encode_defunct(text=form.message), signature=form.signature,
+        ).lower()
+    except Exception:
+        raise HTTPException(401, detail="Signature verification failed")
+    if recovered != form.address.lower() or not accounts_svc.is_valid_eth_address(recovered):
+        raise HTTPException(401, detail="Signature does not match a valid wallet")
+
+    owner = await identities_svc.resolve_identity("wallet", recovered)
+    destination = user["account_id"]
+    if owner and str(owner) != str(destination):
+        try:
+            result = await identities_svc.merge_accounts(
+                destination, owner, reason="wallet_link",
+                merge_ref=f"wallet-link:{nonce}",
+            )
+        except ValueError as exc:
+            raise HTTPException(409, detail=str(exc))
+    else:
+        result = await identities_svc.attach_identity(
+            destination, "wallet", recovered, display_hint=recovered,
+            ref=f"wallet-link:{nonce}",
+        )
+    return {**result, "wallet": recovered}
+
+
 @router.post("/v1/accounts")
 async def create_account(
     form: CreateAccountForm,
@@ -213,6 +284,27 @@ async def create_account(
         username=form.username, email=form.email, oauth_sub=form.oauth_sub
     )
     return {"account_id": acct["id"], "username": acct["username"], "api_key": key}
+
+
+@router.post("/v1/accounts/bridges")
+async def create_identity_bridge(
+    form: CreateBridgeForm,
+    x_internal_token: Optional[str] = Header(None),
+):
+    """Bootstrap a least-privilege first-party bridge key, returned once."""
+    expected = os.getenv("GRID_INTERNAL_TOKEN", "")
+    if not expected or x_internal_token != expected:
+        raise HTTPException(403, detail="Internal token required")
+    clean = form.label.strip()
+    if not clean or len(clean) > 80:
+        raise HTTPException(400, detail="Bridge label must be 1..80 characters")
+    acct, key = await accounts_svc.create_account(
+        username=f"{clean} identity bridge", key_label=f"bridge:{clean}",
+        is_session=False, scopes=["inference.submit", "identity.assert"],
+    )
+    return {"account_id": acct["id"], "api_key": key, "scopes": [
+        "inference.submit", "identity.assert",
+    ]}
 
 
 @router.post("/v1/accounts/session")
@@ -340,11 +432,21 @@ async def get_account(
                 ).where(api_keys_table.c.account_id == user["account_id"])
             )
         ).mappings().all()
+    linked_identities = await identities_svc.list_identities(user["account_id"])
     return {
         "account_id": str(user["account_id"]),
         "username": user["username"],
         "wallet": user["wallet"],
         "payout_wallet": user.get("payout_wallet") or "",
+        "identities": [
+            {
+                "kind": identity["kind"],
+                "display_hint": identity["display_hint"],
+                "primary": identity["is_primary"],
+                "verified": identity["verified_at"] is not None,
+            }
+            for identity in linked_identities
+        ],
         # Worker payout preference, resolved (NULL prefs fall back to grid
         # defaults) + the option metadata the dashboard renders the picker from.
         "payout": {
@@ -707,11 +809,13 @@ async def get_credits(
     wallet = user.get("wallet") or None
     from ..services import credits as credits_svc
     from ..services import free_credits
+    from ..services import promotions
 
     paid = await credits_svc.get_balance(aid)
-    cap = await free_credits.daily_cap_micro(wallet)
+    promo_left = await promotions.available_micro(aid)
+    cap = await free_credits.daily_cap_micro(aid, wallet)
     free_left = await free_credits.available_micro(aid, wallet)
-    total = free_left + paid
+    total = promo_left + free_left + paid
 
     def usd(m):
         return round(m / 1_000_000, 6)
@@ -719,8 +823,14 @@ async def get_credits(
     # Free credit is real value but NOT yet consumed by the live reserve path
     # (see docstring). `active` says whether it can actually pay for a charge.
     free_active = free_credits.FREE_ENABLED and free_credits.FREE_SPENDABLE_LIVE
-    spendable = total if free_active else paid
+    promo_active = promotions.PROMO_ENABLED and promotions.PROMO_SPENDABLE_LIVE
+    spendable = paid + (free_left if free_active else 0) + (promo_left if promo_active else 0)
     return {
+        "promotional": {
+            "remaining_micro": promo_left,
+            "remaining_usd": usd(promo_left),
+            "active": promo_active,
+        },
         "free": {
             "daily_cap_micro": cap,
             "remaining_micro": free_left,
@@ -739,7 +849,7 @@ async def get_credits(
         # in the live reserve path). This is the number a client must gate on.
         "total_spendable_micro": spendable,
         "total_spendable_usd": usd(spendable),
-        # free + paid — what WILL be spendable once free credits go live. Preview only.
+        # promo + daily free + paid after all shadow gates are enabled.
         "total_preview_micro": total,
         "total_preview_usd": usd(total),
         "charging_enabled": credits_svc.CHARGING_ENABLED,  # false while dark

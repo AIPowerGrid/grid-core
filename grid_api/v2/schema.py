@@ -48,10 +48,10 @@ PortableJSON = sa.JSON().with_variant(JSONB(), "postgresql")
 
 
 # ── Identity ─────────────────────────────────────────────────────────────
-# One account, up to three credential types. The wallet is the canonical
-# cross-system identity (chat, API, workers, gallery, payouts); email/oauth
-# exist for users who haven't connected a wallet yet. API keys are derived
-# credentials — many per account, individually revocable.
+# One account can have multiple proven identities. These legacy columns remain
+# during migration for compatibility and point at a primary identity; the
+# grid_account_identities table is authoritative. API keys are derived
+# credentials, many per account and individually revocable.
 
 accounts = sa.Table(
     "grid_accounts",
@@ -80,6 +80,144 @@ accounts = sa.Table(
     sa.Column("last_active", sa.DateTime(timezone=True), nullable=True),
 )
 
+
+# Authentication identities are credentials attached to an account, never the
+# account itself. subject_hash is sha256(kind + ":" + canonical subject), so
+# OAuth provider subjects and emails are not exposed in operational queries.
+account_identities = sa.Table(
+    "grid_account_identities",
+    metadata,
+    sa.Column("id", sa.Uuid, primary_key=True, default=uuid4),
+    sa.Column(
+        "account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("kind", sa.String(24), nullable=False),  # wallet | google | github | email
+    sa.Column("subject_hash", sa.String(64), nullable=False),
+    sa.Column("display_hint", sa.String(254), nullable=True),
+    sa.Column("metadata", PortableJSON, nullable=False, default=dict),
+    # NULL means imported legacy contact data, not an authentication proof.
+    sa.Column("verified_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("is_primary", sa.Boolean, nullable=False, default=False),
+    sa.Column("last_used", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.UniqueConstraint("kind", "subject_hash", name="uq_grid_identity_subject"),
+)
+
+
+# A merge never rewrites historical ledgers. Logins through a retired account
+# resolve through this alias to the canonical destination account.
+account_aliases = sa.Table(
+    "grid_account_aliases",
+    metadata,
+    sa.Column(
+        "source_account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="RESTRICT"),
+        primary_key=True,
+    ),
+    sa.Column(
+        "canonical_account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("merge_ref", sa.String(128), nullable=False, unique=True),
+    sa.Column("reason", sa.String(64), nullable=False, default="identity_link"),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+)
+
+
+# Append-only security trail for identity links, unlinks, and account merges.
+identity_events = sa.Table(
+    "grid_identity_events",
+    metadata,
+    sa.Column("id", sa.BigInteger().with_variant(sa.Integer(), "sqlite"),
+              primary_key=True, autoincrement=True),
+    sa.Column("account_id", sa.Uuid, nullable=False, index=True),
+    sa.Column("actor_account_id", sa.Uuid, nullable=True, index=True),
+    sa.Column("event_type", sa.String(32), nullable=False, index=True),
+    sa.Column("identity_kind", sa.String(24), nullable=True),
+    sa.Column("subject_hash", sa.String(64), nullable=True),
+    sa.Column("event_metadata", PortableJSON, nullable=False, default=dict),
+    sa.Column("ref", sa.String(128), nullable=False, unique=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+)
+
+
+# Durable, budgeted promotional campaigns. Daily use-it-or-lose-it credit stays
+# in Redis; welcome/subscription/campaign grants live here and expire explicitly.
+promo_campaigns = sa.Table(
+    "grid_promo_campaigns",
+    metadata,
+    sa.Column("id", sa.String(64), primary_key=True),
+    sa.Column("name", sa.String(160), nullable=False),
+    sa.Column("grant_micro", sa.BigInteger, nullable=False),
+    sa.Column("budget_micro", sa.BigInteger, nullable=True),
+    sa.Column("granted_micro", sa.BigInteger, nullable=False, default=0),
+    sa.Column("expires_days", sa.Integer, nullable=True),
+    sa.Column("eligibility", PortableJSON, nullable=False, default=dict),
+    sa.Column("active", sa.Boolean, nullable=False, default=True, index=True),
+    sa.Column("starts", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("ends", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+)
+
+
+promo_grants = sa.Table(
+    "grid_promo_grants",
+    metadata,
+    sa.Column("id", sa.Uuid, primary_key=True, default=uuid4),
+    sa.Column(
+        "account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column(
+        "campaign_id",
+        sa.String(64),
+        sa.ForeignKey("grid_promo_campaigns.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("amount_micro", sa.BigInteger, nullable=False),
+    sa.Column("remaining_micro", sa.BigInteger, nullable=False),
+    sa.Column("status", sa.String(20), nullable=False, default="active", index=True),
+    sa.Column("ref", sa.String(128), nullable=False, unique=True),
+    sa.Column("expires", sa.DateTime(timezone=True), nullable=True, index=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.UniqueConstraint("account_id", "campaign_id", name="uq_grid_promo_account_campaign"),
+)
+
+
+# One idempotent promotional hold per job. allocations records which expiring
+# grants funded it so release restores value to the correct pocket.
+promo_spends = sa.Table(
+    "grid_promo_spends",
+    metadata,
+    sa.Column("ref", sa.String(128), primary_key=True),
+    sa.Column(
+        "account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("amount_micro", sa.BigInteger, nullable=False),
+    sa.Column("kept_micro", sa.BigInteger, nullable=False, default=0),
+    sa.Column("allocations", PortableJSON, nullable=False, default=list),
+    sa.Column("status", sa.String(20), nullable=False, default="held", index=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+)
+
 api_keys = sa.Table(
     "grid_api_keys",
     metadata,
@@ -99,6 +237,9 @@ api_keys = sa.Table(
     # keys) require a session key, so a leaked inference key can't redirect
     # earnings. Not caller-settable (issue_key forces False).
     sa.Column("is_session", sa.Boolean, nullable=False, server_default=sa.text("false"), default=False),
+    # Capability allowlist. Empty means the legacy role-derived defaults; new
+    # first-party bridge keys carry inference.submit + identity.assert only.
+    sa.Column("scopes", PortableJSON, nullable=False, server_default=sa.text("'[]'"), default=list),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
     sa.Column("last_used", sa.DateTime(timezone=True), nullable=True),
     sa.Column("revoked", sa.Boolean, nullable=False, default=False),
@@ -273,6 +414,9 @@ reservations = sa.Table(
     # held from the paid balance). Settlement restores free-to-free and refunds
     # paid-to-paid — the two pockets never convert into each other.
     sa.Column("free_micro", sa.BigInteger, nullable=False, server_default=sa.text("0"), default=0),
+    # Portion drawn from durable expiring promotional grants. Exact per-grant
+    # allocation is recorded in grid_promo_spends under the same job ref.
+    sa.Column("promo_micro", sa.BigInteger, nullable=False, server_default=sa.text("0"), default=0),
     sa.Column("prompt_toks", sa.Integer, nullable=False, default=0),
     # 'held' until a terminal state settles it; the held→settled UPDATE is the
     # exactly-once guard (only the winning UPDATE moves money).

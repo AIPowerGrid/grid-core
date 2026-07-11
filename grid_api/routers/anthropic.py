@@ -55,6 +55,7 @@ async def create_message(
     body: dict = Body(...),
     x_api_key: Optional[str] = Header(None, alias="x-api-key"),
     authorization: Optional[str] = Header(None),
+    x_grid_user_assertion: Optional[str] = Header(None),
 ):
     """Anthropic-compatible messages endpoint (raw passthrough to a capable worker)."""
     try:
@@ -63,9 +64,13 @@ async def create_message(
         key = x_api_key
         if not key and authorization:
             key = authorization.split(" ", 1)[1] if " " in authorization else authorization
-        user = await accounts_svc.resolve_api_key(key or "")
-        if not user:
-            raise _err(401, "authentication_error", "Invalid API key")
+        try:
+            user = await accounts_svc.authenticate(
+                key or "", x_grid_user_assertion, required_scope="inference.submit",
+            )
+        except HTTPException as exc:
+            message = exc.detail if isinstance(exc.detail, str) else "Authentication failed"
+            raise _err(exc.status_code, "authentication_error", message)
 
         model = body.get("model")
         if not model:

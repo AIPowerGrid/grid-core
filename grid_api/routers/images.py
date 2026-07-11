@@ -58,11 +58,14 @@ async def create_image(
     body: ImageRequest,
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
+    x_grid_user_assertion: Optional[str] = Header(None),
 ):
     """OpenAI-compatible image generation."""
     try:
         key = extract_api_key(apikey, authorization)
-        user = await accounts_svc.authenticate(key)
+        user = await accounts_svc.authenticate(
+            key, x_grid_user_assertion, required_scope="inference.submit",
+        )
 
         # Worker affinity is ownership-gated: reject before doing any work if the
         # caller named a worker they don't own.

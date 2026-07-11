@@ -3,8 +3,8 @@
 
 """v2 accounts: key resolution, account creation, key issuance.
 
-Identity model (docs/V2.md): one grid_account, wallet-canonical, with API
-keys as derived credentials. During the transition, key resolution checks
+Identity model: one canonical Grid account with multiple independently proven
+login identities and individually scoped API keys. During the transition, key resolution checks
 grid_api_keys first and falls back to the legacy Haidra users table, so old
 keys keep working until the horde is decommissioned.
 
@@ -25,6 +25,7 @@ from fastapi import HTTPException
 from ..auth import hash_api_key
 from ..database import new_session, users_table
 from ..v2.schema import accounts as accounts_table
+from ..v2.schema import account_identities as identities_table
 from ..v2.schema import api_keys as api_keys_table
 from ..v2.schema import workers as workers_table
 from .quota import PAID_KUDOS_THRESHOLD
@@ -32,6 +33,8 @@ from .quota import PAID_KUDOS_THRESHOLD
 logger = logging.getLogger("grid_api.accounts")
 
 API_KEY_PREFIX = "grid_"
+SESSION_SCOPES = ["account.read", "account.manage", "inference.submit"]
+INFERENCE_SCOPES = ["account.read", "inference.submit"]
 
 
 def generate_api_key() -> str:
@@ -57,6 +60,7 @@ async def resolve_api_key(plain_key: str) -> dict | None:
                 sa.select(
                     api_keys_table.c.hash,
                     api_keys_table.c.is_session,
+                    api_keys_table.c.scopes,
                     accounts_table.c.id.label("account_id"),
                     accounts_table.c.username,
                     accounts_table.c.wallet,
@@ -78,7 +82,10 @@ async def resolve_api_key(plain_key: str) -> dict | None:
         ).mappings().first()
 
         if row:
+            from .identities import canonical_account_id
+
             flags = row["flags"] or {}
+            canonical_id = await canonical_account_id(row["account_id"], session=session)
             # Best-effort usage stamp; never fail auth over it.
             try:
                 await session.execute(
@@ -88,7 +95,7 @@ async def resolve_api_key(plain_key: str) -> dict | None:
                 )
                 await session.execute(
                     sa.update(accounts_table)
-                    .where(accounts_table.c.id == row["account_id"])
+                    .where(accounts_table.c.id == canonical_id)
                     .values(last_active=datetime.now(timezone.utc))
                 )
                 await session.commit()
@@ -97,11 +104,14 @@ async def resolve_api_key(plain_key: str) -> dict | None:
 
             return {
                 "source": "v2",
-                "id": f"v2:{row['account_id']}",
-                "account_id": row["account_id"],
+                "id": f"v2:{canonical_id}",
+                "account_id": canonical_id,
                 # True only for wallet-proven session keys — gates account-admin
                 # actions (payout wallet, key management) against leaked API keys.
                 "is_session": bool(row["is_session"]),
+                "scopes": list(row["scopes"] or (
+                    SESSION_SCOPES if row["is_session"] else INFERENCE_SCOPES
+                )),
                 "username": row["username"] or "",
                 "wallet": row["wallet"] or "",
                 # Payout address for worker earnings; falls back to the identity
@@ -128,12 +138,68 @@ async def resolve_api_key(plain_key: str) -> dict | None:
     return None
 
 
-async def authenticate(plain_key: str) -> dict:
-    """resolve_api_key or 401."""
+async def _account_auth(account_id, *, scopes: list[str] | None = None) -> dict:
+    """Build a non-admin inference identity for a bridge-asserted user."""
+    from .identities import canonical_account_id
+
+    aid = await canonical_account_id(account_id)
+    async with await new_session() as session:
+        row = (await session.execute(
+            sa.select(accounts_table).where(accounts_table.c.id == aid)
+        )).mappings().first()
+    if not row:
+        raise HTTPException(status_code=401, detail="Asserted account no longer exists")
+    flags = row["flags"] or {}
+    return {
+        "source": "v2", "id": f"v2:{aid}", "account_id": aid,
+        "is_session": False, "scopes": list(scopes or INFERENCE_SCOPES),
+        "username": row["username"] or "", "wallet": row["wallet"] or "",
+        "payout_wallet": row["payout_wallet"] or row["wallet"] or "",
+        "payout_asset": row["payout_asset"], "payout_aipg_bps": row["payout_aipg_bps"],
+        "kudos": PAID_KUDOS_THRESHOLD if flags.get("paid") else 0,
+        "concurrency": int(flags.get("concurrency", 30)),
+    }
+
+
+async def authenticate(plain_key: str, user_assertion: str | None = None,
+                       *, required_scope: str | None = None) -> dict:
+    """Authenticate a direct API key or a scoped bridge plus user assertion."""
     user = await resolve_api_key(plain_key)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid API key")
-    return user
+    scopes = set(user.get("scopes") or [])
+    if required_scope and user.get("source") == "v2" and required_scope not in scopes:
+        raise HTTPException(status_code=403, detail=f"API key lacks {required_scope} scope")
+    if not user_assertion:
+        if required_scope == "inference.submit" and "identity.assert" in scopes:
+            raise HTTPException(status_code=401, detail="Identity bridge requires a user assertion")
+        return user
+
+    from sqlalchemy.exc import IntegrityError
+    from . import assertions
+    from .identities import resolve_identity
+
+    asserted = await assertions.verify(plain_key, user, user_assertion)
+    provider, subject = asserted["provider"], asserted["subject"]
+    account_id = await resolve_identity(provider, subject)
+    if account_id is None:
+        kwargs = {"oauth_sub": subject} if provider == "google" else {"wallet": subject}
+        try:
+            account, _ = await create_account(
+                username="Google user" if provider == "google" else None,
+                issue_initial_key=False,
+                **kwargs,
+            )
+            account_id = account["id"]
+        except IntegrityError:
+            # Concurrent first requests can race the unique identity insert.
+            account_id = await resolve_identity(provider, subject)
+            if account_id is None:
+                raise HTTPException(409, detail="Identity account creation conflicted")
+    asserted_user = await _account_auth(account_id)
+    asserted_user["bridge_account_id"] = user.get("account_id")
+    asserted_user["asserted_provider"] = provider
+    return asserted_user
 
 
 async def assert_owns_worker(user: dict, worker_name: str) -> None:
@@ -170,7 +236,10 @@ async def create_account(
     oauth_sub: str | None = None,
     key_label: str = "default",
     is_session: bool = True,
-) -> tuple[dict, str]:
+    email_verified: bool = False,
+    scopes: list[str] | None = None,
+    issue_initial_key: bool = True,
+) -> tuple[dict, str | None]:
     """Create a grid_account + its first API key.
 
     The first key is the account's LOGIN credential, so it's a session key by
@@ -180,11 +249,13 @@ async def create_account(
     plain = generate_api_key()
     account_id = uuid4()
     now = datetime.now(timezone.utc)
+    wallet = wallet.lower() if wallet else None
+    scopes = list(scopes or (SESSION_SCOPES if is_session else INFERENCE_SCOPES))
     async with await new_session() as session:
         await session.execute(
             sa.insert(accounts_table).values(
                 id=account_id,
-                wallet=wallet.lower() if wallet else None,
+                wallet=wallet,
                 email=email,
                 oauth_sub=oauth_sub,
                 username=username,
@@ -192,22 +263,58 @@ async def create_account(
                 created=now,
             )
         )
-        await session.execute(
-            sa.insert(api_keys_table).values(
-                hash=hash_api_key(plain),
-                account_id=account_id,
-                label=key_label,
-                is_session=is_session,
-                created=now,
-                revoked=False,
+        if issue_initial_key:
+            await session.execute(
+                sa.insert(api_keys_table).values(
+                    hash=hash_api_key(plain),
+                    account_id=account_id,
+                    label=key_label,
+                    is_session=is_session,
+                    scopes=scopes,
+                    created=now,
+                    revoked=False,
+                )
             )
-        )
+        identity_rows = []
+        if wallet:
+            identity_rows.append(("wallet", wallet, wallet, True))
+        oauth_kind = "github" if oauth_sub and oauth_sub.lower().startswith("github_") else "google"
+        if oauth_sub:
+            identity_rows.append((oauth_kind, oauth_sub, f"{oauth_kind.title()} account", True))
+        if email:
+            identity_rows.append(("email", email, email, bool(email_verified)))
+        if identity_rows:
+            from .identities import subject_hash
+
+            await session.execute(sa.insert(identities_table), [
+                {
+                    "id": uuid4(), "account_id": account_id, "kind": kind,
+                    "subject_hash": subject_hash(kind, subject), "display_hint": hint,
+                    "metadata": {"source": "account_create"},
+                    "verified_at": now if verified else None,
+                    "is_primary": True, "created": now,
+                }
+                for kind, subject, hint, verified in identity_rows
+            ])
         await session.commit()
+    # A fresh wallet is free to create and is therefore not sufficient proof for
+    # promotional value. Google verification is the current strong-identity gate.
+    if oauth_sub and oauth_kind == "google":
+        try:
+            from . import promotions
+
+            await promotions.ensure_builtin_campaign()
+            await promotions.grant_once(account_id)
+        except Exception:
+            logger.warning("Welcome grant failed for account %s", account_id, exc_info=True)
     logger.info(f"Account created: {account_id} (wallet={wallet or '-'})")
-    return {"id": str(account_id), "username": username, "wallet": wallet}, plain
+    return {"id": str(account_id), "username": username, "wallet": wallet}, (
+        plain if issue_initial_key else None
+    )
 
 
-async def issue_key(account_id, label: str = "", is_session: bool = False) -> str:
+async def issue_key(account_id, label: str = "", is_session: bool = False,
+                    scopes: list[str] | None = None) -> str:
     """Issue an additional API key for an account; returns plaintext once.
 
     is_session defaults False: keys minted here (via /v1/account/keys) are
@@ -215,6 +322,7 @@ async def issue_key(account_id, label: str = "", is_session: bool = False) -> st
     wallet-login / dashboard-login paths pass is_session=True.
     """
     plain = generate_api_key()
+    effective_scopes = list(scopes or (SESSION_SCOPES if is_session else INFERENCE_SCOPES))
     async with await new_session() as session:
         await session.execute(
             sa.insert(api_keys_table).values(
@@ -222,6 +330,7 @@ async def issue_key(account_id, label: str = "", is_session: bool = False) -> st
                 account_id=account_id,
                 label=label or None,
                 is_session=is_session,
+                scopes=effective_scopes,
                 created=datetime.now(timezone.utc),
                 revoked=False,
             )
@@ -231,7 +340,17 @@ async def issue_key(account_id, label: str = "", is_session: bool = False) -> st
 
 
 async def get_account_by_wallet(wallet: str) -> dict | None:
+    from .identities import resolve_identity
+
+    identity_owner = await resolve_identity("wallet", wallet)
     async with await new_session() as session:
+        if identity_owner:
+            row = (
+                await session.execute(
+                    sa.select(accounts_table).where(accounts_table.c.id == identity_owner)
+                )
+            ).mappings().first()
+            return dict(row) if row else None
         row = (
             await session.execute(
                 sa.select(accounts_table).where(accounts_table.c.wallet == wallet.lower())

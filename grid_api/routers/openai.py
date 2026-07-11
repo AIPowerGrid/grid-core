@@ -124,11 +124,12 @@ async def chat_completions(
     body: ChatCompletionRequest,
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
+    x_grid_user_assertion: Optional[str] = Header(None),
 ):
     """OpenAI-compatible chat completions with real streaming."""
     try:
         key = extract_api_key(apikey, authorization)
-        return await _handle_chat_completions(body, key)
+        return await _handle_chat_completions(body, key, x_grid_user_assertion)
     except HTTPException:
         raise
     except Exception as e:
@@ -283,9 +284,12 @@ def _assert_request_size(messages: list) -> None:
                             detail=f"request too large ({total} chars; max {MAX_REQUEST_CHARS})")
 
 
-async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str):
+async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str,
+                                   user_assertion: str | None = None):
     # Auth — v2 account keys first, legacy Haidra keys as fallback.
-    user = await accounts_svc.authenticate(apikey)
+    user = await accounts_svc.authenticate(
+        apikey, user_assertion, required_scope="inference.submit",
+    )
     _assert_request_size(request.messages)
 
     # Media abstraction: if the requested model is an image/video model, run a

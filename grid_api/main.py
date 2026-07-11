@@ -57,11 +57,13 @@ async def _reservation_sweeper():
     RESERVATION_SWEEP_SECONDS / RESERVATION_STALE_SECONDS."""
     import os
     from .services.credits import sweep_stale_reservations
+    from .services.promotions import sweep_stale_spends
     interval = int(os.getenv("RESERVATION_SWEEP_SECONDS", "300") or 300)
     stale = int(os.getenv("RESERVATION_STALE_SECONDS", "3600") or 3600)
     while True:
         try:
             await sweep_stale_reservations(older_than_seconds=stale)
+            await sweep_stale_spends(older_than_seconds=stale)
         except Exception as e:
             logger.error(f"Reservation sweeper error: {e}")
         await asyncio.sleep(interval)
