@@ -133,6 +133,7 @@ async def test_merge_conserves_purchased_credit_and_retires_source_access(db):
 
     assert result["status"] == "merged"
     assert await identities.canonical_account_id(source) == destination
+    assert await identities.account_family_ids(destination) == {destination, source}
     async with await database.new_session() as session:
         balances = dict((await session.execute(
             sa.select(credits.c.account_id, credits.c.balance_micro)
@@ -212,6 +213,23 @@ async def test_alias_cycles_fail_closed(db):
 
     with pytest.raises(RuntimeError, match="cycle"):
         await identities.canonical_account_id(first)
+
+
+@pytest.mark.asyncio
+async def test_account_family_follows_nested_merge_aliases(db):
+    first = await _account()
+    second = await _account()
+    canonical = await _account()
+    async with await database.new_session() as session:
+        await session.execute(sa.insert(account_aliases), [
+            {"source_account_id": first, "canonical_account_id": second,
+             "merge_ref": "nested:first", "reason": "test"},
+            {"source_account_id": second, "canonical_account_id": canonical,
+             "merge_ref": "nested:second", "reason": "test"},
+        ])
+        await session.commit()
+
+    assert await identities.account_family_ids(first) == {first, second, canonical}
 
 
 @pytest.mark.asyncio

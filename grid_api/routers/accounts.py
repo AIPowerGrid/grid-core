@@ -619,6 +619,22 @@ async def get_account_jobs(
 
     lt = ledger_table
     async with await new_session() as session:
+        family = await identities_svc.account_family_ids(
+            user["account_id"], session=session,
+        )
+        account_rows = (await session.execute(
+            sa.select(accounts_table.c.wallet, accounts_table.c.payout_wallet)
+            .where(accounts_table.c.id.in_(family))
+        )).all()
+        wallets = {
+            value.lower()
+            for row in account_rows
+            for value in row
+            if value
+        }
+        if not wallets:
+            return {"payout_wallet": wallet, "jobs": [],
+                    "note": "set a payout wallet to attribute + settle your worker jobs"}
         rows = (
             await session.execute(
                 sa.select(
@@ -626,7 +642,7 @@ async def get_account_jobs(
                     lt.c.den, lt.c.output_units, lt.c.duration, lt.c.ttft,
                     lt.c.result_hash, lt.c.worker_sig, lt.c.epoch_id, lt.c.created,
                 )
-                .where(lt.c.wallet == wallet)
+                .where(sa.func.lower(lt.c.wallet).in_(wallets))
                 .order_by(lt.c.created.desc())
                 .limit(limit)
             )
@@ -744,6 +760,9 @@ async def get_account_payouts(
     user = await _require_v2(apikey, authorization)
     _PAID = ("sent", "confirmed")
     async with await new_session() as session:
+        family = await identities_svc.account_family_ids(
+            user["account_id"], session=session,
+        )
         # Aggregates over ALL periods, bucketed by status (accurate beyond the
         # row cap below).
         agg = (
@@ -754,7 +773,7 @@ async def get_account_payouts(
                     sa.func.coalesce(sa.func.sum(payouts_table.c.den), 0).label("den"),
                     sa.func.count().label("n"),
                 )
-                .where(payouts_table.c.account_id == user["account_id"])
+                .where(payouts_table.c.account_id.in_(family))
                 .group_by(payouts_table.c.status)
             )
         ).mappings().all()
@@ -770,7 +789,7 @@ async def get_account_payouts(
                     payouts_table.c.created,
                     payouts_table.c.paid,
                 )
-                .where(payouts_table.c.account_id == user["account_id"])
+                .where(payouts_table.c.account_id.in_(family))
                 .order_by(payouts_table.c.created.desc())
                 .limit(200)
             )

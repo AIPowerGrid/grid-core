@@ -78,6 +78,32 @@ async def canonical_account_id(account_id, *, session=None) -> UUID:
             await session.close()
 
 
+async def account_family_ids(account_id, *, session=None) -> set[UUID]:
+    """Return the canonical account and every retired alias beneath it."""
+    owns_session = session is None
+    if owns_session:
+        session = await new_session()
+    try:
+        canonical = await canonical_account_id(account_id, session=session)
+        family = {canonical}
+        frontier = {canonical}
+        for _ in range(16):
+            rows = (await session.execute(
+                sa.select(account_aliases.c.source_account_id).where(
+                    account_aliases.c.canonical_account_id.in_(frontier)
+                )
+            )).scalars().all()
+            discovered = {_uuid(row) for row in rows} - family
+            if not discovered:
+                return family
+            family.update(discovered)
+            frontier = discovered
+        raise RuntimeError("account alias family exceeds safety limit")
+    finally:
+        if owns_session:
+            await session.close()
+
+
 async def resolve_identity(kind: str, subject: str) -> UUID | None:
     digest = subject_hash(kind, subject)
     async with await new_session() as session:
