@@ -67,6 +67,20 @@ async def test_wallet_only_holder_gets_holder_bonus(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_media_account_id_resolves_wallet_for_holder_bonus(monkeypatch):
+    monkeypatch.setattr(free_credits, "FREE_ENABLED", True)
+    monkeypatch.setattr(free_credits, "FREE_HOLDER_MIN_AIPG", 100_000)
+    monkeypatch.setattr(free_credits, "FREE_HOLDER_BONUS_MICRO", 200_000)
+    monkeypatch.setattr(free_credits, "_has_verified_google", _async(False))
+    monkeypatch.setattr(free_credits, "_wallet_for_account", _async("0xabc"))
+    monkeypatch.setattr(
+        holdings, "aipg_balance_raw",
+        _async(100_000 * 10 ** holdings.AIPG_DECIMALS),
+    )
+    assert await free_credits.daily_cap_micro("wallet-account", None) == 200_000
+
+
+@pytest.mark.asyncio
 async def test_daily_cap_disabled_is_zero(monkeypatch):
     monkeypatch.setattr(free_credits, "FREE_ENABLED", False)
     assert await free_credits.daily_cap_micro(None, None) == 0
