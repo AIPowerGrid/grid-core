@@ -199,6 +199,8 @@ async def authenticate(plain_key: str, user_assertion: str | None = None,
     asserted_user = await _account_auth(account_id)
     asserted_user["bridge_account_id"] = user.get("account_id")
     asserted_user["asserted_provider"] = provider
+    if required_scope and required_scope not in set(asserted_user.get("scopes") or []):
+        raise HTTPException(status_code=403, detail=f"Asserted user lacks {required_scope} scope")
     return asserted_user
 
 

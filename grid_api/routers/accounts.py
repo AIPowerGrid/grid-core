@@ -264,6 +264,63 @@ async def link_wallet(
     return {**result, "wallet": recovered}
 
 
+@router.post("/v1/account/identities/wallet/link/asserted")
+@limiter.limit("10/minute")
+async def link_wallet_from_assertion(
+    request: Request,
+    form: WalletLinkForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+    x_grid_user_assertion: Optional[str] = Header(None),
+):
+    """Link a wallet to a bridge-asserted Google account with proof of both."""
+    if not x_grid_user_assertion:
+        raise HTTPException(401, detail="Google user assertion required")
+    user = await accounts_svc.authenticate(
+        extract_api_key(apikey, authorization), x_grid_user_assertion,
+    )
+    if user.get("asserted_provider") != "google":
+        raise HTTPException(403, detail="Wallet linking requires an asserted Google identity")
+    try:
+        from eth_account import Account
+        from eth_account.messages import encode_defunct
+    except ImportError:
+        raise HTTPException(501, detail="Wallet auth unavailable (eth-account not installed)")
+
+    match = re.fullmatch(
+        r"Link wallet to AIPG Grid identity\n\nNonce: ([0-9a-fA-F]+)",
+        form.message,
+    )
+    if not match or not await _nonce_consume(match.group(1)):
+        raise HTTPException(401, detail="Invalid or expired wallet-link nonce")
+    try:
+        recovered = Account.recover_message(
+            encode_defunct(text=form.message), signature=form.signature,
+        ).lower()
+    except Exception:
+        raise HTTPException(401, detail="Signature verification failed")
+    if recovered != form.address.lower() or not accounts_svc.is_valid_eth_address(recovered):
+        raise HTTPException(401, detail="Signature does not match a valid wallet")
+
+    owner = await identities_svc.resolve_identity("wallet", recovered)
+    destination = user["account_id"]
+    nonce = match.group(1)
+    if owner and str(owner) != str(destination):
+        try:
+            result = await identities_svc.merge_accounts(
+                destination, owner, reason="asserted_wallet_link",
+                merge_ref=f"asserted-wallet-link:{nonce}",
+            )
+        except ValueError as exc:
+            raise HTTPException(409, detail=str(exc))
+    else:
+        result = await identities_svc.attach_identity(
+            destination, "wallet", recovered, display_hint=recovered,
+            ref=f"asserted-wallet-link:{nonce}",
+        )
+    return {**result, "wallet": recovered}
+
+
 @router.post("/v1/accounts")
 async def create_account(
     form: CreateAccountForm,
@@ -300,10 +357,10 @@ async def create_identity_bridge(
         raise HTTPException(400, detail="Bridge label must be 1..80 characters")
     acct, key = await accounts_svc.create_account(
         username=f"{clean} identity bridge", key_label=f"bridge:{clean}",
-        is_session=False, scopes=["inference.submit", "identity.assert"],
+        is_session=False, scopes=["account.read", "inference.submit", "identity.assert"],
     )
     return {"account_id": acct["id"], "api_key": key, "scopes": [
-        "inference.submit", "identity.assert",
+        "account.read", "inference.submit", "identity.assert",
     ]}
 
 
@@ -389,8 +446,12 @@ async def account_session(
 # ── Self-service (any active key on the account) ──
 
 
-async def _require_v2(apikey: Optional[str], authorization: Optional[str]) -> dict:
-    user = await accounts_svc.authenticate(extract_api_key(apikey, authorization))
+async def _require_v2(apikey: Optional[str], authorization: Optional[str],
+                      user_assertion: Optional[str] = None) -> dict:
+    user = await accounts_svc.authenticate(
+        extract_api_key(apikey, authorization), user_assertion,
+        required_scope="account.read",
+    )
     if user["source"] != "v2":
         raise HTTPException(
             403, detail="Key management requires a v2 account key (legacy keys are read-only)."
@@ -789,6 +850,7 @@ async def claim_eth_deposit(
 async def get_credits(
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
+    x_grid_user_assertion: Optional[str] = Header(None),
 ):
     """The account's spendable credits — what the front ends show as
     'X free today' + '$Y balance' + a top-up prompt.
@@ -804,7 +866,7 @@ async def get_credits(
     true → charges draw free-first and total_spendable includes it.
     charging_enabled is the overall live gate (dark = nothing is charged).
     """
-    user = await _require_v2(apikey, authorization)
+    user = await _require_v2(apikey, authorization, x_grid_user_assertion)
     aid = user["account_id"]
     wallet = user.get("wallet") or None
     from ..services import credits as credits_svc

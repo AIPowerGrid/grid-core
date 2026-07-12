@@ -238,7 +238,8 @@ api_keys = sa.Table(
     # earnings. Not caller-settable (issue_key forces False).
     sa.Column("is_session", sa.Boolean, nullable=False, server_default=sa.text("false"), default=False),
     # Capability allowlist. Empty means the legacy role-derived defaults; new
-    # first-party bridge keys carry inference.submit + identity.assert only.
+    # first-party bridge keys carry account.read + inference.submit +
+    # identity.assert only.
     sa.Column("scopes", PortableJSON, nullable=False, server_default=sa.text("'[]'"), default=list),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
     sa.Column("last_used", sa.DateTime(timezone=True), nullable=True),

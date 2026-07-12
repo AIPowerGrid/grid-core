@@ -35,6 +35,9 @@ transport, accounts, stats, health/metrics.
   `POST /v1/account/identities/wallet/link` requires an account-management
   session plus an exact-purpose wallet signature. `POST /v1/accounts/bridges`
   bootstraps an internal least-privilege identity bridge.
+  `POST /v1/account/identities/wallet/link/asserted` accepts a one-use Google
+  bridge assertion plus an independently signed wallet nonce; both proofs are
+  required before attach/merge.
 - `stats.py` - `GET /v1/workers`, progress polling, model status, usage totals,
   model stats, wallet earnings, `GET /v1/payouts/public` (aggregate payout
   transparency), `GET /v1/jobs/recent` (PUBLIC redacted job feed: model, worker

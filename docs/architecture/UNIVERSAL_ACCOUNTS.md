@@ -43,8 +43,9 @@ sequenceDiagram
     C-->>F: Generation response and canonical usage
 ```
 
-The bridge key remains server-side and has only `inference.submit` and
-`identity.assert`. An asserted user receives inference authority, never key,
+The bridge key remains server-side and has only `account.read`,
+`inference.submit`, and `identity.assert`. An asserted user receives inference
+and self-balance read authority, never key,
 payout, worker, or account-management authority. Redis replay protection is
 fail-closed. Assertions live for at most 60 seconds and are one-use.
 
@@ -68,6 +69,12 @@ If the wallet already owns an account, Core refuses the merge while either
 account has an active value hold, revokes source keys, moves worker ownership,
 preserves accrued payout reachability, moves purchased credit with paired ledger
 entries, and records an alias plus an append-only security event.
+
+First-party frontends that do not hold user session keys use
+`POST /v1/account/identities/wallet/link/asserted`. A short-lived Google
+assertion proves the destination account and the exact message `Link wallet to
+AIPG Grid identity` plus a Core nonce proves the wallet. The same merge
+invariants apply.
 
 ## Credit policy
 
