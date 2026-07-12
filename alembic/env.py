@@ -12,10 +12,11 @@ import asyncio
 import os
 from logging.config import fileConfig
 
-from alembic import context
+import sqlalchemy as sa
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from alembic import context
 from grid_api.v2.schema import metadata as target_metadata
 
 config = context.config
@@ -45,6 +46,13 @@ def include_object(obj, name, type_, reflected, compare_to):
     return True
 
 
+def compare_type(context, inspected_column, metadata_column, inspected_type, metadata_type):
+    """Treat dialect-reflected JSON and the schema's generic JSON as equivalent."""
+    if isinstance(inspected_type, sa.JSON) and isinstance(metadata_type, sa.JSON):
+        return False
+    return None
+
+
 def run_migrations_offline() -> None:
     context.configure(
         url=get_url(),
@@ -52,6 +60,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         include_object=include_object,
+        compare_type=compare_type,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -62,6 +71,7 @@ def do_run_migrations(connection) -> None:
         connection=connection,
         target_metadata=target_metadata,
         include_object=include_object,
+        compare_type=compare_type,
     )
     with context.begin_transaction():
         context.run_migrations()

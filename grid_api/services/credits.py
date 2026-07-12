@@ -36,9 +36,11 @@ from ..v2.schema import credit_ledger as ledger_t
 from ..v2.schema import credits as credits_t
 from ..v2.schema import ledger as grid_ledger_t
 from ..v2.schema import reservations as reservations_t
+from ..v2.schema import accounts as accounts_t
 from . import free_credits
 from . import promotions
 from . import pricing
+from . import service_limits
 
 logger = logging.getLogger("grid_api.credits")
 
@@ -76,21 +78,48 @@ async def apply_holder_discount(cost_micro: int, *, wallet: str | None = None, a
     holder doesn't qualify. Never raises — a failed/timed-out balance read just
     means "no discount", never a blocked or mis-priced charge. Safe to call in
     dry-run (so the logged would_charge previews the discounted number too)."""
-    if cost_micro <= 0 or not HOLDER_DISCOUNT_ENABLED or HOLDER_DISCOUNT_BPS <= 0:
+    discount = await holder_discount_bps(wallet=wallet, account_id=account_id)
+    if cost_micro <= 0 or discount <= 0:
         return cost_micro
+    return int(cost_micro * (10_000 - discount) // 10_000)
+
+
+async def holder_discount_bps(*, wallet: str | None = None, account_id=None) -> int:
+    """Return the reservation-time discount to snapshot with the hold."""
+    if not HOLDER_DISCOUNT_ENABLED or HOLDER_DISCOUNT_BPS <= 0:
+        return 0
     try:
         if wallet is None and account_id is not None:
             wallet = await _wallet_for_account(account_id)
         if not wallet:
-            return cost_micro
+            return 0
         from . import holdings
         bal = await holdings.aipg_balance_raw(wallet)
         if bal < HOLDER_MIN_AIPG * (10 ** holdings.AIPG_DECIMALS):
-            return cost_micro
-        return int(cost_micro * (10_000 - HOLDER_DISCOUNT_BPS) // 10_000)
+            return 0
+        return max(0, min(HOLDER_DISCOUNT_BPS, 10_000))
     except Exception:
         logger.warning("holder-discount read failed; charging full price", exc_info=True)
-        return cost_micro
+        return 0
+
+
+def _snapshot_rates(model: str) -> tuple[int, int]:
+    price = pricing.get_price(model)
+    if not price:
+        return 0, 0
+    return (
+        int(round(price.input_per_mtok * pricing.MICRO)),
+        int(round(price.output_per_mtok * pricing.MICRO)),
+    )
+
+
+def _quote_snapshot(prompt_tokens: int, completion_tokens: int, input_rate: int,
+                    output_rate: int, discount_bps: int) -> int:
+    base = int(round(
+        (int(prompt_tokens or 0) * input_rate + int(completion_tokens or 0) * output_rate)
+        / pricing.MICRO
+    ))
+    return base * (10_000 - max(0, min(int(discount_bps or 0), 10_000))) // 10_000
 
 
 async def get_balance(account_id) -> int:
@@ -102,6 +131,24 @@ async def get_balance(account_id) -> int:
             )
         ).first()
         return int(row[0]) if row else 0
+
+
+async def _locked_canonical_account(s, account_id):
+    """Serialize value movement with account merges, then resolve aliases."""
+    from .identities import canonical_account_id
+
+    candidate = await canonical_account_id(account_id, session=s)
+    lock_ids = sorted({account_id, candidate}, key=str)
+    await s.execute(
+        sa.select(accounts_t.c.id)
+        .where(accounts_t.c.id.in_(lock_ids))
+        .order_by(accounts_t.c.id)
+        .with_for_update()
+    )
+    current = await canonical_account_id(account_id, session=s)
+    if current != candidate:
+        raise RuntimeError("account changed during value movement; retry")
+    return current
 
 
 async def _credit_in_session(s, account_id, amount_micro: int, reason: str, ref: str, model: str | None = None) -> None:
@@ -136,12 +183,18 @@ async def _debit_in_session(s, account_id, amount_micro: int, reason: str, ref: 
 
 async def _insert_reservation_in_session(s, job_id, account_id, model: str, reserved_micro: int,
                                           prompt_toks: int, free_micro: int = 0,
-                                          promo_micro: int = 0) -> None:
+                                          promo_micro: int = 0, input_rate: int | None = None,
+                                          output_rate: int | None = None, discount_bps: int = 0,
+                                          service_id: str | None = None) -> None:
     await s.execute(sa.insert(reservations_t).values(
         job_id=str(job_id), account_id=account_id, model=model,
         reserved_micro=int(reserved_micro or 0), free_micro=int(free_micro or 0),
         promo_micro=int(promo_micro or 0),
         prompt_toks=int(prompt_toks or 0),
+        input_per_mtok_micro=input_rate,
+        output_per_mtok_micro=output_rate,
+        discount_bps=int(discount_bps or 0),
+        service_id=service_id,
         status="held", created=_now(),
     ))
 
@@ -217,6 +270,7 @@ async def credit(account_id, amount_micro: int, reason: str, ref: str | None = N
         # hard lock; this is the code-level shield.)
         raise ValueError("credit() requires a non-null ref")
     async with await new_session() as s:
+        account_id = await _locked_canonical_account(s, account_id)
         try:
             await _credit_in_session(s, account_id, amount_micro, reason, ref, model)
         except IntegrityError:
@@ -233,6 +287,7 @@ async def debit(account_id, amount_micro: int, reason: str, ref: str | None = No
     if not ref:
         raise ValueError("debit() requires a non-null ref")
     async with await new_session() as s:
+        account_id = await _locked_canonical_account(s, account_id)
         try:
             status = await _debit_in_session(s, account_id, amount_micro, reason, ref, model)
         except IntegrityError:
@@ -332,14 +387,21 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
     if not pricing.is_priced(model):
         return {"ok": False, "reserved": 0, "status": "unpriced",
                 "reason": f"model '{model}' is not available for billing"}
-    cost = pricing.quote_text(model, int(prompt_tokens or 0), int(max_tokens or 0))
+    input_rate, output_rate = _snapshot_rates(model)
+    discount_bps = await holder_discount_bps(
+        wallet=user.get("wallet"), account_id=_account_id(user),
+    )
+    cost = _quote_snapshot(prompt_tokens, max_tokens, input_rate, output_rate, discount_bps)
     if cost <= 0:
         return {"ok": True, "reserved": 0, "status": "free"}
     aid = _account_id(user)
     if not aid:
         return {"ok": False, "reserved": 0, "status": "no_account",
                 "reason": "billing requires a v2 account key"}
-    cost = await apply_holder_discount(cost, wallet=user.get("wallet"), account_id=aid)
+    service_ok, service_reason = await service_limits.authorize(user, cost, str(job_id))
+    if not service_ok:
+        return {"ok": False, "reserved": 0, "status": "service_limit",
+                "reason": service_reason}
     # PROMO → DAILY FREE → PAID. Idempotent on job_id — a retry sees the same split. The free
     # consume is a Redis op outside the SQL txn: every failure path below releases
     # it, so the worst crash case forfeits part of ONE day's free allowance
@@ -373,7 +435,10 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
                         "reason": "insufficient credits"}
             try:
                 await _insert_reservation_in_session(s, job_id, aid, model, cost, prompt_tokens,
-                                                     free_micro=from_free, promo_micro=from_promo)
+                                                     free_micro=from_free, promo_micro=from_promo,
+                                                     input_rate=input_rate, output_rate=output_rate,
+                                                     discount_bps=discount_bps,
+                                                     service_id=user.get("service_id"))
             except IntegrityError:
                 await s.rollback()
                 reserved = await _reservation_reserved_micro(job_id)
@@ -442,7 +507,7 @@ async def reconcile(user: dict, model: str, prompt_tokens: int, completion_token
 
 
 async def authorize_media(account_id, model: str, job_type: str, n: int, seconds, job_id,
-                          *, record_reservation: bool = False) -> dict:
+                          *, record_reservation: bool = False, user: dict | None = None) -> dict:
     """Pre-dispatch billing gate for media (image/video). Unlike text, media cost
     is deterministic from the request (n images / video seconds), so we reserve
     the EXACT cost up front; on success it stands (settle_exact), on failure it's
@@ -459,6 +524,8 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                 "reason": f"model '{model}' is not available for billing"}
     if job_type == "video":
         cost = pricing.quote_video(model, float(seconds or 0))
+    elif job_type == "3d":
+        cost = pricing.quote_3d(model, int(n or 1))
     else:
         cost = pricing.quote_image(model, int(n or 1))
     if cost <= 0:
@@ -467,6 +534,12 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
         return {"ok": False, "reserved": 0, "status": "no_account",
                 "reason": "billing requires a v2 account"}
     cost = await apply_holder_discount(cost, account_id=account_id)
+    service_ok, service_reason = await service_limits.authorize(
+        user or {"account_id": account_id}, cost, str(job_id),
+    )
+    if not service_ok:
+        return {"ok": False, "reserved": 0, "status": "service_limit",
+                "reason": service_reason}
     # PROMO → DAILY FREE → PAID (same contract as authorize_request).
     ref = str(job_id)
     from_promo = await _promo_first(account_id, cost, ref)
@@ -497,7 +570,8 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                 return {"ok": False, "reserved": 0, "status": "insufficient", "reason": "insufficient credits"}
             try:
                 await _insert_reservation_in_session(s, job_id, account_id, model, cost, 0,
-                                                     free_micro=from_free, promo_micro=from_promo)
+                                                     free_micro=from_free, promo_micro=from_promo,
+                                                     service_id=(user or {}).get("service_id"))
             except IntegrityError:
                 await s.rollback()
                 reserved = await _reservation_reserved_micro(job_id)
@@ -597,7 +671,10 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
             row = (await s.execute(
                 sa.select(reservations_t.c.account_id, reservations_t.c.model,
                           reservations_t.c.reserved_micro, reservations_t.c.prompt_toks,
-                          reservations_t.c.free_micro, reservations_t.c.promo_micro)
+                          reservations_t.c.free_micro, reservations_t.c.promo_micro,
+                          reservations_t.c.input_per_mtok_micro,
+                          reservations_t.c.output_per_mtok_micro,
+                          reservations_t.c.discount_bps)
                 .where(reservations_t.c.job_id == str(job_id))
             )).first()
             if not row:
@@ -644,7 +721,12 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
                     if promo_held > 0:
                         promo_restore = (aid, 0)
                 else:
-                    actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
+                    if row[6] is not None and row[7] is not None:
+                        actual = _quote_snapshot(
+                            prompt_toks, completion_tokens, int(row[6]), int(row[7]), int(row[8] or 0),
+                        )
+                    else:
+                        actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
                     # Attribute consumption promo → daily free → paid, matching reserve.
                     promo_spent = min(promo_held, actual)
                     after_promo = actual - promo_spent
@@ -738,7 +820,10 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
             row = (await s.execute(
                 sa.select(reservations_t.c.account_id, reservations_t.c.model,
                           reservations_t.c.reserved_micro, reservations_t.c.prompt_toks,
-                          reservations_t.c.free_micro, reservations_t.c.promo_micro)
+                          reservations_t.c.free_micro, reservations_t.c.promo_micro,
+                          reservations_t.c.input_per_mtok_micro,
+                          reservations_t.c.output_per_mtok_micro,
+                          reservations_t.c.discount_bps)
                 .where(reservations_t.c.job_id == job_id)
             )).first()
             if not row:
@@ -770,11 +855,13 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
             free_restore = None  # (keep_micro) — Redis, applied after commit
             promo_restore = None
             if CHARGING_ENABLED and aid and reserved > 0 and not exact:
-                actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
-                # The reservation was held at the discounted rate; settle at the
-                # same rate so the refund/extra math is consistent (else a holder
-                # is over-collected against their discounted hold).
-                actual = await apply_holder_discount(actual, account_id=aid)
+                if row[6] is not None and row[7] is not None:
+                    actual = _quote_snapshot(
+                        prompt_toks, completion_tokens, int(row[6]), int(row[7]), int(row[8] or 0),
+                    )
+                else:
+                    # Compatibility for reservations opened before migration 0015.
+                    actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
                 # Three pockets, never converted: promo → daily free → paid
                 # (matching the draw); the paid refund/extra moves in THIS txn,
                 # the free restore follows the commit (crash between = free-day

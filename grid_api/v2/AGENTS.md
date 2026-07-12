@@ -6,7 +6,8 @@ SQLAlchemy metadata for Grid-owned v2 tables: accounts, API keys, workers, jobs,
 completion ledger, prepaid credits, credit ledger, reservations, canonical
 identities/account aliases, promotional campaigns/grants, settlement
 epochs, per-asset revenue pots (`grid_revenue`), multi-asset payout legs
-(`grid_payout_legs`), and validator assignments/attestation evidence rows.
+(`grid_payout_legs`), validator assignments/attestation evidence rows, and
+bounded service clients plus their delegation audit events.
 
 ## Ownership
 
@@ -33,6 +34,8 @@ epochs, per-asset revenue pots (`grid_revenue`), multi-asset payout legs
 - `grid_reservations.promo_micro` and `grid_promo_spends` preserve the durable
   promotional allocation. Campaign grants are unique per canonical account and
   globally budgeted.
+- Reservation-time text rates and discount basis points are immutable billing
+  evidence; settlement must not use a newer price book for an existing hold.
 - `grid_account_identities` is authoritative for login identities; legacy
   wallet/email/oauth columns are compatibility primaries. Backfilled email is
   unverified and cannot authenticate. Aliases retire merged accounts without

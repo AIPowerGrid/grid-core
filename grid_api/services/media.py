@@ -301,7 +301,8 @@ async def _inflight_release(account_id) -> None:
 
 async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int,
                           account_id=None, concurrency_limit: int | None = None,
-                          preferred_worker: str = "", progress_token: str = "") -> tuple[list[dict], dict]:
+                          preferred_worker: str = "", progress_token: str = "",
+                          billing_user: dict | None = None) -> tuple[list[dict], dict]:
     """Queue a media job and block until the worker reports the result.
 
     Returns (outputs, meta): the list of output objects ({url, key, sha256,
@@ -327,7 +328,7 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
     # settler (settle_exact on success / release_job on failure) and a crash can't
     # strand the hold — the sweeper releases stale 'held' rows. No-op in dry-run.
     reserved = 0
-    if account_id is not None and credits.CHARGING_ENABLED:
+    if credits.CHARGING_ENABLED:
         n = int(payload.get("n", 1) or 1)
         seconds = (payload.get("recipe_inputs") or {}).get("seconds")
         if job_type == "video" and not seconds:
@@ -335,7 +336,7 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
             # conservative default rather than letting it slip through free.
             seconds = DEFAULT_VIDEO_SECONDS
         auth = await credits.authorize_media(account_id, model, job_type, n, seconds, job_id,
-                                             record_reservation=True)
+                                             record_reservation=True, user=billing_user)
         if not auth["ok"]:
             raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
         reserved = auth["reserved"]

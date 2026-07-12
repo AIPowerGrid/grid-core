@@ -3,15 +3,10 @@
 
 """Account + API key management (v2).
 
-Three ways in:
-
-1. Wallet (SIWE) — fully self-serve, the web3-native path. Sign a nonce,
-   get an account + API key. Same flow as aipg.chat and the art gallery.
-2. Dashboard-created (email/OAuth) — the dashboard authenticates itself with
-   X-Internal-Token (GRID_INTERNAL_TOKEN) and creates accounts on behalf of
-   users it verified. Disabled when the env var is unset.
-3. Legacy Haidra keys — still resolve everywhere (services/accounts.py
-   fallback) until the horde is decommissioned.
+Current entry points are Core-verified Google OIDC, Core-verified wallet
+signatures, and app-local subjects delegated by bounded service accounts. They
+receive short-lived Core tokens. Legacy internal sessions and Haidra keys remain
+behind explicit transition flags only.
 
 Key management (list/issue/revoke) authenticates with any active key on the
 account. Plaintext keys are returned exactly once and never stored.
@@ -20,13 +15,13 @@ account. Plaintext keys are returned exactly once and never stored.
 import logging
 import os
 import re
-import time
 import uuid as uuid_mod
 from typing import Optional
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Header, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 
 from ..auth import extract_api_key
 from ..database import new_session
@@ -34,10 +29,11 @@ from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
 from ..services import economics
 from ..services import identities as identities_svc
+from ..v2.schema import accounts as accounts_table
 from ..v2.schema import api_keys as api_keys_table
+from ..v2.schema import ledger as ledger_table
 from ..v2.schema import payouts as payouts_table
 from ..v2.schema import workers as workers_table
-from ..v2.schema import ledger as ledger_table
 
 logger = logging.getLogger("grid_api.accounts_api")
 
@@ -52,6 +48,7 @@ _NONCE_PREFIX = "grid:siwe_nonce:"
 
 async def _nonce_issue() -> str:
     from ..redis_client import get_redis
+
     nonce = uuid_mod.uuid4().hex
     await get_redis().set(f"{_NONCE_PREFIX}{nonce}", "1", ex=_NONCE_TTL)
     return nonce
@@ -62,6 +59,7 @@ async def _nonce_consume(nonce: str) -> bool:
     if not nonce:
         return False
     from ..redis_client import get_redis
+
     r = get_redis()
     key = f"{_NONCE_PREFIX}{nonce}"
     # GETDEL is atomic single-use; use one Lua operation on older Redis.
@@ -69,9 +67,9 @@ async def _nonce_consume(nonce: str) -> bool:
         val = await r.getdel(key)
     except Exception:
         val = await r.eval(
-            "local v=redis.call('GET',KEYS[1]); "
-            "if v then redis.call('DEL',KEYS[1]) end; return v",
-            1, key,
+            "local v=redis.call('GET',KEYS[1]); if v then redis.call('DEL',KEYS[1]) end; return v",
+            1,
+            key,
         )
     return bool(val)
 
@@ -130,6 +128,25 @@ class IssueKeyForm(BaseModel):
 
 class CreateBridgeForm(BaseModel):
     label: str
+    service_id: Optional[str] = None
+    allowed_providers: list[str] = Field(default_factory=lambda: ["app"])
+    google_audiences: list[str] = Field(default_factory=list)
+    per_request_micro: Optional[int] = None
+    daily_micro: Optional[int] = None
+
+
+class ServiceExchangeForm(BaseModel):
+    subject: str
+
+
+class GoogleExchangeForm(BaseModel):
+    id_token: str
+    app_subject: Optional[str] = None
+
+
+class BindServiceIdentityForm(BaseModel):
+    subject: str
+    user_token: str
 
 
 class ClaimDepositForm(BaseModel):
@@ -145,12 +162,7 @@ async def wallet_nonce(request: Request):
 @router.post("/v1/accounts/wallet/verify")
 @limiter.limit("10/minute")
 async def wallet_verify(request: Request, form: WalletVerifyForm):
-    """Verify a SIWE signature; create the account if new; issue an API key.
-
-    The recovered signer is the identity — the claimed address is only
-    cross-checked. Each successful verify issues a fresh key (label
-    "wallet-login"); manage/revoke via /v1/account/keys.
-    """
+    """Verify a wallet signature and issue a short-lived Core user token."""
     try:
         from eth_account import Account
         from eth_account.messages import encode_defunct
@@ -174,7 +186,8 @@ async def wallet_verify(request: Request, form: WalletVerifyForm):
 
     try:
         recovered = Account.recover_message(
-            encode_defunct(text=form.message), signature=form.signature
+            encode_defunct(text=form.message),
+            signature=form.signature,
         )
     except Exception:
         raise HTTPException(401, detail="Signature verification failed.")
@@ -184,26 +197,39 @@ async def wallet_verify(request: Request, form: WalletVerifyForm):
     wallet = recovered.lower()
     account = await accounts_svc.get_account_by_wallet(wallet)
     if account:
-        key = await accounts_svc.issue_key(account["id"], label="wallet-login", is_session=True)
-        return {
-            "account_id": str(account["id"]),
-            "wallet": wallet,
-            "username": account.get("username"),
-            "api_key": key,
-            "created": False,
-        }
+        acct, created = account, False
+    else:
+        acct, _ = await accounts_svc.create_account(
+            username=form.username or f"{wallet[:6]}…{wallet[-4:]}",
+            wallet=wallet,
+            issue_initial_key=False,
+        )
+        created = True
 
-    acct, key = await accounts_svc.create_account(
-        username=form.username or f"{wallet[:6]}…{wallet[-4:]}",
-        wallet=wallet,
-        key_label="wallet-login",
+    from ..services import user_tokens
+
+    token = user_tokens.issue(
+        acct["id"],
+        audience="direct",
+        scopes=accounts_svc.SESSION_SCOPES,
+        auth_method="siwe",
     )
+    legacy_key = None
+    if os.getenv("GRID_LEGACY_SESSION_KEYS_ENABLED", "0").lower() in {"1", "true", "yes", "on"}:
+        legacy_key = await accounts_svc.issue_key(
+            acct["id"],
+            label="wallet-login",
+            is_session=True,
+        )
     return {
-        "account_id": acct["id"],
+        "account_id": str(acct["id"]),
         "wallet": wallet,
-        "username": acct["username"],
-        "api_key": key,
-        "created": True,
+        "username": acct.get("username"),
+        "access_token": token,
+        "token_type": "Bearer",
+        "expires_in": 900,
+        "api_key": legacy_key,
+        "created": created,
     }
 
 
@@ -239,7 +265,8 @@ async def link_wallet(
         raise HTTPException(401, detail="Invalid or expired nonce. Please retry.")
     try:
         recovered = Account.recover_message(
-            encode_defunct(text=form.message), signature=form.signature,
+            encode_defunct(text=form.message),
+            signature=form.signature,
         ).lower()
     except Exception:
         raise HTTPException(401, detail="Signature verification failed")
@@ -251,14 +278,19 @@ async def link_wallet(
     if owner and str(owner) != str(destination):
         try:
             result = await identities_svc.merge_accounts(
-                destination, owner, reason="wallet_link",
+                destination,
+                owner,
+                reason="wallet_link",
                 merge_ref=f"wallet-link:{nonce}",
             )
         except ValueError as exc:
             raise HTTPException(409, detail=str(exc))
     else:
         result = await identities_svc.attach_identity(
-            destination, "wallet", recovered, display_hint=recovered,
+            destination,
+            "wallet",
+            recovered,
+            display_hint=recovered,
             ref=f"wallet-link:{nonce}",
         )
     return {**result, "wallet": recovered}
@@ -272,15 +304,21 @@ async def link_wallet_from_assertion(
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
     x_grid_user_assertion: Optional[str] = Header(None),
+    x_grid_user_token: Optional[str] = Header(None),
 ):
-    """Link a wallet to a bridge-asserted Google account with proof of both."""
-    if not x_grid_user_assertion:
-        raise HTTPException(401, detail="Google user assertion required")
+    """Link a wallet to a delegated user account with proof of both."""
+    if not (x_grid_user_assertion or x_grid_user_token):
+        raise HTTPException(401, detail="Delegated Grid user token required")
     user = await accounts_svc.authenticate(
-        extract_api_key(apikey, authorization), x_grid_user_assertion,
+        extract_api_key(apikey, authorization),
+        x_grid_user_assertion,
+        user_token=x_grid_user_token,
     )
-    if user.get("asserted_provider") != "google":
-        raise HTTPException(403, detail="Wallet linking requires an asserted Google identity")
+    if user.get("key_kind") not in {"delegated_user", "user_token"}:
+        raise HTTPException(403, detail="Wallet linking requires a native Grid user token")
+    from ..services import user_tokens
+
+    user_tokens.require_recent_step_up(user.get("token_claims") or {})
     try:
         from eth_account import Account
         from eth_account.messages import encode_defunct
@@ -295,7 +333,8 @@ async def link_wallet_from_assertion(
         raise HTTPException(401, detail="Invalid or expired wallet-link nonce")
     try:
         recovered = Account.recover_message(
-            encode_defunct(text=form.message), signature=form.signature,
+            encode_defunct(text=form.message),
+            signature=form.signature,
         ).lower()
     except Exception:
         raise HTTPException(401, detail="Signature verification failed")
@@ -308,14 +347,19 @@ async def link_wallet_from_assertion(
     if owner and str(owner) != str(destination):
         try:
             result = await identities_svc.merge_accounts(
-                destination, owner, reason="asserted_wallet_link",
+                destination,
+                owner,
+                reason="asserted_wallet_link",
                 merge_ref=f"asserted-wallet-link:{nonce}",
             )
         except ValueError as exc:
             raise HTTPException(409, detail=str(exc))
     else:
         result = await identities_svc.attach_identity(
-            destination, "wallet", recovered, display_hint=recovered,
+            destination,
+            "wallet",
+            recovered,
+            display_hint=recovered,
             ref=f"asserted-wallet-link:{nonce}",
         )
     return {**result, "wallet": recovered}
@@ -331,6 +375,13 @@ async def create_account(
     Requires GRID_INTERNAL_TOKEN; the dashboard verifies the user's email or
     OAuth identity itself and calls this with the result.
     """
+    if os.getenv("GRID_LEGACY_INTERNAL_SESSION_ENABLED", "0").lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        raise HTTPException(410, detail="Legacy internal account creation is retired")
     expected = os.getenv("GRID_INTERNAL_TOKEN", "")
     if not expected or x_internal_token != expected:
         raise HTTPException(403, detail="Account creation requires the internal token")
@@ -338,7 +389,9 @@ async def create_account(
         raise HTTPException(400, detail="Provide at least one of username/email/oauth_sub")
 
     acct, key = await accounts_svc.create_account(
-        username=form.username, email=form.email, oauth_sub=form.oauth_sub
+        username=form.username,
+        email=form.email,
+        oauth_sub=form.oauth_sub,
     )
     return {"account_id": acct["id"], "username": acct["username"], "api_key": key}
 
@@ -348,20 +401,221 @@ async def create_identity_bridge(
     form: CreateBridgeForm,
     x_internal_token: Optional[str] = Header(None),
 ):
-    """Bootstrap a least-privilege first-party bridge key, returned once."""
-    expected = os.getenv("GRID_INTERNAL_TOKEN", "")
+    """Bootstrap a bounded service account. Disable after provisioning."""
+    expected = os.getenv("GRID_SERVICE_BOOTSTRAP_TOKEN", "")
     if not expected or x_internal_token != expected:
-        raise HTTPException(403, detail="Internal token required")
+        raise HTTPException(403, detail="Service bootstrap token required")
     clean = form.label.strip()
     if not clean or len(clean) > 80:
         raise HTTPException(400, detail="Bridge label must be 1..80 characters")
-    acct, key = await accounts_svc.create_account(
-        username=f"{clean} identity bridge", key_label=f"bridge:{clean}",
-        is_session=False, scopes=["account.read", "inference.submit", "identity.assert"],
+    sid = form.service_id or re.sub(r"[^a-z0-9-]+", "-", clean.lower()).strip("-")
+    try:
+        service, key = await accounts_svc.create_service_client(
+            sid,
+            clean,
+            allowed_providers=form.allowed_providers,
+            google_audiences=form.google_audiences,
+            per_request_micro=form.per_request_micro,
+            daily_micro=form.daily_micro,
+        )
+    except (ValueError, IntegrityError) as exc:
+        raise HTTPException(409, detail=str(exc))
+    return {
+        "service_id": service["id"],
+        "account_id": str(service["account_id"]),
+        "api_key": key,
+        "scopes": ["account.read", "inference.submit", "identity.exchange", "identity.assert"],
+    }
+
+
+async def _require_service_exchange(
+    apikey: Optional[str],
+    authorization: Optional[str],
+) -> dict:
+    user = await accounts_svc.authenticate(
+        extract_api_key(apikey, authorization),
+        required_scope="identity.exchange",
     )
-    return {"account_id": acct["id"], "api_key": key, "scopes": [
-        "account.read", "inference.submit", "identity.assert",
-    ]}
+    if user.get("key_kind") != "service" or not user.get("service_id"):
+        raise HTTPException(403, detail="A service-account key is required")
+    return user
+
+
+@router.post("/v1/auth/service/exchange")
+@limiter.limit("120/minute")
+async def exchange_service_identity(
+    request: Request,
+    form: ServiceExchangeForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Exchange one service-local authenticated subject for a short user token."""
+    service = await _require_service_exchange(apikey, authorization)
+    if "app" not in set(service.get("allowed_providers") or []):
+        raise HTTPException(403, detail="This service cannot delegate app identities")
+    subject = form.subject.strip()
+    if not subject or len(subject) > 200:
+        raise HTTPException(400, detail="subject must be 1..200 characters")
+    namespaced = f"{service['service_id']}:{subject}"
+    account_id = await identities_svc.resolve_identity("app", namespaced)
+    if account_id is None:
+        try:
+            account, _ = await accounts_svc.create_account(
+                username=f"{service['service_id']} user",
+                issue_initial_key=False,
+                identity_kind="app",
+                identity_subject=namespaced,
+            )
+            account_id = account["id"]
+        except IntegrityError:
+            account_id = await identities_svc.resolve_identity("app", namespaced)
+            if account_id is None:
+                raise HTTPException(409, detail="Service identity creation conflicted")
+    from ..services import service_auth
+
+    token = service_auth.issue_user_token(
+        account_id,
+        service_id=service["service_id"],
+        auth_method="app",
+    )
+    await service_auth.record_event(
+        service["service_id"],
+        "app_exchange",
+        account_id=account_id,
+        ref=service_auth.new_event_ref("exchange", service["service_id"]),
+    )
+    return {"access_token": token, "token_type": "Bearer", "expires_in": 900, "account_id": str(account_id)}
+
+
+@router.post("/v1/auth/google/exchange")
+@limiter.limit("30/minute")
+async def exchange_google_identity(
+    request: Request,
+    form: GoogleExchangeForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Verify Google with Google, then issue a short Core account token."""
+    service = await _require_service_exchange(apikey, authorization)
+    if "google" not in set(service.get("allowed_providers") or []):
+        raise HTTPException(403, detail="This service cannot exchange Google identities")
+    from ..services import service_auth
+
+    proof = await service_auth.verify_google_id_token(
+        form.id_token,
+        service.get("google_audiences") or [],
+    )
+    account_id = await identities_svc.resolve_identity("google", proof["subject"])
+    if account_id is None:
+        try:
+            account, _ = await accounts_svc.create_account(
+                username=proof.get("name") or "Google user",
+                oauth_sub=proof["subject"],
+                email=proof.get("email") if proof.get("email_verified") else None,
+                email_verified=proof.get("email_verified", False),
+                issue_initial_key=False,
+                grant_verified_welcome=True,
+            )
+            account_id = account["id"]
+        except IntegrityError:
+            account_id = await identities_svc.resolve_identity("google", proof["subject"])
+            if account_id is None:
+                raise HTTPException(409, detail="Google identity creation conflicted")
+
+    from ..services import promotions
+
+    await promotions.ensure_builtin_campaign()
+    await promotions.grant_once(account_id)
+
+    if form.app_subject:
+        namespaced = f"{service['service_id']}:{form.app_subject.strip()}"
+        owner = await identities_svc.resolve_identity("app", namespaced)
+        if owner and str(owner) != str(account_id):
+            try:
+                await identities_svc.merge_accounts(
+                    account_id,
+                    owner,
+                    reason="google_proof",
+                    merge_ref=service_auth.new_event_ref("google-link", service["service_id"]),
+                )
+            except ValueError as exc:
+                raise HTTPException(409, detail=str(exc))
+        elif not owner:
+            linked = await identities_svc.attach_identity(
+                account_id,
+                "app",
+                namespaced,
+                display_hint=f"{service['service_id']} account",
+                ref=service_auth.new_event_ref("app-link", service["service_id"]),
+            )
+            if linked["status"] == "conflict":
+                raise HTTPException(409, detail="Application identity is already linked")
+
+    account_id = await identities_svc.canonical_account_id(account_id)
+    token = service_auth.issue_user_token(
+        account_id,
+        service_id=service["service_id"],
+        auth_method="google",
+        account_manage=True,
+    )
+    await service_auth.record_event(
+        service["service_id"],
+        "google_exchange",
+        account_id=account_id,
+        ref=service_auth.new_event_ref("exchange", service["service_id"]),
+    )
+    return {"access_token": token, "token_type": "Bearer", "expires_in": 900, "account_id": str(account_id)}
+
+
+@router.post("/v1/auth/service/bind")
+@limiter.limit("20/minute")
+async def bind_service_identity(
+    request: Request,
+    form: BindServiceIdentityForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Bind a service-local subject after fresh Core Google/SIWE proof."""
+    service = await _require_service_exchange(apikey, authorization)
+    if "app" not in set(service.get("allowed_providers") or []):
+        raise HTTPException(403, detail="This service cannot bind app identities")
+    from ..services import service_auth, user_tokens
+
+    proof = user_tokens.verify(form.user_token, audience="direct")
+    user_tokens.require_recent_step_up(proof)
+    destination = await identities_svc.canonical_account_id(proof["sub"])
+    subject = form.subject.strip()
+    if not subject or len(subject) > 200:
+        raise HTTPException(400, detail="subject must be 1..200 characters")
+    namespaced = f"{service['service_id']}:{subject}"
+    owner = await identities_svc.resolve_identity("app", namespaced)
+    if owner and str(owner) != str(destination):
+        try:
+            result = await identities_svc.merge_accounts(
+                destination,
+                owner,
+                reason="service_bind",
+                merge_ref=service_auth.new_event_ref("service-bind", service["service_id"]),
+            )
+        except ValueError as exc:
+            raise HTTPException(409, detail=str(exc))
+    elif owner:
+        result = {"status": "already", "account_id": str(destination)}
+    else:
+        result = await identities_svc.attach_identity(
+            destination,
+            "app",
+            namespaced,
+            display_hint=f"{service['service_id']} account",
+            ref=service_auth.new_event_ref("service-bind", service["service_id"]),
+        )
+    await service_auth.record_event(
+        service["service_id"],
+        "service_identity_bound",
+        account_id=destination,
+        ref=service_auth.new_event_ref("bind", service["service_id"]),
+    )
+    return result
 
 
 @router.post("/v1/accounts/session")
@@ -377,24 +631,54 @@ async def account_session(
     each login revokes the previous one, so a leaked old session key is dead
     the moment the user logs in again.
     """
+    if os.getenv("GRID_LEGACY_INTERNAL_SESSION_ENABLED", "0").lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        raise HTTPException(410, detail="Legacy internal sessions are retired; use native auth exchange")
     expected = os.getenv("GRID_INTERNAL_TOKEN", "")
     if not expected or x_internal_token != expected:
         raise HTTPException(403, detail="Internal token required")
     match = _session_match(form)
     if match is None:
-        raise HTTPException(
-            400, detail="Provide an authoritative identity: oauth_sub, wallet, or a verified email")
+        raise HTTPException(400, detail="Provide an authoritative identity: oauth_sub, wallet, or a verified email")
     match_field, match_val = match
 
-    from ..v2.schema import accounts as accounts_table
-
-    match_col = getattr(accounts_table.c, match_field)
+    if match_field == "oauth_sub":
+        identity_kind = "github" if match_val.lower().startswith("github_") else "google"
+        account_id = await identities_svc.resolve_identity(identity_kind, match_val)
+    elif match_field == "wallet":
+        account_id = await identities_svc.resolve_identity("wallet", match_val)
+    else:
+        account_id = await identities_svc.resolve_identity("email", match_val)
+        if account_id is None:
+            # A freshly verified magic-link may upgrade imported contact data.
+            async with await new_session() as session:
+                account_id = await session.scalar(
+                    sa.select(accounts_table.c.id).where(accounts_table.c.email == match_val),
+                )
+            if account_id:
+                await identities_svc.attach_identity(
+                    account_id,
+                    "email",
+                    match_val,
+                    display_hint=match_val,
+                    ref=f"legacy-email-verify:{uuid_mod.uuid4()}",
+                )
     async with await new_session() as session:
         row = (
-            await session.execute(
-                sa.select(accounts_table).where(match_col == match_val)
+            (
+                await session.execute(
+                    sa.select(accounts_table).where(accounts_table.c.id == account_id),
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+            if account_id
+            else None
+        )
 
     created = False
     if row:
@@ -408,7 +692,7 @@ async def account_session(
                     api_keys_table.c.label == "dashboard-session",
                     api_keys_table.c.revoked.is_(False),
                 )
-                .values(revoked=True)
+                .values(revoked=True),
             )
             await session.commit()
         key = await accounts_svc.issue_key(account_id, label="dashboard-session", is_session=True)
@@ -421,9 +705,11 @@ async def account_session(
         attach_email = form.email
         if attach_email:
             async with await new_session() as s2:
-                taken = (await s2.execute(
-                    sa.select(accounts_table.c.id).where(accounts_table.c.email == attach_email)
-                )).first()
+                taken = (
+                    await s2.execute(
+                        sa.select(accounts_table.c.id).where(accounts_table.c.email == attach_email),
+                    )
+                ).first()
             if taken:
                 attach_email = None  # owned elsewhere — drop it, don't merge
         acct, key = await accounts_svc.create_account(
@@ -446,15 +732,19 @@ async def account_session(
 # ── Self-service (any active key on the account) ──
 
 
-async def _require_v2(apikey: Optional[str], authorization: Optional[str],
-                      user_assertion: Optional[str] = None) -> dict:
+async def _require_v2(
+    apikey: Optional[str], authorization: Optional[str], user_assertion: Optional[str] = None, user_token: Optional[str] = None,
+) -> dict:
     user = await accounts_svc.authenticate(
-        extract_api_key(apikey, authorization), user_assertion,
+        extract_api_key(apikey, authorization),
+        user_assertion,
+        user_token=user_token,
         required_scope="account.read",
     )
     if user["source"] != "v2":
         raise HTTPException(
-            403, detail="Key management requires a v2 account key (legacy keys are read-only)."
+            403,
+            detail="Key management requires a v2 account key (legacy keys are read-only).",
         )
     return user
 
@@ -465,12 +755,23 @@ async def _require_session(apikey: Optional[str], authorization: Optional[str]) 
     but cannot redirect earnings or mint/kill keys — so a leaked inference key is
     not enough to steal payouts. Sign in with your wallet to get a session key."""
     user = await _require_v2(apikey, authorization)
-    if not user.get("is_session"):
+    if user.get("key_kind") in {"user_token", "delegated_user"}:
+        from ..services import user_tokens
+
+        if "account.manage" not in set(user.get("scopes") or []):
+            raise HTTPException(403, detail="This user token cannot manage the account")
+        user_tokens.require_recent_step_up(user.get("token_claims") or {})
+        return user
+    legacy_allowed = os.getenv("GRID_LEGACY_SESSION_KEYS_ENABLED", "0").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if not legacy_allowed or not user.get("is_session"):
         raise HTTPException(
             403,
-            detail="This action needs a wallet session. Sign in with your wallet "
-                   "(or the dashboard) — an inference API key can't change payout "
-                   "settings or manage keys.",
+            detail="This action needs a fresh Google or wallet proof; an inference or service key cannot manage the account.",
         )
     return user
 
@@ -483,16 +784,20 @@ async def get_account(
     user = await _require_v2(apikey, authorization)
     async with await new_session() as session:
         keys = (
-            await session.execute(
-                sa.select(
-                    api_keys_table.c.hash,
-                    api_keys_table.c.label,
-                    api_keys_table.c.created,
-                    api_keys_table.c.last_used,
-                    api_keys_table.c.revoked,
-                ).where(api_keys_table.c.account_id == user["account_id"])
+            (
+                await session.execute(
+                    sa.select(
+                        api_keys_table.c.hash,
+                        api_keys_table.c.label,
+                        api_keys_table.c.created,
+                        api_keys_table.c.last_used,
+                        api_keys_table.c.revoked,
+                    ).where(api_keys_table.c.account_id == user["account_id"]),
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
     linked_identities = await identities_svc.list_identities(user["account_id"])
     return {
         "account_id": str(user["account_id"]),
@@ -512,9 +817,7 @@ async def get_account(
         # defaults) + the option metadata the dashboard renders the picker from.
         "payout": {
             "asset": user.get("payout_asset") or economics.DEFAULT_PAYOUT_ASSET,
-            "aipg_bps": user.get("payout_aipg_bps")
-            if user.get("payout_aipg_bps") is not None
-            else economics.WORKER_AIPG_SHARE_BPS,
+            "aipg_bps": user.get("payout_aipg_bps") if user.get("payout_aipg_bps") is not None else economics.WORKER_AIPG_SHARE_BPS,
             "assets": list(economics.PAYOUT_ASSETS),
             "par_assets": list(economics.PAYOUT_PAR_ASSETS),
             "conversion_fee_bps": economics.PAYOUT_CONVERSION_FEE_BPS,
@@ -585,16 +888,19 @@ async def set_payout_preference(
     user = await _require_session(apikey, authorization)
     try:
         await accounts_svc.set_payout_preference(
-            user["account_id"], asset=form.asset, aipg_bps=form.aipg_bps
+            user["account_id"],
+            asset=form.asset,
+            aipg_bps=form.aipg_bps,
         )
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
     return {
-        "asset": (form.asset.upper() if form.asset
-                  else (user.get("payout_asset") or economics.DEFAULT_PAYOUT_ASSET)),
-        "aipg_bps": (form.aipg_bps if form.aipg_bps is not None
-                     else (user.get("payout_aipg_bps") if user.get("payout_aipg_bps") is not None
-                           else economics.WORKER_AIPG_SHARE_BPS)),
+        "asset": (form.asset.upper() if form.asset else (user.get("payout_asset") or economics.DEFAULT_PAYOUT_ASSET)),
+        "aipg_bps": (
+            form.aipg_bps
+            if form.aipg_bps is not None
+            else (user.get("payout_aipg_bps") if user.get("payout_aipg_bps") is not None else economics.WORKER_AIPG_SHARE_BPS)
+        ),
     }
 
 
@@ -613,40 +919,48 @@ async def get_account_jobs(
     wallet = (user.get("payout_wallet") or "").lower()
     limit = max(1, min(limit, 100))
     if not wallet:
-        return {"payout_wallet": "", "jobs": [],
-                "note": "set a payout wallet to attribute + settle your worker jobs"}
+        return {"payout_wallet": "", "jobs": [], "note": "set a payout wallet to attribute + settle your worker jobs"}
     from ..v2.schema import ledger as ledger_table
 
     lt = ledger_table
     async with await new_session() as session:
         family = await identities_svc.account_family_ids(
-            user["account_id"], session=session,
+            user["account_id"],
+            session=session,
         )
-        account_rows = (await session.execute(
-            sa.select(accounts_table.c.wallet, accounts_table.c.payout_wallet)
-            .where(accounts_table.c.id.in_(family))
-        )).all()
-        wallets = {
-            value.lower()
-            for row in account_rows
-            for value in row
-            if value
-        }
-        if not wallets:
-            return {"payout_wallet": wallet, "jobs": [],
-                    "note": "set a payout wallet to attribute + settle your worker jobs"}
-        rows = (
+        account_rows = (
             await session.execute(
-                sa.select(
-                    lt.c.job_id, lt.c.worker_id, lt.c.model, lt.c.job_type,
-                    lt.c.den, lt.c.output_units, lt.c.duration, lt.c.ttft,
-                    lt.c.result_hash, lt.c.worker_sig, lt.c.epoch_id, lt.c.created,
-                )
-                .where(sa.func.lower(lt.c.wallet).in_(wallets))
-                .order_by(lt.c.created.desc())
-                .limit(limit)
+                sa.select(accounts_table.c.wallet, accounts_table.c.payout_wallet).where(accounts_table.c.id.in_(family)),
             )
-        ).mappings().all()
+        ).all()
+        wallets = {value.lower() for row in account_rows for value in row if value}
+        if not wallets:
+            return {"payout_wallet": wallet, "jobs": [], "note": "set a payout wallet to attribute + settle your worker jobs"}
+        rows = (
+            (
+                await session.execute(
+                    sa.select(
+                        lt.c.job_id,
+                        lt.c.worker_id,
+                        lt.c.model,
+                        lt.c.job_type,
+                        lt.c.den,
+                        lt.c.output_units,
+                        lt.c.duration,
+                        lt.c.ttft,
+                        lt.c.result_hash,
+                        lt.c.worker_sig,
+                        lt.c.epoch_id,
+                        lt.c.created,
+                    )
+                    .where(sa.func.lower(lt.c.wallet).in_(wallets))
+                    .order_by(lt.c.created.desc())
+                    .limit(limit),
+                )
+            )
+            .mappings()
+            .all()
+        )
     return {
         "payout_wallet": wallet,
         "total_den": round(sum(float(r["den"] or 0) for r in rows), 3),
@@ -682,17 +996,21 @@ async def get_account_workers(
     user = await _require_v2(apikey, authorization)
     async with await new_session() as session:
         rows = (
-            await session.execute(
-                sa.select(
-                    workers_table.c.id,
-                    workers_table.c.name,
-                    workers_table.c.type,
-                    workers_table.c.models,
-                    workers_table.c.last_seen,
-                    workers_table.c.maintenance,
-                ).where(workers_table.c.account_id == user["account_id"])
+            (
+                await session.execute(
+                    sa.select(
+                        workers_table.c.id,
+                        workers_table.c.name,
+                        workers_table.c.type,
+                        workers_table.c.models,
+                        workers_table.c.last_seen,
+                        workers_table.c.maintenance,
+                    ).where(workers_table.c.account_id == user["account_id"]),
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
 
         # Authoritative den/jobs totals from the append-only ledger. The
         # den_earned / jobs_completed COLUMNS on grid_workers were never
@@ -710,7 +1028,7 @@ async def get_account_workers(
                         sa.func.count().label("jobs"),
                     )
                     .where(ledger_table.c.worker_id.in_(worker_ids))
-                    .group_by(ledger_table.c.worker_id)
+                    .group_by(ledger_table.c.worker_id),
                 )
             ).all()
             led = {row.worker_id: (float(row.den or 0.0), int(row.jobs or 0)) for row in agg}
@@ -761,39 +1079,48 @@ async def get_account_payouts(
     _PAID = ("sent", "confirmed")
     async with await new_session() as session:
         family = await identities_svc.account_family_ids(
-            user["account_id"], session=session,
+            user["account_id"],
+            session=session,
         )
         # Aggregates over ALL periods, bucketed by status (accurate beyond the
         # row cap below).
         agg = (
-            await session.execute(
-                sa.select(
-                    payouts_table.c.status,
-                    sa.func.coalesce(sa.func.sum(payouts_table.c.aipg_amount), 0).label("aipg"),
-                    sa.func.coalesce(sa.func.sum(payouts_table.c.den), 0).label("den"),
-                    sa.func.count().label("n"),
+            (
+                await session.execute(
+                    sa.select(
+                        payouts_table.c.status,
+                        sa.func.coalesce(sa.func.sum(payouts_table.c.aipg_amount), 0).label("aipg"),
+                        sa.func.coalesce(sa.func.sum(payouts_table.c.den), 0).label("den"),
+                        sa.func.count().label("n"),
+                    )
+                    .where(payouts_table.c.account_id.in_(family))
+                    .group_by(payouts_table.c.status),
                 )
-                .where(payouts_table.c.account_id.in_(family))
-                .group_by(payouts_table.c.status)
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         rows = (
-            await session.execute(
-                sa.select(
-                    payouts_table.c.period_id,
-                    payouts_table.c.den,
-                    payouts_table.c.aipg_amount,
-                    payouts_table.c.status,
-                    payouts_table.c.tx_hash,
-                    payouts_table.c.address,
-                    payouts_table.c.created,
-                    payouts_table.c.paid,
+            (
+                await session.execute(
+                    sa.select(
+                        payouts_table.c.period_id,
+                        payouts_table.c.den,
+                        payouts_table.c.aipg_amount,
+                        payouts_table.c.status,
+                        payouts_table.c.tx_hash,
+                        payouts_table.c.address,
+                        payouts_table.c.created,
+                        payouts_table.c.paid,
+                    )
+                    .where(payouts_table.c.account_id.in_(family))
+                    .order_by(payouts_table.c.created.desc())
+                    .limit(200),
                 )
-                .where(payouts_table.c.account_id.in_(family))
-                .order_by(payouts_table.c.created.desc())
-                .limit(200)
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
 
     by_status = {a["status"]: a for a in agg}
 
@@ -841,6 +1168,7 @@ async def claim_deposit(
     """
     user = await _require_v2(apikey, authorization)
     from ..services import deposits
+
     return await deposits.verify_and_credit(form.tx_hash, user)
 
 
@@ -862,6 +1190,7 @@ async def claim_eth_deposit(
     """
     user = await _require_v2(apikey, authorization)
     from ..services import deposits
+
     return await deposits.verify_and_credit_eth(form.tx_hash, user)
 
 
@@ -870,6 +1199,7 @@ async def get_credits(
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
     x_grid_user_assertion: Optional[str] = Header(None),
+    x_grid_user_token: Optional[str] = Header(None),
 ):
     """The account's spendable credits — what the front ends show as
     'X free today' + '$Y balance' + a top-up prompt.
@@ -885,12 +1215,16 @@ async def get_credits(
     true → charges draw free-first and total_spendable includes it.
     charging_enabled is the overall live gate (dark = nothing is charged).
     """
-    user = await _require_v2(apikey, authorization, x_grid_user_assertion)
+    user = await _require_v2(
+        apikey,
+        authorization,
+        x_grid_user_assertion,
+        x_grid_user_token,
+    )
     aid = user["account_id"]
     wallet = user.get("wallet") or None
     from ..services import credits as credits_svc
-    from ..services import free_credits
-    from ..services import promotions
+    from ..services import free_credits, promotions
 
     paid = await credits_svc.get_balance(aid)
     promo_left = await promotions.available_micro(aid)
@@ -962,7 +1296,7 @@ async def revoke_key(
                 api_keys_table.c.account_id == user["account_id"],
                 api_keys_table.c.hash.like(f"{key_id}%"),
             )
-            .values(revoked=True)
+            .values(revoked=True),
         )
         await session.commit()
     if result.rowcount == 0:

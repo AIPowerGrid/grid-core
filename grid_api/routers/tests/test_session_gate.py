@@ -8,6 +8,7 @@ keys. These exercise `_require_session` with a stubbed authenticate() so they
 need no Postgres."""
 
 import pytest
+import time
 from fastapi import HTTPException
 
 from grid_api.routers import accounts as acc
@@ -29,9 +30,13 @@ async def test_session_gate_rejects_inference_key(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_session_gate_allows_session_key(monkeypatch):
+async def test_session_gate_allows_recent_native_proof(monkeypatch):
     monkeypatch.setattr(acc.accounts_svc, "authenticate",
-                        _auth_returning({"source": "v2", "account_id": "a", "is_session": True}))
+                        _auth_returning({
+                            "source": "v2", "account_id": "a", "is_session": False,
+                            "key_kind": "user_token", "scopes": ["account.manage"],
+                            "token_claims": {"amr": "siwe", "auth_time": int(time.time())},
+                        }))
     user = await acc._require_session("sesskey", None)
     assert user["account_id"] == "a"
 

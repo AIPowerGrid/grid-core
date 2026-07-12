@@ -56,6 +56,7 @@ async def create_message(
     x_api_key: Optional[str] = Header(None, alias="x-api-key"),
     authorization: Optional[str] = Header(None),
     x_grid_user_assertion: Optional[str] = Header(None),
+    x_grid_user_token: Optional[str] = Header(None),
 ):
     """Anthropic-compatible messages endpoint (raw passthrough to a capable worker)."""
     try:
@@ -66,7 +67,8 @@ async def create_message(
             key = authorization.split(" ", 1)[1] if " " in authorization else authorization
         try:
             user = await accounts_svc.authenticate(
-                key or "", x_grid_user_assertion, required_scope="inference.submit",
+                key or "", x_grid_user_assertion, user_token=x_grid_user_token,
+                required_scope="inference.submit",
             )
         except HTTPException as exc:
             message = exc.detail if isinstance(exc.detail, str) else "Authentication failed"

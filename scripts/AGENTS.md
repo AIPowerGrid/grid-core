@@ -14,6 +14,10 @@ tests, and an incomplete testnet model-registry helper.
 - `deploy_model_registry.py` - incomplete Base Sepolia ModelRegistry scaffold;
   not the production Grid Diamond deployment path.
 - `run_tests.sh` - legacy test wrapper.
+- `create_service_account.py` - one-time provisioning for bounded frontend or
+  backend service principals; prints the new key exactly once.
+- `rotate_service_key.py` - atomically revokes a service's old keys and prints
+  one replacement key exactly once.
 
 ## Local Contracts
 

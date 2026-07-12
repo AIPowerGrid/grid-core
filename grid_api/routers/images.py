@@ -59,12 +59,14 @@ async def create_image(
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
     x_grid_user_assertion: Optional[str] = Header(None),
+    x_grid_user_token: Optional[str] = Header(None),
 ):
     """OpenAI-compatible image generation."""
     try:
         key = extract_api_key(apikey, authorization)
         user = await accounts_svc.authenticate(
-            key, x_grid_user_assertion, required_scope="inference.submit",
+            key, x_grid_user_assertion, user_token=x_grid_user_token,
+            required_scope="inference.submit",
         )
 
         # Worker affinity is ownership-gated: reject before doing any work if the
@@ -170,7 +172,8 @@ async def create_image(
 
         outputs, meta = await media.submit_and_wait(model, "image", payload, media.IMAGE_TIMEOUT,
                                               account_id=user.get("account_id"), concurrency_limit=media.MEDIA_CONCURRENCY,
-                                              preferred_worker=body.worker or "", progress_token=body.progress_token or "")
+                                              preferred_worker=body.worker or "", progress_token=body.progress_token or "",
+                                              billing_user=user)
 
         want_b64 = body.response_format == "b64_json"
         data = []

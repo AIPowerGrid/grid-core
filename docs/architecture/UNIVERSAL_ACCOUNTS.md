@@ -2,11 +2,11 @@
 
 ## Status
 
-The Core schema, identity services, scoped frontend assertions, wallet-link
-flow, promotional grants, and three-pocket reservation accounting are built and
-tested. They are ship-dark: promotional and daily-free value do not pay for
-inference until their independent live flags are enabled. First-party clients
-still need to migrate before the legacy internal session bridge can be retired.
+The Core schema, identity services, native short-lived user tokens, bounded
+service clients, wallet-link flow, promotional grants, and three-pocket
+reservation accounting are built and tested. They are ship-dark: promotional
+and daily-free value do not pay for inference until their independent live
+flags are enabled. The legacy internal session bridge is default-off.
 
 ## Invariants
 
@@ -30,29 +30,29 @@ still need to migrate before the legacy internal session bridge can be retired.
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant F as First-party frontend server
+    participant F as Frontend service account
     participant C as Grid Core
     participant R as Redis
-    U->>F: Sign in with Google or prove wallet
-    F->>F: Sign 45-second user assertion with bridge key
-    F->>C: API key plus X-Grid-User-Assertion
-    C->>C: Require identity.assert scope and verify signature and claims
-    C->>R: Consume issuer plus nonce with SET NX
-    C->>C: Resolve or create canonical account
+    U->>F: Sign in or use an app-local account
+    F->>C: Google ID token or namespaced app subject
+    C->>C: Verify Google, or bind subject to this service only
+    C-->>F: 15-minute scoped Core user token
+    F->>C: Service key plus X-Grid-User-Token
+    C->>C: Verify token audience, service state, scopes, and ceilings
     C->>C: Reserve against promo, daily free, then purchased credit
     C-->>F: Generation response and canonical usage
 ```
 
-The bridge key remains server-side and has only `account.read`,
-`inference.submit`, and `identity.assert`. An asserted user receives inference
-and self-balance read authority, never key,
-payout, worker, or account-management authority. Redis replay protection is
-fail-closed. Assertions live for at most 60 seconds and are one-use.
+The service key remains server-side and has only `account.read`,
+`inference.submit`, `identity.exchange`, and transitional app-only
+`identity.assert`. A delegated user receives inference and self-balance read
+authority, never key, payout, worker, or account-management authority. Native
+tokens live for 15 minutes and are audience-bound to an active service.
 
-This is a first-party transition trust model, not the decentralized identity
-end-state. Compromise of a bridge lets that frontend impersonate identities for
-inference. Keep one key per frontend, rotate independently, monitor issuer use,
-and migrate external integrators to their own user-held API keys.
+Compromise of a service can impersonate only subjects in that service's app
+namespace, not arbitrary global Google users or wallets. Per-request and daily
+ceilings cap exposure. Service-owned jobs remain supported and charge the
+service account. External integrators may instead use their own user-held keys.
 
 ## Wallet linking and merge
 
@@ -70,11 +70,10 @@ account has an active value hold, revokes source keys, moves worker ownership,
 preserves accrued payout reachability, moves purchased credit with paired ledger
 entries, and records an alias plus an append-only security event.
 
-First-party frontends that do not hold user session keys use
-`POST /v1/account/identities/wallet/link/asserted`. A short-lived Google
-assertion proves the destination account and the exact message `Link wallet to
-AIPG Grid identity` plus a Core nonce proves the wallet. The same merge
-invariants apply.
+First-party frontends use `POST /v1/account/identities/wallet/link/asserted`
+with a service key plus `X-Grid-User-Token`. A recent Core-verified Google token
+proves the destination account and the exact message `Link wallet to AIPG Grid
+identity` plus a Core nonce proves the wallet. The same merge invariants apply.
 
 Trusted applications may assert a namespaced `app` subject for an authenticated
 user who has neither Google nor wallet identity. This creates a stable canonical
@@ -109,16 +108,17 @@ alias family so linked users still see that history without rewriting evidence.
 
 ## Rollout gates
 
-1. Apply Alembic `0013` before deploying code that selects scoped-key or promo
-   columns.
+1. Apply Alembic through `0015` before deploying native-token or service-account
+   code.
 2. Create a distinct bridge key per first-party frontend and store it only in
    server-side secret storage.
-3. Migrate Art, Chat, and Console to per-request assertions and wallet linking.
+3. Provision separate bounded service accounts for Art, Chat, and Console;
+   migrate them to native tokens or app-only assertions and wallet linking.
 4. Run shadow accounting and compare Core balances with real completed jobs.
 5. Remove frontend-owned free counters only after parity.
 6. Enable promotional spending with rollback metrics and campaign-budget
    alerts.
 7. Add holder anti-recycling and a network-wide daily-free budget, then enable
    daily free spending independently.
-8. Retire `GRID_INTERNAL_TOKEN` account/session identity submission after every
-   first-party caller has migrated.
+8. Keep `GRID_LEGACY_INTERNAL_SESSION_ENABLED=0` and remove
+   `GRID_INTERNAL_TOKEN` after rollback windows close.

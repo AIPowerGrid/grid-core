@@ -218,6 +218,55 @@ promo_spends = sa.Table(
     sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
 )
 
+
+# Backend applications are durable principals with independently rotatable keys
+# and bounded delegation authority. They may pay for service-owned work directly
+# or exchange a locally authenticated app subject / provider proof for a short-
+# lived Core user token. They are never account-management sessions.
+service_clients = sa.Table(
+    "grid_service_clients",
+    metadata,
+    sa.Column("id", sa.String(64), primary_key=True),
+    sa.Column(
+        "account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    ),
+    sa.Column("name", sa.String(120), nullable=False),
+    sa.Column("allowed_providers", PortableJSON, nullable=False, default=list),
+    sa.Column("google_audiences", PortableJSON, nullable=False, default=list),
+    sa.Column("per_request_micro", sa.BigInteger, nullable=True),
+    sa.Column("daily_micro", sa.BigInteger, nullable=True),
+    sa.Column("active", sa.Boolean, nullable=False, default=True, index=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+)
+
+
+service_events = sa.Table(
+    "grid_service_events",
+    metadata,
+    sa.Column(
+        "id",
+        sa.BigInteger().with_variant(sa.Integer(), "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    ),
+    sa.Column(
+        "service_id",
+        sa.String(64),
+        sa.ForeignKey("grid_service_clients.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("account_id", sa.Uuid, nullable=True, index=True),
+    sa.Column("event_type", sa.String(40), nullable=False, index=True),
+    sa.Column("ref", sa.String(128), nullable=False, unique=True),
+    sa.Column("event_metadata", PortableJSON, nullable=False, default=dict),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+)
+
 api_keys = sa.Table(
     "grid_api_keys",
     metadata,
@@ -231,6 +280,16 @@ api_keys = sa.Table(
         index=True,
     ),
     sa.Column("label", sa.String(100), nullable=True),
+    # user = ordinary/session key; service = backend application credential.
+    # Core user access tokens are signed and short-lived, not rows in this table.
+    sa.Column("key_kind", sa.String(16), nullable=False, server_default=sa.text("'user'"), default="user"),
+    sa.Column(
+        "service_id",
+        sa.String(64),
+        sa.ForeignKey("grid_service_clients.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    ),
     # True ONLY for wallet-proven session keys (SIWE wallet-login / dashboard
     # login) and an account's initial login key — never for user-issued keys via
     # /v1/account/keys. Account-admin actions (change payout wallet, issue/revoke
@@ -243,6 +302,7 @@ api_keys = sa.Table(
     sa.Column("scopes", PortableJSON, nullable=False, server_default=sa.text("'[]'"), default=list),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
     sa.Column("last_used", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True, index=True),
     sa.Column("revoked", sa.Boolean, nullable=False, default=False),
 )
 
@@ -419,6 +479,12 @@ reservations = sa.Table(
     # allocation is recorded in grid_promo_spends under the same job ref.
     sa.Column("promo_micro", sa.BigInteger, nullable=False, server_default=sa.text("0"), default=0),
     sa.Column("prompt_toks", sa.Integer, nullable=False, default=0),
+    # Snapshot the price contract at reserve time. Settlement must never change
+    # because a deploy edits pricing.py or the holder qualification changes.
+    sa.Column("input_per_mtok_micro", sa.BigInteger, nullable=True),
+    sa.Column("output_per_mtok_micro", sa.BigInteger, nullable=True),
+    sa.Column("discount_bps", sa.Integer, nullable=False, server_default=sa.text("0"), default=0),
+    sa.Column("service_id", sa.String(64), nullable=True, index=True),
     # 'held' until a terminal state settles it; the held→settled UPDATE is the
     # exactly-once guard (only the winning UPDATE moves money).
     sa.Column("status", sa.String(16), nullable=False, default="held", index=True),

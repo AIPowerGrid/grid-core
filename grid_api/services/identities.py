@@ -222,6 +222,17 @@ async def merge_accounts(destination_account_id, source_account_id, *, reason: s
         if len(locked) != 2:
             raise ValueError("both accounts must exist")
         by_id = {_uuid(row["id"]): row for row in locked}
+        # Another merge may have completed while this call waited on the locks.
+        # Re-resolve under those locks so opposing concurrent merges cannot create
+        # A→B and B→A aliases.
+        destination = await canonical_account_id(destination, session=session)
+        source = await canonical_account_id(source, session=session)
+        if destination == source:
+            await session.rollback()
+            return {"status": "already", "account_id": str(destination)}
+        if destination not in by_id or source not in by_id:
+            await session.rollback()
+            raise ValueError("account changed during merge; retry")
         dest_row, source_row = by_id[destination], by_id[source]
 
         held_reservations = await session.scalar(

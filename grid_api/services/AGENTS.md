@@ -19,7 +19,9 @@ content sanitization, and reward settlement.
   sha256 of witnessed output or NULL, never sha256("")), `den.py` (den
   accounting), `accounts.py` (scoped keys and payout preference),
   `identities.py` (verified identities, aliases, and value-conserving merges),
-  `assertions.py` (short-lived one-use frontend assertions), `economics.py`
+  `user_tokens.py` (Core-issued short-lived sessions), `service_auth.py`
+  (bounded service clients + proof exchange), `service_limits.py` (fail-closed
+  request/day ceilings), `assertions.py` (legacy app-only assertions), `economics.py`
   (splits, payout-asset + conversion-fee knobs, `worker_share_bps`),
   `holdings.py` (cached on-chain AIPG balance + Chainlink ETH/USD),
   `deposits.py` (USDC/ETH deposit claims), `model_registry.py` (ModelVault sync).
@@ -65,6 +67,11 @@ content sanitization, and reward settlement.
 - Account merges require proof of both sides, refuse active holds, revoke source
   keys, preserve accrued payout reachability, and move purchased balance through
   paired append-only ledger entries.
+- Service keys remain long-lived backend credentials but cannot manage user
+  accounts. Global Google/SIWE proof is verified by Core; app delegation is
+  namespaced to one service and receives bounded inference authority.
+- Text reservations snapshot input/output rates and holder discount at reserve
+  time. Never reprice an in-flight job from the current price book.
 - `ledger.py` writes one completion event per job. Settlement and stats depend on
   `grid_ledger`; do not revive orphan den tables for new v2 payouts.
 - On-chain reads only via sync loops, cached; never per-request.
