@@ -88,13 +88,20 @@ preventing subject collisions across partners even when local IDs match.
 | Pocket | Default | Reset or expiry | Sybil control | Live gate |
 | --- | ---: | --- | --- | --- |
 | Daily free | $0.05/day | UTC midnight | Verified Google | `GRID_FREE_SPENDABLE_LIVE` |
-| AIPG holder allowance | $0.20/day | UTC midnight | Cached Base holding | `GRID_FREE_SPENDABLE_LIVE` |
+| AIPG holder bonus | +$0.20/day | UTC midnight | Cached Base holding | `GRID_FREE_SPENDABLE_LIVE` |
 | Welcome promotion | $0.15 once | 30 days | Verified Google plus global budget | `GRID_PROMO_SPENDABLE_LIVE` |
 | Purchased | Deposited value | None | Payment confirmation | `GRID_CHARGING_ENABLED` |
 
 Clients must gate generation on `total_spendable_micro`, not preview totals or
 frontend-owned counters. `GET /v1/account/credits` reports each pocket and its
 active state separately.
+
+The daily allowance is not ready to activate from an instantaneous token
+balance alone. A holder could move the same tokens through multiple wallets and
+collect the bonus repeatedly. Before `GRID_FREE_SPENDABLE_LIVE=1`, replace that
+check with a non-recyclable qualification such as bonded stake or a prior-epoch
+balance snapshot, and enforce a network-wide daily subsidy ceiling. Verified
+Google identity reduces casual abuse but is not, by itself, a Sybil proof.
 
 ## Rollout gates
 
@@ -105,7 +112,9 @@ active state separately.
 3. Migrate Art, Chat, and Console to per-request assertions and wallet linking.
 4. Run shadow accounting and compare Core balances with real completed jobs.
 5. Remove frontend-owned free counters only after parity.
-6. Enable promotional spending, then daily free spending, independently with
-   rollback metrics and campaign-budget alerts.
-7. Retire `GRID_INTERNAL_TOKEN` account/session identity submission after every
+6. Enable promotional spending with rollback metrics and campaign-budget
+   alerts.
+7. Add holder anti-recycling and a network-wide daily-free budget, then enable
+   daily free spending independently.
+8. Retire `GRID_INTERNAL_TOKEN` account/session identity submission after every
    first-party caller has migrated.
