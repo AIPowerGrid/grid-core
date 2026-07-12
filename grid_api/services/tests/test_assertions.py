@@ -214,3 +214,28 @@ async def test_bridge_google_and_wallet_proofs_merge_accounts(assertion_db):
     )
     assert google_owner == wallet_owner
     assert str(await accounts_router.identities_svc.canonical_account_id(wallet_account["id"])) == str(google_owner)
+
+
+@pytest.mark.asyncio
+async def test_app_assertion_creates_stable_non_google_identity(assertion_db):
+    _, bridge_key = assertion_db
+    first = assertions.sign(
+        bridge_key, provider="app", subject="aipg-chat:user-123",
+    )
+    user = await accounts.authenticate(
+        bridge_key, first, required_scope="inference.submit",
+    )
+    bridge, _ = assertion_db
+    owner = await accounts_router.identities_svc.resolve_identity(
+        "app", f"{bridge['id']}:aipg-chat:user-123",
+    )
+    assert owner == user["account_id"]
+    assert user["asserted_provider"] == "app"
+
+    second = assertions.sign(
+        bridge_key, provider="app", subject="aipg-chat:user-123",
+    )
+    same_user = await accounts.authenticate(
+        bridge_key, second, required_scope="account.read",
+    )
+    assert same_user["account_id"] == user["account_id"]

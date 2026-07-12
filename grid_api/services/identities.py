@@ -43,7 +43,7 @@ def canonical_subject(kind: str, subject: str) -> str:
         value = value.lower()
     if kind in {"google", "github"} and value.lower().startswith(f"{kind}_"):
         value = value[len(kind) + 1:]
-    if kind not in {"wallet", "google", "github", "email"} or not value:
+    if kind not in {"wallet", "google", "github", "email", "app"} or not value:
         raise ValueError("unsupported or empty identity")
     return value
 
