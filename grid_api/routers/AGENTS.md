@@ -20,7 +20,8 @@ transport, accounts, stats, health/metrics.
 - `worker_ws.py` - `/v1/workers/ws`: registration + dispatch + health/eviction + streaming.
   **God-file (~1.1K LOC); split target = registration / dispatch / health / stream.** Highest
   bug history (eviction cascade, idle-redelivery) - change carefully, add tests.
-- `accounts.py` - wallet auth, dashboard/internal account/session creation,
+- `accounts.py` - native Google/SIWE auth, bounded service exchange, and
+  default-off legacy dashboard/internal session creation,
   account profile (incl. resolved `payout{asset, aipg_bps, active, live_asset}`),
   payout wallet + `POST /v1/account/payout-preference` (both SESSION-gated),
   worker listing, API-key issue/revoke, `GET /v1/account/credits` (promotional/free/paid
@@ -28,16 +29,14 @@ transport, accounts, stats, health/metrics.
   `free.active` tracks GRID_FREE_SPENDABLE_LIVE), `GET /v1/account/jobs`
   (operator trust view: my workers' jobs + den + result_hash + signed flag,
   scoped to the payout wallet), deposit claims (USDC + Chainlink-priced ETH).
-  `POST /v1/accounts/session` is the internal-token-gated identity bridge. It
+  `POST /v1/accounts/session` is the retired internal-token bridge. It
   resolves on exactly one authoritative identity (`oauth_sub` first, then
   wallet, then verified email only when it is the sole identity); supplemental
   or unverified email must never join accounts.
-  `POST /v1/account/identities/wallet/link` requires an account-management
-  session plus an exact-purpose wallet signature. `POST /v1/accounts/bridges`
-  bootstraps an internal least-privilege identity bridge.
-  `POST /v1/account/identities/wallet/link/asserted` accepts a one-use Google
-  bridge assertion plus an independently signed wallet nonce; both proofs are
-  required before attach/merge.
+  Native service/app exchange lives at `/v1/auth/service/exchange`; Google ID
+  tokens are verified at `/v1/auth/google/exchange`; `/v1/auth/service/bind`
+  binds an app subject after recent Google/SIWE proof. `/v1/accounts/bridges`
+  bootstraps a bounded service client only when separately enabled.
 - `stats.py` - `GET /v1/workers`, progress polling, model status, usage totals,
   model stats, wallet earnings, `GET /v1/payouts/public` (aggregate payout
   transparency), `GET /v1/jobs/recent` (PUBLIC redacted job feed: model, worker
@@ -82,10 +81,10 @@ transport, accounts, stats, health/metrics.
   nonces, signatures, account IDs, or validator identities from scorecard routes.
 - Targeted validator probes must be hard-targeted to the assigned worker and
   must not bill users, pay den, write worker ledger rows, or strike workers.
-- `accounts.py` internal-token routes are for trusted first-party services only.
-  Generation routes accept `X-Grid-User-Assertion` only from scoped bridge keys;
-  assertions are signed, at most 60 seconds old, and Redis-replay-protected.
-  They grant inference identity, never account-management authority.
+- Generation routes accept Core-issued `X-Grid-User-Token` delegation from a
+  service key. Legacy `X-Grid-User-Assertion` is app-local only and cannot claim
+  Google or wallet identity. Account management needs a recent Core-verified
+  Google/SIWE proof.
 
 ## Work Guidance
 

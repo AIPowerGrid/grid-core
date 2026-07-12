@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from grid_api import database
-from grid_api.services import credits
+from grid_api.services import credits, identities
 from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import metadata as v2_metadata
 
@@ -93,3 +93,29 @@ async def test_duplicate_ref_debit_charges_once_under_race(pg):
     assert sum(1 for r in results if r == "ok") == 1, results
     assert sum(1 for r in results if r == "already") == 11, results
     assert await credits.get_balance(aid) == cost * 9
+
+
+@pytest.mark.asyncio
+async def test_opposing_account_merges_cannot_create_alias_cycle(pg):
+    first = await _seed_account()
+    second = await _seed_account()
+    results = await asyncio.gather(
+        identities.merge_accounts(first, second, merge_ref=f"merge:{first}"),
+        identities.merge_accounts(second, first, merge_ref=f"merge:{second}"),
+        return_exceptions=True,
+    )
+    assert not all(isinstance(result, Exception) for result in results)
+    assert await identities.canonical_account_id(first) == await identities.canonical_account_id(second)
+
+
+@pytest.mark.asyncio
+async def test_credit_racing_merge_is_not_stranded_on_retired_account(pg):
+    destination = await _seed_account()
+    source = await _seed_account()
+    await asyncio.gather(
+        credits.credit(source, 50_000, "deposit", ref=f"deposit:{source}"),
+        identities.merge_accounts(destination, source, merge_ref=f"credit-race:{source}"),
+    )
+    canonical = await identities.canonical_account_id(source)
+    assert canonical == await identities.canonical_account_id(destination)
+    assert await credits.get_balance(canonical) == 50_000

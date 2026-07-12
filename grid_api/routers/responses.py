@@ -46,13 +46,15 @@ async def create_response(
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
     x_grid_user_assertion: Optional[str] = Header(None),
+    x_grid_user_token: Optional[str] = Header(None),
 ):
     """OpenAI-compatible Responses endpoint (raw passthrough to a capable worker)."""
     try:
         guard_passthrough_body(body)  # bound size/depth before the recursive walk
         key = extract_api_key(apikey, authorization)
         user = await accounts_svc.authenticate(
-            key, x_grid_user_assertion, required_scope="inference.submit",
+            key, x_grid_user_assertion, user_token=x_grid_user_token,
+            required_scope="inference.submit",
         )
 
         model = body.get("model")

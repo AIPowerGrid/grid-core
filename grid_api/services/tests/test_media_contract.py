@@ -4,7 +4,7 @@
 import pytest
 from fastapi import HTTPException
 
-from grid_api.services import media, recipes
+from grid_api.services import credits, media, recipes
 
 
 def test_strict_size_rejects_silent_adjustments():
@@ -44,3 +44,14 @@ def test_recipe_resolver_preserves_explicit_zero_seed():
     out = recipes.resolve("0xseedzero", {"seed": 0})
     assert out["seed"] == 0
     assert out["spec"]["3"]["inputs"]["seed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_live_media_rejects_legacy_no_account_before_dispatch(monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    with pytest.raises(HTTPException) as exc:
+        await media.submit_and_wait(
+            "z-image-turbo", "image", {"n": 1}, 1, account_id=None,
+        )
+    assert exc.value.status_code == 402
+    assert "v2 account" in exc.value.detail

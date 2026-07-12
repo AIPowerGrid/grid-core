@@ -9,16 +9,15 @@ from uuid import UUID
 
 import pytest
 import pytest_asyncio
-import sqlalchemy as sa
 from fastapi import HTTPException
-from starlette.requests import Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
+from starlette.requests import Request
 
 from grid_api import database
-from grid_api.services import accounts, assertions, promotions
 from grid_api.routers import accounts as accounts_router
-from grid_api.v2.schema import account_identities, api_keys, metadata
+from grid_api.services import accounts, assertions, promotions, service_auth, user_tokens
+from grid_api.v2.schema import metadata
 
 
 class FakeRedis:
@@ -51,6 +50,7 @@ async def assertion_db(monkeypatch):
 
     monkeypatch.setattr(redis_client, "get_redis", lambda: fake_redis)
     monkeypatch.setattr(promotions, "PROMO_ENABLED", False)
+    monkeypatch.setenv("GRID_USER_TOKEN_SIGNING_KEY", "unit-test-" * 4)
     bridge, bridge_key = await accounts.create_account(
         username="art-bridge", key_label="art-bridge", is_session=False,
         scopes=["account.read", "inference.submit", "identity.assert"],
@@ -63,30 +63,18 @@ async def assertion_db(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_valid_google_assertion_creates_keyless_canonical_user(assertion_db):
-    bridge, bridge_key = assertion_db
+async def test_global_google_assertion_is_retired(assertion_db):
+    _, bridge_key = assertion_db
     token = assertions.sign(bridge_key, provider="google", subject="google-sub-123")
-
-    user = await accounts.authenticate(bridge_key, token)
-
-    assert user["asserted_provider"] == "google"
-    assert str(user["bridge_account_id"]) == bridge["id"]
-    assert str(user["account_id"]) != bridge["id"]
-    assert user["is_session"] is False
-    async with await database.new_session() as session:
-        key_count = await session.scalar(sa.select(sa.func.count()).select_from(api_keys))
-        identity = (await session.execute(
-            sa.select(account_identities.c.kind, account_identities.c.verified_at)
-            .where(account_identities.c.account_id == user["account_id"])
-        )).first()
-    assert key_count == 1  # bridge key only; no orphaned user credential
-    assert identity.kind == "google" and identity.verified_at is not None
+    with pytest.raises(HTTPException) as exc:
+        await accounts.authenticate(bridge_key, token)
+    assert exc.value.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_assertion_is_single_use(assertion_db):
     _, bridge_key = assertion_db
-    token = assertions.sign(bridge_key, provider="google", subject="replay-sub")
+    token = assertions.sign(bridge_key, provider="app", subject="replay-sub")
     await accounts.authenticate(bridge_key, token)
     with pytest.raises(HTTPException) as exc:
         await accounts.authenticate(bridge_key, token)
@@ -154,7 +142,11 @@ async def test_wallet_link_requires_both_session_and_wallet_signature(assertion_
 
     wallet = Account.create()
     source, _ = await accounts.create_account(wallet=wallet.address)
-    destination, destination_key = await accounts.create_account(oauth_sub="link-google-sub")
+    destination, _ = await accounts.create_account(oauth_sub="link-google-sub")
+    destination_key = user_tokens.issue(
+        destination["id"], audience="direct", scopes=accounts.SESSION_SCOPES,
+        auth_method="google",
+    )
     nonce = await accounts_router._nonce_issue()
     message = f"Link wallet to AIPG Grid account {destination['id']}\n\nNonce: {nonce}"
     signature = Account.sign_message(
@@ -178,11 +170,24 @@ async def test_wallet_link_requires_both_session_and_wallet_signature(assertion_
 
 
 @pytest.mark.asyncio
-async def test_bridge_google_and_wallet_proofs_merge_accounts(assertion_db):
+async def test_wallet_link_requires_google_step_up_and_merges_accounts(assertion_db):
     from eth_account import Account
     from eth_account.messages import encode_defunct
 
-    _, bridge_key = assertion_db
+    service, service_key = await accounts.create_service_client(
+        "gallery-test", "Gallery test", allowed_providers=["app"],
+    )
+    app_account, _ = await accounts.create_account(
+        username="gallery user", issue_initial_key=False,
+        identity_kind="app", identity_subject="gallery-test:user-1",
+    )
+    app_token = service_auth.issue_user_token(
+        app_account["id"], service_id="gallery-test", auth_method="app",
+    )
+    google_token = service_auth.issue_user_token(
+        app_account["id"], service_id="gallery-test", auth_method="google",
+        account_manage=True,
+    )
     wallet = Account.create()
     wallet_account, _ = await accounts.create_account(wallet=wallet.address)
     nonce = await accounts_router._nonce_issue()
@@ -190,30 +195,41 @@ async def test_bridge_google_and_wallet_proofs_merge_accounts(assertion_db):
     signature = Account.sign_message(
         encode_defunct(text=message), wallet.key,
     ).signature.hex()
-    google_assertion = assertions.sign(
-        bridge_key, provider="google", subject="linked-google-sub",
-    )
     request = Request({"type": "http", "method": "POST", "path": "/", "headers": []})
+
+    with pytest.raises(HTTPException) as exc:
+        await accounts_router.link_wallet_from_assertion(
+            request,
+            accounts_router.WalletLinkForm(
+                message=message, signature=signature, address=wallet.address,
+            ),
+            apikey=service_key,
+            authorization=None,
+            x_grid_user_assertion=None,
+            x_grid_user_token=app_token,
+        )
+    assert exc.value.status_code == 403
 
     result = await accounts_router.link_wallet_from_assertion(
         request,
         accounts_router.WalletLinkForm(
             message=message, signature=signature, address=wallet.address,
         ),
-        apikey=bridge_key,
+        apikey=service_key,
         authorization=None,
-        x_grid_user_assertion=google_assertion,
+        x_grid_user_assertion=None,
+        x_grid_user_token=google_token,
     )
 
     assert result["status"] == "merged"
-    google_owner = await accounts_router.identities_svc.resolve_identity(
-        "google", "linked-google-sub",
+    app_owner = await accounts_router.identities_svc.resolve_identity(
+        "app", "gallery-test:user-1",
     )
     wallet_owner = await accounts_router.identities_svc.resolve_identity(
         "wallet", wallet.address,
     )
-    assert google_owner == wallet_owner
-    assert str(await accounts_router.identities_svc.canonical_account_id(wallet_account["id"])) == str(google_owner)
+    assert app_owner == wallet_owner
+    assert str(await accounts_router.identities_svc.canonical_account_id(wallet_account["id"])) == str(app_owner)
 
 
 @pytest.mark.asyncio

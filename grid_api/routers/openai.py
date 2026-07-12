@@ -125,11 +125,14 @@ async def chat_completions(
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
     x_grid_user_assertion: Optional[str] = Header(None),
+    x_grid_user_token: Optional[str] = Header(None),
 ):
     """OpenAI-compatible chat completions with real streaming."""
     try:
         key = extract_api_key(apikey, authorization)
-        return await _handle_chat_completions(body, key, x_grid_user_assertion)
+        return await _handle_chat_completions(
+            body, key, x_grid_user_assertion, x_grid_user_token,
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -181,7 +184,7 @@ def _last_user_image(messages: list) -> Optional[str]:
     return None
 
 
-async def _chat_media(request: ChatCompletionRequest, kind: str, account_id=None):
+async def _chat_media(request: ChatCompletionRequest, kind: str, account_id=None, user=None):
     """Image/video generation abstracted behind /v1/chat/completions.
 
     When the requested model is a media model, the latest user turn is the
@@ -234,7 +237,8 @@ async def _chat_media(request: ChatCompletionRequest, kind: str, account_id=None
     if source_image_url:
         payload["source_image_url"] = source_image_url
     outputs, _meta = await media.submit_and_wait(model, kind, payload, timeout,
-                                          account_id=account_id, concurrency_limit=media.MEDIA_CONCURRENCY)
+                                          account_id=account_id, concurrency_limit=media.MEDIA_CONCURRENCY,
+                                          billing_user=user)
 
     urls = [o["url"] for o in outputs if o.get("url")]
     if kind == "video":
@@ -285,10 +289,12 @@ def _assert_request_size(messages: list) -> None:
 
 
 async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str,
-                                   user_assertion: str | None = None):
+                                   user_assertion: str | None = None,
+                                   user_token: str | None = None):
     # Auth — v2 account keys first, legacy Haidra keys as fallback.
     user = await accounts_svc.authenticate(
-        apikey, user_assertion, required_scope="inference.submit",
+        apikey, user_assertion, user_token=user_token,
+        required_scope="inference.submit",
     )
     _assert_request_size(request.messages)
 
@@ -299,7 +305,9 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str,
     media_kind = await _detect_media_model(request.model)
     if media_kind:
         await quota.check_and_consume(dict(user))
-        return await _chat_media(request, media_kind, account_id=user.get("account_id"))
+        return await _chat_media(
+            request, media_kind, account_id=user.get("account_id"), user=user,
+        )
 
     # Check for available text workers serving the OpenAI chat-completions API.
     available = await get_available_models(job_type="text", api_format="openai-chat")

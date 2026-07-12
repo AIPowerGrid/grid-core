@@ -33,7 +33,10 @@ logger = logging.getLogger("grid_api.ratelimit")
 def _looks_like_grid_key(raw: str) -> bool:
     """Cheap well-formedness check (no DB): a real grid key is `grid_`-prefixed
     and a sane length. Used only to decide the rate-limit bucket, never for auth."""
-    return raw.startswith("grid_") and 16 <= len(raw) <= 128
+    return (
+        (raw.startswith("grid_") and 16 <= len(raw) <= 128)
+        or (raw.startswith("gridu_") and 32 <= len(raw) <= 4096)
+    )
 
 
 def _api_key_or_ip(request) -> str:
@@ -48,10 +51,13 @@ def _api_key_or_ip(request) -> str:
     attack; a per-IP outer ceiling is the follow-up.) Key is hashed so raw
     secrets never become Redis key names.
     """
+    delegated = request.headers.get("x-grid-user-token")
     apikey = request.headers.get("apikey")
     auth = request.headers.get("authorization")
     raw = None
-    if apikey:
+    if delegated:
+        raw = delegated
+    elif apikey:
         raw = apikey
     elif auth:
         raw = auth[7:] if auth.lower().startswith("bearer ") else auth

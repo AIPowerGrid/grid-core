@@ -20,6 +20,8 @@ validation, worker incentives, and trust boundaries.
   invariants, scorecard privacy rules, and future economic gates.
 - `UNIVERSAL_ACCOUNTS.md` - canonical identity, frontend assertion, linking,
   merge, and three-pocket credit contracts.
+- `SERVICE_ACCOUNTS.md` - bounded backend principals, native user-token
+  exchange, provisioning commands, ceilings, and rollout order.
 - `INCIDENT_2026-07-12_PARTIAL_DEPLOY.md` - chat outage caused by restarting a
   code/schema-divergent production checkout; reconciliation requirements.
 
@@ -28,8 +30,10 @@ validation, worker incentives, and trust boundaries.
 - Keep the live/dry-run/stub status explicit. If a checklist marks an item done,
   code and tests must support that claim.
 - Economics docs must distinguish demand billing from supply settlement.
-- Identity guidance must remain aligned across docs: scoped bridge key plus
-  signed user assertion supersedes raw trusted headers.
+- Identity guidance must remain aligned across docs: Core-verified Google/SIWE
+  proofs issue short native user tokens; bounded service accounts may exchange
+  only their namespaced app subjects. One-use assertions are app-only legacy
+  transport, never authority for global Google or wallet identities.
 - Validator/slashing docs must not imply automatic slashing exists until
   enforcement and WorkerRegistry integration are wired and reviewed.
 - Validator/fidelity docs must separate reproducible workflow certification

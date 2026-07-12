@@ -125,6 +125,25 @@ async def test_settle_refunds_unused_remainder(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_settlement_uses_reservation_time_price_snapshot(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 10_000_000, "topup", ref="snapshot-seed")
+    original = pricing.PRICING[PRICED]
+    reserved = await _reserve(aid, "snapshot-job", prompt=1000, mx=1000)
+    expected = pricing.quote_text(PRICED, 1000, 100)
+    try:
+        pricing.PRICING[PRICED] = pricing.ModelPrice(
+            input_per_mtok=original.input_per_mtok * 10,
+            output_per_mtok=original.output_per_mtok * 10,
+        )
+        await credits.settle_job("snapshot-job", 100)
+    finally:
+        pricing.PRICING[PRICED] = original
+    assert reserved > expected
+    assert await credits.get_balance(aid) == 10_000_000 - expected
+
+@pytest.mark.asyncio
 async def test_release_full_refund(db, monkeypatch):
     monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
     aid = uuid.uuid4()
