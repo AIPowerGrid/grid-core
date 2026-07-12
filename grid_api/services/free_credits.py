@@ -37,7 +37,7 @@ import sqlalchemy as sa
 
 from ..database import new_session
 from ..redis_client import get_redis
-from ..v2.schema import account_identities
+from ..v2.schema import account_identities, accounts
 
 logger = logging.getLogger("grid_api.free_credits")
 
@@ -85,11 +85,26 @@ async def _has_verified_google(account_id) -> bool:
         return False
 
 
+async def _wallet_for_account(account_id) -> str | None:
+    """Resolve the primary login wallet for media paths that carry only an id."""
+    if not account_id:
+        return None
+    try:
+        async with await new_session() as session:
+            return await session.scalar(
+                sa.select(accounts.c.wallet).where(accounts.c.id == account_id)
+            )
+    except Exception:
+        return None
+
+
 async def daily_cap_micro(account_id, wallet: str | None) -> int:
     """Daily cap: verified-Google base plus an independent AIPG-holder bonus."""
     if not FREE_ENABLED:
         return 0
     cap = FREE_DAILY_MICRO if await _has_verified_google(account_id) else 0
+    if wallet is None:
+        wallet = await _wallet_for_account(account_id)
     if wallet and FREE_HOLDER_BONUS_MICRO > 0:
         try:
             from . import holdings
