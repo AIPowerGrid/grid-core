@@ -74,14 +74,15 @@ def presign_outputs(job_id: str, n: int, ext: str, expires: int = 900,
 
     Returns one slot per output: {key, put_url, content_type, public_url}.
 
-    Keys are prefixed by media type (`image/…`, `video/…`) so a single bucket can
-    carry both yet still take prefix-scoped R2 lifecycle rules — e.g. expire
-    `video/` sooner (it's ~5× the storage/egress) while keeping images longer —
-    without a separate bucket or domain.
+    Keys are prefixed by media type (`image/…`, `video/…`, `3d/…`) so a single
+    bucket can carry all types yet still take prefix-scoped R2 lifecycle rules —
+    e.g. expire `video/` sooner (it's ~5× the storage/egress), keep `3d/` meshes
+    longer (they're downloadable deliverables, not previews) — without a separate
+    bucket or domain.
     """
     bucket = media_bucket()
     content_type = CONTENT_TYPES.get(ext, "application/octet-stream")
-    prefix = "video" if job_type == "video" else "image"
+    prefix = {"video": "video", "3d": "3d"}.get(job_type, "image")
     slots = []
     for i in range(n):
         key = f"{prefix}/{job_id}/{i}.{ext}"
