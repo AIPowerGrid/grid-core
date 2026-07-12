@@ -26,6 +26,9 @@ deploying from an agent or moving money.
 4. Confirm `/etc/aipg/grid.env` is readable only by the service account and has
    the required current variables.
 5. Record the state of `aipg-gridapi`, Redis, PostgreSQL, and any payout timer.
+6. Refuse an in-place update when `git status --porcelain` is non-empty. Preserve
+   that checkout for investigation and deploy a clean reviewed release instead;
+   copying selected files into production creates an untestable runtime.
 
 ## Existing-host deploy
 

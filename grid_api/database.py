@@ -133,6 +133,11 @@ waiting_prompts_table = sa.Table(
     sa.Column("nsfw", sa.Boolean, default=False),
     sa.Column("slow_workers", sa.Boolean, default=True),
     sa.Column("trusted_workers", sa.Boolean, default=False),
+    # Legacy Horde columns are NOT NULL in production. Grid-native prompts do
+    # not require the retired backend-validation allowlist and do not opt into
+    # the legacy extra-slow worker pool.
+    sa.Column("validated_backends", sa.Boolean, default=False),
+    sa.Column("extra_slow_workers", sa.Boolean, default=False),
     sa.Column("ipaddr", sa.String(39)),
     sa.Column("safe_ip", sa.Boolean, default=True),
     sa.Column("webhook", sa.String(1024)),
