@@ -241,10 +241,28 @@ ungoverned (no clamps/enums) and is superseded by recipes. **Do not author new
 
 ---
 
+## 3D / mesh models (`jobType: "3d"`)
+
+`jobType` also accepts `"3d"` (image→mesh, e.g. `recipes/trellis2-3d.json` for
+TRELLIS). Three things differ from image/video:
+
+- **Endpoint:** `POST /v1/3d/generations` (image required, no prompt). Output is a
+  `.glb` (added to `storage.CONTENT_TYPES`); the worker presigns `ext=glb`.
+- **Output collection is different.** Image/video outputs are registered in ComfyUI
+  `/history` and fetched via `/view`. TRELLIS's export node **only writes the file to
+  disk** and returns its path — it registers nothing in history. So the worker reads
+  the newest mesh from `COMFYUI_OUTPUT_DIR` once the prompt completes (the bridge must
+  be **colocated** with its ComfyUI). See `grid-media-worker` `_collect_outputs`.
+- **`seedMax`** — TRELLIS's seed input caps at 2³¹−1. Set `"seedMax": 2147483647` in
+  `_grid` so `resolve()` folds an over-range seed instead of ComfyUI rejecting it.
+- **Worker** advertises `GRID_JOB_TYPES=3d` + `GRID_TRUST_MODELS=true` (a recipe-served
+  model has no local checkpoint — the grid supplies the graph). The grid must accept
+  `"3d"` in the registration job-type filter (`worker_ws.py`).
+
 ## Reference
 
 - `grid_api/services/recipes.py` — resolver, capability gates, RecipeVault sync.
 - `grid_api/services/recipe_import.py` — the importer/CLI + `validate_recipe`.
-- `recipes/*.json` — current worked examples (t2i, i2i, i2i-blend, i2v, turbo).
+- `recipes/*.json` — current worked examples (t2i, i2i, i2i-blend, i2v, turbo, 3d).
 - `recipes/AGENTS.md` — one-screen authoring contract.
 - Tests: `grid_api/services/tests/test_recipes.py`, `test_media_contract.py`.
