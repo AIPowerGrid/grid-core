@@ -733,6 +733,40 @@ def _text_param_schema(model_id: str) -> dict:
     }
 
 
+@router.get("/v1/models/{model_id}/recipe")
+async def get_model_recipe(model_id: str, apikey: Optional[str] = Header(None),
+                           authorization: Optional[str] = Header(None)):
+    """Worker preflight: the canary-resolved recipe(s) for a media model, plus the
+    node types + model files a worker must have to run it. A worker fetches this at
+    startup, checks nodes/files against its ComfyUI /object_info, then smoke-runs the
+    `spec` — advertising the model only if it produces a real output. Authed (workers
+    hold a grid key); recipe graphs aren't secret but we don't serve them anonymously.
+    """
+    from ..services import accounts as accounts_svc, recipes
+    await accounts_svc.authenticate(extract_api_key(apikey, authorization))
+
+    recs = recipes.recipes_for_model(model_id)
+    if not recs:
+        raise HTTPException(status_code=404, detail=f"No recipe serves model '{model_id}'")
+    out = []
+    for r in recs:
+        canary: dict = {}  # minimum steps for a fast smoke test
+        if "steps" in r.vars and "steps" in r.clamps:
+            canary["steps"] = r.clamps["steps"][0]
+        resolved = recipes.resolve(r.recipe_root, canary)
+        out.append({
+            "name": r.name,
+            "recipe_root": r.recipe_root,
+            "job_type": r.job_type,
+            "required_models": r.required_models,
+            "node_types": recipes.node_types(resolved["spec"]),
+            "model_files": recipes.model_files(resolved["spec"]),
+            "image_paths": resolved.get("image_paths"),
+            "spec": resolved["spec"],
+        })
+    return {"model": model_id, "recipes": out}
+
+
 @router.get("/v1/models/{model_id}/params")
 async def get_model_params(model_id: str):
     """The adjustable parameter schema for a model — ranges, enums, capabilities.
