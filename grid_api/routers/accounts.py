@@ -855,9 +855,9 @@ async def get_credits(
     """The account's spendable credits — what the front ends show as
     'X free today' + '$Y balance' + a top-up prompt.
 
-    Two pockets, one USD unit (micro-USD): the daily FREE allowance (resets UTC
-    midnight, use-it-or-lose-it, tiered by AIPG held) and the purchased balance
-    (from on-chain deposits, never expires).
+    Three pockets, one USD unit (micro-USD): promotional grants (campaign-bound
+    and expiring), the daily free allowance (resets UTC midnight, tiered by AIPG
+    held), and purchased balance (from on-chain deposits, never expires).
 
     The free-first draw IS integrated into the live durable reserve path
     (authorize_request / authorize_media hold free-first with reserve/release
@@ -882,8 +882,7 @@ async def get_credits(
     def usd(m):
         return round(m / 1_000_000, 6)
 
-    # Free credit is real value but NOT yet consumed by the live reserve path
-    # (see docstring). `active` says whether it can actually pay for a charge.
+    # `active` says whether each shadowed pocket can currently pay a charge.
     free_active = free_credits.FREE_ENABLED and free_credits.FREE_SPENDABLE_LIVE
     promo_active = promotions.PROMO_ENABLED and promotions.PROMO_SPENDABLE_LIVE
     spendable = paid + (free_left if free_active else 0) + (promo_left if promo_active else 0)
