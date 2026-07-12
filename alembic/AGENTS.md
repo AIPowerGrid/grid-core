@@ -3,17 +3,18 @@
 ## Purpose
 
 Migration source for Grid-owned database tables. These migrations must make the
-production database match `grid_api/v2/schema.py` without relying on
+production database match the Grid-owned schema contracts without relying on
 `create_all(checkfirst=True)` to alter existing tables.
 
 ## Ownership
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current head: `0013`
+- `versions/` - ordered migration revisions. Current head: `0014`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
-  promotional grants, and reservations.promo_micro).
+  promotional grants, and reservations.promo_micro; `0014` codifies safe DB
+  defaults for Grid-native inserts into the optional legacy waiting-prompts table).
 
 ## Local Contracts
 

@@ -20,6 +20,8 @@ validation, worker incentives, and trust boundaries.
   invariants, scorecard privacy rules, and future economic gates.
 - `UNIVERSAL_ACCOUNTS.md` - canonical identity, frontend assertion, linking,
   merge, and three-pocket credit contracts.
+- `INCIDENT_2026-07-12_PARTIAL_DEPLOY.md` - chat outage caused by restarting a
+  code/schema-divergent production checkout; reconciliation requirements.
 
 ## Local Contracts
 
