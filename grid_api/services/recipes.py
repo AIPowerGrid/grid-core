@@ -90,6 +90,30 @@ def register_recipe(recipe_root: str, name: str, workflow: dict, *,
     return r
 
 
+# File extensions that denote model weights (for worker preflight file checks).
+_MODEL_EXTS = (".safetensors", ".ckpt", ".pth", ".pt", ".bin", ".gguf", ".onnx")
+
+
+def node_types(spec: dict) -> list[str]:
+    """Distinct ComfyUI node class_types in a recipe graph — a worker must have all
+    of these installed to run the recipe (preflight tier 1)."""
+    return sorted({v.get("class_type") for v in spec.values()
+                   if isinstance(v, dict) and v.get("class_type")})
+
+
+def model_files(spec: dict) -> list[str]:
+    """Weight files a recipe graph references (loader-node string inputs that look
+    like model files) — a worker must have all of these on disk (preflight tier 2)."""
+    files = set()
+    for v in spec.values():
+        if not isinstance(v, dict):
+            continue
+        for iv in (v.get("inputs") or {}).values():
+            if isinstance(iv, str) and iv.lower().endswith(_MODEL_EXTS):
+                files.add(iv)
+    return sorted(files)
+
+
 def get_recipe(ref: str | int) -> Optional[Recipe]:
     """Look up by recipe_root (hex str), recipe_id (int/numeric str), or name."""
     if isinstance(ref, int):
