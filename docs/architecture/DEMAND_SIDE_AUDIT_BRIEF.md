@@ -87,8 +87,8 @@ on). These are hard gates, not suggestions:
   key** (`api_keys.is_session`, set only by SIWE wallet-login / dashboard-login;
   `issue_key` forces it false so it isn't caller-settable). A leaked inference key
   can no longer redirect earnings or manage keys. API keys now carry capability
-  scopes and Core can bootstrap bridge keys limited to `inference.submit` plus
-  `identity.assert`. **Still TODO:** split the remaining session-level account
+  scopes and Core can bootstrap bridge keys limited to `account.read`,
+  `inference.submit`, and `identity.assert`. **Still TODO:** split the remaining session-level account
   authority into finer billing/worker scopes after client migration.
 - [x] **B3a (P0 FIXED `cf0cfd08`, 2026-07-08) — Identity-bridge confused deputy.**
   `POST /v1/accounts/session` OR-matched oauth_sub|wallet|email then `.first()`
@@ -212,8 +212,8 @@ impossible as-is.
 **RESOLVED (post-audit): signed user assertions, not a raw header.** The earlier
 "trusted `X-Grid-User` header" idea is **superseded** (it also contradicted
 `GRID_ECONOMICS.md`, which proposed per-user keys). Adopted model = **B2 + B3**:
-the chat authenticates with a **scoped bridge key** (`inference.submit` +
-`identity.assert` only) and sends a **short-lived signed assertion**
+the chat authenticates with a **scoped bridge key** (`account.read` +
+`inference.submit` + `identity.assert` only) and sends a **short-lived signed assertion**
 (`iss/sub/aud/exp/nonce`) identifying the end user; the grid verifies the
 signature and meters/attributes to that user. No raw-header trust; the bridge
 key cannot mint keys, change payout wallets, or manage workers. The original

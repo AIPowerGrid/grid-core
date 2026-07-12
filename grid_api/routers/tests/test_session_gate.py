@@ -14,7 +14,7 @@ from grid_api.routers import accounts as acc
 
 
 def _auth_returning(user):
-    async def _f(_key):
+    async def _f(_key, *_args, **_kwargs):
         return user
     return _f
 

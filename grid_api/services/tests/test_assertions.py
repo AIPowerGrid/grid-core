@@ -53,7 +53,7 @@ async def assertion_db(monkeypatch):
     monkeypatch.setattr(promotions, "PROMO_ENABLED", False)
     bridge, bridge_key = await accounts.create_account(
         username="art-bridge", key_label="art-bridge", is_session=False,
-        scopes=["inference.submit", "identity.assert"],
+        scopes=["account.read", "inference.submit", "identity.assert"],
     )
     try:
         yield bridge, bridge_key
@@ -175,3 +175,42 @@ async def test_wallet_link_requires_both_session_and_wallet_signature(assertion_
     assert result["account_id"] == destination["id"]
     assert await accounts.get_account_by_wallet(wallet.address) is not None
     assert str(await accounts_router.identities_svc.canonical_account_id(source["id"])) == destination["id"]
+
+
+@pytest.mark.asyncio
+async def test_bridge_google_and_wallet_proofs_merge_accounts(assertion_db):
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+
+    _, bridge_key = assertion_db
+    wallet = Account.create()
+    wallet_account, _ = await accounts.create_account(wallet=wallet.address)
+    nonce = await accounts_router._nonce_issue()
+    message = f"Link wallet to AIPG Grid identity\n\nNonce: {nonce}"
+    signature = Account.sign_message(
+        encode_defunct(text=message), wallet.key,
+    ).signature.hex()
+    google_assertion = assertions.sign(
+        bridge_key, provider="google", subject="linked-google-sub",
+    )
+    request = Request({"type": "http", "method": "POST", "path": "/", "headers": []})
+
+    result = await accounts_router.link_wallet_from_assertion(
+        request,
+        accounts_router.WalletLinkForm(
+            message=message, signature=signature, address=wallet.address,
+        ),
+        apikey=bridge_key,
+        authorization=None,
+        x_grid_user_assertion=google_assertion,
+    )
+
+    assert result["status"] == "merged"
+    google_owner = await accounts_router.identities_svc.resolve_identity(
+        "google", "linked-google-sub",
+    )
+    wallet_owner = await accounts_router.identities_svc.resolve_identity(
+        "wallet", wallet.address,
+    )
+    assert google_owner == wallet_owner
+    assert str(await accounts_router.identities_svc.canonical_account_id(wallet_account["id"])) == str(google_owner)
