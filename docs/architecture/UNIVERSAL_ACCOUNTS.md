@@ -103,6 +103,10 @@ check with a non-recyclable qualification such as bonded stake or a prior-epoch
 balance snapshot, and enforce a network-wide daily subsidy ceiling. Verified
 Google identity reduces casual abuse but is not, by itself, a Sybil proof.
 
+Account merges preserve append-only payout and job ledgers on their original
+account and wallet identifiers. Canonical account views resolve the complete
+alias family so linked users still see that history without rewriting evidence.
+
 ## Rollout gates
 
 1. Apply Alembic `0013` before deploying code that selects scoped-key or promo
