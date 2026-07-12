@@ -76,6 +76,13 @@ assertion proves the destination account and the exact message `Link wallet to
 AIPG Grid identity` plus a Core nonce proves the wallet. The same merge
 invariants apply.
 
+Trusted applications may assert a namespaced `app` subject for an authenticated
+user who has neither Google nor wallet identity. This creates a stable canonical
+account but confers no strong-identity promotional eligibility. Google and SIWE
+remain the proof paths for account linking and promotional grants.
+Core additionally binds every `app` subject to the authenticated bridge account,
+preventing subject collisions across partners even when local IDs match.
+
 ## Credit policy
 
 | Pocket | Default | Reset or expiry | Sybil control | Live gate |

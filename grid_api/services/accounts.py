@@ -181,12 +181,22 @@ async def authenticate(plain_key: str, user_assertion: str | None = None,
 
     asserted = await assertions.verify(plain_key, user, user_assertion)
     provider, subject = asserted["provider"], asserted["subject"]
+    if provider == "app":
+        # Application-local subjects are meaningful only within their issuing
+        # bridge. Bind the bridge account into the canonical subject so two
+        # partners cannot collide by choosing the same local user ID.
+        subject = f"{user['account_id']}:{subject}"
     account_id = await resolve_identity(provider, subject)
     if account_id is None:
-        kwargs = {"oauth_sub": subject} if provider == "google" else {"wallet": subject}
+        if provider == "google":
+            kwargs = {"oauth_sub": subject}
+        elif provider == "wallet":
+            kwargs = {"wallet": subject}
+        else:
+            kwargs = {"identity_kind": "app", "identity_subject": subject}
         try:
             account, _ = await create_account(
-                username="Google user" if provider == "google" else None,
+                username={"google": "Google user", "app": "Application user"}.get(provider),
                 issue_initial_key=False,
                 **kwargs,
             )
@@ -241,6 +251,8 @@ async def create_account(
     email_verified: bool = False,
     scopes: list[str] | None = None,
     issue_initial_key: bool = True,
+    identity_kind: str | None = None,
+    identity_subject: str | None = None,
 ) -> tuple[dict, str | None]:
     """Create a grid_account + its first API key.
 
@@ -285,6 +297,13 @@ async def create_account(
             identity_rows.append((oauth_kind, oauth_sub, f"{oauth_kind.title()} account", True))
         if email:
             identity_rows.append(("email", email, email, bool(email_verified)))
+        if identity_kind or identity_subject:
+            if not identity_kind or not identity_subject:
+                raise ValueError("identity_kind and identity_subject must be provided together")
+            from .identities import canonical_subject
+
+            canonical_subject(identity_kind, identity_subject)
+            identity_rows.append((identity_kind, identity_subject, f"{identity_kind.title()} account", True))
         if identity_rows:
             from .identities import subject_hash
 

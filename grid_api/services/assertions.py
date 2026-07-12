@@ -88,7 +88,7 @@ async def verify(plain_key: str, bridge_user: dict, token: str) -> dict:
         raise HTTPException(401, detail="User assertion audience or issuer mismatch")
     if issued > now + 5 or expires <= now or expires - issued > MAX_LIFETIME_SECONDS:
         raise HTTPException(401, detail="Expired or invalid user assertion lifetime")
-    if provider not in {"google", "wallet"} or not subject or len(subject) > 255:
+    if provider not in {"google", "wallet", "app"} or not subject or len(subject) > 255:
         raise HTTPException(401, detail="Unsupported asserted identity")
     if provider == "wallet" and not _WALLET_RE.fullmatch(subject):
         raise HTTPException(401, detail="Malformed asserted wallet")
