@@ -41,6 +41,8 @@ tests, and an incomplete testnet model-registry helper.
   `grid_api/services/settlement/payouts.py`; keep this wrapper thin.
 - Add explicit dry-run defaults to any new chain, database, or cleanup tool.
 - Put reusable logic in the owning service package and test it there.
+- Invoke Python operator tools through the selected release's `.venv/bin/python`;
+  their env-based shebang assumes an already activated virtual environment.
 
 ## Verification
 

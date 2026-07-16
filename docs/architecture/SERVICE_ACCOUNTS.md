@@ -22,19 +22,19 @@ Run after Alembic `0015` from a trusted Core host. The command prints the key
 once; put it in the application's server-side secret store.
 
 ```bash
-./scripts/create_service_account.py \
+.venv/bin/python scripts/create_service_account.py \
   --id grid-console --name "Grid Console" \
   --provider app --provider google \
   --google-audience "$GOOGLE_ID" \
   --per-request-micro 1000000 --daily-micro 100000000
 
-./scripts/create_service_account.py \
+.venv/bin/python scripts/create_service_account.py \
   --id aipg-art --name "AIPG Art" \
   --provider app --provider google \
   --google-audience "$GOOGLE_CLIENT_ID" \
   --per-request-micro 1000000 --daily-micro 250000000
 
-./scripts/create_service_account.py \
+.venv/bin/python scripts/create_service_account.py \
   --id aipg-chat --name "AIPG Chat" \
   --provider app \
   --per-request-micro 500000 --daily-micro 100000000
@@ -47,7 +47,7 @@ fail-closed and idempotently by job reference.
 Rotate one service without affecting the others:
 
 ```bash
-./scripts/rotate_service_key.py --id aipg-art
+.venv/bin/python scripts/rotate_service_key.py --id aipg-art
 ```
 
 ## Exchanges
