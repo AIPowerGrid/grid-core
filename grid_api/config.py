@@ -36,11 +36,12 @@ class GridSettings(BaseSettings):
     worker_identity_chain_id: int = 8453
     worker_registration_skew_seconds: int = 300
     require_worker_identity: bool = False
-    # Comma-separated SHA-256 profile digests promoted after release signing
-    # and real-hardware canaries. Empty means no managed profile is accepted.
+    # Comma-separated SHA-256 profile digests approved after signature and
+    # exact-scope hardware qualification. Empty accepts no managed profile.
     approved_worker_profile_digests: str = ""
-    # Product gate separate from profile approval and global charging. Keep off
-    # until real-hardware canaries and a supervised dark launch pass.
+    # Product gate separate from profile approval and global charging. A
+    # private pilot may enable this after its exact-hardware canary; public
+    # manager publication remains a separate, broader qualification gate.
     audio_enabled: bool = False
     # Native-manager device enrollment. Independently dark until the console
     # approval page and release manager are deployed together.

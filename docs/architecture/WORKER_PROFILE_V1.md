@@ -2,10 +2,12 @@
 
 ## Posture
 
-This path is ship-dark. Core and worker code exist and tests pass, but the
-bundled ACE-Step profile is unsigned and marked `draft`, Core's approved-profile
-allowlist is empty, `AUDIO_ENABLED=0`, no production audio worker is connected,
-audio charging is off, and the recipe has not been registered in RecipeVault.
+The Grid-operated RTX 3090 pilot has a signed, one-class `pilot` profile whose
+exact digest is approved by Core. Native enrollment and the authenticated audio
+route are enabled; demand charging remains off during supervised validation.
+The bundled, downloadable `public` profile remains unsigned and marked `draft`,
+its three-class qualification is incomplete, and the recipe has not yet been
+registered in RecipeVault. A pilot is not a public manager release.
 
 ## Purpose
 
@@ -64,7 +66,16 @@ source commit. Every file has an exact size and SHA-256 commitment.
 
 The profile digest commits to the entire profile. Core accepts managed profile
 metadata only when that exact profile digest is in
-`APPROVED_WORKER_PROFILE_DIGESTS`. The current empty default accepts none.
+`APPROVED_WORKER_PROFILE_DIGESTS`. The empty software default accepts none.
+
+Qualification scope is explicit:
+
+- `pilot` binds one signed profile to one measured hardware class for a
+  privately operated, exact-digest Core allowlist entry. It may honestly leave
+  `recipe.onchain_root` null and cannot pass public release CI.
+- `public` requires minimum, midrange, and datacenter evidence plus the
+  registered RecipeVault root before a downloadable manager release can be
+  assembled.
 
 The pinned Linux dependency environment measures about 8.28 GB allocated and
 the complete 28-file runtime model tree about 10.09 GB (9.40 GiB), for roughly
@@ -149,41 +160,41 @@ Audio demand reserves exact requested seconds before dispatch and settles only
 with the worker ledger terminal transaction. Worker den is calculated from
 Core-capped requested seconds, not worker-reported duration. The current
 `$0.002/second` customer price and `0.06 den/second` reward weight are provisional
-benchmark pegs; charging must remain off until real minimum, midrange, and
-datacenter measurements are reviewed.
+benchmark pegs. Charging remains off through the supervised pilot. Public
+hardware support and broad pricing claims still require the full qualification
+matrix.
 
-No hot-path transaction belongs in audio generation. The near-term receipt
-binds the off-chain recipe SHA-256. After benchmark review freezes the recipe,
-register that exact root and canonical recipe bytes in the live Diamond
-RecipeVault, record the root in the profile, and only then sign and allowlist the
-final profile digest. Aggregate receipts/epochs can be anchored on Base. Do not
-create a new audio-specific contract for this worker profile.
+No hot-path transaction belongs in audio generation. The pilot receipt binds
+the off-chain recipe SHA-256 and makes no on-chain provenance claim. Before a
+public profile ships, register that exact root and canonical recipe bytes in the
+live Diamond RecipeVault and record the root in the profile. Aggregate
+receipts/epochs can later be anchored on Base. Do not create a new
+audio-specific contract for this worker profile.
 
-## Go-Live Gates
+## Pilot Go-Live Gates
 
-1. Run install, launch, canary, and a real Grid job on minimum, midrange, and
-   datacenter NVIDIA hosts.
-2. Record generation latency, peak VRAM/RAM, output duration, failure behavior,
-   and cost per generated second with the manager's repeatable benchmark report;
-   use separate state/report files per selected GPU, then adjust requirements,
-   timeouts, price, and den. The same verified install root may be reused across
-   GPUs without redownloading artifacts.
-3. Register the frozen recipe SHA-256 and canonical recipe bytes in the live
-   Diamond RecipeVault using the hardware-wallet path, then set the profile's
-   `recipe.onchain_root` to that same root.
-4. Create an encrypted offline Ed25519 release key. Use `profile_release.py`
-   with the three private benchmark reports; it independently recomputes the
-   minimum/midrange/datacenter classes and binds only the privacy-safe canonical
-   qualification-manifest hash plus the registered root into the final
-   `active` profile. Add only the reviewed public key to the worker.
-5. Build Linux/Windows artifacts, verify checksums, and code-sign public Windows
-   downloads. Treat Apple/MPS as a separate future profile.
-6. Add the final profile digest to Core's allowlist and deploy Core dark.
-7. Enable the dark Console pairing endpoint in staging and verify Google/SIWE
-   step-up, payout-wallet replacement confirmation, manager crash-resume, key
-   revocation, and abandoned-enrollment expiry.
-8. Run one supervised end-to-end audio job with global charging still off and
-   `AUDIO_ENABLED=1`; verify
-   reservation, signed receipt, ledger, upload, timeout, and retry behavior.
-9. Publish the RecipeVault transaction/reference and supervised job evidence;
-   only then consider enabling audio demand charging.
+1. Derive a `pilot` draft for the selected hardware class, verify every pinned
+   artifact, and run the repeatable three-sample benchmark on that exact GPU.
+2. Sign the pilot with an encrypted offline Ed25519 key and commit only its
+   public verification key.
+3. Add only the final signed profile digest to Core's allowlist. Keep global
+   charging off.
+4. Complete native Console pairing with a recent Google/SIWE account step-up
+   and a real payout-wallet delegation.
+5. Run one supervised end-to-end audio job and verify the reservation lifecycle,
+   signed receipt, worker ledger row, upload, timeout, and replay behavior.
+6. Enable demand charging only after the live price peg and failure/release
+   paths are reviewed.
+
+## Public Release Gates
+
+1. Repeat qualification on distinct minimum, midrange, and datacenter NVIDIA
+   hosts; record latency, peak resources, output duration, failures, and cost per
+   generated second.
+2. Register the frozen recipe SHA-256 and canonical recipe bytes in the live
+   Diamond RecipeVault through the hardware-wallet path.
+3. Sign a separate `public` profile with all three reports and the registered
+   root. A pilot profile cannot be promoted or reused as this release.
+4. Build Linux and Windows artifacts, verify checksums and provenance, code-sign
+   Windows downloads, and perform supervised staging. Treat Apple/MPS as a
+   separate future profile.
