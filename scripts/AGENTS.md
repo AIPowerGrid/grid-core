@@ -27,6 +27,8 @@ tests, and an incomplete testnet model-registry helper.
   the retry step.
 - Systemd owns `/etc/aipg/grid.env`; do not source that file from the shell
   wrapper or print its values.
+- The payout wrapper resolves Python from its own immutable release directory;
+  never point it back at the historical mutable production checkout.
 - `monitor_queues.py --cleanup` mutates legacy Horde tables. It does not monitor
   the Redis Streams `/v1` queue and must not be presented as current Grid queue
   observability.

@@ -3,8 +3,10 @@
 # systemd injects /etc/aipg/grid.env via EnvironmentFile= — do NOT re-source it
 # here (bash-sourcing mangles passwords containing special chars).
 set -euo pipefail
-cd /home/aipg/system-core
-PY=.venv/bin/python
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+APP_DIR="$(dirname -- "$SCRIPT_DIR")"
+cd "$APP_DIR"
+PY="$APP_DIR/.venv/bin/python"
 BUDGET="${PAYOUT_HOURLY_BUDGET:-208.33}"
 H_START="$(date -u -d 'now -1 hour' +%Y-%m-%dT%H:00:00+00:00)"
 H_END="$(date -u +%Y-%m-%dT%H:00:00+00:00)"

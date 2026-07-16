@@ -21,7 +21,8 @@ owning AGENTS.md and any affected parent Child DOX Index.
   `/api/v2` poll queue.
 - `alembic/` - grid-owned database migrations. Must match `grid_api/v2/schema.py`.
 - `deploy/`, `docker/`, root Docker/systemd scripts - production and local
-  runtime wiring.
+  runtime wiring. Production selects immutable releases through
+  `/home/aipg/current`; the historical mutable checkout is not deployable.
 - `docs/` - architecture, economics, blockchain, and migration specs.
 - `core-integration-package/` - Base contract ABIs, sample contracts, and JS SDKs
   for ModelRegistry, RecipeVault, and JobAnchor.
