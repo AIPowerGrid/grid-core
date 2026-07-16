@@ -34,6 +34,7 @@ class ModelPrice:
     output_per_mtok: float  # USD per 1M output tokens
     image_per_image: float = 0.0   # USD per image
     video_per_second: float = 0.0  # USD per second of video
+    audio_per_second: float = 0.0  # USD per second of generated audio
     mesh_per_generation: float = 0.0  # USD per completed 3D generation
 
 
@@ -45,6 +46,7 @@ def half_of(usd_input: float, usd_output: float, **media) -> ModelPrice:
         output_per_mtok=usd_output / 2,
         image_per_image=(media["usd_image"] / 2) if media.get("usd_image") else 0.0,
         video_per_second=(media["usd_video_sec"] / 2) if media.get("usd_video_sec") else 0.0,
+        audio_per_second=(media["usd_audio_sec"] / 2) if media.get("usd_audio_sec") else 0.0,
         mesh_per_generation=(media["usd_mesh"] / 2) if media.get("usd_mesh") else 0.0,
     )
 
@@ -73,6 +75,9 @@ PRICING: dict[str, ModelPrice] = {
     "flux.2 klein 4b fp8":  half_of(0, 0, usd_image=0.02),       # → $0.010/image (Flux distilled 4B)
     "krea 2 turbo":         half_of(0, 0, usd_image=0.03),       # → $0.015/image (quality turbo)
     "ltx-2.3":              half_of(0, 0, usd_video_sec=0.04),   # → $0.020/second video (Justin)
+    # Guarded launch peg only; benchmark against three real worker tiers before
+    # enabling audio charging. Explicit pricing prevents accidental free jobs.
+    "ace-step-v1.5-turbo":  ModelPrice(0, 0, audio_per_second=0.002),
     # Initial guarded peg for a multi-minute textured mesh workload. Re-peg from
     # measured worker cost before enabling charging; explicit is safer than free.
     "trellis2":             ModelPrice(0, 0, mesh_per_generation=0.25),
@@ -113,6 +118,11 @@ def quote_image(model: str, n: int = 1) -> int:
 def quote_video(model: str, seconds: float = 0.0) -> int:
     p = get_price(model)
     return int(round((p.video_per_second * max(seconds, 0.0)) * MICRO)) if p else 0
+
+
+def quote_audio(model: str, seconds: float = 0.0) -> int:
+    p = get_price(model)
+    return int(round((p.audio_per_second * max(seconds, 0.0)) * MICRO)) if p else 0
 
 
 def quote_3d(model: str, n: int = 1) -> int:

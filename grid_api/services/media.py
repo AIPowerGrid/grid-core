@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Shared media (image / video) generation helpers.
+"""Shared media (image / video / audio / 3D) generation helpers.
 
 One code path behind three front doors: `/v1/images/generations`,
 `/v1/videos/generations`, and the chat-completions abstraction. Each submits a
@@ -330,7 +330,7 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
     reserved = 0
     if credits.CHARGING_ENABLED:
         n = int(payload.get("n", 1) or 1)
-        seconds = (payload.get("recipe_inputs") or {}).get("seconds")
+        seconds = payload.get("seconds") or (payload.get("recipe_inputs") or {}).get("seconds")
         if job_type == "video" and not seconds:
             # the recipe's baked default duration isn't known to the grid; bill a
             # conservative default rather than letting it slip through free.
@@ -436,6 +436,7 @@ async def _submit_and_wait_inner(model: str, job_type: str, payload: dict, timeo
             "worker": result.get("worker", ""),
             "gen_time": result.get("gen_time"),
             "model": result.get("model", model),
+            "recipe_root": result.get("recipe_root"),
         }
         return media, meta
 

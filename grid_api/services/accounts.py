@@ -17,10 +17,11 @@ import logging
 import re
 import secrets
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 
 from ..auth import hash_api_key
 from ..database import new_session, users_table
@@ -64,6 +65,7 @@ async def resolve_api_key(plain_key: str) -> dict | None:
                         api_keys_table.c.is_session,
                         api_keys_table.c.scopes,
                         api_keys_table.c.key_kind,
+                        api_keys_table.c.label,
                         api_keys_table.c.service_id,
                         api_keys_table.c.expires_at,
                         service_clients_table.c.per_request_micro,
@@ -129,13 +131,16 @@ async def resolve_api_key(plain_key: str) -> dict | None:
                 # actions (payout wallet, key management) against leaked API keys.
                 "is_session": bool(row["is_session"]),
                 "key_kind": row["key_kind"] or "user",
+                "key_label": row["label"] or "",
                 "service_id": row["service_id"],
-                "service_limits": {
-                    "per_request_micro": row["per_request_micro"],
-                    "daily_micro": row["daily_micro"],
-                }
-                if row["service_id"]
-                else None,
+                "service_limits": (
+                    {
+                        "per_request_micro": row["per_request_micro"],
+                        "daily_micro": row["daily_micro"],
+                    }
+                    if row["service_id"]
+                    else None
+                ),
                 "allowed_providers": list(row["allowed_providers"] or []),
                 "google_audiences": list(row["google_audiences"] or []),
                 "scopes": list(row["scopes"] or (SESSION_SCOPES if row["is_session"] else INFERENCE_SCOPES)),
@@ -228,12 +233,14 @@ async def authenticate(
                 "token_claims": claims,
                 "auth_method": claims.get("amr"),
                 "service_id": claims.get("service_id"),
-                "service_limits": {
-                    "per_request_micro": service_policy.get("per_request_micro"),
-                    "daily_micro": service_policy.get("daily_micro"),
-                }
-                if service_policy
-                else None,
+                "service_limits": (
+                    {
+                        "per_request_micro": service_policy.get("per_request_micro"),
+                        "daily_micro": service_policy.get("daily_micro"),
+                    }
+                    if service_policy
+                    else None
+                ),
                 "key_kind": "user_token",
             },
         )
@@ -479,6 +486,175 @@ async def issue_key(
         )
         await session.commit()
     return plain
+
+
+async def install_prehashed_worker_key(
+    account_id,
+    key_hash: str,
+    *,
+    label: str,
+    expires_at,
+) -> None:
+    """Install a manager-generated worker credential without storing plaintext.
+
+    The enrollment service receives the candidate credential over TLS, hashes it
+    immediately, and passes only the hash here. The temporary expiry prevents a
+    completed-but-never-retrieved enrollment from leaving a durable orphan key.
+    """
+    if not re.fullmatch(r"[0-9a-f]{64}", key_hash):
+        raise ValueError("worker key hash must be lowercase SHA-256 hex")
+    account_id = UUID(str(account_id))
+    async with await new_session() as session:
+        try:
+            await session.execute(
+                sa.insert(api_keys_table).values(
+                    hash=key_hash,
+                    account_id=account_id,
+                    label=label,
+                    is_session=False,
+                    key_kind="worker",
+                    service_id=None,
+                    scopes=["worker.connect"],
+                    created=datetime.now(timezone.utc),
+                    expires_at=expires_at,
+                    revoked=False,
+                ),
+            )
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            existing = (
+                await session.execute(
+                    sa.select(
+                        api_keys_table.c.account_id,
+                        api_keys_table.c.key_kind,
+                        api_keys_table.c.revoked,
+                    ).where(api_keys_table.c.hash == key_hash),
+                )
+            ).first()
+            if not existing or str(existing.account_id) != str(account_id):
+                raise
+            if existing.key_kind != "worker" or existing.revoked:
+                raise
+
+
+async def install_enrolled_worker_key(
+    account_id,
+    key_hash: str,
+    *,
+    label: str,
+    expires_at,
+    payout_wallet: str,
+) -> None:
+    """Atomically bind the enrollment payout wallet and temporary worker key."""
+    if not re.fullmatch(r"[0-9a-f]{64}", key_hash):
+        raise ValueError("worker key hash must be lowercase SHA-256 hex")
+    wallet = payout_wallet.strip().lower()
+    if not is_valid_eth_address(wallet):
+        raise ValueError("payout address must be a valid 0x-prefixed 40-hex EVM address")
+    account_id = UUID(str(account_id))
+    async with await new_session() as session:
+        try:
+            updated = await session.execute(
+                sa.update(accounts_table).where(accounts_table.c.id == account_id).values(payout_wallet=wallet),
+            )
+            if updated.rowcount != 1:
+                raise ValueError("worker enrollment account does not exist")
+            await session.execute(
+                sa.insert(api_keys_table).values(
+                    hash=key_hash,
+                    account_id=account_id,
+                    label=label,
+                    is_session=False,
+                    key_kind="worker",
+                    service_id=None,
+                    scopes=["worker.connect"],
+                    created=datetime.now(timezone.utc),
+                    expires_at=expires_at,
+                    revoked=False,
+                ),
+            )
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            existing = (
+                await session.execute(
+                    sa.select(
+                        api_keys_table.c.account_id,
+                        api_keys_table.c.label,
+                        api_keys_table.c.key_kind,
+                        api_keys_table.c.revoked,
+                    ).where(api_keys_table.c.hash == key_hash),
+                )
+            ).first()
+            if (
+                not existing
+                or str(existing.account_id) != str(account_id)
+                or existing.label != label
+                or existing.key_kind != "worker"
+                or existing.revoked
+            ):
+                raise
+            await session.execute(
+                sa.update(accounts_table).where(accounts_table.c.id == account_id).values(payout_wallet=wallet),
+            )
+            await session.commit()
+
+
+async def activate_prehashed_worker_key(account_id, key_hash: str) -> bool:
+    """Activate one rig key and revoke older keys for the same rig label."""
+    account_id = UUID(str(account_id))
+    async with await new_session() as session:
+        label = await session.scalar(
+            sa.select(api_keys_table.c.label).where(
+                api_keys_table.c.account_id == account_id,
+                api_keys_table.c.hash == key_hash,
+                api_keys_table.c.key_kind == "worker",
+                api_keys_table.c.revoked.is_(False),
+            ),
+        )
+        if not label:
+            return False
+        result = await session.execute(
+            sa.update(api_keys_table)
+            .where(
+                api_keys_table.c.account_id == account_id,
+                api_keys_table.c.hash == key_hash,
+                api_keys_table.c.key_kind == "worker",
+                api_keys_table.c.revoked.is_(False),
+            )
+            .values(expires_at=None),
+        )
+        if result.rowcount == 1:
+            await session.execute(
+                sa.update(api_keys_table)
+                .where(
+                    api_keys_table.c.account_id == account_id,
+                    api_keys_table.c.hash != key_hash,
+                    api_keys_table.c.key_kind == "worker",
+                    api_keys_table.c.label == label,
+                    api_keys_table.c.revoked.is_(False),
+                )
+                .values(revoked=True),
+            )
+        await session.commit()
+    return result.rowcount == 1
+
+
+async def revoke_prehashed_worker_key(account_id, key_hash: str) -> None:
+    """Best-effort rollback for an enrollment that cannot publish completion."""
+    account_id = UUID(str(account_id))
+    async with await new_session() as session:
+        await session.execute(
+            sa.update(api_keys_table)
+            .where(
+                api_keys_table.c.account_id == account_id,
+                api_keys_table.c.hash == key_hash,
+                api_keys_table.c.key_kind == "worker",
+            )
+            .values(revoked=True),
+        )
+        await session.commit()
 
 
 async def create_service_client(

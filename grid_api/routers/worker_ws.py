@@ -28,23 +28,22 @@ from uuid import uuid4
 import sqlalchemy as sa
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from ..config import get_settings
 from ..database import (
     LEGACY_WORKER_DEFAULTS,
     new_session,
     processing_gens_table,
-    users_table,
-    waiting_prompts_table,
     worker_models_table,
     workers_table,
 )
 from ..redis_client import get_redis
 from ..services import accounts as accounts_svc
-from ..services import credits, job_queue, storage, token_stream
+from ..services import audio, credits, job_queue, signing, storage, token_stream
 from ..services import ledger as ledger_svc
-from ..services import signing
+from ..services import worker_identity as worker_identity_svc
 from ..services.den import calculate_den, calculate_media_den, count_tokens
-from ..v2.schema import workers as v2_workers_table
 from ..services.metrics_state import record_job_complete, record_job_failed
+from ..v2.schema import workers as v2_workers_table
 
 logger = logging.getLogger("grid_api.worker_ws")
 
@@ -66,8 +65,71 @@ async def _worker_online(worker_name: str) -> bool:
     r = get_redis()
     return bool(await r.get(f"{WORKER_ONLINE_BY_NAME}{worker_name}"))
 
+
 # In-process tracking for WebSocket handles (can't serialize these to Redis)
 _local_ws: dict[str, WebSocket] = {}
+
+
+def _can_connect_worker(user: dict) -> bool:
+    """Allow legacy accounts and v2 keys carrying a worker capability."""
+    if user.get("source") != "v2":
+        return True
+    return bool({"worker.connect", "inference.submit"} & set(user.get("scopes") or []))
+
+
+def _worker_key_matches_name(user: dict, worker_name: str) -> bool:
+    """Manager-issued rig credentials may register only their labeled rig."""
+    if user.get("source") != "v2" or user.get("key_kind") != "worker":
+        return True
+    return user.get("key_label") == f"worker:{worker_name}"
+
+
+def _receipt_signers(worker_info: dict) -> list[str]:
+    """A delegated signer supersedes the payout wallet for output receipts."""
+    signer = worker_info.get("signer_address")
+    return [signer] if signer else [worker_info.get("wallet_address", "")]
+
+
+def _media_result_commitment(job_type: str, payload: dict, outputs: list[dict]):
+    output_hashes = [item.get("sha256") or item["key"] for item in outputs]
+    if job_type == "audio":
+        return {"outputs": output_hashes, "recipe_root": payload.get("recipe_root")}
+    return output_hashes
+
+
+def _validated_audio_results(value: object, expected: int) -> dict[int, dict]:
+    """Require one canonical output digest for every presigned audio slot."""
+    if not isinstance(value, list) or len(value) != expected:
+        raise ValueError("audio result count does not match the requested outputs")
+    reported: dict[int, dict] = {}
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("audio result entry is malformed")
+        index = item.get("index")
+        if not isinstance(index, int) or isinstance(index, bool) or index < 0 or index >= expected or index in reported:
+            raise ValueError("audio result index is invalid or duplicated")
+        digest = item.get("sha256")
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ValueError("audio result digest is not canonical SHA-256 hex")
+        reported[index] = item
+    return reported
+
+
+def _media_output_units(job_type: str, payload: dict, n: int) -> int:
+    if job_type == "audio":
+        return max(n, int(round(float(payload.get("seconds", 0) or 0))))
+    return max(n, int(payload.get("frames", 0) or 0))
+
+
+def _requires_managed_profile(job_types: list[str], worker_profile: dict | None) -> bool:
+    """Audio is a governed-profile capability, not a free-form job type."""
+    return "audio" in job_types and worker_profile is None
+
+
+def _requires_signed_receipt(job_type: str, worker_info: dict) -> bool:
+    """Managed-profile work must be attributable to its delegated rig key."""
+    return job_type == "audio" or worker_info.get("worker_profile") is not None
+
 
 # ── Worker health enforcement ──
 # A completion that is empty (zero tokens) or an explicit worker error counts
@@ -76,7 +138,7 @@ _local_ws: dict[str, WebSocket] = {}
 # stops a worker whose inference backend has died from silently swallowing a
 # share of every job (the 2026-06-14 "empty every other message" outage).
 MAX_STRIKES = 6
-STRIKE_DECAY_S = 300       # strikes reset after 5 min without a failure
+STRIKE_DECAY_S = 300  # strikes reset after 5 min without a failure
 # Escalating quarantine: each eviction within EVICT_COUNT_DECAY_S ramps the
 # re-register bar (30s → 2m → 10m → 1h) so a chronically-broken backend backs
 # off instead of flapping back every 30s and eating fresh jobs. The repeat
@@ -209,9 +271,9 @@ async def get_available_models(job_type: str | None = None, api_format: str | No
     if job_type in ("image", "video") and not api_format:
         try:
             from ..services import recipes as _recipes
+
             for rc in _recipes.list_recipes():
-                if (rc.job_type == job_type and rc.required_models
-                        and all(m in models for m in rc.required_models)):
+                if rc.job_type == job_type and rc.required_models and all(m in models for m in rc.required_models):
                     models.add(rc.model_name)
         except Exception as e:
             logger.debug("recipe-backed model advertisement skipped: %s", e)
@@ -246,10 +308,7 @@ async def get_model_modalities() -> dict[str, list[str]]:
         for m in info.get("models", []):
             out.setdefault(m, set()).update(mods)
     # Stable order: text first, then the rest alphabetically.
-    return {
-        model: (["text"] if "text" in mods else []) + sorted(mods - {"text"})
-        for model, mods in out.items()
-    }
+    return {model: (["text"] if "text" in mods else []) + sorted(mods - {"text"}) for model, mods in out.items()}
 
 
 async def get_connected_worker_count() -> int:
@@ -281,7 +340,20 @@ async def worker_websocket(ws: WebSocket):
         # Job types this worker serves. Accepts the new `job_types` list or the
         # legacy single `worker_type`; defaults to text for old text workers.
         job_types = init_msg.get("job_types") or [init_msg.get("worker_type", "text")]
-        job_types = [t for t in job_types if t in ("text", "image", "video", "3d")] or ["text"]
+        job_types = [t for t in job_types if t in ("text", "image", "video", "audio", "3d")] or ["text"]
+        bridge_agent = init_msg.get("bridge_agent", "grid-ws")
+        try:
+            worker_profile = worker_identity_svc.normalize_worker_profile(init_msg.get("worker_profile"))
+        except worker_identity_svc.WorkerIdentityError as exc:
+            await ws.send_json({"type": "error", "message": str(exc)})
+            await ws.close(code=4003)
+            return
+        if _requires_managed_profile(job_types, worker_profile):
+            await ws.send_json(
+                {"type": "error", "message": "audio requires an approved managed profile"},
+            )
+            await ws.close(code=4003)
+            return
         # API formats this worker's backend natively serves. The worker probes
         # its inference engine and advertises only what actually answers (vLLM
         # exposes openai-chat + openai-responses but NOT anthropic, for example).
@@ -313,14 +385,28 @@ async def worker_websocket(ws: WebSocket):
             await ws.send_json({"type": "error", "message": "Invalid API key"})
             await ws.close(code=4001)
             return
+        if not _can_connect_worker(user):
+            await ws.send_json(
+                {"type": "error", "message": "API key lacks worker.connect scope"},
+            )
+            await ws.close(code=4003)
+            return
+        if not _worker_key_matches_name(user, worker_name):
+            await ws.send_json(
+                {"type": "error", "message": "worker credential targets another rig"},
+            )
+            await ws.close(code=4003)
+            return
 
         # Refuse workers we just evicted for failing health — gives a flapping
         # worker (dead backend) time to actually recover before rejoining.
         if await _is_in_cooldown(worker_name):
-            await ws.send_json({
-                "type": "error",
-                "message": "Worker recently evicted for failed generations; retry shortly.",
-            })
+            await ws.send_json(
+                {
+                    "type": "error",
+                    "message": "Worker recently evicted for failed generations; retry shortly.",
+                },
+            )
             await ws.close(code=4003)
             return
 
@@ -330,6 +416,34 @@ async def worker_websocket(ws: WebSocket):
         # users. If neither is set, den accrues unattributed until they set one
         # (see settlement.count_unattributed_den).
         wallet_address = user.get("payout_wallet") or user.get("wallet") or ""
+        identity_required = get_settings().require_worker_identity or worker_profile is not None or "audio" in job_types
+        try:
+            verified_identity = await worker_identity_svc.verify_registration(
+                proof=init_msg.get("worker_identity"),
+                payout_wallet=wallet_address,
+                worker_name=worker_name,
+                models=models,
+                job_types=job_types,
+                bridge_agent=bridge_agent,
+                worker_profile=worker_profile,
+                required=identity_required,
+            )
+        except worker_identity_svc.WorkerIdentityError as exc:
+            await ws.send_json({"type": "error", "message": str(exc)})
+            await ws.close(code=4003)
+            return
+
+        capabilities = {"job_types": job_types}
+        if worker_profile is not None:
+            capabilities["worker_profile"] = worker_profile
+        if verified_identity is not None:
+            capabilities.update(
+                {
+                    "signer_address": verified_identity.signer_address,
+                    "delegation_id": verified_identity.delegation_id,
+                    "delegation_expires_at": verified_identity.expires_at,
+                },
+            )
 
         if user["source"] == "v2":
             # v2 workers live in grid_workers (wallet-keyed, JSON models).
@@ -337,19 +451,19 @@ async def worker_websocket(ws: WebSocket):
             async with await new_session() as session:
                 row = (
                     await session.execute(
-                        sa.select(v2_workers_table.c.id, v2_workers_table.c.account_id).where(
-                            v2_workers_table.c.name == worker_name
-                        )
+                        sa.select(v2_workers_table.c.id, v2_workers_table.c.account_id).where(v2_workers_table.c.name == worker_name),
                     )
                 ).first()
                 # SECURITY: a worker name is owned by the account that created it. Without
                 # this check any authenticated account could register an existing worker's
                 # name and rebind its wallet → redirect another operator's den/earnings.
                 if row and row[1] != user["account_id"]:
-                    await ws.send_json({
-                        "type": "error",
-                        "message": "worker name already registered to another account",
-                    })
+                    await ws.send_json(
+                        {
+                            "type": "error",
+                            "message": "worker name already registered to another account",
+                        },
+                    )
                     await ws.close(code=4003)
                     return
                 if row:
@@ -362,7 +476,8 @@ async def worker_websocket(ws: WebSocket):
                             models=models,
                             wallet=wallet_address or None,
                             type=job_types[0],
-                        )
+                            capabilities=capabilities,
+                        ),
                     )
                 else:
                     worker_id = str(uuid4())
@@ -374,14 +489,14 @@ async def worker_websocket(ws: WebSocket):
                             type=job_types[0],
                             wallet=wallet_address or None,
                             models=models,
-                            capabilities={"job_types": job_types},
-                            bridge_agent=init_msg.get("bridge_agent", "grid-ws"),
+                            capabilities=capabilities,
+                            bridge_agent=bridge_agent,
                             maintenance=False,
                             first_seen=now,
                             last_seen=now,
                             jobs_completed=0,
                             den_earned=0.0,
-                        )
+                        ),
                     )
                 await session.commit()
         else:
@@ -391,7 +506,7 @@ async def worker_websocket(ws: WebSocket):
                     sa.select(workers_table).where(
                         workers_table.c.name == worker_name,
                         workers_table.c.user_id == user["id"],
-                    )
+                    ),
                 )
                 worker = result.mappings().first()
 
@@ -404,7 +519,7 @@ async def worker_websocket(ws: WebSocket):
                             last_check_in=datetime.utcnow(),
                             max_length=max_length,
                             max_context_length=max_context_length,
-                        )
+                        ),
                     )
                 else:
                     worker_id = str(uuid4())
@@ -423,17 +538,13 @@ async def worker_websocket(ws: WebSocket):
                             paused=False,
                             bridge_agent=init_msg.get("bridge_agent", "grid-ws"),
                             **LEGACY_WORKER_DEFAULTS,
-                        )
+                        ),
                     )
 
                 # Update model list
-                await session.execute(
-                    sa.delete(worker_models_table).where(worker_models_table.c.worker_id == worker_id)
-                )
+                await session.execute(sa.delete(worker_models_table).where(worker_models_table.c.worker_id == worker_id))
                 for model in models:
-                    await session.execute(
-                        sa.insert(worker_models_table).values(worker_id=worker_id, model=model)
-                    )
+                    await session.execute(sa.insert(worker_models_table).values(worker_id=worker_id, model=model))
                 await session.commit()
 
         # Register in Redis (visible to all processes)
@@ -448,6 +559,8 @@ async def worker_websocket(ws: WebSocket):
             "max_length": max_length,
             "max_context_length": max_context_length,
             "wallet_address": wallet_address,
+            "signer_address": (verified_identity.signer_address if verified_identity is not None else ""),
+            "worker_profile": worker_profile,
         }
         # Single active connection per worker. A reconnect (restart / network blip)
         # can leave the previous WS half-open; if its server-side task is still
@@ -466,9 +579,7 @@ async def worker_websocket(ws: WebSocket):
         await register_worker(worker_id, worker_info)
 
         await ws.send_json({"type": "ready", "worker_id": worker_id})
-        logger.info(
-            f"Worker '{worker_name}' ({worker_id}) connected, types={job_types}, models: {models}"
-        )
+        logger.info(f"Worker '{worker_name}' ({worker_id}) connected, types={job_types}, models: {models}")
 
         # ── Step 2: Concurrent job polling + keepalive ──
         # A bounded queue (maxsize=1) decouples the Redis poll from the
@@ -546,10 +657,7 @@ async def worker_websocket(ws: WebSocket):
                         except asyncio.TimeoutError:
                             pass
                     except (asyncio.TimeoutError, WebSocketDisconnect, RuntimeError) as e:
-                        logger.info(
-                            f"Worker '{worker_name}' keepalive failed "
-                            f"({type(e).__name__}) — closing for reconnect"
-                        )
+                        logger.info(f"Worker '{worker_name}' keepalive failed " f"({type(e).__name__}) — closing for reconnect")
                         break
                     continue
 
@@ -628,10 +736,18 @@ async def worker_websocket(ws: WebSocket):
 
                 # Track current job for retry on disconnect
                 current_job = job
+                job["worker_id"] = worker_id
 
-                # ── Media path (image/video) ──
+                # ── Media path (image/video/audio/3D) ──
                 if job.get("job_type", "text") != "text":
-                    ok = await _handle_media_job(ws, job, selected_model, worker_id, worker_info)
+                    async with job_queue.maintain_job_claim(job):
+                        ok = await _handle_media_job(
+                            ws,
+                            job,
+                            selected_model,
+                            worker_id,
+                            worker_info,
+                        )
                     if ok:
                         await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
                     current_job = None
@@ -665,57 +781,58 @@ async def worker_websocket(ws: WebSocket):
 
                 # Create or update processing_gen (may already exist from a requeued job)
                 if legacy_rows:
-                  async with await new_session() as session:
-                    existing = await session.execute(
-                        sa.select(processing_gens_table.c.id).where(
-                            processing_gens_table.c.id == job["job_id"]
+                    async with await new_session() as session:
+                        existing = await session.execute(
+                            sa.select(processing_gens_table.c.id).where(processing_gens_table.c.id == job["job_id"]),
                         )
-                    )
-                    if existing.first():
-                        await session.execute(
-                            sa.update(processing_gens_table)
-                            .where(processing_gens_table.c.id == job["job_id"])
-                            .values(
-                                worker_id=worker_id,
-                                model=selected_model,
-                                start_time=datetime.utcnow(),
-                                faulted=False,
-                                cancelled=False,
+                        if existing.first():
+                            await session.execute(
+                                sa.update(processing_gens_table)
+                                .where(processing_gens_table.c.id == job["job_id"])
+                                .values(
+                                    worker_id=worker_id,
+                                    model=selected_model,
+                                    start_time=datetime.utcnow(),
+                                    faulted=False,
+                                    cancelled=False,
+                                ),
                             )
-                        )
-                    else:
-                        await session.execute(
-                            sa.insert(processing_gens_table).values(
-                                id=job["job_id"],
-                                procgen_type="text",
-                                wp_id=job["job_id"],
-                                worker_id=worker_id,
-                                model=selected_model,
-                                seed=0,
-                                start_time=datetime.utcnow(),
-                                created=datetime.utcnow(),
-                                cancelled=False,
-                                faulted=False,
-                                fake=False,
-                                censored=False,
-                                job_ttl=150,
-                                progress_percent=0,
-                                current_step=0,
-                                total_steps=0,
-                                media_type="text",
+                        else:
+                            await session.execute(
+                                sa.insert(processing_gens_table).values(
+                                    id=job["job_id"],
+                                    procgen_type="text",
+                                    wp_id=job["job_id"],
+                                    worker_id=worker_id,
+                                    model=selected_model,
+                                    seed=0,
+                                    start_time=datetime.utcnow(),
+                                    created=datetime.utcnow(),
+                                    cancelled=False,
+                                    faulted=False,
+                                    fake=False,
+                                    censored=False,
+                                    job_ttl=150,
+                                    progress_percent=0,
+                                    current_step=0,
+                                    total_steps=0,
+                                    media_type="text",
+                                ),
                             )
-                        )
-                    await session.commit()
+                        await session.commit()
 
-                await ws.send_json({
-                    "type": "job",
-                    "id": job["job_id"],
-                    "model": selected_model,
-                    "payload": job["payload"],
-                })
+                await ws.send_json(
+                    {
+                        "type": "job",
+                        "id": job["job_id"],
+                        "model": selected_model,
+                        "payload": job["payload"],
+                    },
+                )
 
                 # Wait for tokens + done
                 import time as _time
+
                 gen_start = _time.time()
                 gen = await _handle_worker_generation(ws, job, worker_info)
                 full_text = gen["full_text"]
@@ -747,8 +864,12 @@ async def worker_websocket(ws: WebSocket):
                     record_job_failed()
                     if token_count == 0:
                         new_id = await job_queue.requeue_job(
-                            job["job_id"], job["payload"], job["models"],
-                            job.get("stream_id"), job_type="text", stream=job.get("stream"),
+                            job["job_id"],
+                            job["payload"],
+                            job["models"],
+                            job.get("stream_id"),
+                            job_type="text",
+                            stream=job.get("stream"),
                             preferred_worker=job.get("preferred_worker", ""),
                             hard_target_worker=job.get("hard_target_worker", ""),
                             affinity_passes=job.get("affinity_passes", 0),
@@ -758,23 +879,17 @@ async def worker_websocket(ws: WebSocket):
                             # and gave up. This is terminal: surface an error and
                             # refund, else the client hangs to the idle timeout and
                             # the reservation stays stranded until the sweeper.
-                            await token_stream.publish_error(
-                                job["job_id"], "No worker could complete this job; giving up."
-                            )
+                            await token_stream.publish_error(job["job_id"], "No worker could complete this job; giving up.")
                             await credits.release_job(job["job_id"])
                             logger.warning(
-                                f"Job {job['job_id']} dead-lettered after repeated empty "
-                                f"completions (worker '{worker_name}')"
+                                f"Job {job['job_id']} dead-lettered after repeated empty " f"completions (worker '{worker_name}')",
                             )
                         else:
                             logger.warning(
-                                f"Job {job['job_id']} requeued after worker '{worker_name}' "
-                                f"failed it (strike {strikes}/{MAX_STRIKES})"
+                                f"Job {job['job_id']} requeued after worker '{worker_name}' " f"failed it (strike {strikes}/{MAX_STRIKES})",
                             )
                     else:
-                        await token_stream.publish_error(
-                            job["job_id"], "Worker failed mid-generation; please retry."
-                        )
+                        await token_stream.publish_error(job["job_id"], "Worker failed mid-generation; please retry.")
                         await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
                         # Terminal (surfaced to client, not requeued): refund the hold.
                         # NB: the token_count==0 branch above REQUEUES, so the
@@ -786,7 +901,7 @@ async def worker_websocket(ws: WebSocket):
                         cooldown = await _evict_worker(worker_id, worker_name)
                         logger.error(
                             f"Worker '{worker_name}' ({worker_id}) hit {MAX_STRIKES} "
-                            f"strikes — evicting and barring re-register for {cooldown}s"
+                            f"strikes — evicting and barring re-register for {cooldown}s",
                         )
                         break  # drop the WS; cooldown blocks immediate rejoin
                     continue
@@ -839,13 +954,13 @@ async def worker_websocket(ws: WebSocket):
                     generation_time_seconds=gen_time,
                 )
                 if legacy_rows:
-                  async with await new_session() as session:
-                    await session.execute(
-                        sa.update(processing_gens_table)
-                        .where(processing_gens_table.c.id == job["job_id"])
-                        .values(generation=full_text, faulted=False)
-                    )
-                    await session.commit()
+                    async with await new_session() as session:
+                        await session.execute(
+                            sa.update(processing_gens_table)
+                            .where(processing_gens_table.c.id == job["job_id"])
+                            .values(generation=full_text, faulted=False),
+                        )
+                        await session.commit()
 
                 # ── ATOMIC terminal: worker-payout ledger row + demand
                 # settlement commit together (or neither). grid_ledger is the
@@ -863,7 +978,10 @@ async def worker_websocket(ws: WebSocket):
                 # verifies to the payout wallet over this exact output commitment.
                 # Absent/invalid → unsigned (floor). Fail-closed in signing.py.
                 verified_sig = signing.verify_worker_sig(
-                    job["job_id"], result_hash, gen.get("worker_sig"), [payout_wallet]
+                    job["job_id"],
+                    result_hash,
+                    gen.get("worker_sig"),
+                    _receipt_signers(worker_info),
                 )
                 settle_result = await credits.record_and_settle(
                     ledger_values=dict(
@@ -890,13 +1008,8 @@ async def worker_websocket(ws: WebSocket):
                     # the message is reclaimed and re-served rather than silently
                     # becoming free inference with an unpaid worker. (current_job
                     # stays set → the disconnect/reclaim path recovers it.)
-                    logger.critical(
-                        f"Terminal settlement failed for job {job['job_id']} — not acking; "
-                        f"leaving for stale-reclaim"
-                    )
-                    await token_stream.publish_error(
-                        job["job_id"], "Settlement failed; please retry."
-                    )
+                    logger.critical(f"Terminal settlement failed for job {job['job_id']} — not acking; " f"leaving for stale-reclaim")
+                    await token_stream.publish_error(job["job_id"], "Settlement failed; please retry.")
                     record_job_failed()
                     continue
 
@@ -904,9 +1017,13 @@ async def worker_websocket(ws: WebSocket):
                 if settle_result in _PAID_SETTLE:
                     # Paid success → tell the client DONE, ack queue + worker, metrics.
                     await token_stream.publish_done(
-                        job["job_id"], full_text, gen["full_reasoning"],
-                        tool_calls=gen["tool_calls"], usage=gen["usage"],
-                        finish_reason=gen["finish_reason"], grid=gen["grid_meta"],
+                        job["job_id"],
+                        full_text,
+                        gen["full_reasoning"],
+                        tool_calls=gen["tool_calls"],
+                        usage=gen["usage"],
+                        finish_reason=gen["finish_reason"],
+                        grid=gen["grid_meta"],
                     )
                     await job_queue.ack_job(job["stream_id"])
                     await ws.send_json({"type": "ack", "id": job["job_id"], "den": den_awarded})
@@ -920,9 +1037,7 @@ async def worker_websocket(ws: WebSocket):
                     # winning dispatch already delivered the response.
                     logger.warning(f"Job {job['job_id']} closed without payout (settle={settle_result})")
                     if settle_result == "stale_no_payout":
-                        await token_stream.publish_error(
-                            job["job_id"], "Job could not be settled (already closed); please retry."
-                        )
+                        await token_stream.publish_error(job["job_id"], "Job could not be settled (already closed); please retry.")
                     await job_queue.ack_job(job["stream_id"])
                     await ws.send_json({"type": "ack", "id": job["job_id"], "den": 0})
         finally:
@@ -986,7 +1101,9 @@ async def worker_websocket(ws: WebSocket):
             try:
                 pid = prefetched["job_id"]
                 nid = await job_queue.requeue_job(
-                    pid, prefetched["payload"], prefetched["models"],
+                    pid,
+                    prefetched["payload"],
+                    prefetched["models"],
                     prefetched.get("stream_id"),
                     job_type=prefetched.get("job_type", "text"),
                     stream=prefetched.get("stream"),
@@ -994,8 +1111,7 @@ async def worker_websocket(ws: WebSocket):
                     hard_target_worker=prefetched.get("hard_target_worker", ""),
                     affinity_passes=prefetched.get("affinity_passes", 0),
                 )
-                logger.warning("Requeued prefetched-but-undispatched job %s%s",
-                               pid, f" as {nid}" if nid else " (gave up)")
+                logger.warning("Requeued prefetched-but-undispatched job %s%s", pid, f" as {nid}" if nid else " (gave up)")
             except Exception:
                 logger.error("failed to requeue prefetched job on cleanup", exc_info=True)
 
@@ -1003,9 +1119,7 @@ async def worker_websocket(ws: WebSocket):
             logger.info(f"Worker '{worker_info['name']}' cleaned up")
 
 
-async def _handle_validator_probe(
-    ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict
-) -> bool:
+async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict) -> bool:
     """Dispatch one assignment-bound validator probe.
 
     Validator probes are evidence collection, not paid inference. They must not
@@ -1014,12 +1128,14 @@ async def _handle_validator_probe(
     """
     job_id = job["job_id"]
     payload = job["payload"]
-    await ws.send_json({
-        "type": "job",
-        "id": job_id,
-        "model": selected_model,
-        "payload": payload,
-    })
+    await ws.send_json(
+        {
+            "type": "job",
+            "id": job_id,
+            "model": selected_model,
+            "payload": payload,
+        },
+    )
 
     gen = await _handle_worker_generation(ws, job, worker_info)
     if gen["client_error"] is not None:
@@ -1052,9 +1168,7 @@ async def _handle_validator_probe(
     return True
 
 
-async def _handle_media_job(
-    ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict
-) -> bool:
+async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict) -> bool:
     """Dispatch one image/video job to the worker and collect the result.
 
     The job message carries presigned PUT slots so the worker uploads outputs
@@ -1072,31 +1186,37 @@ async def _handle_media_job(
     job_type = job.get("job_type", "image")
 
     n = int(payload.get("n", 1) or 1)
-    ext = payload.get("ext") or ("mp4" if job_type == "video"
-                                 else "glb" if job_type == "3d" else "webp")
+    ext = payload.get("ext") or ("mp4" if job_type == "video" else "wav" if job_type == "audio" else "glb" if job_type == "3d" else "webp")
+    upload_expires = audio.AUDIO_UPLOAD_URL_TTL if job_type == "audio" else 900
     try:
-        upload_slots = storage.presign_outputs(job_id, n, ext, job_type=job_type)
+        upload_slots = storage.presign_outputs(
+            job_id,
+            n,
+            ext,
+            expires=upload_expires,
+            job_type=job_type,
+        )
     except Exception as e:
         logger.error(f"Presign failed for job {job_id}: {e}")
         await token_stream.publish_error(job_id, "Storage unavailable; please retry.")
         await credits.release_job(job_id)  # terminal: never dispatched → refund the hold
         return True
 
-    await ws.send_json({
-        "type": "job",
-        "id": job_id,
-        "job_type": job_type,
-        "model": selected_model,
-        "payload": payload,
-        "upload": [
-            {"put_url": s["put_url"], "key": s["key"], "content_type": s["content_type"]}
-            for s in upload_slots
-        ],
-    })
+    await ws.send_json(
+        {
+            "type": "job",
+            "id": job_id,
+            "job_type": job_type,
+            "model": selected_model,
+            "payload": payload,
+            "upload": [{"put_url": s["put_url"], "key": s["key"], "content_type": s["content_type"]} for s in upload_slots],
+        },
+    )
 
     gen_start = _time.time()
+    receive_timeout = audio.AUDIO_WORKER_TIMEOUT if job_type == "audio" else 600
     while True:
-        msg = await asyncio.wait_for(ws.receive_json(), timeout=600)
+        msg = await asyncio.wait_for(ws.receive_json(), timeout=receive_timeout)
         msg_type = msg.get("type")
 
         if msg_type == "progress":
@@ -1118,16 +1238,50 @@ async def _handle_media_job(
 
         elif msg_type == "done":
             gen_time = _time.time() - gen_start
-            reported = {r.get("index", i): r for i, r in enumerate(msg.get("results", []))}
+            expected_recipe_root = payload.get("recipe_root") if job_type == "audio" else None
+            if expected_recipe_root and msg.get("recipe_root") != expected_recipe_root:
+                logger.error("Audio worker returned the wrong recipe root for job %s", job_id)
+                await token_stream.publish_error(job_id, "Worker recipe verification failed.")
+                await credits.release_job(job_id)
+                return True
+            if job_type == "audio":
+                try:
+                    reported = _validated_audio_results(msg.get("results"), n)
+                except ValueError as exc:
+                    logger.error("Audio output verification failed for job %s: %s", job_id, exc)
+                    await token_stream.publish_error(job_id, "Worker output verification failed.")
+                    await credits.release_job(job_id)
+                    return True
+            else:
+                reported = {r.get("index", i): r for i, r in enumerate(msg.get("results", []))}
+            if job_type == "audio":
+                try:
+                    uploaded = await asyncio.to_thread(
+                        storage.uploaded_outputs_present,
+                        upload_slots,
+                        min_bytes=audio.MIN_WAV_BYTES,
+                        max_bytes=audio.MAX_AUDIO_BYTES,
+                    )
+                except Exception as exc:
+                    logger.error("Audio storage verification unavailable for job %s: %s", job_id, exc)
+                    await token_stream.publish_error(job_id, "Output verification unavailable; please retry.")
+                    return False
+                if not uploaded:
+                    logger.error("Audio output object is missing or invalid for job %s", job_id)
+                    await token_stream.publish_error(job_id, "Worker output verification failed.")
+                    await credits.release_job(job_id)
+                    return True
             outputs = []
             for i, slot in enumerate(upload_slots):
                 rep = reported.get(i, {})
-                outputs.append({
-                    "url": slot["public_url"],
-                    "key": slot["key"],
-                    "seed": rep.get("seed"),
-                    "sha256": rep.get("sha256"),
-                })
+                outputs.append(
+                    {
+                        "url": slot["public_url"],
+                        "key": slot["key"],
+                        "seed": rep.get("seed"),
+                        "sha256": rep.get("sha256"),
+                    },
+                )
 
             den_awarded = calculate_media_den(
                 job_type=job_type,
@@ -1136,6 +1290,7 @@ async def _handle_media_job(
                 steps=int(payload.get("steps", 20) or 20),
                 n=n,
                 frames=int(payload.get("frames", 0) or 0),
+                seconds=float(payload.get("seconds", 0) or 0),
             )
 
             # Result hash: digest over the worker-reported per-output sha256s.
@@ -1145,9 +1300,19 @@ async def _handle_media_job(
             # This hash is integrity bookkeeping, NOT proof-of-output. Real attestation
             # comes from the validator scan path (re-fetch + recompute, or sampled re-exec);
             # do not treat media result_hash as authoritative at settlement until then.
-            result_hash = ledger_svc.canonical_hash(
-                [o.get("sha256") or o["key"] for o in outputs]
+            result_commitment = _media_result_commitment(job_type, payload, outputs)
+            result_hash = ledger_svc.canonical_hash(result_commitment)
+            verified_sig = signing.verify_worker_sig(
+                job_id,
+                result_hash,
+                msg.get("worker_sig"),
+                _receipt_signers(worker_info),
             )
+            if _requires_signed_receipt(job_type, worker_info) and not verified_sig:
+                logger.error("Managed worker returned an invalid receipt for job %s", job_id)
+                await token_stream.publish_error(job_id, "Worker receipt verification failed.")
+                await credits.release_job(job_id)
+                return True
             # ATOMIC terminal: worker-payout row + demand settlement in one txn.
             # Media reserves the EXACT cost up front, so success just lets the hold
             # stand (exact=True → flip held→settled, no ledger movement).
@@ -1159,10 +1324,11 @@ async def _handle_media_job(
                     model=selected_model,
                     job_type=job_type,
                     den=den_awarded,
-                    output_units=max(n, int(payload.get("frames", 0) or 0)),
+                    output_units=_media_output_units(job_type, payload, n),
                     duration=gen_time,
                     prompt_hash=ledger_svc.canonical_hash(payload),
                     result_hash=result_hash,
+                    worker_sig=verified_sig,
                 ),
                 exact=True,
             )
@@ -1175,12 +1341,16 @@ async def _handle_media_job(
 
             if settle_result in _PAID_SETTLE:
                 await token_stream.publish_done(
-                    job_id, json.dumps({
-                        "media": outputs,
-                        "model": selected_model,
-                        "worker": worker_info.get("name", ""),
-                        "gen_time": round(gen_time, 2),
-                    })
+                    job_id,
+                    json.dumps(
+                        {
+                            "media": outputs,
+                            "model": selected_model,
+                            "worker": worker_info.get("name", ""),
+                            "gen_time": round(gen_time, 2),
+                            "recipe_root": expected_recipe_root,
+                        },
+                    ),
                 )
                 await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
                 record_job_complete(tokens=0, den=den_awarded, duration=gen_time)
@@ -1206,9 +1376,7 @@ async def _handle_media_job(
             return True
 
 
-async def _handle_raw_passthrough(
-    ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict
-) -> bool:
+async def _handle_raw_passthrough(ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict) -> bool:
     """Tunnel a raw Anthropic / OpenAI-Responses job to the worker and relay it.
 
     The worker forwards the client's request to the matching backend endpoint
@@ -1224,12 +1392,14 @@ async def _handle_raw_passthrough(
     job_id = job["job_id"]
     payload = job["payload"]
 
-    await ws.send_json({
-        "type": "job",
-        "id": job_id,
-        "model": selected_model,
-        "payload": payload,
-    })
+    await ws.send_json(
+        {
+            "type": "job",
+            "id": job_id,
+            "model": selected_model,
+            "payload": payload,
+        },
+    )
 
     gen_start = _time.time()
     accumulated: list[str] = []  # raw data strings, for the result hash
@@ -1285,15 +1455,14 @@ async def _handle_raw_passthrough(
                 generation_time_seconds=gen_time,
             )
             await _clear_strikes(worker_id)
-            result_src = "".join(accumulated) if accumulated else (
-                json.dumps(full_json, sort_keys=True) if full_json else ""
-            )
+            result_src = "".join(accumulated) if accumulated else (json.dumps(full_json, sort_keys=True) if full_json else "")
 
             # ATOMIC terminal: worker-payout row + demand settlement in one txn.
             # Bill on a GRID count of the relayed/assembled output, never the
             # backend's `usage`. Reuses the reservation opened atomically at
             # reserve time; no-op in dry-run / for jobs without a reservation.
             from ._passthrough import completion_tokens as _pt_completion
+
             api_format = payload.get("api_format", "openai-chat")
             settle_result = await credits.record_and_settle(
                 ledger_values=dict(
@@ -1362,9 +1531,7 @@ def _merge_tool_call_deltas(acc: dict, deltas: list):
     """
     for tc in deltas or []:
         idx = tc.get("index", 0)
-        slot = acc.setdefault(
-            idx, {"index": idx, "id": None, "type": "function", "function": {"name": "", "arguments": ""}}
-        )
+        slot = acc.setdefault(idx, {"index": idx, "id": None, "type": "function", "function": {"name": "", "arguments": ""}})
         if tc.get("id"):
             slot["id"] = tc["id"]
         if tc.get("type"):
@@ -1382,9 +1549,20 @@ def _merge_tool_call_deltas(acc: dict, deltas: list):
 _PAID_SETTLE = ("settled", "no_reservation")
 
 
-def _gen_result(*, full_text="", full_reasoning="", tool_calls=None, usage=None,
-                finish_reason="stop", grid_meta=None, metered=0,
-                failed=False, client_error=None, ttft=None, worker_sig=None) -> dict:
+def _gen_result(
+    *,
+    full_text="",
+    full_reasoning="",
+    tool_calls=None,
+    usage=None,
+    finish_reason="stop",
+    grid_meta=None,
+    metered=0,
+    failed=False,
+    client_error=None,
+    ttft=None,
+    worker_sig=None,
+) -> dict:
     """Structured result of one worker generation. On SUCCESS the caller publishes
     DONE only AFTER settlement commits (so the client's completion signal, the
     queue ack, and the worker ack all gate on a committed terminal).
@@ -1393,9 +1571,16 @@ def _gen_result(*, full_text="", full_reasoning="", tool_calls=None, usage=None,
     frame — the caller verifies it against the worker's payout wallet before
     persisting (unverified/absent → the row is stored unsigned)."""
     return {
-        "full_text": full_text, "full_reasoning": full_reasoning, "tool_calls": tool_calls,
-        "usage": usage, "finish_reason": finish_reason, "grid_meta": grid_meta,
-        "metered": metered, "failed": failed, "client_error": client_error, "ttft": ttft,
+        "full_text": full_text,
+        "full_reasoning": full_reasoning,
+        "tool_calls": tool_calls,
+        "usage": usage,
+        "finish_reason": finish_reason,
+        "grid_meta": grid_meta,
+        "metered": metered,
+        "failed": failed,
+        "client_error": client_error,
+        "ttft": ttft,
         "worker_sig": worker_sig,
     }
 
@@ -1422,6 +1607,7 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
     the requeue/strike machinery (retrying would fail identically everywhere).
     """
     import time as _time
+
     job_id = job["job_id"]
     full_text = ""
     full_reasoning = ""
@@ -1466,9 +1652,7 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
                 if msg.get("finish_reason"):
                     last_finish = msg["finish_reason"]
                 token_count += 1
-                await token_stream.publish_token(
-                    job_id, delta=delta, finish_reason=msg.get("finish_reason")
-                )
+                await token_stream.publish_token(job_id, delta=delta, finish_reason=msg.get("finish_reason"))
             else:
                 # Legacy path — separate text/reasoning channels.
                 text = msg.get("text", "")
@@ -1499,20 +1683,13 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
             # carried here; verified against the payout wallet at settle time.
             reported_worker_sig = msg.get("worker_sig")
             tool_calls = [tool_acc[i] for i in sorted(tool_acc)] if tool_acc else None
-            finish_reason = msg.get("finish_reason") or last_finish or (
-                "tool_calls" if tool_calls else "stop"
-            )
+            finish_reason = msg.get("finish_reason") or last_finish or ("tool_calls" if tool_calls else "stop")
 
             # An empty completion (no content, no reasoning, no tool calls) is a
             # silent backend failure, not a success — don't pay for it or hand
             # the client a blank reply. A cancelled job is exempt: stopping early
             # with little/no output is expected, not a fault.
-            produced_output = bool(
-                (full_text or "").strip()
-                or (full_reasoning or "").strip()
-                or tool_calls
-                or token_count
-            )
+            produced_output = bool((full_text or "").strip() or (full_reasoning or "").strip() or tool_calls or token_count)
             if not produced_output and not was_cancelled:
                 logger.warning(f"Worker returned EMPTY completion for job {job_id} — treating as failure")
                 return _gen_result(full_text=full_text, metered=0, failed=True, ttft=ttft)
@@ -1523,10 +1700,12 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
             # comparable industry number. Dividing by full wall-clock (incl. ttft)
             # understates t/s badly on prompts with long prefill / short outputs.
             gen_elapsed = _time.time() - recv_start
-            decode_s = gen_elapsed - (ttft or 0.0)   # first-token → last-token
+            decode_s = gen_elapsed - (ttft or 0.0)  # first-token → last-token
             if decode_s <= 0:
-                decode_s = gen_elapsed                # 1-token / sub-tick fallback
-            metered_now = (usage.get("completion_tokens") if usage and isinstance(usage.get("completion_tokens"), int) else token_count) or 0
+                decode_s = gen_elapsed  # 1-token / sub-tick fallback
+            metered_now = (
+                usage.get("completion_tokens") if usage and isinstance(usage.get("completion_tokens"), int) else token_count
+            ) or 0
             grid_meta = {
                 "worker": worker_info.get("name", ""),
                 "gen_time": round(gen_elapsed, 2),
@@ -1544,9 +1723,16 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
             if usage and isinstance(usage.get("completion_tokens"), int):
                 metered = usage["completion_tokens"]
             return _gen_result(
-                full_text=full_text, full_reasoning=full_reasoning, tool_calls=tool_calls,
-                usage=usage, finish_reason=finish_reason, grid_meta=grid_meta,
-                metered=metered, failed=False, ttft=ttft, worker_sig=reported_worker_sig,
+                full_text=full_text,
+                full_reasoning=full_reasoning,
+                tool_calls=tool_calls,
+                usage=usage,
+                finish_reason=finish_reason,
+                grid_meta=grid_meta,
+                metered=metered,
+                failed=False,
+                ttft=ttft,
+                worker_sig=reported_worker_sig,
             )
 
         elif msg_type == "pong":
@@ -1557,7 +1743,6 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
             if msg.get("client_error"):
                 # Deterministic caller fault (bad request); not the worker's fault.
                 logger.info(f"Client error on job {job_id}: {message[:200]}")
-                return _gen_result(full_text=full_text, metered=token_count, failed=True,
-                                   client_error=message, ttft=ttft)
+                return _gen_result(full_text=full_text, metered=token_count, failed=True, client_error=message, ttft=ttft)
             logger.error(f"Worker error on job {job_id}: {message}")
             return _gen_result(full_text=full_text, metered=token_count, failed=True, ttft=ttft)

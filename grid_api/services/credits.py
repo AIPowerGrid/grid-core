@@ -524,6 +524,8 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                 "reason": f"model '{model}' is not available for billing"}
     if job_type == "video":
         cost = pricing.quote_video(model, float(seconds or 0))
+    elif job_type == "audio":
+        cost = pricing.quote_audio(model, float(seconds or 0))
     elif job_type == "3d":
         cost = pricing.quote_3d(model, int(n or 1))
     else:
