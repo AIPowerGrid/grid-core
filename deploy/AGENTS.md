@@ -3,7 +3,9 @@
 ## Purpose
 
 Existing-host operations plus inherited bootstrap, nginx, and systemd assets for
-grid-core (deployed from the historical `/home/aipg/system-core` path).
+grid-core. Production services execute an immutable release selected through
+`/home/aipg/current`; the historical `/home/aipg/system-core` checkout is not a
+release artifact.
 
 ## Ownership
 
@@ -15,6 +17,8 @@ grid-core (deployed from the historical `/home/aipg/system-core` path).
 - `nginx/aipg-api.conf` - public route split between `/v1`, `/api/v2`, `/v2`,
   metrics, and legacy site routes.
 - `systemd/aipg-gridapi.service` - uvicorn Grid API unit.
+- `systemd/aipg-payout.{service,timer}` - custodial payout one-shot and hourly
+  scheduler. The service invokes the wrapper from the selected release.
 - `systemd/aipg-horde@.service` - legacy Flask unit template.
 
 ## Local Contracts

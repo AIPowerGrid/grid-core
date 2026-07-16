@@ -1,0 +1,14 @@
+[Unit]
+Description=AIPG hourly custodial worker payout
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=aipg
+Group=aipg
+WorkingDirectory=/home/aipg/current
+EnvironmentFile=/etc/aipg/grid.env
+ExecStart=/home/aipg/current/scripts/payout_hourly.sh
+NoNewPrivileges=true
+PrivateTmp=true

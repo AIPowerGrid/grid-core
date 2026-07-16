@@ -2,10 +2,12 @@
 
 ## Current status
 
-Production serves the FastAPI `grid_api` application from the `main` branch of
-`AIPowerGrid/grid-core`. Database changes are Alembic-managed. The existing host
-uses `/home/aipg/system-core` as its checkout path for historical reasons; the
-repository name and remote are `grid-core`.
+Production serves the FastAPI `grid_api` application from a reviewed commit of
+`AIPowerGrid/grid-core`. Database changes are Alembic-managed. Each deployment
+gets an immutable checkout under `/home/aipg/releases/`; `/home/aipg/current` is
+an atomically replaced symlink to the selected release. The historical
+`/home/aipg/system-core` checkout is retained only for forensics and rollback
+comparison and must never receive another in-place deployment.
 
 `bootstrap.sh`, the legacy Flask fleet unit, and the nginx split were written for
 the old mixed Horde cutover. **Do not use `bootstrap.sh` for a new production
@@ -32,16 +34,44 @@ deploying from an agent or moving money.
 
 ## Existing-host deploy
 
-Run as an operator on the production host:
+Choose and record a reviewed full commit SHA. Build it beside the live release;
+do not use a branch checkout as the release identity:
 
 ```bash
-sudo -u aipg git -C /home/aipg/system-core fetch origin
-sudo -u aipg git -C /home/aipg/system-core pull --ff-only origin main
-sudo -u aipg /home/aipg/system-core/.venv/bin/pip install -r /home/aipg/system-core/requirements.txt
-cd /home/aipg/system-core
-sudo -E -H -u aipg ./.venv/bin/python -m alembic upgrade head
+COMMIT=<reviewed-full-sha>
+RELEASE=/home/aipg/releases/grid-core-${COMMIT:0:8}
+sudo -H -u aipg git clone https://github.com/AIPowerGrid/grid-core.git "$RELEASE"
+sudo -H -u aipg git -C "$RELEASE" checkout --detach "$COMMIT"
+test "$(sudo -H -u aipg git -C "$RELEASE" rev-parse HEAD)" = "$COMMIT"
+test -z "$(sudo -H -u aipg git -C "$RELEASE" status --porcelain)"
+sudo -H -u aipg python3 -m venv "$RELEASE/.venv"
+sudo -H -u aipg "$RELEASE/.venv/bin/pip" install -r "$RELEASE/requirements.txt"
+sudo -H -u aipg "$RELEASE/.venv/bin/pip" check
+```
+
+Back up the Grid-owned PostgreSQL schema and prove every pending migration on a
+restored scratch database before applying it to production. Source
+`/etc/aipg/grid.env` only in a root/operator shell and never print its values.
+After the scratch proof, run Alembic from the candidate release with the service
+environment loaded, then verify `alembic current` equals its single head.
+
+Install the versioned unit assets, select the release atomically, and restart:
+
+```bash
+sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-gridapi.service" /etc/systemd/system/
+sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-payout.service" /etc/systemd/system/
+sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-payout.timer" /etc/systemd/system/
+sudo ln -s "$RELEASE" /home/aipg/.current.next
+sudo mv -Tf /home/aipg/.current.next /home/aipg/current
+sudo systemctl daemon-reload
+sudo systemd-analyze verify aipg-gridapi.service aipg-payout.service aipg-payout.timer
 sudo systemctl restart aipg-gridapi
 ```
+
+The payout timer is a money-moving control. Preserve its prior enabled/active
+state; do not enable or start it merely because unit files were installed. The
+payout wrapper derives its Python interpreter from the selected immutable
+release, so Core and payout accounting cannot silently execute different trees.
 
 `-H` is intentional: asyncpg may otherwise inspect root's PostgreSQL client
 certificate path.
@@ -79,10 +109,10 @@ worker reconnects before declaring the deploy healthy.
 ## Rollback
 
 Code rollback and schema rollback are separate decisions. Do not downgrade a
-database by checking out old code and hoping Alembic reverses itself. Choose a
-known-good commit compatible with the migrated schema, deploy it explicitly,
-restart `aipg-gridapi`, and repeat the verification above. Restore a database
-backup only under an incident plan.
+database by checking out old code and hoping Alembic reverses itself. Atomically
+repoint `/home/aipg/current` to a retained known-good release that is compatible
+with the migrated schema, restart `aipg-gridapi`, and repeat verification.
+Restore a database backup only under an incident plan.
 
 ## Asset status
 

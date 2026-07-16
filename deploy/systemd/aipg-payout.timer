@@ -1,0 +1,10 @@
+[Unit]
+Description=Run AIPG worker payout every hour
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
