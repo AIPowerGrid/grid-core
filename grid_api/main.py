@@ -24,8 +24,24 @@ from slowapi.errors import RateLimitExceeded
 from .database import close_database, init_database
 from .ratelimit import limiter
 from .redis_client import close_redis, init_redis
-from .routers import accounts, anthropic, health, images, metrics, openai, responses, stats, styles, threed, validator, videos, worker_ws
-from .services.p2p import init_p2p, close_p2p
+from .routers import (
+    accounts,
+    anthropic,
+    audio,
+    health,
+    images,
+    metrics,
+    openai,
+    responses,
+    stats,
+    styles,
+    threed,
+    validator,
+    videos,
+    worker_enrollment,
+    worker_ws,
+)
+from .services.p2p import close_p2p, init_p2p
 
 logging.basicConfig(
     level=logging.INFO,
@@ -158,8 +174,10 @@ app.include_router(anthropic.router)
 app.include_router(responses.router)
 app.include_router(images.router)
 app.include_router(videos.router)
+app.include_router(audio.router)
 app.include_router(threed.router)
 app.include_router(worker_ws.router)
+app.include_router(worker_enrollment.router)
 app.include_router(stats.router)
 app.include_router(styles.router)
 app.include_router(validator.router)
@@ -182,6 +200,7 @@ async def root():
             "openai": "POST /v1/chat/completions",
             "anthropic": "POST /v1/messages",
             "images": "POST /v1/images/generations",
+            "audio": "POST /v1/audio/generations",
             "models": "GET /v1/models",
             "worker_ws": "WS /v1/workers/ws",
             "health": "GET /health",

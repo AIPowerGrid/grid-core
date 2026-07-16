@@ -25,11 +25,15 @@ content sanitization, and reward settlement.
   (splits, payout-asset + conversion-fee knobs, `worker_share_bps`),
   `holdings.py` (cached on-chain AIPG balance + Chainlink ETH/USD),
   `deposits.py` (USDC/ETH deposit claims), `model_registry.py` (ModelVault sync).
-- **Worker trust:** `signing.py` - opt-in worker output signatures. Verifies an
-  EIP-191 sig over `aipg-job:{job_id}:{result_hash}` recovers to the worker's
-  PAYOUT wallet (attribution = payment = future slashable stake; no separate
-  PKI). FAIL-CLOSED: only a positively-verified sig is stored; unsigned workers
-  ("floor" tier) run and earn unchanged.
+- **Worker trust:** `worker_identity.py` verifies a payout-wallet delegation to
+  a funds-less per-rig signer plus a fresh registration proof; `signing.py`
+  verifies that delegated signer over `aipg-job:{job_id}:{result_hash}`.
+  Managed profiles and audio workers require identity now; legacy workers stay
+  compatible until the global enforcement gate is deliberately enabled.
+- **Worker enrollment:** `worker_enrollment.py` coordinates a short-lived
+  manager/Console pairing in Redis. The manager creates the final API key and
+  poll secret locally; Core stores only their hashes, installs only
+  `worker.connect`, and removes the key expiry only after manager ACK.
 - **Validation evidence:** `validators.py` issues validator assignments, verifies
   assignment-bound attestations, computes non-economic quorum state, and builds
   aggregate scorecards. Authoritative evidence must match the Grid-issued
@@ -75,6 +79,17 @@ content sanitization, and reward settlement.
 - `ledger.py` writes one completion event per job. Settlement and stats depend on
   `grid_ledger`; do not revive orphan den tables for new v2 payouts.
 - On-chain reads only via sync loops, cached; never per-request.
+- Never copy a payout private key to a worker. Core resolves the payout wallet
+  from the API-key account, then verifies its signed delegation to the worker's
+  local signer. Registration nonces are one-use and fail closed if Redis is down.
+- Managed profile metadata is not self-authenticating. Core accepts an
+  allowlisted release digest only with Core-owned profile ID, runtime adapter,
+  runtime digest, recipe root, and capability-tier values. Runtime execution
+  still requires validator evidence.
+- Enrollment create/poll endpoints never return a plaintext API key. Keep
+  request secrets as `SecretStr`, preserve Redis TTLs, and keep completion
+  idempotent across browser retries and manager crash-resume. Payout-wallet
+  binding and temporary worker-key insertion must commit atomically.
 - `model_registry.py` is not currently wired into startup. Do not claim
   ModelVault enforcement is live unless the sync is wired and tested.
 - `enforcement.py` records slashable evidence only; it must not directly slash

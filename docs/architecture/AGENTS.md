@@ -18,6 +18,8 @@ validation, worker incentives, and trust boundaries.
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only
   invariants, scorecard privacy rules, and future economic gates.
+- `WORKER_PROFILE_V1.md` - signed worker installation profiles, ACE-Step audio
+  data flow, identity/privacy boundaries, and go-live gates.
 - `UNIVERSAL_ACCOUNTS.md` - canonical identity, frontend assertion, linking,
   merge, and three-pocket credit contracts.
 - `SERVICE_ACCOUNTS.md` - bounded backend principals, native user-token

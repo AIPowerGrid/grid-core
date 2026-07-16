@@ -8,8 +8,11 @@ The API submits jobs via XADD. Failed/abandoned jobs are requeued
 automatically via claim_stale_jobs().
 """
 
+import asyncio
+import contextlib
 import json
 import logging
+from contextlib import asynccontextmanager
 
 import redis.exceptions
 
@@ -214,6 +217,40 @@ async def ack_job(message_id: str, stream: str = STREAM_KEY):
     """Acknowledge a completed job so it's removed from the pending list."""
     r = get_redis()
     await r.xack(stream, CONSUMER_GROUP, message_id)
+
+
+async def touch_job_claim(job: dict) -> None:
+    """Reset a running job's pending-idle timer without changing ownership."""
+    stream = job.get("stream") or _stream_for(job.get("job_type", "text"))
+    await get_redis().xclaim(
+        stream,
+        CONSUMER_GROUP,
+        job["worker_id"],
+        min_idle_time=0,
+        message_ids=[job["stream_id"]],
+        justid=True,
+    )
+
+
+@asynccontextmanager
+async def maintain_job_claim(job: dict, *, interval_seconds: float = 60.0):
+    """Keep a legitimate long-running job below the stale-reclaim threshold."""
+
+    async def _heartbeat() -> None:
+        while True:
+            await asyncio.sleep(interval_seconds)
+            try:
+                await touch_job_claim(job)
+            except Exception as exc:
+                logger.error("Could not refresh claim for job %s: %s", job.get("job_id"), exc)
+
+    task = asyncio.create_task(_heartbeat())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 async def requeue_job(

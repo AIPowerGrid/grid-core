@@ -17,6 +17,11 @@ transport, accounts, stats, health/metrics.
   secret sanitization helpers.
 - `images.py` - `POST /v1/images/generations` native image jobs.
 - `videos.py` - `POST /v1/videos/generations` native video jobs.
+- `audio.py` - `POST /v1/audio/generations` governed local ACE-Step jobs.
+- `worker_enrollment.py` - dark device-style manager pairing. Public create,
+  intent, poll, and ACK endpoints are capability-bound by a high-entropy
+  enrollment ID plus poll secret; prepare/approve require a recent scoped user
+  token and a payout-wallet signature.
 - `worker_ws.py` - `/v1/workers/ws`: registration + dispatch + health/eviction + streaming.
   **God-file (~1.1K LOC); split target = registration / dispatch / health / stream.** Highest
   bug history (eviction cascade, idle-redelivery) - change carefully, add tests.
@@ -99,6 +104,9 @@ transport, accounts, stats, health/metrics.
 ## Verification
 
 - `pytest grid_api/routers/`.
+- Worker pairing/auth changes: include
+  `grid_api/routers/tests/test_worker_enrollment_contract.py` and the service
+  lifecycle tests before the full suite.
 - `pytest grid_api/services/tests/test_credits_billing.py` when changing any
   route that reserves, refunds, or reconciles credits.
 

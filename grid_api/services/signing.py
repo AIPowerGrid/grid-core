@@ -44,7 +44,8 @@ def signed_message(job_id: str, result_hash: str) -> str:
 def verify_worker_sig(job_id, result_hash, worker_sig, allowed_addresses) -> str | None:
     """Return `worker_sig` IFF it is a valid signature over
     `signed_message(job_id, result_hash)` recovering to one of
-    `allowed_addresses` (the worker's payout/login wallet); else None.
+    `allowed_addresses` (the delegated worker signer, or the payout/login
+    wallet for a legacy worker); else None.
 
     Fail-closed: no sig, no result_hash, no allowed address, a bad signature, or
     a signer outside the allowed set all return None (the job records unsigned).

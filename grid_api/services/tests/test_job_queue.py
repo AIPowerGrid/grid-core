@@ -21,6 +21,7 @@ class FakeRedis:
     def __init__(self):
         self.xadds: list[dict] = []
         self.xacks: list[str] = []
+        self.xclaims: list[dict] = []
 
     async def xadd(self, stream, data, **kwargs):
         # Accept maxlen/approximate (real redis trims the stream); the fake just
@@ -31,6 +32,28 @@ class FakeRedis:
     async def xack(self, stream, group, msg_id):
         self.xacks.append(msg_id)
         return 1
+
+    async def xclaim(
+        self,
+        stream,
+        group,
+        consumer,
+        *,
+        min_idle_time,
+        message_ids,
+        justid,
+    ):
+        self.xclaims.append(
+            {
+                "stream": stream,
+                "group": group,
+                "consumer": consumer,
+                "min_idle_time": min_idle_time,
+                "message_ids": message_ids,
+                "justid": justid,
+            }
+        )
+        return message_ids
 
 
 @pytest.fixture
@@ -100,3 +123,22 @@ async def test_submit_job_carries_requeue_count(fake_redis):
 async def test_submit_job_defaults_requeue_count_zero(fake_redis):
     await job_queue.submit_job("job-3", {"p": 1}, ["m"])
     assert fake_redis.xadds[0]["requeue_count"] == "0"
+
+
+@pytest.mark.asyncio
+async def test_touch_job_claim_preserves_worker_ownership(fake_redis):
+    job = _job()
+    job.update({"worker_id": "worker-1", "job_type": "audio", "stream": "grid:jobs:media"})
+
+    await job_queue.touch_job_claim(job)
+
+    assert fake_redis.xclaims == [
+        {
+            "stream": "grid:jobs:media",
+            "group": job_queue.CONSUMER_GROUP,
+            "consumer": "worker-1",
+            "min_idle_time": 0,
+            "message_ids": ["s-1"],
+            "justid": True,
+        }
+    ]

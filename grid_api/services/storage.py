@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import boto3
 from botocore.client import Config as BotoConfig
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger("grid_api.storage")
 
@@ -25,6 +26,8 @@ CONTENT_TYPES = {
     "jpg": "image/jpeg",
     "mp4": "video/mp4",
     "webm": "video/webm",
+    "wav": "audio/wav",
+    "flac": "audio/flac",
     # 3D mesh artifacts (TRELLIS etc.)
     "glb": "model/gltf-binary",
     "gltf": "model/gltf+json",
@@ -63,13 +66,10 @@ def upload_source(data: bytes, ext: str, expires: int = 3600) -> str:
     key = f"source/{uuid4().hex}.{ext}"
     content_type = CONTENT_TYPES.get(ext, "application/octet-stream")
     _client().put_object(Bucket=media_bucket(), Key=key, Body=data, ContentType=content_type)
-    return _client().generate_presigned_url(
-        "get_object", Params={"Bucket": media_bucket(), "Key": key}, ExpiresIn=expires
-    )
+    return _client().generate_presigned_url("get_object", Params={"Bucket": media_bucket(), "Key": key}, ExpiresIn=expires)
 
 
-def presign_outputs(job_id: str, n: int, ext: str, expires: int = 900,
-                    job_type: str = "image") -> list[dict]:
+def presign_outputs(job_id: str, n: int, ext: str, expires: int = 900, job_type: str = "image") -> list[dict]:
     """Presign PUT URLs for a job's expected outputs.
 
     Returns one slot per output: {key, put_url, content_type, public_url}.
@@ -82,7 +82,7 @@ def presign_outputs(job_id: str, n: int, ext: str, expires: int = 900,
     """
     bucket = media_bucket()
     content_type = CONTENT_TYPES.get(ext, "application/octet-stream")
-    prefix = {"video": "video", "3d": "3d"}.get(job_type, "image")
+    prefix = {"video": "video", "audio": "audio", "3d": "3d"}.get(job_type, "image")
     slots = []
     for i in range(n):
         key = f"{prefix}/{job_id}/{i}.{ext}"
@@ -97,6 +97,38 @@ def presign_outputs(job_id: str, n: int, ext: str, expires: int = 900,
                 "put_url": put_url,
                 "content_type": content_type,
                 "public_url": f"{public_media_base()}/{key}",
-            }
+            },
         )
     return slots
+
+
+def uploaded_outputs_present(
+    slots: list[dict],
+    *,
+    min_bytes: int = 1,
+    max_bytes: int | None = None,
+) -> bool:
+    """Verify expected objects exist with the presigned type and size bounds.
+
+    A missing or malformed object returns False. Storage transport/service errors
+    propagate so callers can preserve the queue message and economic hold.
+    """
+    client = _client()
+    bucket = media_bucket()
+    for slot in slots:
+        try:
+            metadata = client.head_object(Bucket=bucket, Key=slot["key"])
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            if code in {"404", "NoSuchKey", "NotFound"}:
+                return False
+            raise
+        length = metadata.get("ContentLength")
+        content_type = str(metadata.get("ContentType") or "").split(";", 1)[0].strip().lower()
+        if not isinstance(length, int) or isinstance(length, bool) or length < min_bytes:
+            return False
+        if max_bytes is not None and length > max_bytes:
+            return False
+        if content_type != str(slot["content_type"]).lower():
+            return False
+    return True

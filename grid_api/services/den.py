@@ -163,6 +163,9 @@ DEN_PER_MEGAPIXEL_STEP = 0.04
 # Video work is costlier per frame than a lone image at the same resolution
 # (temporal models, VAE decode over frames) — weight per frame-step.
 DEN_PER_MEGAPIXEL_FRAME_STEP = 0.002
+# Audio reward is duration-based and server-capped; tune after the three V1
+# hardware benchmarks. It never trusts worker-reported duration.
+DEN_PER_AUDIO_SECOND = 0.06
 
 
 def calculate_media_den(
@@ -172,6 +175,7 @@ def calculate_media_den(
     steps: int = 20,
     n: int = 1,
     frames: int = 0,
+    seconds: float = 0.0,
 ) -> float:
     """Calculate den for an image or video generation.
 
@@ -182,7 +186,9 @@ def calculate_media_den(
     megapixels = max((width * height) / 1_048_576, 0.01)
     steps = max(steps, 1)
 
-    if job_type == "video":
+    if job_type == "audio":
+        den = max(float(seconds), 1.0) * DEN_PER_AUDIO_SECOND * max(n, 1)
+    elif job_type == "video":
         den = megapixels * steps * max(frames, 1) * DEN_PER_MEGAPIXEL_FRAME_STEP
     else:
         den = megapixels * steps * max(n, 1) * DEN_PER_MEGAPIXEL_STEP

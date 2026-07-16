@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-import os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings
@@ -30,6 +29,26 @@ class GridSettings(BaseSettings):
     job_timeout_seconds: int = 300  # 5 min max generation time
     worker_ping_interval: int = 30  # Keepalive ping every 30s
     stream_subscribe_timeout: int = 300  # SSE connection max lifetime
+
+    # Worker identity. Managed profiles and audio workers always require this;
+    # flip the global gate after every worker runtime supports delegation.
+    worker_identity_audience: str = "api.aipowergrid.io"
+    worker_identity_chain_id: int = 8453
+    worker_registration_skew_seconds: int = 300
+    require_worker_identity: bool = False
+    # Comma-separated SHA-256 profile digests promoted after release signing
+    # and real-hardware canaries. Empty means no managed profile is accepted.
+    approved_worker_profile_digests: str = ""
+    # Product gate separate from profile approval and global charging. Keep off
+    # until real-hardware canaries and a supervised dark launch pass.
+    audio_enabled: bool = False
+    # Native-manager device enrollment. Independently dark until the console
+    # approval page and release manager are deployed together.
+    worker_enrollment_enabled: bool = False
+    worker_enrollment_console_url: str = (
+        "https://console.aipowergrid.io/dashboard/connect-worker"
+    )
+    worker_enrollment_ttl_seconds: int = 900
 
     class Config:
         env_file = ".env"
