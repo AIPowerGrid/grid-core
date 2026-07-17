@@ -2,11 +2,14 @@
 
 ## Posture
 
-The Grid-operated RTX 3090 pilot has a signed, one-class `pilot` profile whose
-exact digest is approved by Core. Native enrollment and the authenticated audio
-route are enabled; demand charging remains off during supervised validation.
-The bundled, downloadable `public` profile remains unsigned and marked `draft`,
-its three-class qualification is incomplete, and the recipe has not yet been
+The Grid-operated RTX 3090 pilot has completed its one-class, three-run
+qualification against an unsigned `pilot` draft. It is not active yet: the
+existing offline operator key must sign the final pilot envelope, and Core must
+allowlist that final signed digest before the worker can advertise it. Native
+enrollment and the authenticated audio route remain dark until that coordinated
+activation; demand charging remains off during supervised validation. The
+bundled, downloadable `public` profile remains unsigned and marked `draft`, its
+three-class qualification is incomplete, and the recipe has not yet been
 registered in RecipeVault. A pilot is not a public manager release.
 
 ## Purpose
@@ -50,11 +53,11 @@ committed source archive, exact managed Python 3.12.13, the committed `uv.lock`,
 sizes and hashes, the constrained DiT-only audio recipe, Core protocol
 compatibility, and post-canary capabilities. The manager bundles `uv`, so this
 path does not require system Git. V1 fixes all LM-assisted request modes off.
-Upstream still requires its default 1.7B LM files to satisfy the main-model
-presence check, so those files are pinned but never loaded by this profile. The
-complete runtime model tree contains 28 committed files: 26 from the exact model
-revision and two runtime-overlaid Python definitions from the exact ACE-Step
-source commit. Every file has an exact size and SHA-256 commitment.
+The profile does not install or initialize the optional 1.7B planner LM. Its
+constrained DiT-only request surface keeps planning controls disabled. The
+complete runtime model tree contains 21 committed checkpoint files, including
+two runtime-effective Python definitions pinned to the exact ACE-Step source
+commit. Every file has an exact size and SHA-256 commitment.
 
 `runtime.digest` is SHA-256 over a canonical `aipg-runtime-v1` commitment:
 
