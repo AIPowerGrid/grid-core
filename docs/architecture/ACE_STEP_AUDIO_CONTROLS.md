@@ -8,11 +8,11 @@ tests ship together.
 ## Objective
 
 Expose controls that musicians can understand and that materially constrain a
-Turbo generation, while preserving one reproducible, billable job contract.
+XL Turbo generation, while preserving one reproducible, billable job contract.
 Do not proxy the upstream ACE-Step API wholesale.
 
-The active managed runtime exposes `acestep-v15-turbo` only. Its pinned API
-recommends eight inference steps for Turbo. Therefore the current public
+The XL managed runtime exposes `acestep-v15-xl-turbo` only. Its pinned API
+recommends eight inference steps for XL Turbo. Therefore the current public
 default remains eight steps; a larger value is not advertised as a quality
 improvement without benchmark evidence.
 
@@ -26,7 +26,7 @@ The next governed text-to-music recipe will accept these request controls:
 | `lyrics` | 0-20,000 chars | empty | User-authored vocal content. |
 | `seconds` | 10-300 | 30 | Deterministic price and den unit. |
 | `seed` | 0 through `2^53-1` | Core-randomized | Reproducibility without trusting a worker RNG. |
-| `inference_steps` | 1-20 | 8 | Turbo-supported experiment knob; UI labels eight as recommended. |
+| `inference_steps` | 1-20 | 8 | XL Turbo-supported experiment knob; UI labels eight as recommended. |
 | `bpm` | integer 30-300 | unset | Direct musical tempo constraint. |
 | `key_scale` | normalized musical key | unset | Direct harmonic constraint. |
 | `time_signature` | 2/4, 3/4, 4/4, 6/8 | unset | Direct rhythmic constraint. |
@@ -40,14 +40,14 @@ these fields, but never silently rewrite a submitted prompt or lyrics.
 
 | Upstream capability | Reason it is not a public knob today |
 | --- | --- |
-| `guidance_scale`, `shift`, ADG, CFG intervals | Base-model-only or not qualified on the active Turbo profile. |
+| `guidance_scale`, `shift`, ADG, CFG intervals | Non-Turbo controls or not qualified on the active XL Turbo profile. |
 | Custom `timesteps` and `infer_method` | Raw sampler configuration destroys a stable, comparable recipe surface. |
 | `batch_size` | One output per job keeps quotas, pricing, receipts, and worker settlement exact. Variations should be separate jobs. |
 | `use_random_seed` | Core owns seed normalization and receipt reproducibility. |
 | LM temperature, top-k/top-p, backend, CFG | Runtime-operation knobs, not customer creative controls. |
 | `sample_mode` | Produces opaque LM-authored prompt/lyrics and weakens user-intent provenance. |
 | `audio_code_string` | An expert/internal transport requiring a separate validation and storage policy. |
-| Base/XL model selection | Not loaded or qualified by the active worker profile. |
+| Base/SFT model selection | Not loaded or qualified by the canonical XL Turbo worker profile. |
 | Output format selection | Core stores one verified WAV output; conversion belongs at an edge/export layer. |
 
 ## Prompt Assist Is an Experiment, Not a Default
@@ -61,7 +61,7 @@ Before any public "Enhance prompt" or "Quality" mode, the Grid must:
 1. Create a distinct recipe root with the exact fixed LM behavior.
 2. Preserve the user input and commit the normalized effective input in the
    job receipt/metadata without logging either in service journals.
-3. Benchmark it on the qualified 3090 profile against Turbo at eight steps.
+3. Benchmark it on the qualified 3090 profile at eight steps before publishing a new recipe root.
 4. Publish only a named, measured mode. Do not expose LM sampler internals.
 
 The benchmark set must contain instrumental and vocal briefs, explicit and
@@ -105,7 +105,7 @@ following artifacts must land and be verified as one release:
 4. `bridge/profiles/ace-step-v1.profile.json`: matching recipe root, followed
    by offline release signing and managed-worker deployment.
 5. Core router/worker contract tests and worker canary/qualification evidence.
-6. `aipg.music`: matching user controls, presets, and the honest Turbo default.
+6. `aipg.music`: matching user controls, presets, and the honest XL Turbo default.
 
 Do not deploy Core alone or edit a production profile in place. An old profile
 must remain accepted until the new signed profile is active and the managed

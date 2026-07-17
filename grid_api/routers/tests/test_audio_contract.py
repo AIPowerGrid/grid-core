@@ -17,7 +17,7 @@ from grid_api.services import audio, credits, den, media, pricing, storage
 
 def test_audio_recipe_root_is_a_canonical_contract():
     assert audio.recipe_root() == audio.ACE_STEP_RECIPE_ROOT
-    assert audio.ACE_STEP_RECIPE_SPEC["fixed"]["model"] == "acestep-v15-turbo"
+    assert audio.ACE_STEP_RECIPE_SPEC["fixed"]["model"] == "acestep-v15-xl-turbo"
     assert audio.ACE_STEP_RECIPE_SPEC["fixed"]["use_random_seed"] is False
 
 
@@ -50,7 +50,7 @@ def test_audio_request_is_strict_and_bounded():
 
 
 def test_audio_pricing_and_den_are_duration_based():
-    assert pricing.quote_audio(audio.DEFAULT_AUDIO_MODEL, 30) == 60_000
+    assert pricing.quote_audio(audio.DEFAULT_AUDIO_MODEL, 30) == 120_000
     assert den.calculate_media_den("audio", 1, 1, n=1, seconds=30) == 1.8
     assert den.calculate_media_den("audio", 4096, 4096, n=1, seconds=30) == 1.8
 

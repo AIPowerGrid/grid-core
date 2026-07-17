@@ -77,7 +77,9 @@ PRICING: dict[str, ModelPrice] = {
     "ltx-2.3":              half_of(0, 0, usd_video_sec=0.04),   # → $0.020/second video (Justin)
     # Guarded launch peg only; benchmark against three real worker tiers before
     # enabling audio charging. Explicit pricing prevents accidental free jobs.
-    "ace-step-v1.5-turbo":  ModelPrice(0, 0, audio_per_second=0.002),
+    # Guarded XL launch peg. The 4B DiT has roughly twice the 2B Turbo weight
+    # footprint; benchmark worker cost before enabling charging and re-peg then.
+    "ace-step-v1.5-xl-turbo": ModelPrice(0, 0, audio_per_second=0.004),
     # Initial guarded peg for a multi-minute textured mesh workload. Re-peg from
     # measured worker cost before enabling charging; explicit is safer than free.
     "trellis2":             ModelPrice(0, 0, mesh_per_generation=0.25),
