@@ -22,11 +22,26 @@ def test_audio_recipe_root_is_a_canonical_contract():
 
 
 def test_audio_request_is_strict_and_bounded():
-    request = audio_router.AudioRequest(prompt="clean electronic pulse", seed=0)
+    request = audio_router.AudioRequest(
+        prompt="clean electronic pulse",
+        seed=0,
+        bpm=96,
+        key_scale="A minor",
+        time_signature="4/4",
+        vocal_language="en",
+    )
     assert request.seed == 0
+    assert request.bpm == 96
+    assert request.key_scale == "A minor"
+    assert request.time_signature == "4/4"
+    assert request.vocal_language == "en"
     for invalid in (
         {"prompt": "x", "seconds": 9},
         {"prompt": "x", "inference_steps": 21},
+        {"prompt": "x", "bpm": 301},
+        {"prompt": "x", "key_scale": "A minor; drop table"},
+        {"prompt": "x", "time_signature": "7/8"},
+        {"prompt": "x", "vocal_language": "English"},
         {"prompt": "x", "model": "m" * 129},
         {"prompt": "x", "unknown": True},
     ):
@@ -165,12 +180,30 @@ async def test_audio_router_dispatches_governed_payload(monkeypatch):
     request = Request({"type": "http", "method": "POST", "path": "/v1/audio/generations", "headers": []})
     response = await audio_router.create_audio(
         request,
-        audio_router.AudioRequest(prompt="clean pulse", seconds=30, seed=0),
+        audio_router.AudioRequest(
+            prompt="clean pulse",
+            seconds=30,
+            seed=0,
+            bpm=96,
+            key_scale="A minor",
+            time_signature="4/4",
+            vocal_language="en",
+        ),
         apikey="test-key",
     )
     assert response["data"][0]["seed"] == 0
     assert observed["job_type"] == "audio"
     assert observed["payload"]["recipe_root"] == audio.ACE_STEP_RECIPE_ROOT
+    assert observed["payload"]["bpm"] == 96
+    assert observed["payload"]["key_scale"] == "A minor"
+    assert observed["payload"]["time_signature"] == "4"
+    assert observed["payload"]["vocal_language"] == "en"
+    assert response["grid"]["controls"] == {
+        "bpm": 96,
+        "key_scale": "A minor",
+        "time_signature": "4",
+        "vocal_language": "en",
+    }
     assert observed["kwargs"]["account_id"] == account_id
 
 
