@@ -11,16 +11,22 @@
     ],
     "vars": {
       "image": "1.inputs.image",
-      "seed": "5.inputs.seed",
+      "seed": [
+        "5.inputs.seed",
+        "6.inputs.seed"
+      ],
       "steps": [
         "5.inputs.ss_sampling_steps",
-        "5.inputs.shape_sampling_steps"
+        "5.inputs.shape_sampling_steps",
+        "6.inputs.tex_sampling_steps"
       ],
       "guidance": [
         "5.inputs.ss_guidance_strength",
-        "5.inputs.shape_guidance_strength"
+        "5.inputs.shape_guidance_strength",
+        "6.inputs.tex_guidance_strength"
       ],
-      "target_faces": "6.inputs.target_face_count"
+      "target_faces": "8.inputs.target_face_count",
+      "texture_size": "9.inputs.texture_size"
     },
     "clamps": {
       "steps": [
@@ -34,6 +40,10 @@
       "target_faces": [
         5000,
         300000
+      ],
+      "texture_size": [
+        512,
+        4096
       ]
     }
   },
@@ -104,10 +114,10 @@
       ],
       "seed": 0,
       "ss_guidance_strength": 7.5,
-      "ss_sampling_steps": 12,
+      "ss_sampling_steps": 8,
       "shape_guidance_strength": 7.5,
-      "shape_sampling_steps": 12,
-      "max_tokens": 49152
+      "shape_sampling_steps": 8,
+      "max_tokens": 32768
     },
     "class_type": "Trellis2ImageToShape",
     "_meta": {
@@ -116,24 +126,79 @@
   },
   "6": {
     "inputs": {
+      "model_config": [
+        "2",
+        0
+      ],
+      "conditioning": [
+        "4",
+        0
+      ],
+      "shape_slat": [
+        "5",
+        1
+      ],
+      "subs": [
+        "5",
+        2
+      ],
+      "seed": 0,
+      "tex_guidance_strength": 7.5,
+      "tex_sampling_steps": 8
+    },
+    "class_type": "Trellis2ShapeToTexturedMesh",
+    "_meta": {
+      "title": "Shape to Textured Mesh"
+    }
+  },
+  "8": {
+    "inputs": {
       "trimesh": [
         "5",
         0
       ],
-      "target_face_count": 100000,
-      "fill_holes": false,
-      "remesh": false,
-      "remesh_band": 1.0
+      "remesh": "on",
+      "remesh_band": 1.0,
+      "remove_inner_faces": false,
+      "floater_threshold": 0.001,
+      "target_face_count": 50000,
+      "weld_vertices": true,
+      "weld_digits": 4,
+      "chart_cone_angle": 90.0,
+      "chart_refine_iterations": 0,
+      "chart_global_iterations": 1,
+      "chart_smooth_strength": 1
     },
-    "class_type": "Trellis2Simplify",
+    "class_type": "Trellis2ProcessMesh",
     "_meta": {
-      "title": "Simplify Mesh"
+      "title": "Process Mesh"
+    }
+  },
+  "9": {
+    "inputs": {
+      "trimesh": [
+        "8",
+        0
+      ],
+      "voxelgrid": [
+        "6",
+        0
+      ],
+      "original_mesh": [
+        "5",
+        0
+      ],
+      "texture_size": 2048
+    },
+    "class_type": "Trellis2RasterizePBR",
+    "_meta": {
+      "title": "Rasterize PBR"
     }
   },
   "7": {
     "inputs": {
       "trimesh": [
-        "6",
+        "9",
         0
       ],
       "filename_prefix": "trellis2",
