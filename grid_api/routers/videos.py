@@ -135,6 +135,16 @@ async def create_video(
         recipe_inputs["fps"] = body.fps
         recipe_inputs["frames"] = frames
         recipe_inputs.update(media.advanced_knob_inputs(extra))  # steps/cfg/sampler/scheduler
+        # Director/timeline recipes (e.g. LTX Director 2.0): forward the recipe's
+        # string knobs. The resolver applies them ONLY if the recipe declares the
+        # var (unknown inputs are ignored), so plain video recipes are unaffected.
+        # `timeline` may carry inline base64 media (imageB64/audioB64) per the
+        # LTXDirector schema — generous cap; the others stay tight.
+        for k, cap in (("timeline", 25_000_000), ("local_prompts", 100_000),
+                       ("segment_lengths", 100_000), ("guide_strength", 100_000)):
+            v = extra.get(k)
+            if v is not None:
+                recipe_inputs[k] = str(v)[:cap]
 
         # LoRAs: gate consistently with /v1/images (was silently ignored on video — a
         # model with no img/lora recipe now returns 422 instead of dropping them).
