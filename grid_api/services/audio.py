@@ -28,6 +28,11 @@ MIN_AUDIO_SECONDS = 10.0
 MAX_AUDIO_SECONDS = 300.0
 MIN_INFERENCE_STEPS = 1
 MAX_INFERENCE_STEPS = 20
+MIN_AUDIO_BPM = 30
+MAX_AUDIO_BPM = 300
+KEY_SCALE_PATTERN = r"^[A-G](?:#|b)? (?:Major|minor)$"
+TIME_SIGNATURES = ("2", "3", "4", "6")
+VOCAL_LANGUAGE_PATTERN = r"^[a-z]{2}$"
 
 ACE_STEP_RECIPE_SPEC = {
     "adapter": "ace-step-api-audio-v1",
@@ -45,12 +50,26 @@ ACE_STEP_RECIPE_SPEC = {
     "limits": {
         "audio_duration": [10, 300],
         "inference_steps": [1, 20],
+        "bpm": [30, 300],
+        "key_scale_pattern": KEY_SCALE_PATTERN,
+        "time_signatures": list(TIME_SIGNATURES),
+        "vocal_language_pattern": VOCAL_LANGUAGE_PATTERN,
         "lyrics_chars": 20000,
         "prompt_chars": 2000,
     },
-    "variables": ["prompt", "lyrics", "audio_duration", "inference_steps", "seed"],
+    "variables": [
+        "prompt",
+        "lyrics",
+        "audio_duration",
+        "inference_steps",
+        "seed",
+        "bpm",
+        "key_scale",
+        "time_signature",
+        "vocal_language",
+    ],
 }
-ACE_STEP_RECIPE_ROOT = "21e6572ec04f315bea7089080797f55c7836da0707417b39f505f5ac5b54235f"
+ACE_STEP_RECIPE_ROOT = "0f074238255c42e0304ef41373fe9e3c88b0e8e9584f39fae57c8fefb0e3ad5d"
 
 
 def recipe_root(spec=ACE_STEP_RECIPE_SPEC) -> str:

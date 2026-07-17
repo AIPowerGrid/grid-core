@@ -9,6 +9,8 @@ import logging
 import time
 
 from fastapi import APIRouter, Header, HTTPException, Request
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..auth import extract_api_key
@@ -37,6 +39,20 @@ class AudioRequest(BaseModel):
         default=8,
         ge=audio.MIN_INFERENCE_STEPS,
         le=audio.MAX_INFERENCE_STEPS,
+    )
+    bpm: int | None = Field(default=None, ge=audio.MIN_AUDIO_BPM, le=audio.MAX_AUDIO_BPM)
+    key_scale: str | None = Field(
+        default=None,
+        min_length=7,
+        max_length=12,
+        pattern=audio.KEY_SCALE_PATTERN,
+    )
+    time_signature: Literal["2/4", "3/4", "4/4", "6/8"] | None = None
+    vocal_language: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=2,
+        pattern=audio.VOCAL_LANGUAGE_PATTERN,
     )
     seed: int | None = Field(default=None, ge=0, le=media.MAX_SEED)
     worker: str | None = None
@@ -89,6 +105,19 @@ async def create_audio(
             "seeds": [seed],
             "recipe_root": audio.ACE_STEP_RECIPE_ROOT,
         }
+        controls = {
+            key: value
+            for key, value in {
+                "bpm": body.bpm,
+                "key_scale": body.key_scale,
+                "time_signature": (
+                    body.time_signature.split("/", 1)[0] if body.time_signature else None
+                ),
+                "vocal_language": body.vocal_language,
+            }.items()
+            if value is not None
+        }
+        payload.update(controls)
         outputs, meta = await media.submit_and_wait(
             model,
             "audio",
@@ -104,7 +133,11 @@ async def create_audio(
         return {
             "created": int(time.time()),
             "data": [{"url": output["url"], "seed": output.get("seed", seed)}],
-            "grid": {**meta, "recipe_root": audio.ACE_STEP_RECIPE_ROOT},
+            "grid": {
+                **meta,
+                "recipe_root": audio.ACE_STEP_RECIPE_ROOT,
+                "controls": controls,
+            },
         }
     except HTTPException:
         raise

@@ -20,6 +20,9 @@ validation, worker incentives, and trust boundaries.
   invariants, scorecard privacy rules, and future economic gates.
 - `WORKER_PROFILE_V1.md` - signed worker installation profiles, ACE-Step audio
   data flow, identity/privacy boundaries, and go-live gates.
+- `ACE_STEP_AUDIO_CONTROLS.md` - governed ACE-Step control surface, quality
+  calibration gate, and the boundary between public creative controls and
+  private runtime controls.
 - `UNIVERSAL_ACCOUNTS.md` - canonical identity, frontend assertion, linking,
   merge, and three-pocket credit contracts.
 - `SERVICE_ACCOUNTS.md` - bounded backend principals, native user-token
