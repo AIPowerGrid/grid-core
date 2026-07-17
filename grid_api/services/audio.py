@@ -8,9 +8,9 @@ from __future__ import annotations
 import hashlib
 import json
 
-DEFAULT_AUDIO_MODEL = "ace-step-v1.5-turbo"
+DEFAULT_AUDIO_MODEL = "ace-step-v1.5-xl-turbo"
 ACE_STEP_RUNTIME_ADAPTER = "ace-step-1.5-api"
-ACE_STEP_RUNTIME_DIGEST = "7571cec88e676620b178a6aa03d8326da8381d65a7001d592a5238d8a1b50743"
+ACE_STEP_RUNTIME_DIGEST = "dc041e131f6e82924e44f98006d8a4536fc672fa4fc014c407e1470269628ac2"
 ACE_STEP_CAPABILITY_TIERS = frozenset(
     {"audio.ace-step.base", "audio.ace-step.standard"},
 )
@@ -39,7 +39,7 @@ ACE_STEP_RECIPE_SPEC = {
     "fixed": {
         "audio_format": "wav",
         "batch_size": 1,
-        "model": "acestep-v15-turbo",
+        "model": "acestep-v15-xl-turbo",
         "sample_mode": False,
         "thinking": False,
         "use_cot_caption": False,
@@ -69,7 +69,7 @@ ACE_STEP_RECIPE_SPEC = {
         "vocal_language",
     ],
 }
-ACE_STEP_RECIPE_ROOT = "0f074238255c42e0304ef41373fe9e3c88b0e8e9584f39fae57c8fefb0e3ad5d"
+ACE_STEP_RECIPE_ROOT = "b1995dc3ef14ad1f439ced5d952de69e875b7d3af3ccaf5491c6ab5f43f550fb"
 
 
 def recipe_root(spec=ACE_STEP_RECIPE_SPEC) -> str:

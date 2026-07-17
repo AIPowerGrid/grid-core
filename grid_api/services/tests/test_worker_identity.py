@@ -27,7 +27,7 @@ class FakeRedis:
 
 def _profile():
     return {
-        "id": "ace-step-v1.5-turbo",
+        "id": "ace-step-v1.5-xl-turbo",
         "version": "0.1.0",
         "digest": "a" * 64,
         "signing_key_id": "release-2026-01",
@@ -64,7 +64,7 @@ def _proof(*, now=1_800_000_100, worker_name="audio-rig", profile=None):
         "nonce": "cd" * 16,
         "worker_signer": signer.address.lower(),
         "worker_name": worker_name,
-        "models": ["ace-step-v1.5-turbo"],
+        "models": ["ace-step-v1.5-xl-turbo"],
         "job_types": ["audio"],
         "bridge_agent": "comfy-bridge/ws:1",
         "profile_digest": profile["digest"] if profile else None,
@@ -97,7 +97,7 @@ async def _verify(proof, wallet, *, profile=None, required=True, now=1_800_000_1
         proof=proof,
         payout_wallet=wallet.address,
         worker_name="audio-rig",
-        models=["ace-step-v1.5-turbo"],
+        models=["ace-step-v1.5-xl-turbo"],
         job_types=["audio"],
         bridge_agent="comfy-bridge/ws:1",
         worker_profile=profile,
@@ -167,7 +167,7 @@ async def test_missing_proof_is_optional_only_for_legacy_workers(identity_env):
             proof=None,
             payout_wallet="",
             worker_name="managed",
-            models=["ace-step-v1.5-turbo"],
+            models=["ace-step-v1.5-xl-turbo"],
             job_types=["audio"],
             bridge_agent="comfy-bridge/ws:1",
             worker_profile=_profile(),
