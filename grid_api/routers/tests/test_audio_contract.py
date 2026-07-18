@@ -19,6 +19,9 @@ def test_audio_recipe_root_is_a_canonical_contract():
     assert audio.recipe_root() == audio.ACE_STEP_RECIPE_ROOT
     assert audio.ACE_STEP_RECIPE_SPEC["fixed"]["model"] == "acestep-v15-xl-turbo"
     assert audio.ACE_STEP_RECIPE_SPEC["fixed"]["use_random_seed"] is False
+    assert audio.ACE_STEP_RUNTIME_DIGEST == (
+        "d626d89a2bc36b9ff37c4177a94dbf7c6ea32bb4b45080618f792fd93012c4db"
+    )
 
 
 def test_audio_request_is_strict_and_bounded():

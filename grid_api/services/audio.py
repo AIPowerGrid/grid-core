@@ -10,7 +10,7 @@ import json
 
 DEFAULT_AUDIO_MODEL = "ace-step-v1.5-xl-turbo"
 ACE_STEP_RUNTIME_ADAPTER = "ace-step-1.5-api"
-ACE_STEP_RUNTIME_DIGEST = "dc041e131f6e82924e44f98006d8a4536fc672fa4fc014c407e1470269628ac2"
+ACE_STEP_RUNTIME_DIGEST = "d626d89a2bc36b9ff37c4177a94dbf7c6ea32bb4b45080618f792fd93012c4db"
 ACE_STEP_CAPABILITY_TIERS = frozenset(
     {"audio.ace-step.base", "audio.ace-step.standard"},
 )
