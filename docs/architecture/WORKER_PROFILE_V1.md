@@ -2,15 +2,14 @@
 
 ## Posture
 
-The Grid-operated RTX 3090 pilot has completed its one-class, three-run
-qualification against an unsigned `pilot` draft. It is not active yet: the
-existing offline operator key must sign the final pilot envelope, and Core must
-allowlist that final signed digest before the worker can advertise it. Native
-enrollment and the authenticated audio route remain dark until that coordinated
-activation; demand charging remains off during supervised validation. The
-bundled, downloadable `public` profile remains unsigned and marked `draft`, its
-three-class qualification is incomplete, and the recipe has not yet been
-registered in RecipeVault. A pilot is not a public manager release.
+The Grid-operated RTX 3090 pilot runs a signed, one-class `pilot` profile whose
+exact digest is approved by Core. Its three-run qualification, managed canary,
+native enrollment, authenticated audio route, and one Studio generation have
+been verified against ACE-Step 1.5 XL Turbo. Demand charging remains off during
+supervised validation. The bundled, downloadable `public` profile remains
+unsigned and marked `draft`, its three-class qualification is incomplete, and
+the recipe has not yet been registered in RecipeVault. A pilot is not a public
+manager release.
 
 ## Purpose
 
