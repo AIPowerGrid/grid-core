@@ -198,11 +198,35 @@ async def _perf_by_model(session, since: datetime | None) -> dict[tuple[str, str
     return out
 
 
+def _recipe_model_capacity(workers: list[dict], recipe_defs) -> dict[tuple[str, str], set[int]]:
+    """Map recipe-backed public model names to workers that can execute them.
+
+    Workers advertise installed checkpoints, while clients request the recipe's
+    model name. A worker counts only when it serves the recipe modality and has
+    every required checkpoint itself; satisfying requirements across different
+    workers would advertise capacity that cannot actually execute one job.
+    """
+    capacity: dict[tuple[str, str], set[int]] = {}
+    for recipe in recipe_defs:
+        job_type = recipe.job_type
+        required = set(recipe.required_models or [])
+        if job_type not in ("image", "video", "3d") or not required:
+            continue
+        key = (recipe.model_name, job_type)
+        for index, worker in enumerate(workers):
+            if job_type not in (worker.get("job_types") or ["text"]):
+                continue
+            if required.issubset(set(worker.get("models") or [])):
+                capacity.setdefault(key, set()).add(index)
+    return capacity
+
+
 @router.get("/v1/status/models")
 async def status_models():
     """Models currently served, with how many workers serve each — plus recent
     per-model performance (t/s, TTFT, avg latency) from the last 24h of ledger
-    timing, so a picker can show live availability AND how fast each model is."""
+    timing. Includes recipe-backed public model names when compatible workers
+    have every required checkpoint, not just raw worker-advertised checkpoints."""
     workers = await _active_workers()
     counts: dict[str, int] = {}
     types: dict[str, set] = {}
@@ -230,6 +254,31 @@ async def status_models():
             "avg_ttft_s": p.get("avg_ttft_s"),
             "avg_latency_s": p.get("avg_latency_s"),
         })
+    # A governed recipe can expose a new client-facing model name while routing
+    # to an existing worker checkpoint. Surface those virtual models here so
+    # status consumers use the same recipe-aware availability as generation.
+    try:
+        from ..services import recipes
+
+        virtual = _recipe_model_capacity(workers, recipes.list_recipes())
+        for (model_name, job_type), worker_indexes in virtual.items():
+            if model_name in counts or not worker_indexes:
+                continue
+            p = perf.get((model_name, job_type)) or {}
+            out.append({
+                "name": model_name,
+                "count": len(worker_indexes),
+                "type": job_type,
+                "max_context_length": None,
+                "samples": p.get("samples", 0),
+                "tokens_per_s": p.get("tokens_per_s"),
+                "avg_ttft_s": p.get("avg_ttft_s"),
+                "avg_latency_s": p.get("avg_latency_s"),
+                "recipe_backed": True,
+            })
+    except Exception as e:
+        logger.warning("Could not expand recipe-backed model status: %s", e)
+    out.sort(key=lambda item: (-item["count"], item["name"].lower()))
     return out
 
 
