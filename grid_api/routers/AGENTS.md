@@ -42,7 +42,8 @@ transport, accounts, stats, health/metrics.
   tokens are verified at `/v1/auth/google/exchange`; `/v1/auth/service/bind`
   binds an app subject after recent Google/SIWE proof. `/v1/accounts/bridges`
   bootstraps a bounded service client only when separately enabled.
-- `stats.py` - `GET /v1/workers`, progress polling, model status, usage totals,
+- `stats.py` - `GET /v1/workers`, progress polling, recipe-aware model status
+  (raw worker checkpoints plus executable recipe-backed public model names), usage totals,
   model stats, wallet earnings, `GET /v1/payouts/public` (aggregate payout
   transparency), `GET /v1/jobs/recent` (PUBLIC redacted job feed: model, worker
   handle, timing, den, prompt/result hashes + signed flag — NEVER content,
