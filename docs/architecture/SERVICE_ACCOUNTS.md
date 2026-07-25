@@ -16,6 +16,12 @@ and application-owned generation can charge the service account directly. User
 generation uses the same service key plus `X-Grid-User-Token`, or the user token
 directly as Bearer auth.
 
+A direct service key bypasses the free-user request-count quota only when both
+`per_request_micro` and `daily_micro` are positive. Those fail-closed exposure
+ceilings are the replacement control. Delegated user tokens remain subject to
+their canonical user's request quota; service status never makes end users
+unmetered.
+
 ## Provisioning
 
 Run after Alembic `0015` from a trusted Core host. The command prints the key
@@ -39,6 +45,21 @@ once; put it in the application's server-side secret store.
   --provider app \
   --per-request-micro 500000 --daily-micro 100000000
 ```
+
+To migrate an existing server-held API key without rotating it or moving its
+paid balance, promote exactly one active account/key-label pair:
+
+```bash
+.venv/bin/python scripts/adopt_service_account.py \
+  --id aigarth --name "Aigarth" \
+  --account-id "$AIGARTH_ACCOUNT_ID" --key-label aigarth \
+  --provider app \
+  --per-request-micro 500000 --daily-micro 100000000
+```
+
+The adoption is transactional and idempotent for an identical policy. It fails
+closed if the service id already has another policy or if the account/label does
+not identify exactly one active user/service key.
 
 The example ceilings are conservative deployment defaults, not economics. Tune
 them from observed traffic. Redis enforces the daily exposure ceiling
