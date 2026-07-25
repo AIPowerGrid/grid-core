@@ -6,7 +6,8 @@
 The mission is "free AI for everyone, funded by paid usage." This is the code
 that makes the free part real: every user gets a daily allowance of requests,
 metered per UTC day in Redis. Accounts carrying an explicit ``quota_exempt``
-policy flag are unmetered.
+policy flag are unmetered. Direct first-party service keys are also unmetered
+only when they carry both fail-closed per-request and daily spending ceilings.
 
 Design notes:
   - Meter ACCEPTED requests only: callers invoke this right before a request
@@ -43,8 +44,27 @@ def _seconds_until_utc_midnight() -> int:
 
 
 def is_paid(user: dict) -> bool:
-    """True if account policy explicitly exempts the user from the daily cap."""
-    return bool(user.get("quota_exempt"))
+    """True when this credential is explicitly outside the free request tier.
+
+    A service *account* alone is not enough: only its direct server-held key,
+    with both exposure ceilings configured, bypasses the free-user counter.
+    Delegated user tokens still use their canonical user's quota.
+    """
+    if user.get("quota_exempt"):
+        return True
+    limits = user.get("service_limits") or {}
+    try:
+        per_request = int(limits.get("per_request_micro"))
+        daily = int(limits.get("daily_micro"))
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        user.get("key_kind") == "service"
+        and user.get("service_id")
+        and per_request > 0
+        and daily > 0
+        and per_request <= daily
+    )
 
 
 async def check_and_consume(user: dict) -> None:

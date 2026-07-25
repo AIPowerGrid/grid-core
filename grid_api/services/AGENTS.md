@@ -74,6 +74,9 @@ content sanitization, and reward settlement.
 - Service keys remain long-lived backend credentials but cannot manage user
   accounts. Global Google/SIWE proof is verified by Core; app delegation is
   namespaced to one service and receives bounded inference authority.
+- The free request-count quota exempts a direct service key only when both its
+  per-request and daily micro-USD ceilings are positive. Delegated users and
+  unbounded service keys remain in the free-user quota path.
 - Text reservations snapshot input/output rates and holder discount at reserve
   time. Never reprice an in-flight job from the current price book.
 - `ledger.py` writes one completion event per job. Settlement and stats depend on

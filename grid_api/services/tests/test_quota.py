@@ -69,6 +69,24 @@ def test_is_paid_uses_explicit_policy():
     assert quota.is_paid({}) is False
 
 
+def test_only_bounded_direct_service_keys_bypass_free_request_quota():
+    bounded = {
+        "key_kind": "service",
+        "service_id": "aigarth",
+        "service_limits": {
+            "per_request_micro": 500_000,
+            "daily_micro": 100_000_000,
+        },
+    }
+    assert quota.is_paid(bounded) is True
+    assert quota.is_paid({**bounded, "key_kind": "delegated_user"}) is False
+    assert quota.is_paid({**bounded, "service_limits": {"daily_micro": 100_000_000}}) is False
+    assert quota.is_paid({**bounded, "service_limits": {"per_request_micro": 500_000}}) is False
+    assert quota.is_paid({**bounded, "service_limits": {"per_request_micro": 500_000, "daily_micro": 0}}) is False
+    assert quota.is_paid({**bounded, "service_limits": {"per_request_micro": 1_000, "daily_micro": 500}}) is False
+    assert quota.is_paid({**bounded, "service_id": None}) is False
+
+
 # ── free metering ──
 
 

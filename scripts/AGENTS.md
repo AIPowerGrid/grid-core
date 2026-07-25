@@ -17,6 +17,9 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   runtime through code, packaging, deploy, or operator scripts.
 - `create_service_account.py` - one-time provisioning for bounded frontend or
   backend service principals; prints the new key exactly once.
+- `adopt_service_account.py` - transactionally promotes exactly one existing
+  labeled API key into a bounded service principal without rotating its key or
+  moving its account balance.
 - `rotate_service_key.py` - atomically revokes a service's old keys and prints
   one replacement key exactly once.
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import time
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -16,9 +17,10 @@ from starlette.requests import Request
 
 from grid_api import database
 from grid_api.routers import accounts as accounts_router
-from grid_api.services import accounts, service_limits, user_tokens
+from grid_api.services import accounts, quota, service_limits, user_tokens
 from grid_api.v2.schema import accounts as accounts_table
 from grid_api.v2.schema import metadata
+from grid_api.v2.schema import service_clients as service_clients_table
 
 
 @pytest_asyncio.fixture
@@ -109,6 +111,77 @@ async def test_service_key_remains_valid_for_service_owned_work(db):
         await accounts.authenticate(key)
     rotated = await accounts.authenticate(replacement, required_scope="inference.submit")
     assert rotated["service_id"] == service["id"]
+
+
+@pytest.mark.asyncio
+async def test_existing_key_can_be_atomically_adopted_as_bounded_service(db):
+    account, key = await accounts.create_account(
+        username="aigarth-bot",
+        key_label="aigarth",
+        is_session=False,
+    )
+    assert key
+    service = await accounts.adopt_service_client(
+        "aigarth",
+        "Aigarth",
+        account_id=account["id"],
+        key_label="aigarth",
+        allowed_providers=["app"],
+        per_request_micro=500_000,
+        daily_micro=100_000_000,
+    )
+    assert service["account_id"] == account["id"]
+
+    user = await accounts.authenticate(key, required_scope="inference.submit")
+    assert user["key_kind"] == "service"
+    assert user["service_id"] == "aigarth"
+    assert user["service_limits"] == {
+        "per_request_micro": 500_000,
+        "daily_micro": 100_000_000,
+    }
+    assert quota.is_paid(user) is True
+
+    # Exact re-runs are idempotent and keep the same plaintext key valid.
+    again = await accounts.adopt_service_client(
+        "aigarth",
+        "Aigarth",
+        account_id=account["id"],
+        key_label="aigarth",
+        allowed_providers=["app"],
+        per_request_micro=500_000,
+        daily_micro=100_000_000,
+    )
+    assert again == service
+    assert (await accounts.authenticate(key))["service_id"] == "aigarth"
+
+
+@pytest.mark.asyncio
+async def test_service_adoption_rolls_back_when_key_label_is_ambiguous(db):
+    account, original = await accounts.create_account(
+        username="ambiguous",
+        key_label="shared",
+        is_session=False,
+    )
+    assert original
+    await accounts.issue_key(UUID(account["id"]), label="shared")
+    with pytest.raises(ValueError, match="exactly one"):
+        await accounts.adopt_service_client(
+            "ambiguous-service",
+            "Ambiguous",
+            account_id=account["id"],
+            key_label="shared",
+            per_request_micro=100,
+            daily_micro=1_000,
+        )
+
+    async with await database.new_session() as session:
+        count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(service_clients_table)
+            .where(service_clients_table.c.id == "ambiguous-service"),
+        )
+    assert count == 0
+    assert (await accounts.authenticate(original))["key_kind"] == "user"
 
 
 @pytest.mark.asyncio

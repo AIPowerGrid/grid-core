@@ -32,6 +32,7 @@ logger = logging.getLogger("grid_api.accounts")
 API_KEY_PREFIX = "grid_"
 SESSION_SCOPES = ["account.read", "account.manage", "inference.submit"]
 INFERENCE_SCOPES = ["account.read", "inference.submit"]
+SERVICE_SCOPES = ["account.read", "inference.submit", "identity.exchange", "identity.assert"]
 
 
 def generate_api_key() -> str:
@@ -687,13 +688,134 @@ async def create_service_client(
                 is_session=False,
                 key_kind="service",
                 service_id=sid,
-                scopes=["account.read", "inference.submit", "identity.exchange", "identity.assert"],
+                scopes=SERVICE_SCOPES,
                 created=now,
                 revoked=False,
             ),
         )
         await session.commit()
     return {"id": sid, "account_id": str(account_id), "name": name}, plain
+
+
+async def adopt_service_client(
+    service_id: str,
+    name: str,
+    *,
+    account_id,
+    key_label: str,
+    allowed_providers: list[str] | None = None,
+    google_audiences: list[str] | None = None,
+    per_request_micro: int,
+    daily_micro: int,
+) -> dict:
+    """Promote one existing server-held key into a bounded service client.
+
+    The account, balance, and plaintext key stay unchanged. The transaction
+    requires exactly one active key with ``key_label`` so an operator cannot
+    accidentally promote every user credential on an account. Re-running the
+    same adoption is idempotent; conflicting service policy fails closed.
+    """
+    from .service_auth import normalize_service_id
+
+    sid = normalize_service_id(service_id)
+    aid = UUID(str(account_id))
+    label = (key_label or "").strip()
+    if not label:
+        raise ValueError("key_label is required")
+    if per_request_micro <= 0 or daily_micro <= 0:
+        raise ValueError("bounded service adoption requires positive per-request and daily ceilings")
+    if per_request_micro > daily_micro:
+        raise ValueError("per-request ceiling cannot exceed the daily ceiling")
+    allowed = sorted(set(allowed_providers or ["app"]))
+    audiences = list(google_audiences or [])
+    if not set(allowed).issubset({"app", "google"}):
+        raise ValueError("service providers must be app and/or google")
+
+    now = datetime.now(timezone.utc)
+    async with await new_session() as session:
+        account = (
+            await session.execute(
+                sa.select(accounts_table.c.id).where(accounts_table.c.id == aid).with_for_update(),
+            )
+        ).first()
+        if not account:
+            raise ValueError("account not found")
+
+        existing = (
+            (
+                await session.execute(
+                    sa.select(service_clients_table)
+                    .where(service_clients_table.c.id == sid)
+                    .with_for_update(),
+                )
+            )
+            .mappings()
+            .first()
+        )
+        desired = {
+            "account_id": aid,
+            "name": name,
+            "allowed_providers": allowed,
+            "google_audiences": audiences,
+            "per_request_micro": per_request_micro,
+            "daily_micro": daily_micro,
+            "active": True,
+        }
+        if existing:
+            comparable = {
+                "account_id": existing["account_id"],
+                "name": existing["name"],
+                "allowed_providers": list(existing["allowed_providers"] or []),
+                "google_audiences": list(existing["google_audiences"] or []),
+                "per_request_micro": existing["per_request_micro"],
+                "daily_micro": existing["daily_micro"],
+                "active": bool(existing["active"]),
+            }
+            if comparable != desired:
+                raise ValueError("service id already exists with different policy")
+        else:
+            await session.execute(
+                sa.insert(service_clients_table).values(id=sid, created=now, **desired),
+            )
+
+        key_rows = (
+            (
+                await session.execute(
+                    sa.select(
+                        api_keys_table.c.hash,
+                        api_keys_table.c.key_kind,
+                        api_keys_table.c.service_id,
+                    )
+                    .where(
+                        api_keys_table.c.account_id == aid,
+                        api_keys_table.c.label == label,
+                        api_keys_table.c.revoked.is_(False),
+                    )
+                    .with_for_update(),
+                )
+            )
+            .mappings()
+            .all()
+        )
+        if len(key_rows) != 1:
+            raise ValueError("expected exactly one active key with that account and label")
+        key = key_rows[0]
+        if key["key_kind"] not in {"user", "service"}:
+            raise ValueError(f"cannot promote key kind '{key['key_kind']}'")
+        if key["key_kind"] == "service" and key["service_id"] != sid:
+            raise ValueError("key already belongs to a different service")
+        await session.execute(
+            sa.update(api_keys_table)
+            .where(api_keys_table.c.hash == key["hash"])
+            .values(
+                is_session=False,
+                key_kind="service",
+                service_id=sid,
+                scopes=SERVICE_SCOPES,
+            ),
+        )
+        await session.commit()
+    return {"id": sid, "account_id": str(aid), "name": name}
 
 
 async def rotate_service_key(service_id: str) -> str:
@@ -727,7 +849,7 @@ async def rotate_service_key(service_id: str) -> str:
                 is_session=False,
                 key_kind="service",
                 service_id=sid,
-                scopes=["account.read", "inference.submit", "identity.exchange", "identity.assert"],
+                scopes=SERVICE_SCOPES,
                 created=now,
                 revoked=False,
             ),
