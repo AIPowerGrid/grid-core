@@ -110,7 +110,7 @@ def main():
     # Use the exact models from your failing worker payload
     default_worker_models = [
         "FLUX.1-dev-Kontext-fp8-scaled",
-        "flux.1-krea-dev",
+        "FLUX.1-schnell",
         "Chroma",
     ]
     if len(sys.argv) > 1:

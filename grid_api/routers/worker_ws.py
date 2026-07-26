@@ -50,6 +50,7 @@ WORKER_ACTIVE_SET = "grid:workers:active"
 # name → "1" with TTL, for O(1) "is this worker online?" by name (worker
 # affinity). Refreshed on every heartbeat; TTL-reaped if a worker vanishes.
 WORKER_ONLINE_BY_NAME = "grid:worker:online:"
+RETIRED_WORKER_MODEL_PREFIXES = ("flux.1-krea-dev", "flux1-krea-dev")
 
 
 async def _worker_online(worker_name: str) -> bool:
@@ -76,6 +77,27 @@ def _worker_key_matches_name(user: dict, worker_name: str) -> bool:
     if user.get("source") != "v2" or user.get("key_kind") != "worker":
         return True
     return user.get("key_label") == f"worker:{worker_name}"
+
+
+def _retired_model_claims(models) -> list[str]:
+    if not isinstance(models, (list, tuple)):
+        return []
+
+    def retired(model) -> bool:
+        if not isinstance(model, str):
+            return False
+        normalized = model.casefold().replace("_", "-").replace(" ", "-")
+        while "--" in normalized:
+            normalized = normalized.replace("--", "-")
+        return normalized.startswith(RETIRED_WORKER_MODEL_PREFIXES)
+
+    return sorted(
+        {
+            model
+            for model in models
+            if retired(model)
+        }
+    )
 
 
 def _receipt_signers(worker_info: dict) -> list[str]:
@@ -329,6 +351,16 @@ async def worker_websocket(ws: WebSocket):
         apikey = init_msg.get("apikey", "")
         worker_name = init_msg.get("name", "")
         models = init_msg.get("models", [])
+        retired_models = _retired_model_claims(models)
+        if retired_models:
+            await ws.send_json(
+                {
+                    "type": "error",
+                    "message": f"Retired model identity: {', '.join(retired_models)}",
+                },
+            )
+            await ws.close(code=4003)
+            return
         max_length = init_msg.get("max_length", 512)
         max_context_length = init_msg.get("max_context_length", 2048)
         # Job types this worker serves. Accepts the new `job_types` list or the

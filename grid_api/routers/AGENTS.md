@@ -71,6 +71,8 @@ transport, accounts, stats, health/metrics.
   reserve/reconcile or an explicit no-charge policy.
 - `worker_ws.py` must not trust worker-reported counts for rewards or customer
   billing without a server-side cap or verification path.
+- Core rejects retired model identities during the worker handshake. Worker-side
+  filtering is defense in depth, not the network authority for retirement.
 - Media routes must pass `user.get("account_id")` to `services.media`; quota IDs
   like `v2:<uuid>` are not credit ledger account IDs.
 - Worker affinity (`worker` request field) is ownership-gated before queueing.
