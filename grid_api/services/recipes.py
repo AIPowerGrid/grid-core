@@ -139,6 +139,21 @@ def recipes_for_model(ref: str | int) -> list[Recipe]:
     return [r] if r else []
 
 
+def generation_modes(ref: str | int) -> list[str]:
+    """Client-facing generation modes derived from approved recipe variants."""
+    modes: set[str] = set()
+    for recipe in recipes_for_model(ref):
+        if recipe.job_type not in ("image", "video"):
+            continue
+        if recipe.job_type == "image":
+            mode = "img2img" if "image" in recipe.vars else "txt2img"
+        else:
+            mode = "img2video" if "image" in recipe.vars else "txt2video"
+        modes.add(mode)
+    order = ("txt2img", "img2img", "txt2video", "img2video")
+    return [mode for mode in order if mode in modes]
+
+
 def supports_loras(ref: str | int) -> bool:
     """True if ANY recipe for the model declares a `loraInject` block — i.e. it has a
     graph injection point for LoRA loaders. The recipe is the capability authority; a

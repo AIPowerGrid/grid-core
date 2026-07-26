@@ -23,6 +23,9 @@ knobs → validate → drop here).
   recipes become public API surface.
 - If a recipe supports LoRAs, ensure `loras.py` and worker injection rules can
   enforce safe names, strengths, and injection points.
+- Client generation modes come from recipe variants: a recipe with an `image`
+  var contributes `img2img`/`img2video`; one without it contributes
+  `txt2img`/`txt2video`. Never advertise a mode by metadata alone.
 
 ## Work Guidance
 

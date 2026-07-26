@@ -15,6 +15,7 @@ from grid_api.services import recipes  # noqa: E402
 
 def _clear():
     recipes._BY_ROOT.clear(); recipes._BY_ID.clear(); recipes._BY_NAME.clear()
+    recipes._BY_MODEL.clear()
 
 
 def _seed_ltx():
@@ -160,6 +161,43 @@ def test_import_traces_positive_negative():
     assert v["seed"] == "4.inputs.seed" and v["image"] == "5.inputs.image"
     assert recipe["_grid"]["jobType"] == "video" and not notes
     print("ok: import traces positive/negative + detects seed/image")
+
+
+def test_krea_img2img_recipe_selects_source_graph():
+    _clear()
+    recipe_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+        "recipes",
+    )
+    recipes.load_local_recipes(recipe_dir)
+
+    assert recipes.generation_modes("Krea 2 Turbo") == ["txt2img", "img2img"]
+    assert recipes.supports_image("Krea 2 Turbo")
+    assert recipes.supports_denoise("Krea 2 Turbo")
+
+    resolved = recipes.resolve_for_model(
+        "Krea 2 Turbo",
+        {
+            "prompt": "restyle the source",
+            "seed": 7,
+            "width": 896,
+            "height": 1152,
+            "denoise": 0.6,
+        },
+        has_source=True,
+    )
+    assert resolved["name"] == "krea-2-turbo (img2img)"
+    assert resolved["image_paths"] == "10.inputs.image"
+    assert resolved["spec"]["7"]["inputs"]["latent_image"] == ["12", 0]
+    assert resolved["spec"]["7"]["inputs"]["denoise"] == 0.6
+    assert resolved["spec"]["11"]["inputs"]["width"] == 896
+    assert resolved["spec"]["11"]["inputs"]["height"] == 1152
+
+    text_only = recipes.resolve_for_model(
+        "Krea 2 Turbo", {"prompt": "text only", "seed": 8}, has_source=False
+    )
+    assert text_only["name"] == "krea-2-turbo"
+    assert "image_paths" in text_only and text_only["image_paths"] is None
 
 
 if __name__ == "__main__":

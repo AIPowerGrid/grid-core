@@ -221,6 +221,12 @@ def _recipe_model_capacity(workers: list[dict], recipe_defs) -> dict[tuple[str, 
     return capacity
 
 
+def _recipe_generation_modes(model_name: str) -> list[str]:
+    from ..services import recipes
+
+    return recipes.generation_modes(model_name)
+
+
 @router.get("/v1/status/models")
 async def status_models():
     """Models currently served, with how many workers serve each — plus recent
@@ -244,7 +250,7 @@ async def status_models():
     for m, c in sorted(counts.items(), key=lambda kv: -kv[1]):
         mtype = sorted(types.get(m, {"text"}))[0] if types.get(m) else "text"
         p = perf.get((m, mtype)) or {}
-        out.append({
+        item = {
             "name": m,
             "count": c,
             "type": mtype,
@@ -253,7 +259,11 @@ async def status_models():
             "tokens_per_s": p.get("tokens_per_s"),
             "avg_ttft_s": p.get("avg_ttft_s"),
             "avg_latency_s": p.get("avg_latency_s"),
-        })
+        }
+        modes = _recipe_generation_modes(m)
+        if modes:
+            item["capabilities"] = modes
+        out.append(item)
     # A governed recipe can expose a new client-facing model name while routing
     # to an existing worker checkpoint. Surface those virtual models here so
     # status consumers use the same recipe-aware availability as generation.
@@ -265,7 +275,7 @@ async def status_models():
             if model_name in counts or not worker_indexes:
                 continue
             p = perf.get((model_name, job_type)) or {}
-            out.append({
+            item = {
                 "name": model_name,
                 "count": len(worker_indexes),
                 "type": job_type,
@@ -275,7 +285,11 @@ async def status_models():
                 "avg_ttft_s": p.get("avg_ttft_s"),
                 "avg_latency_s": p.get("avg_latency_s"),
                 "recipe_backed": True,
-            })
+            }
+            modes = _recipe_generation_modes(model_name)
+            if modes:
+                item["capabilities"] = modes
+            out.append(item)
     except Exception as e:
         logger.warning("Could not expand recipe-backed model status: %s", e)
     out.sort(key=lambda item: (-item["count"], item["name"].lower()))
