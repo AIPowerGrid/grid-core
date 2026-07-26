@@ -74,6 +74,10 @@ async def test_status_models_advertises_executable_recipe_name(monkeypatch):
     monkeypatch.setattr(stats, "new_session", _new_session)
     monkeypatch.setattr(stats, "_perf_by_model", _perf_by_model)
     monkeypatch.setattr("grid_api.services.recipes.list_recipes", lambda: [_recipe()])
+    monkeypatch.setattr(
+        "grid_api.services.recipes.generation_modes",
+        lambda model: ["txt2video", "img2video"] if model == "LTX Director 2.0" else [],
+    )
 
     result = await stats.status_models()
 
@@ -88,4 +92,5 @@ async def test_status_models_advertises_executable_recipe_name(monkeypatch):
         "avg_ttft_s": None,
         "avg_latency_s": None,
         "recipe_backed": True,
+        "capabilities": ["txt2video", "img2video"],
     }

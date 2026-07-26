@@ -34,6 +34,9 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   after terminal job state. Add tests for every endpoint that moves paid work.
 - **Safety:** `services/sanitizer.py` is secret redaction, not a content safety
   system. Do not treat it as CSAM/PII/NSFW moderation.
+- **Media capabilities:** `/v1/status/models` publishes generation modes derived
+  from approved recipe variants. A connected checkpoint alone does not authorize
+  `img2img` or `img2video`; the corresponding recipe must declare an image input.
 
 ## Work Guidance
 
