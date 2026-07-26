@@ -139,7 +139,7 @@ class ModelRegistrySDK {
     
     /**
      * Get model constraints for parameter validation
-     * @param {string} modelId - Model identifier (e.g., "flux.1-krea-dev")
+     * @param {string} modelId - Model identifier (e.g., "approved-model-id")
      * @returns {Object} Constraints object or null if not found
      */
     async getModelConstraints(modelId) {

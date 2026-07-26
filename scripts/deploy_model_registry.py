@@ -131,29 +131,6 @@ MODEL_REGISTRY_ABI = [
 
 # Model definitions from stable_diffusion.json
 MODELS = {
-    "flux.1-krea-dev": {
-        "fileName": "flux1-krea-dev_fp8_scaled.safetensors",
-        "displayName": "flux.1-krea-dev",
-        "description": "FLUX.1-Krea-dev vanilla (non-uncensored) variant",
-        "isNSFW": False,
-        "sizeBytes": 17206700956,
-        "modelType": 1,  # IMAGE_MODEL
-        "inpainting": False,
-        "img2img": True,
-        "controlnet": False,
-        "lora": True,
-        "baseModel": "flux_1",
-        "architecture": "DiT",
-        "constraints": {
-            "stepsMin": 28,
-            "stepsMax": 32,
-            "cfgMinTenths": 35,  # 3.5 * 10
-            "cfgMaxTenths": 50,  # 5.0 * 10
-            "clipSkip": 1,
-            "samplers": ["k_euler"],
-            "schedulers": ["karras"],
-        },
-    },
     "Juggernaut XL": {
         "fileName": "juggernaut_xl.safetensors",
         "displayName": "Juggernaut XL",

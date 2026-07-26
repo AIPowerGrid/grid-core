@@ -15,7 +15,7 @@ This guide documents how to deploy and configure on-chain model validation for A
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────────┐
 │  Job Request    │────▶│   AIPG Core      │────▶│  ModelRegistry      │
-│  (flux.1-krea)  │     │   (Python)       │     │  (Base Sepolia/     │
+│ (approved model)│     │   (Python)       │     │  (Base Sepolia/     │
 └─────────────────┘     └──────────────────┘     │   Mainnet)          │
                                │                 └─────────────────────┘
                                │                          │
@@ -76,7 +76,7 @@ tail -f horde.log | grep -i "blockchain\|validation"
 
 Expected output when job comes in:
 ```
-Blockchain validation passed for WP <id> with models: ['flux.1-krea-dev']
+Blockchain validation passed for WP <id> with models: ['approved-model-id']
 ```
 
 ---
@@ -173,17 +173,17 @@ contract = w3.eth.contract(address=Web3.to_checksum_address(MODEL_REGISTRY), abi
 
 # Model data
 model = {
-    "fileName": "flux1-krea-dev_fp8_scaled.safetensors",
-    "displayName": "flux.1-krea-dev",
-    "description": "FLUX.1-Krea-dev high quality image generation",
+    "fileName": "approved-model.safetensors",
+    "displayName": "approved-model-id",
+    "description": "Approved image generation model",
     "isNSFW": False,
-    "sizeBytes": 17206700956,
+    "sizeBytes": 0,  # replace with the verified artifact size
     "modelType": 1,  # 0=TEXT, 1=IMAGE, 2=VIDEO
     "inpainting": False,
     "img2img": True,
     "controlnet": False,
     "lora": True,
-    "baseModel": "flux_1",
+    "baseModel": "declared-base-model",
     "architecture": "DiT"
 }
 
@@ -219,7 +219,7 @@ print(f"Model registered! TX: {tx_hash.hex()}")
 ### Verify Model Registration
 
 ```python
-model_hash = Web3.keccak(text="flux1-krea-dev_fp8_scaled.safetensors")
+model_hash = Web3.keccak(text="approved-model.safetensors")
 exists = contract.functions.isModelExists(model_hash).call()
 print(f"Model exists: {exists}")
 ```
@@ -230,9 +230,8 @@ print(f"Model exists: {exists}")
 
 ### Base Sepolia
 
-| Model Name | File Name | Hash | Status |
-|------------|-----------|------|--------|
-| flux.1-krea-dev | flux1-krea-dev_fp8_scaled.safetensors | `0x90a3628...` | ✅ Registered |
+The historical testnet registry is not the live Grid catalog. Confirm active
+models from the current catalog deployment before registering or routing work.
 
 ### Models to Register
 
@@ -349,4 +348,3 @@ Check RPC_URL is correct:
 ## Contact
 
 For questions about blockchain integration, contact the AIPG team.
-
