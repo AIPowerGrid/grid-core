@@ -39,7 +39,14 @@ def upgrade() -> None:
     )
     op.create_table(
         "grid_credit_ledger",
-        sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+        # SQLite only autoincrements an exact INTEGER PRIMARY KEY. Keep the
+        # canonical Postgres BIGINT while matching v2 schema on embedded grids.
+        sa.Column(
+            "id",
+            sa.BigInteger().with_variant(sa.Integer(), "sqlite"),
+            primary_key=True,
+            autoincrement=True,
+        ),
         sa.Column("account_id", sa.Uuid, sa.ForeignKey("grid_accounts.id", ondelete="CASCADE"), nullable=False, index=True),
         sa.Column("delta_micro", sa.BigInteger, nullable=False),
         sa.Column("reason", sa.String(64), nullable=False),

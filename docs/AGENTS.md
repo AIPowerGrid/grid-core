@@ -12,6 +12,9 @@ for humans and agents.
 - `architecture-migration/` - Flask-to-FastAPI/Redis-stream/worker migration
   planning.
 - `BLOCKCHAIN_INTEGRATION.md` - legacy/on-chain integration guide.
+- `FUNDING_RAIL.md` - Base asset acceptance and x402 architecture.
+- `FUNDING_CANARY_RUNBOOK.md` - dark deploy, real-money canary evidence, and
+  rollback gates.
 - `V2.md` - v2 API/design notes.
 
 ## Local Contracts

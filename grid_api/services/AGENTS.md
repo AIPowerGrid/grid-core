@@ -25,7 +25,10 @@ content sanitization, and reward settlement.
   `assertions.py` (legacy app-only assertions), `economics.py`
   (splits, payout-asset + conversion-fee knobs, `worker_share_bps`),
   `holdings.py` (cached on-chain AIPG balance + Chainlink ETH/USD),
-  `deposits.py` (USDC/ETH deposit claims), `model_registry.py` (ModelVault sync).
+  `deposits.py` (atomic Base funding receipts plus USDC, bounded AIPG, and
+  conversion-gated ETH claims), `x402_payments.py` (default-off accountless
+  Base USDC authorization and settlement receipts), `model_registry.py`
+  (ModelVault sync).
 - **Worker trust:** `worker_identity.py` verifies a payout-wallet delegation to
   a funds-less per-rig signer plus a fresh registration proof; `signing.py`
   verifies that delegated signer over `aipg-job:{job_id}:{result_hash}`.
@@ -55,6 +58,28 @@ content sanitization, and reward settlement.
   prevent poison-job eviction cascades. Stale jobs reclaimed by the loop in `main.py`.
 - Money paths must stay idempotent and tested; value-moving credit ledger writes
   require non-null refs and must not overdraft under concurrency.
+- A successful Base funding claim atomically writes its immutable
+  `grid_deposits` receipt and purchased-credit ledger movement. AIPG valuation
+  must use a fresh operator epoch plus hard transaction/account/network caps;
+  do not derive credit from the thin pool's spot price. Deposit claims are the
+  narrow exception to the no-request-path-chain-read rule: they must verify the
+  configured RPC is on the expected chain before trusting transaction/receipt
+  data, and they must never sit in the inference hot path.
+- Production ETH funding uses `swap_receipt`: the linked wallet spends native
+  ETH and the confirmed transaction must deliver canonical Base USDC directly
+  to the configured USDC treasury. Credit only the actual USDC Transfer amount.
+  The oracle-priced `buffered` mode is an operator-only pilot, not a public
+  funding path.
+- AIPG funding claims must bind the transfer block timestamp to the active
+  operator price epoch. Never value a historical transfer under a newer epoch.
+- x402 authorization is not revenue. Its reservation and verified-payment row
+  commit before dispatch; its exact attempt is persisted as `settling` before
+  the facilitator can touch chain. Facilitator success is only `reported`;
+  worker payout aggregation must exclude that job until Core independently
+  proves the exact canonical-USDC Base transfer and records `settled`.
+  Ambiguous attempts go to `manual_review`. The initial route is Base USDC,
+  `upto`, text-only, and non-streaming because the upstream middleware buffers
+  the response before settlement.
 - Media billing reserves exact deterministic cost before dispatch and refunds on
   non-running paths; text billing reserves max cost and reconciles against trusted
   usage.
