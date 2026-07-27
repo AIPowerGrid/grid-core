@@ -321,7 +321,10 @@ async def _confirmed_transaction(tx_hash: str, asset: str) -> tuple[dict, dict, 
         )
         raise HTTPException(502, detail="Could not reach Base to verify the transaction.")
     if not tx or not receipt:
-        raise HTTPException(400, detail="Transaction not found or not yet mined.")
+        raise HTTPException(
+            425,
+            detail="Transaction not found or not yet visible. Retry shortly.",
+        )
     if receipt.get("status") not in ("0x1", 1):
         raise HTTPException(400, detail="Transaction failed on-chain.")
     block_number = int(receipt["blockNumber"], 16)
