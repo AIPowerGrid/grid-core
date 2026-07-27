@@ -125,6 +125,36 @@ async def test_settle_refunds_unused_remainder(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_settle_reconciles_service_exposure_to_actual(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    reconciled = []
+
+    async def authorize(_user, _amount, _ref):
+        return True, None
+
+    async def reconcile(service_id, ref, keep_micro):
+        reconciled.append((service_id, ref, keep_micro))
+        return True
+
+    monkeypatch.setattr(credits.service_limits, "authorize", authorize)
+    monkeypatch.setattr(credits.service_limits, "reconcile", reconcile)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 10_000_000, "topup", ref="service-seed")
+    user = {
+        "account_id": aid,
+        "service_id": "chat-frontend",
+        "service_limits": {"per_request_micro": 1_000_000, "daily_micro": 10_000_000},
+    }
+    auth = await credits.authorize_request(
+        user, PRICED, 1000, 1000, "service-job", record_reservation=True,
+    )
+    assert auth["ok"]
+    await credits.settle_job("service-job", 100)
+    actual = pricing.quote_text(PRICED, 1000, 100)
+    assert reconciled == [("chat-frontend", "service-job", actual)]
+
+
+@pytest.mark.asyncio
 async def test_settlement_uses_reservation_time_price_snapshot(db, monkeypatch):
     monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
     aid = uuid.uuid4()

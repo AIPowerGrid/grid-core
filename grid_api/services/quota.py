@@ -6,8 +6,9 @@
 The mission is "free AI for everyone, funded by paid usage." This is the code
 that makes the free part real: every user gets a daily allowance of requests,
 metered per UTC day in Redis. Accounts carrying an explicit ``quota_exempt``
-policy flag are unmetered. Direct first-party service keys are also unmetered
-only when they carry both fail-closed per-request and daily spending ceilings.
+policy flag or a positive purchased-credit balance are unmetered. Direct
+first-party service keys are also unmetered only when they carry both
+fail-closed per-request and daily spending ceilings.
 
 Design notes:
   - Meter ACCEPTED requests only: callers invoke this right before a request
@@ -67,6 +68,27 @@ def is_paid(user: dict) -> bool:
     )
 
 
+async def has_paid_access(user: dict) -> bool:
+    """Return whether request-count quota should not gate this credential.
+
+    Promotional and daily-free value do not qualify: only an explicit policy,
+    a bounded direct service key, or positive purchased balance does. A balance
+    lookup failure falls back to the free counter; the later billing reserve is
+    still the authoritative spend gate.
+    """
+    if is_paid(user):
+        return True
+    if not user.get("account_id"):
+        return False
+    try:
+        from . import credits
+
+        return await credits.has_credit(user)
+    except Exception as exc:
+        logger.warning("paid quota lookup failed for account %s: %s", user.get("account_id"), exc)
+        return False
+
+
 async def check_and_consume(user: dict) -> None:
     """Consume one unit of the user's daily quota; raise 429 if exhausted.
 
@@ -74,7 +96,7 @@ async def check_and_consume(user: dict) -> None:
     pass through untouched. On any Redis error we fail open (allow the request)
     so a quota-store outage doesn't break inference.
     """
-    if is_paid(user):
+    if await has_paid_access(user):
         return
 
     user_id = user.get("id")
@@ -110,7 +132,7 @@ async def check_and_consume(user: dict) -> None:
 
 async def remaining(user: dict) -> int | None:
     """Requests left today, or None for paid/unmetered users. Best-effort."""
-    if is_paid(user):
+    if await has_paid_access(user):
         return None
     user_id = user.get("id")
     if user_id is None:

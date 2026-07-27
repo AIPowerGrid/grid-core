@@ -88,8 +88,12 @@ on). These are hard gates, not suggestions:
   `issue_key` forces it false so it isn't caller-settable). A leaked inference key
   can no longer redirect earnings or manage keys. API keys now carry capability
   scopes and Core can bootstrap bridge keys limited to `account.read`,
-  `inference.submit`, and `identity.assert`. **Still TODO:** split the remaining session-level account
-  authority into finer billing/worker scopes after client migration.
+  `inference.submit`, and `identity.assert`. Wallet login now has a strict
+  EIP-4361 challenge that binds the selected address, allowlisted frontend
+  domain/URI, Base chain id, issue/expiry time, and single-use nonce; generic
+  sign-in verification is default-off. **Still TODO:** deploy Core and the
+  Console challenge client together, then split the remaining session-level
+  account authority into finer billing/worker scopes.
 - [x] **B3a (P0 FIXED `cf0cfd08`, 2026-07-08) — Identity-bridge confused deputy.**
   `POST /v1/accounts/session` OR-matched oauth_sub|wallet|email then `.first()`
   (no ORDER BY) and minted a dashboard-session key for the arbitrary winner.
@@ -124,12 +128,16 @@ on). These are hard gates, not suggestions:
   never the worker/backend `usage`. They reserve before dispatch (402 on
   insufficient funds, native error envelope) and reconcile/refund on the terminal
   event or in a `finally` on disconnect, same as chat.
-  **Remaining before flip:** peg media prices (currently placeholders); the
-  per-format flatten is a tiktoken proxy (o200k_base), not each backend's native
-  tokenizer, so counts are approximate — acceptable as a billing proxy, document it.
-- [x] **B5 (DONE, b8d4ca2) — Default-deny unpriced models in enforce mode.** Flip
-  `BLOCK_UNPRICED` semantics so an unpriced/renamed model can't be free when
-  charging is on.
+  Price coverage is now modality-specific, production display/recipe names map
+  through explicit aliases, omitted video duration bills the selected recipe's
+  baked graph default, and ACE-Step uses the approved low-cost launch peg.
+  **Remaining before flip:** approve the provisional Qwen/SmolLM/media pegs from
+  measured worker economics; the per-format flatten is a tiktoken proxy
+  (o200k_base), not each backend's native tokenizer, so counts are approximate.
+- [x] **B5 (DONE, b8d4ca2 + launch-hardening follow-up) — Default-deny unpriced
+  model/modality pairs in enforce mode.** A renamed model or a model priced only
+  for another modality cannot become free. Positive sub-micro quotes round up to
+  one ledger unit.
 - [x] **B6 (code-guard DONE, b8d4ca2; hard DB constraint → B7) — Idempotency is structural, not caller-discipline.** `ref` **non-null
   required** for value-moving ledger rows (Postgres allows multiple NULLs through
   the unique index); validate in code; tests.
@@ -158,6 +166,19 @@ on). These are hard gates, not suggestions:
   rejected, concurrent-debit can't overdraft, insufficient blocks **before**
   dispatch, stream reserve/refund, media-job charging, unpriced blocked in
   enforce mode.
+
+### 2026-07 demand-launch hardening (code complete; deploy/canary pending)
+
+- Positive purchased-credit accounts bypass only the free request-count quota;
+  the atomic prepaid reserve remains the authoritative spend gate.
+- Bounded service ceilings now reserve by job id, release on failed
+  authorization/no-work terminals, and reconcile max text exposure to actual
+  spend after the SQL terminal commit.
+- Core strict-SIWE tests cover cross-domain rejection, exact-message matching,
+  non-burning invalid attempts, and single-use replay rejection. The Console
+  client signs the Core-issued message verbatim.
+- Global charging remains off until production deploy order, price approval,
+  top-up path, monitoring, and a bounded canary are complete.
 
 **Recommended build order:** B1+B6+B5 (+ tests) → B4 (universal metering) →
 B2+B3 (scoped keys + signed bridge identity) → B7 → B8.

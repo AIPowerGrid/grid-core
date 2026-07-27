@@ -332,9 +332,15 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
         n = int(payload.get("n", 1) or 1)
         seconds = payload.get("seconds") or (payload.get("recipe_inputs") or {}).get("seconds")
         if job_type == "video" and not seconds:
-            # the recipe's baked default duration isn't known to the grid; bill a
-            # conservative default rather than letting it slip through free.
-            seconds = DEFAULT_VIDEO_SECONDS
+            # Bill the exact graph default. Recipe display names can share a
+            # checkpoint while baking different durations (e.g. 5s Director vs
+            # 10s Audio), so a single global fallback would undercharge one.
+            seconds = recipes.baked_default_for_model(
+                model,
+                "seconds",
+                payload.get("recipe_inputs") or {},
+                has_source=bool(payload.get("source_image_url")),
+            ) or DEFAULT_VIDEO_SECONDS
         auth = await credits.authorize_media(account_id, model, job_type, n, seconds, job_id,
                                              record_reservation=True, user=billing_user)
         if not auth["ok"]:

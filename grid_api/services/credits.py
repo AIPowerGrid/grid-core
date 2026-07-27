@@ -81,7 +81,8 @@ async def apply_holder_discount(cost_micro: int, *, wallet: str | None = None, a
     discount = await holder_discount_bps(wallet=wallet, account_id=account_id)
     if cost_micro <= 0 or discount <= 0:
         return cost_micro
-    return int(cost_micro * (10_000 - discount) // 10_000)
+    factor = 10_000 - discount
+    return (cost_micro * factor + 9_999) // 10_000 if factor > 0 else 0
 
 
 async def holder_discount_bps(*, wallet: str | None = None, account_id=None) -> int:
@@ -115,11 +116,10 @@ def _snapshot_rates(model: str) -> tuple[int, int]:
 
 def _quote_snapshot(prompt_tokens: int, completion_tokens: int, input_rate: int,
                     output_rate: int, discount_bps: int) -> int:
-    base = int(round(
-        (int(prompt_tokens or 0) * input_rate + int(completion_tokens or 0) * output_rate)
-        / pricing.MICRO
-    ))
-    return base * (10_000 - max(0, min(int(discount_bps or 0), 10_000))) // 10_000
+    numerator = int(prompt_tokens or 0) * input_rate + int(completion_tokens or 0) * output_rate
+    base = (numerator + pricing.MICRO - 1) // pricing.MICRO if numerator > 0 else 0
+    factor = 10_000 - max(0, min(int(discount_bps or 0), 10_000))
+    return (base * factor + 9_999) // 10_000 if base > 0 and factor > 0 else 0
 
 
 async def get_balance(account_id) -> int:
@@ -384,9 +384,9 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
     """
     if not CHARGING_ENABLED:
         return {"ok": True, "reserved": 0, "status": "dry_run"}
-    if not pricing.is_priced(model):
+    if not pricing.is_priced_for(model, "text"):
         return {"ok": False, "reserved": 0, "status": "unpriced",
-                "reason": f"model '{model}' is not available for billing"}
+                "reason": f"model '{model}' has no text price"}
     input_rate, output_rate = _snapshot_rates(model)
     discount_bps = await holder_discount_bps(
         wallet=user.get("wallet"), account_id=_account_id(user),
@@ -422,6 +422,7 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
                 reserved = await _reservation_reserved_micro(job_id)
                 if reserved is not None:
                     return {"ok": True, "reserved": reserved, "status": "already"}
+                await service_limits.release(user.get("service_id"), ref)
                 logger.error("reservation debit exists without reservation row job=%s account=%s", job_id, aid)
                 return {"ok": False, "reserved": 0, "status": "reservation_missing",
                         "reason": "billing reservation is inconsistent; retry with a new request id"}
@@ -429,6 +430,7 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
                 await s.rollback()
                 await _promo_release(aid, ref)
                 await free_credits.release(aid, ref)  # give back the free we just took
+                await service_limits.release(user.get("service_id"), ref)
                 logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD (free=%d): insufficient",
                             aid, model, cost, from_free)
                 return {"ok": False, "reserved": 0, "status": "insufficient",
@@ -447,6 +449,7 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
                 logger.error("reservation insert conflicted without readable row job=%s account=%s", job_id, aid)
                 await _promo_release(aid, ref)
                 await free_credits.release(aid, ref)
+                await service_limits.release(user.get("service_id"), ref)
                 return {"ok": False, "reserved": 0, "status": "reservation_failed",
                         "reason": "billing reservation failed"}
             except Exception:
@@ -454,6 +457,7 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
                 logger.error("reservation insert failed job=%s account=%s", job_id, aid, exc_info=True)
                 await _promo_release(aid, ref)
                 await free_credits.release(aid, ref)
+                await service_limits.release(user.get("service_id"), ref)
                 return {"ok": False, "reserved": 0, "status": "reservation_failed",
                         "reason": "billing reservation failed"}
             await s.commit()
@@ -469,6 +473,7 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
                 "from_promo": from_promo, "from_free": from_free}
     await _promo_release(aid, ref)
     await free_credits.release(aid, ref)
+    await service_limits.release(user.get("service_id"), ref)
     logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD (free=%d): insufficient",
                 aid, model, cost, from_free)
     return {"ok": False, "reserved": 0, "status": "insufficient",
@@ -519,9 +524,9 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
     isn't token-priced; settle_exact ignores it)."""
     if not CHARGING_ENABLED:
         return {"ok": True, "reserved": 0, "status": "dry_run"}
-    if not pricing.is_priced(model):
+    if not pricing.is_priced_for(model, job_type):
         return {"ok": False, "reserved": 0, "status": "unpriced",
-                "reason": f"model '{model}' is not available for billing"}
+                "reason": f"model '{model}' has no {job_type} price"}
     if job_type == "video":
         cost = pricing.quote_video(model, float(seconds or 0))
     elif job_type == "audio":
@@ -560,6 +565,7 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                 reserved = await _reservation_reserved_micro(job_id)
                 if reserved is not None:
                     return {"ok": True, "reserved": reserved, "status": "already"}
+                await service_limits.release((user or {}).get("service_id"), ref)
                 logger.error("media reserve debit exists without reservation row job=%s account=%s", job_id, account_id)
                 return {"ok": False, "reserved": 0, "status": "reservation_missing",
                         "reason": "billing reservation is inconsistent; retry with a new request id"}
@@ -567,6 +573,7 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                 await s.rollback()
                 await _promo_release(account_id, ref)
                 await free_credits.release(account_id, ref)
+                await service_limits.release((user or {}).get("service_id"), ref)
                 logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD (free=%d): insufficient",
                             account_id, model, cost, from_free)
                 return {"ok": False, "reserved": 0, "status": "insufficient", "reason": "insufficient credits"}
@@ -581,6 +588,7 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                     return {"ok": True, "reserved": reserved, "status": "already"}
                 await _promo_release(account_id, ref)
                 await free_credits.release(account_id, ref)
+                await service_limits.release((user or {}).get("service_id"), ref)
                 return {"ok": False, "reserved": 0, "status": "reservation_failed",
                         "reason": "billing reservation failed"}
             except Exception:
@@ -588,6 +596,7 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                 logger.error("media reservation insert failed job=%s account=%s", job_id, account_id, exc_info=True)
                 await _promo_release(account_id, ref)
                 await free_credits.release(account_id, ref)
+                await service_limits.release((user or {}).get("service_id"), ref)
                 return {"ok": False, "reserved": 0, "status": "reservation_failed",
                         "reason": "billing reservation failed"}
             await s.commit()
@@ -603,6 +612,7 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                 "from_promo": from_promo, "from_free": from_free}
     await _promo_release(account_id, ref)
     await free_credits.release(account_id, ref)
+    await service_limits.release((user or {}).get("service_id"), ref)
     logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD (free=%d): insufficient",
                 account_id, model, cost, from_free)
     return {"ok": False, "reserved": 0, "status": "insufficient", "reason": "insufficient credits"}
@@ -668,6 +678,7 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
     and retryable instead of marking it settled prematurely."""
     free_restore = None  # (account_id, keep_micro) — applied AFTER the SQL commit
     promo_restore = None  # (account_id, keep_micro) — durable promo pocket
+    service_reconcile = None  # (service_id, actual_micro) — Redis after commit
     try:
         async with await new_session() as s:
             row = (await s.execute(
@@ -676,7 +687,8 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
                           reservations_t.c.free_micro, reservations_t.c.promo_micro,
                           reservations_t.c.input_per_mtok_micro,
                           reservations_t.c.output_per_mtok_micro,
-                          reservations_t.c.discount_bps)
+                          reservations_t.c.discount_bps,
+                          reservations_t.c.service_id)
                 .where(reservations_t.c.job_id == str(job_id))
             )).first()
             if not row:
@@ -699,6 +711,7 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
             free_held = int(row[4] or 0)
             promo_held = int(row[5] or 0)
             paid_held = reserved - free_held - promo_held
+            service_id = row[9]
 
             if not CHARGING_ENABLED:
                 if status == "ok":
@@ -716,6 +729,7 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
                 # the free restore is a Redis op queued for after commit (a crash
                 # between them forfeits free-day allowance, never paid money).
                 if status != "ok":
+                    service_reconcile = (service_id, 0)
                     if paid_held > 0:
                         await _credit_in_session(s, paid_account_id, paid_held, "release:failed", f"{job_id}:refund", model)
                     if free_held > 0:
@@ -729,6 +743,7 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
                         )
                     else:
                         actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
+                    service_reconcile = (service_id, actual)
                     # Attribute consumption promo → daily free → paid, matching reserve.
                     promo_spent = min(promo_held, actual)
                     after_promo = actual - promo_spent
@@ -751,6 +766,8 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
             await free_credits.release(free_restore[0], str(job_id), keep_micro=free_restore[1])
         if promo_restore is not None:
             await _promo_release(promo_restore[0], str(job_id), keep_micro=promo_restore[1])
+        if service_reconcile is not None:
+            await service_limits.reconcile(service_reconcile[0], str(job_id), service_reconcile[1])
     except Exception:
         logger.error("settle_job failed job=%s (refund may be owed)", job_id, exc_info=True)
 
@@ -825,7 +842,8 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
                           reservations_t.c.free_micro, reservations_t.c.promo_micro,
                           reservations_t.c.input_per_mtok_micro,
                           reservations_t.c.output_per_mtok_micro,
-                          reservations_t.c.discount_bps)
+                          reservations_t.c.discount_bps,
+                          reservations_t.c.service_id)
                 .where(reservations_t.c.job_id == job_id)
             )).first()
             if not row:
@@ -856,6 +874,7 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
             promo_held = int(row[5] or 0)
             free_restore = None  # (keep_micro) — Redis, applied after commit
             promo_restore = None
+            service_keep = reserved
             if CHARGING_ENABLED and aid and reserved > 0 and not exact:
                 if row[6] is not None and row[7] is not None:
                     actual = _quote_snapshot(
@@ -864,6 +883,7 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
                 else:
                     # Compatibility for reservations opened before migration 0015.
                     actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
+                service_keep = actual
                 # Three pockets, never converted: promo → daily free → paid
                 # (matching the draw); the paid refund/extra moves in THIS txn,
                 # the free restore follows the commit (crash between = free-day
@@ -892,6 +912,7 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
                 await free_credits.release(aid, job_id, keep_micro=free_restore)
             if promo_restore is not None:
                 await _promo_release(aid, job_id, keep_micro=promo_restore)
+            await service_limits.reconcile(row[9], job_id, service_keep)
             return "settled"
     except Exception:
         logger.error("record_and_settle failed job=%s (terminal not committed; retryable)", job_id, exc_info=True)

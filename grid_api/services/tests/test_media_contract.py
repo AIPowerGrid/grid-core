@@ -55,3 +55,29 @@ async def test_live_media_rejects_legacy_no_account_before_dispatch(monkeypatch)
         )
     assert exc.value.status_code == 402
     assert "v2 account" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_live_media_bills_recipe_baked_duration(monkeypatch):
+    recipes.register_recipe("0xbilling-duration", "billing-duration", {
+        "_grid": {
+            "modelName": "billing-duration",
+            "jobType": "video",
+            "vars": {"seconds": "9.inputs.value", "seed": "3.inputs.seed"},
+        },
+        "3": {"inputs": {"seed": 0}},
+        "9": {"inputs": {"value": 10}},
+    })
+    observed = {}
+
+    async def authorize(_account_id, _model, _job_type, _n, seconds, _job_id, **_kwargs):
+        observed["seconds"] = seconds
+        return {"ok": False, "reserved": 0, "reason": "stop before dispatch"}
+
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    monkeypatch.setattr(credits, "authorize_media", authorize)
+    with pytest.raises(HTTPException):
+        await media.submit_and_wait(
+            "billing-duration", "video", {"n": 1}, 1, account_id="account",
+        )
+    assert observed["seconds"] == 10
