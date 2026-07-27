@@ -16,12 +16,16 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - `check_retired_runtime.py` - CI guard against reintroducing the retired
   runtime through code, packaging, deploy, or operator scripts.
 - `create_service_account.py` - one-time provisioning for bounded frontend or
-  backend service principals; prints the new key exactly once.
+  backend service principals; prints the new key exactly once. Google audiences
+  and exact SIWE authorities are explicit per-service policy.
 - `adopt_service_account.py` - transactionally promotes exactly one existing
   labeled API key into a bounded service principal without rotating its key or
   moving its account balance.
 - `rotate_service_key.py` - atomically revokes a service's old keys and prints
   one replacement key exactly once.
+- `configure_service_identity.py` - preview-first, digest-bound update of an
+  existing service's allowed proof providers, Google audiences, and exact SIWE
+  authorities.
 - `grant_canary_credit.py` - dry-run-by-default, capped operator credit for one
   allowlisted demand-billing canary.
 
@@ -43,6 +47,11 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - Money-path changes belong primarily in
   `grid_api/services/settlement/payouts.py`; keep this wrapper thin.
 - Add explicit dry-run defaults to any new chain, database, or cleanup tool.
+- A service with `--provider wallet` must also list every intended exact
+  authority with `--siwe-domain`; never grant a wildcard domain.
+- Existing-service identity policy changes use
+  `configure_service_identity.py`: run without `--apply`, inspect the complete
+  policy, then apply with that preview's exact `current_digest`.
 - Put reusable logic in the owning service package and test it there.
 - Invoke Python operator tools through the selected release's `.venv/bin/python`;
   their env-based shebang assumes an already activated virtual environment.

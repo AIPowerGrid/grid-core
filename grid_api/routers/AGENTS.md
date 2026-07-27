@@ -44,9 +44,13 @@ transport, accounts, stats, health/metrics.
   wallet, then verified email only when it is the sole identity); supplemental
   or unverified email must never join accounts.
   Native service/app exchange lives at `/v1/auth/service/exchange`; Google ID
-  tokens are verified at `/v1/auth/google/exchange`; `/v1/auth/service/bind`
-  binds an app subject after recent Google/SIWE proof. `/v1/accounts/bridges`
-  bootstraps a bounded service client only when separately enabled.
+  tokens are verified at `/v1/auth/google/exchange`; partner wallet proof uses
+  `/v1/auth/wallet/challenge` plus `/v1/auth/wallet/exchange`, bound to the
+  service, its exact `siwe_domains`, the app subject, wallet, URI, Base chain,
+  expiry, and one-use nonce. `/v1/auth/service/bind` binds an app subject after
+  recent Google/SIWE proof. Bind accepts either a direct step-up token or a
+  step-up token audience-bound to that same service. `/v1/accounts/bridges` bootstraps a bounded service
+  client only when separately enabled.
   Wallet login uses `/v1/accounts/wallet/challenge`; the signed message binds
   wallet, allowlisted frontend domain/URI, Base chain id, issue/expiry time, and
   a single-use nonce. `/wallet/nonce` remains for authenticated wallet-link
@@ -105,6 +109,10 @@ transport, accounts, stats, health/metrics.
   service key. Legacy `X-Grid-User-Assertion` is app-local only and cannot claim
   Google or wallet identity. Account management needs a recent Core-verified
   Google/SIWE proof.
+- A service may submit an `app_subject` during Google or wallet exchange only
+  when it derives that value from its authenticated server session. Never trust
+  a browser-supplied account/user id: proof exchange may merge value-bearing
+  accounts.
 
 ## Work Guidance
 

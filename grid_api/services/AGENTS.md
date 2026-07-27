@@ -20,7 +20,8 @@ content sanitization, and reward settlement.
   accounting), `accounts.py` (scoped keys and payout preference),
   `identities.py` (verified identities, aliases, and value-conserving merges),
   `user_tokens.py` (Core-issued short-lived sessions), `service_auth.py`
-  (bounded service clients + proof exchange), `service_limits.py` (fail-closed
+  (bounded service clients + proof exchange), `wallet_proofs.py` (EOA and
+  deployed EIP-1271 personal-sign verification on Base), `service_limits.py` (fail-closed
   request/day ceilings), `alerts.py` (redacted, bounded operator event delivery),
   `assertions.py` (legacy app-only assertions), `economics.py`
   (splits, payout-asset + conversion-fee knobs, `worker_share_bps`),
@@ -106,8 +107,21 @@ content sanitization, and reward settlement.
   Funding configuration may expose advisory daily-cap usage for preflight, but
   `_record_and_credit` remains the authoritative locked enforcement point.
 - Service keys remain long-lived backend credentials but cannot manage user
-  accounts. Global Google/SIWE proof is verified by Core; app delegation is
-  namespaced to one service and receives bounded inference authority.
+  accounts. Global Google/SIWE proof is verified by Core; partner SIWE is
+  additionally bound to the service's exact allowlisted domains and optional
+  service-local subject. App delegation is namespaced to one service and
+  receives bounded inference authority. The service must derive any exchanged
+  app subject from its authenticated server session, never directly from an
+  untrusted request field.
+- Native service exchange uses the stable service-id namespace. During
+  migration it also resolves the former service-account-UUID namespace used by
+  signed assertions, attaches the stable identity, and value-conservingly
+  merges conflicts. Never remove this compatibility path while legacy
+  assertion identities or balances remain.
+- Partner wallet exchange supports EOAs without an RPC call and deployed
+  EIP-1271 contract wallets through `eth_getCode` plus `isValidSignature` on
+  Base. RPC failure rejects the contract-wallet proof; it must never fall back
+  to trusting the partner's assertion.
 - The free request-count quota exempts positive purchased-credit accounts and a
   direct service key only when both its per-request and daily micro-USD ceilings
   are positive. Promotional/daily-free value, delegated users without purchased

@@ -17,7 +17,16 @@ from starlette.requests import Request
 
 from grid_api import database
 from grid_api.routers import accounts as accounts_router
-from grid_api.services import accounts, alerts, quota, service_limits, user_tokens
+from grid_api.services import (
+    accounts,
+    alerts,
+    credits,
+    identities,
+    quota,
+    service_auth,
+    service_limits,
+    user_tokens,
+)
 from grid_api.v2.schema import accounts as accounts_table
 from grid_api.v2.schema import metadata
 from grid_api.v2.schema import service_clients as service_clients_table
@@ -75,6 +84,442 @@ async def test_service_exchange_is_namespaced_and_short_lived(db):
         authorization=None,
     )
     assert same["account_id"] == result["account_id"]
+
+
+@pytest.mark.asyncio
+async def test_native_exchange_absorbs_legacy_service_account_namespace(db):
+    service, key = await accounts.create_service_client(
+        "chat-legacy",
+        "Chat",
+        allowed_providers=["app"],
+    )
+    subject = "aipg-chat:user-1"
+    legacy_subject = f"{service['account_id']}:{subject}"
+    legacy_account, _ = await accounts.create_account(
+        username="Legacy Chat user",
+        issue_initial_key=False,
+        identity_kind="app",
+        identity_subject=legacy_subject,
+    )
+    assert await credits.credit(
+        UUID(legacy_account["id"]),
+        750_000,
+        "test_funding",
+        "test:legacy-service-namespace",
+    )
+    request = Request(
+        {"type": "http", "method": "POST", "path": "/", "headers": []},
+    )
+
+    result = await accounts_router.exchange_service_identity(
+        request,
+        accounts_router.ServiceExchangeForm(subject=subject),
+        apikey=key,
+        authorization=None,
+    )
+
+    assert result["account_id"] == legacy_account["id"]
+    assert str(
+        await identities.resolve_identity("app", f"chat-legacy:{subject}"),
+    ) == legacy_account["id"]
+    assert await credits.get_balance(UUID(legacy_account["id"])) == 750_000
+
+
+@pytest.mark.asyncio
+async def test_verified_google_account_and_balance_are_shared_across_products(
+    db,
+    monkeypatch,
+):
+    async def verified_google(_id_token, audiences):
+        assert audiences == ["shared-google-client"]
+        return {
+            "subject": "google-user-123",
+            "email": "verified@example.test",
+            "email_verified": True,
+            "name": "Verified User",
+        }
+
+    async def no_campaign(*_args, **_kwargs):
+        return None
+
+    async def no_grant(*_args, **_kwargs):
+        return {"status": "disabled"}
+
+    monkeypatch.setattr(service_auth, "verify_google_id_token", verified_google)
+    monkeypatch.setattr(
+        "grid_api.services.promotions.ensure_builtin_campaign",
+        no_campaign,
+    )
+    monkeypatch.setattr("grid_api.services.promotions.grant_once", no_grant)
+
+    services = {}
+    for service_id in ("aipg-art", "aipg-chat", "aipg-music"):
+        services[service_id] = await accounts.create_service_client(
+            service_id,
+            service_id,
+            allowed_providers=["app", "google", "wallet"],
+            google_audiences=["shared-google-client"],
+            siwe_domains=[f"{service_id}.test"],
+        )
+
+    request = Request(
+        {"type": "http", "method": "POST", "path": "/", "headers": []},
+    )
+    account_id = None
+    for index, (service_id, (service, key)) in enumerate(services.items()):
+        result = await accounts_router.exchange_google_identity(
+            request,
+            accounts_router.GoogleExchangeForm(
+                id_token=f"google-proof-{index}",
+                app_subject=f"{service_id}:local-user-{index}",
+            ),
+            apikey=key,
+            authorization=None,
+        )
+        if account_id is None:
+            account_id = result["account_id"]
+            assert await credits.credit(
+                UUID(account_id),
+                20_000,
+                "test_funding",
+                "test:universal-product-balance",
+            )
+        assert result["account_id"] == account_id
+        delegated = await accounts.authenticate(
+            key,
+            user_token=result["access_token"],
+            required_scope="inference.submit",
+        )
+        assert str(delegated["account_id"]) == account_id
+        assert delegated["service_id"] == service["id"]
+        assert str(
+            await identities.resolve_identity(
+                "app",
+                f"{service['id']}:{service_id}:local-user-{index}",
+            ),
+        ) == account_id
+        assert await credits.get_balance(UUID(account_id)) == 20_000
+
+
+class _NonceRedis:
+    def __init__(self):
+        self.values: dict[str, str] = {}
+
+    async def set(self, key, value, **_kwargs):
+        self.values[key] = value
+        return True
+
+    async def get(self, key):
+        return self.values.get(key)
+
+    async def getdel(self, key):
+        return self.values.pop(key, None)
+
+
+@pytest.mark.asyncio
+async def test_verified_wallet_account_and_balance_are_shared_across_products(
+    db,
+    monkeypatch,
+):
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+
+    redis = _NonceRedis()
+    monkeypatch.setattr("grid_api.redis_client.get_redis", lambda: redis)
+    services = {}
+    for service_id, domain in (
+        ("aipg-art", "aipg.art"),
+        ("aipg-music", "aipg.music"),
+    ):
+        services[service_id] = await accounts.create_service_client(
+            service_id,
+            service_id,
+            allowed_providers=["app", "wallet"],
+            siwe_domains=[domain],
+        )
+
+    wallet = Account.create()
+    request = Request(
+        {"type": "http", "method": "POST", "path": "/", "headers": []},
+    )
+    account_id = None
+    for index, (service_id, (_service, key)) in enumerate(services.items()):
+        domain = "aipg.art" if service_id == "aipg-art" else "aipg.music"
+        app_subject = f"local-wallet-user-{index}"
+        challenge = await accounts_router.exchange_wallet_challenge(
+            request,
+            accounts_router.ServiceWalletChallengeForm(
+                address=wallet.address,
+                domain=domain,
+                uri=f"https://{domain}",
+                app_subject=app_subject,
+            ),
+            apikey=key,
+            authorization=None,
+        )
+        signature = Account.sign_message(
+            encode_defunct(text=challenge["message"]),
+            wallet.key,
+        ).signature.hex()
+        result = await accounts_router.exchange_wallet_identity(
+            request,
+            accounts_router.ServiceWalletExchangeForm(
+                message=challenge["message"],
+                signature=signature,
+                address=wallet.address,
+                app_subject=app_subject,
+            ),
+            apikey=key,
+            authorization=None,
+        )
+        if account_id is None:
+            account_id = result["account_id"]
+            assert await credits.credit(
+                UUID(account_id),
+                20_000,
+                "test_funding",
+                "test:universal-wallet-balance",
+            )
+        assert result["account_id"] == account_id
+        assert str(
+            await identities.resolve_identity(
+                "app",
+                f"{service_id}:{app_subject}",
+            ),
+        ) == account_id
+        assert await credits.get_balance(UUID(account_id)) == 20_000
+
+
+@pytest.mark.asyncio
+async def test_service_siwe_merges_funded_wallet_into_local_identity(
+    db,
+    monkeypatch,
+):
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+
+    redis = _NonceRedis()
+    monkeypatch.setattr("grid_api.redis_client.get_redis", lambda: redis)
+    service, key = await accounts.create_service_client(
+        "gallery-test",
+        "Gallery",
+        allowed_providers=["app", "wallet"],
+        siwe_domains=["aipg.art"],
+        per_request_micro=500_000,
+        daily_micro=2_000_000,
+    )
+    local_account, _ = await accounts.create_account(
+        username="Gallery user",
+        issue_initial_key=False,
+        identity_kind="app",
+        identity_subject="gallery-test:user-1",
+    )
+    wallet = Account.create()
+    funded_account, _ = await accounts.create_account(
+        wallet=wallet.address,
+        issue_initial_key=False,
+    )
+    assert await credits.credit(
+        UUID(funded_account["id"]),
+        2_000_000,
+        "test_funding",
+        "test:service-siwe-funding",
+    )
+    request = Request(
+        {"type": "http", "method": "POST", "path": "/", "headers": []},
+    )
+    challenge = await accounts_router.exchange_wallet_challenge(
+        request,
+        accounts_router.ServiceWalletChallengeForm(
+            address=wallet.address,
+            domain="aipg.art",
+            uri="https://aipg.art/create",
+            chain_id=8453,
+            app_subject="user-1",
+        ),
+        apikey=key,
+        authorization=None,
+    )
+    signature = Account.sign_message(
+        encode_defunct(text=challenge["message"]),
+        wallet.key,
+    ).signature.hex()
+    form = accounts_router.ServiceWalletExchangeForm(
+        message=challenge["message"],
+        signature=signature,
+        address=wallet.address,
+        app_subject="user-1",
+    )
+
+    result = await accounts_router.exchange_wallet_identity(
+        request,
+        form,
+        apikey=key,
+        authorization=None,
+    )
+
+    assert result["account_id"] == local_account["id"]
+    assert str(await identities.resolve_identity("wallet", wallet.address)) == local_account["id"]
+    assert str(await identities.canonical_account_id(funded_account["id"])) == local_account["id"]
+    assert await credits.get_balance(UUID(local_account["id"])) == 2_000_000
+    delegated = await accounts.authenticate(
+        key,
+        user_token=result["access_token"],
+        required_scope="inference.submit",
+    )
+    assert delegated["service_id"] == service["id"]
+    assert delegated["auth_method"] == "siwe"
+    assert "account.manage" in delegated["scopes"]
+
+    bound = await accounts_router.bind_service_identity(
+        request,
+        accounts_router.BindServiceIdentityForm(
+            subject="local-user-1",
+            user_token=result["access_token"],
+        ),
+        apikey=key,
+        authorization=None,
+    )
+    assert bound["account_id"] == local_account["id"]
+    assert str(
+        await identities.resolve_identity(
+            "app",
+            f"{service['id']}:local-user-1",
+        ),
+    ) == local_account["id"]
+
+    with pytest.raises(HTTPException) as replay:
+        await accounts_router.exchange_wallet_identity(
+            request,
+            form,
+            apikey=key,
+            authorization=None,
+        )
+    assert replay.value.status_code == 401
+    assert await credits.get_balance(UUID(local_account["id"])) == 2_000_000
+
+
+@pytest.mark.asyncio
+async def test_service_siwe_challenge_is_bound_to_service_subject_and_domain(
+    db,
+    monkeypatch,
+):
+    from eth_account import Account
+
+    redis = _NonceRedis()
+    monkeypatch.setattr("grid_api.redis_client.get_redis", lambda: redis)
+    _, gallery_key = await accounts.create_service_client(
+        "gallery-test",
+        "Gallery",
+        allowed_providers=["wallet"],
+        siwe_domains=["aipg.art"],
+    )
+    _, chat_key = await accounts.create_service_client(
+        "chat-test",
+        "Chat",
+        allowed_providers=["wallet"],
+        siwe_domains=["aipg.chat"],
+    )
+    wallet = Account.create()
+    request = Request(
+        {"type": "http", "method": "POST", "path": "/", "headers": []},
+    )
+    challenge = await accounts_router.exchange_wallet_challenge(
+        request,
+        accounts_router.ServiceWalletChallengeForm(
+            address=wallet.address,
+            domain="aipg.art",
+            uri="https://aipg.art/create",
+            app_subject="gallery-user",
+        ),
+        apikey=gallery_key,
+        authorization=None,
+    )
+    assert "through gallery-test" in challenge["message"]
+
+    with pytest.raises(HTTPException) as wrong_service:
+        await accounts_router.exchange_wallet_identity(
+            request,
+            accounts_router.ServiceWalletExchangeForm(
+                message=challenge["message"],
+                signature="0x00",
+                address=wallet.address,
+                app_subject="gallery-user",
+            ),
+            apikey=chat_key,
+            authorization=None,
+        )
+    assert wrong_service.value.status_code == 401
+
+    with pytest.raises(HTTPException) as wrong_subject:
+        await accounts_router.exchange_wallet_identity(
+            request,
+            accounts_router.ServiceWalletExchangeForm(
+                message=challenge["message"],
+                signature="0x00",
+                address=wallet.address,
+                app_subject="other-user",
+            ),
+            apikey=gallery_key,
+            authorization=None,
+        )
+    assert wrong_subject.value.status_code == 401
+
+    with pytest.raises(HTTPException) as wrong_domain:
+        await accounts_router.exchange_wallet_challenge(
+            request,
+            accounts_router.ServiceWalletChallengeForm(
+                address=wallet.address,
+                domain="aipg.chat",
+                uri="https://aipg.chat",
+                app_subject="gallery-user",
+            ),
+            apikey=gallery_key,
+            authorization=None,
+        )
+    assert wrong_domain.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_service_identity_policy_update_requires_preview_digest(db):
+    await accounts.create_service_client(
+        "gallery-policy",
+        "Gallery",
+        allowed_providers=["app", "google"],
+        google_audiences=["google-old"],
+    )
+    preview = await service_auth.configure_identity_policy(
+        "gallery-policy",
+        allowed_providers=["app", "google", "wallet"],
+        google_audiences=["google-new"],
+        siwe_domains=["aipg.art"],
+    )
+    assert preview["changed"] is True
+    assert preview["applied"] is False
+
+    with pytest.raises(ValueError, match="preview again"):
+        await service_auth.configure_identity_policy(
+            "gallery-policy",
+            allowed_providers=["app", "google", "wallet"],
+            google_audiences=["google-new"],
+            siwe_domains=["aipg.art"],
+            expected_digest="0" * 64,
+            apply=True,
+        )
+
+    applied = await service_auth.configure_identity_policy(
+        "gallery-policy",
+        allowed_providers=["app", "google", "wallet"],
+        google_audiences=["google-new"],
+        siwe_domains=["aipg.art"],
+        expected_digest=preview["current_digest"],
+        apply=True,
+    )
+    assert applied["applied"] is True
+    client = await service_auth.get_client("gallery-policy")
+    assert client["allowed_providers"] == ["app", "google", "wallet"]
+    assert client["google_audiences"] == ["google-new"]
+    assert client["siwe_domains"] == ["aipg.art"]
 
 
 @pytest.mark.asyncio

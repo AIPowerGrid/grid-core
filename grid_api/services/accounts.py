@@ -68,6 +68,7 @@ async def resolve_api_key(plain_key: str) -> dict | None:
                         service_clients_table.c.daily_micro,
                         service_clients_table.c.allowed_providers,
                         service_clients_table.c.google_audiences,
+                        service_clients_table.c.siwe_domains,
                         service_clients_table.c.active.label("service_active"),
                         accounts_table.c.id.label("account_id"),
                         accounts_table.c.username,
@@ -139,6 +140,7 @@ async def resolve_api_key(plain_key: str) -> dict | None:
                 ),
                 "allowed_providers": list(row["allowed_providers"] or []),
                 "google_audiences": list(row["google_audiences"] or []),
+                "siwe_domains": list(row["siwe_domains"] or []),
                 "scopes": list(row["scopes"] or (SESSION_SCOPES if row["is_session"] else INFERENCE_SCOPES)),
                 "username": row["username"] or "",
                 "wallet": row["wallet"] or "",
@@ -666,16 +668,23 @@ async def create_service_client(
     *,
     allowed_providers: list[str] | None = None,
     google_audiences: list[str] | None = None,
+    siwe_domains: list[str] | None = None,
     per_request_micro: int | None = None,
     daily_micro: int | None = None,
 ) -> tuple[dict, str]:
     """Atomically create one backend service principal and its initial key."""
-    from .service_auth import normalize_service_id
+    from .service_auth import normalize_service_id, normalize_siwe_domains
 
     sid = normalize_service_id(service_id)
     allowed = sorted(set(allowed_providers or ["app"]))
-    if not set(allowed).issubset({"app", "google"}):
-        raise ValueError("service providers must be app and/or google")
+    if not set(allowed).issubset({"app", "google", "wallet"}):
+        raise ValueError("service providers must be app, google, and/or wallet")
+    audiences = list(google_audiences or [])
+    domains = normalize_siwe_domains(siwe_domains)
+    if "google" in allowed and not audiences:
+        raise ValueError("Google provider requires at least one audience")
+    if "wallet" in allowed and not domains:
+        raise ValueError("wallet provider requires at least one SIWE domain")
     account_id = uuid4()
     plain = generate_api_key()
     now = datetime.now(timezone.utc)
@@ -694,7 +703,8 @@ async def create_service_client(
                 account_id=account_id,
                 name=name,
                 allowed_providers=allowed,
-                google_audiences=list(google_audiences or []),
+                google_audiences=audiences,
+                siwe_domains=domains,
                 per_request_micro=per_request_micro,
                 daily_micro=daily_micro,
                 active=True,
@@ -741,6 +751,7 @@ async def adopt_service_client(
     key_label: str,
     allowed_providers: list[str] | None = None,
     google_audiences: list[str] | None = None,
+    siwe_domains: list[str] | None = None,
     per_request_micro: int,
     daily_micro: int,
 ) -> dict:
@@ -751,7 +762,7 @@ async def adopt_service_client(
     accidentally promote every user credential on an account. Re-running the
     same adoption is idempotent; conflicting service policy fails closed.
     """
-    from .service_auth import normalize_service_id
+    from .service_auth import normalize_service_id, normalize_siwe_domains
 
     sid = normalize_service_id(service_id)
     aid = UUID(str(account_id))
@@ -764,8 +775,13 @@ async def adopt_service_client(
         raise ValueError("per-request ceiling cannot exceed the daily ceiling")
     allowed = sorted(set(allowed_providers or ["app"]))
     audiences = list(google_audiences or [])
-    if not set(allowed).issubset({"app", "google"}):
-        raise ValueError("service providers must be app and/or google")
+    if not set(allowed).issubset({"app", "google", "wallet"}):
+        raise ValueError("service providers must be app, google, and/or wallet")
+    domains = normalize_siwe_domains(siwe_domains)
+    if "google" in allowed and not audiences:
+        raise ValueError("Google provider requires at least one audience")
+    if "wallet" in allowed and not domains:
+        raise ValueError("wallet provider requires at least one SIWE domain")
 
     now = datetime.now(timezone.utc)
     async with await new_session() as session:
@@ -793,6 +809,7 @@ async def adopt_service_client(
             "name": name,
             "allowed_providers": allowed,
             "google_audiences": audiences,
+            "siwe_domains": domains,
             "per_request_micro": per_request_micro,
             "daily_micro": daily_micro,
             "active": True,
@@ -803,6 +820,7 @@ async def adopt_service_client(
                 "name": existing["name"],
                 "allowed_providers": list(existing["allowed_providers"] or []),
                 "google_audiences": list(existing["google_audiences"] or []),
+                "siwe_domains": list(existing["siwe_domains"] or []),
                 "per_request_micro": existing["per_request_micro"],
                 "daily_micro": existing["daily_micro"],
                 "active": bool(existing["active"]),

@@ -12,6 +12,7 @@ Key management (list/issue/revoke) authenticates with any active key on the
 account. Plaintext keys are returned exactly once and never stored.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -109,6 +110,14 @@ class WalletChallengeForm(BaseModel):
     chain_id: int = 8453
 
 
+class ServiceWalletChallengeForm(WalletChallengeForm):
+    app_subject: Optional[str] = None
+
+
+class ServiceWalletExchangeForm(WalletVerifyForm):
+    app_subject: Optional[str] = None
+
+
 class WalletLinkForm(BaseModel):
     message: str
     signature: str
@@ -159,6 +168,7 @@ class CreateBridgeForm(BaseModel):
     service_id: Optional[str] = None
     allowed_providers: list[str] = Field(default_factory=lambda: ["app"])
     google_audiences: list[str] = Field(default_factory=list)
+    siwe_domains: list[str] = Field(default_factory=list)
     per_request_micro: Optional[int] = None
     daily_micro: Optional[int] = None
 
@@ -203,12 +213,21 @@ def _allowed_siwe_domain(domain: str, uri: str) -> bool:
     return domain in allowed or local
 
 
-def _siwe_message(*, domain: str, address: str, uri: str, chain_id: int,
-                  nonce: str, issued_at: str, expiration_time: str) -> str:
+def _siwe_message(
+    *,
+    domain: str,
+    address: str,
+    uri: str,
+    chain_id: int,
+    nonce: str,
+    issued_at: str,
+    expiration_time: str,
+    statement: str = "Sign in to AI Power Grid.",
+) -> str:
     return (
         f"{domain} wants you to sign in with your Ethereum account:\n"
         f"{address}\n\n"
-        "Sign in to AI Power Grid.\n\n"
+        f"{statement}\n\n"
         f"URI: {uri}\n"
         "Version: 1\n"
         f"Chain ID: {chain_id}\n"
@@ -521,6 +540,7 @@ async def create_identity_bridge(
             clean,
             allowed_providers=form.allowed_providers,
             google_audiences=form.google_audiences,
+            siwe_domains=form.siwe_domains,
             per_request_micro=form.per_request_micro,
             daily_micro=form.daily_micro,
         )
@@ -547,6 +567,64 @@ async def _require_service_exchange(
     return user
 
 
+def _clean_app_subject(value: str | None, *, required: bool = False) -> str | None:
+    subject = (value or "").strip()
+    if not subject:
+        if required:
+            raise HTTPException(400, detail="subject must be 1..200 characters")
+        return None
+    if len(subject) > 200 or any(ord(char) < 32 for char in subject):
+        raise HTTPException(400, detail="subject must be 1..200 printable characters")
+    return subject
+
+
+async def _resolve_service_app_identity(
+    service: dict,
+    app_subject: str,
+) -> tuple[str, object | None]:
+    """Resolve the stable service namespace and absorb the legacy UUID namespace."""
+    from ..services import service_auth
+
+    primary = f"{service['service_id']}:{app_subject}"
+    legacy = f"{service['account_id']}:{app_subject}"
+    primary_owner = await identities_svc.resolve_identity("app", primary)
+    legacy_owner = (
+        await identities_svc.resolve_identity("app", legacy)
+        if legacy != primary
+        else None
+    )
+    if primary_owner and legacy_owner and str(primary_owner) != str(legacy_owner):
+        try:
+            await identities_svc.merge_accounts(
+                primary_owner,
+                legacy_owner,
+                reason="service_namespace_migration",
+                merge_ref=service_auth.new_event_ref(
+                    "service-namespace-merge",
+                    service["service_id"],
+                ),
+            )
+        except ValueError as exc:
+            raise HTTPException(409, detail=str(exc))
+        primary_owner = await identities_svc.canonical_account_id(primary_owner)
+    elif legacy_owner and not primary_owner:
+        linked = await identities_svc.attach_identity(
+            legacy_owner,
+            "app",
+            primary,
+            display_hint=f"{service['service_id']} account",
+            ref=service_auth.new_event_ref(
+                "service-namespace-link",
+                service["service_id"],
+            ),
+        )
+        if linked["status"] == "conflict":
+            primary_owner = await identities_svc.resolve_identity("app", primary)
+        else:
+            primary_owner = legacy_owner
+    return primary, primary_owner
+
+
 @router.post("/v1/auth/service/exchange")
 @limiter.limit("120/minute")
 async def exchange_service_identity(
@@ -559,11 +637,8 @@ async def exchange_service_identity(
     service = await _require_service_exchange(apikey, authorization)
     if "app" not in set(service.get("allowed_providers") or []):
         raise HTTPException(403, detail="This service cannot delegate app identities")
-    subject = form.subject.strip()
-    if not subject or len(subject) > 200:
-        raise HTTPException(400, detail="subject must be 1..200 characters")
-    namespaced = f"{service['service_id']}:{subject}"
-    account_id = await identities_svc.resolve_identity("app", namespaced)
+    subject = _clean_app_subject(form.subject, required=True)
+    namespaced, account_id = await _resolve_service_app_identity(service, subject)
     if account_id is None:
         try:
             account, _ = await accounts_svc.create_account(
@@ -591,6 +666,180 @@ async def exchange_service_identity(
         ref=service_auth.new_event_ref("exchange", service["service_id"]),
     )
     return {"access_token": token, "token_type": "Bearer", "expires_in": 900, "account_id": str(account_id)}
+
+
+@router.post("/v1/auth/wallet/challenge")
+@limiter.limit("30/minute")
+async def exchange_wallet_challenge(
+    request: Request,
+    form: ServiceWalletChallengeForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Issue a partner-, app-subject-, origin-, and wallet-bound SIWE challenge."""
+    service = await _require_service_exchange(apikey, authorization)
+    if "wallet" not in set(service.get("allowed_providers") or []):
+        raise HTTPException(403, detail="This service cannot exchange wallet identities")
+    domain = form.domain.strip().lower()
+    if domain not in set(service.get("siwe_domains") or []):
+        raise HTTPException(403, detail="Wallet sign-in domain is not allowed for this service")
+    if not accounts_svc.is_valid_eth_address(form.address):
+        raise HTTPException(422, detail="Invalid wallet address")
+    if form.chain_id != 8453:
+        raise HTTPException(422, detail="Wallet sign-in requires Base chain ID 8453")
+    if not _allowed_siwe_domain(domain, form.uri):
+        raise HTTPException(422, detail="Wallet sign-in origin is not allowed")
+
+    app_subject = _clean_app_subject(form.app_subject)
+    subject_hash = hashlib.sha256(app_subject.encode()).hexdigest() if app_subject else None
+    nonce = uuid_mod.uuid4().hex
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    issued_at = now.isoformat().replace("+00:00", "Z")
+    expiration_time = (now + timedelta(seconds=_NONCE_TTL)).isoformat().replace("+00:00", "Z")
+    message = _siwe_message(
+        domain=domain,
+        address=form.address,
+        uri=form.uri,
+        chain_id=form.chain_id,
+        nonce=nonce,
+        issued_at=issued_at,
+        expiration_time=expiration_time,
+        statement=f"Sign in to AI Power Grid through {service['service_id']}.",
+    )
+    await _nonce_issue(
+        {
+            "kind": "service_siwe",
+            "service_id": service["service_id"],
+            "app_subject_hash": subject_hash,
+            "address": form.address.lower(),
+            "domain": domain,
+            "uri": form.uri,
+            "chain_id": form.chain_id,
+            "message": message,
+        },
+        nonce=nonce,
+    )
+    return {
+        "nonce": nonce,
+        "message": message,
+        "expires_in": _NONCE_TTL,
+        "chain_id": form.chain_id,
+    }
+
+
+@router.post("/v1/auth/wallet/exchange")
+@limiter.limit("10/minute")
+async def exchange_wallet_identity(
+    request: Request,
+    form: ServiceWalletExchangeForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Verify partner SIWE, merge the app identity, and issue a canonical token."""
+    service = await _require_service_exchange(apikey, authorization)
+    if "wallet" not in set(service.get("allowed_providers") or []):
+        raise HTTPException(403, detail="This service cannot exchange wallet identities")
+    app_subject = _clean_app_subject(form.app_subject)
+    match = re.search(r"\nNonce: ([0-9a-fA-F]{32})\n", form.message)
+    nonce = match.group(1) if match else None
+    challenge = await _nonce_peek(nonce)
+    subject_hash = hashlib.sha256(app_subject.encode()).hexdigest() if app_subject else None
+    if (
+        not challenge
+        or challenge.get("kind") != "service_siwe"
+        or challenge.get("service_id") != service["service_id"]
+        or challenge.get("app_subject_hash") != subject_hash
+        or challenge.get("address") != form.address.lower()
+        or challenge.get("message") != form.message
+    ):
+        raise HTTPException(401, detail="Invalid or mismatched wallet challenge")
+    from ..services.wallet_proofs import verify_personal_signature
+
+    recovered = form.address.lower()
+    if (
+        not accounts_svc.is_valid_eth_address(recovered)
+        or not await verify_personal_signature(
+            message=form.message,
+            signature=form.signature,
+            address=recovered,
+        )
+    ):
+        raise HTTPException(401, detail="Signature does not match a valid wallet")
+    if not await _nonce_consume(nonce):
+        raise HTTPException(401, detail="Wallet challenge was already used")
+
+    if app_subject:
+        namespaced, app_owner = await _resolve_service_app_identity(
+            service,
+            app_subject,
+        )
+    else:
+        namespaced, app_owner = None, None
+    wallet_owner = await identities_svc.resolve_identity("wallet", recovered)
+
+    if app_owner:
+        account_id = app_owner
+        if wallet_owner and str(wallet_owner) != str(account_id):
+            try:
+                await identities_svc.merge_accounts(
+                    account_id,
+                    wallet_owner,
+                    reason="service_siwe",
+                    merge_ref=f"service-siwe:{service['service_id']}:{nonce}",
+                )
+            except ValueError as exc:
+                raise HTTPException(409, detail=str(exc))
+        elif not wallet_owner:
+            await identities_svc.attach_identity(
+                account_id,
+                "wallet",
+                recovered,
+                display_hint=recovered,
+                ref=f"service-siwe-wallet:{service['service_id']}:{nonce}",
+            )
+    elif wallet_owner:
+        account_id = wallet_owner
+    else:
+        account, _ = await accounts_svc.create_account(
+            username=form.username or f"{recovered[:6]}…{recovered[-4:]}",
+            wallet=recovered,
+            issue_initial_key=False,
+        )
+        account_id = account["id"]
+
+    account_id = await identities_svc.canonical_account_id(account_id)
+    if namespaced and not app_owner:
+        linked = await identities_svc.attach_identity(
+            account_id,
+            "app",
+            namespaced,
+            display_hint=f"{service['service_id']} account",
+            ref=f"service-siwe-app:{service['service_id']}:{nonce}",
+        )
+        if linked["status"] == "conflict":
+            raise HTTPException(409, detail="Application identity is already linked")
+
+    from ..services import service_auth
+
+    token = service_auth.issue_user_token(
+        account_id,
+        service_id=service["service_id"],
+        auth_method="siwe",
+        account_manage=True,
+    )
+    await service_auth.record_event(
+        service["service_id"],
+        "wallet_exchange",
+        account_id=account_id,
+        ref=f"wallet-exchange:{service['service_id']}:{nonce}",
+    )
+    return {
+        "access_token": token,
+        "token_type": "Bearer",
+        "expires_in": 900,
+        "account_id": str(account_id),
+        "wallet": recovered,
+    }
 
 
 @router.post("/v1/auth/google/exchange")
@@ -633,9 +882,12 @@ async def exchange_google_identity(
     await promotions.ensure_builtin_campaign()
     await promotions.grant_once(account_id)
 
-    if form.app_subject:
-        namespaced = f"{service['service_id']}:{form.app_subject.strip()}"
-        owner = await identities_svc.resolve_identity("app", namespaced)
+    app_subject = _clean_app_subject(form.app_subject)
+    if app_subject:
+        namespaced, owner = await _resolve_service_app_identity(
+            service,
+            app_subject,
+        )
         if owner and str(owner) != str(account_id):
             try:
                 await identities_svc.merge_accounts(
@@ -687,14 +939,21 @@ async def bind_service_identity(
         raise HTTPException(403, detail="This service cannot bind app identities")
     from ..services import service_auth, user_tokens
 
-    proof = user_tokens.verify(form.user_token, audience="direct")
+    try:
+        proof = user_tokens.verify(form.user_token, audience="direct")
+    except HTTPException:
+        proof = user_tokens.verify(
+            form.user_token,
+            audience=service["service_id"],
+        )
+        if proof.get("service_id") != service["service_id"]:
+            raise HTTPException(401, detail="Grid user token service mismatch")
     user_tokens.require_recent_step_up(proof)
     destination = await identities_svc.canonical_account_id(proof["sub"])
     subject = form.subject.strip()
     if not subject or len(subject) > 200:
         raise HTTPException(400, detail="subject must be 1..200 characters")
-    namespaced = f"{service['service_id']}:{subject}"
-    owner = await identities_svc.resolve_identity("app", namespaced)
+    namespaced, owner = await _resolve_service_app_identity(service, subject)
     if owner and str(owner) != str(destination):
         try:
             result = await identities_svc.merge_accounts(

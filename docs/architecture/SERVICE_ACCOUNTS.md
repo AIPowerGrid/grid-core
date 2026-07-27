@@ -24,7 +24,7 @@ unmetered.
 
 ## Provisioning
 
-Run after Alembic `0015` from a trusted Core host. The command prints the key
+Run after Alembic `0019` from a trusted Core host. The command prints the key
 once; put it in the application's server-side secret store.
 
 ```bash
@@ -36,14 +36,24 @@ once; put it in the application's server-side secret store.
 
 .venv/bin/python scripts/create_service_account.py \
   --id aipg-art --name "AIPG Art" \
-  --provider app --provider google \
+  --provider app --provider google --provider wallet \
   --google-audience "$GOOGLE_CLIENT_ID" \
+  --siwe-domain aipg.art \
   --per-request-micro 1000000 --daily-micro 250000000
 
 .venv/bin/python scripts/create_service_account.py \
   --id aipg-chat --name "AIPG Chat" \
-  --provider app \
+  --provider app --provider google --provider wallet \
+  --google-audience "$GOOGLE_CLIENT_ID" \
+  --siwe-domain aipg.chat \
   --per-request-micro 500000 --daily-micro 100000000
+
+.venv/bin/python scripts/create_service_account.py \
+  --id aipg-music --name "AIPG Music" \
+  --provider app --provider google --provider wallet \
+  --google-audience "$GOOGLE_CLIENT_ID" \
+  --siwe-domain aipg.music \
+  --per-request-micro 1000000 --daily-micro 50000000
 ```
 
 To migrate an existing server-held API key without rotating it or moving its
@@ -71,11 +81,37 @@ Rotate one service without affecting the others:
 .venv/bin/python scripts/rotate_service_key.py --id aipg-art
 ```
 
+To add wallet proof to an existing service, preview the complete replacement
+policy first. Then repeat it with the exact digest printed by that preview:
+
+```bash
+.venv/bin/python scripts/configure_service_identity.py \
+  --id aipg-art \
+  --provider app --provider google --provider wallet \
+  --google-audience "$GOOGLE_CLIENT_ID" \
+  --siwe-domain aipg.art
+
+.venv/bin/python scripts/configure_service_identity.py \
+  --id aipg-art \
+  --provider app --provider google --provider wallet \
+  --google-audience "$GOOGLE_CLIENT_ID" \
+  --siwe-domain aipg.art \
+  --apply --expect-digest "$CURRENT_DIGEST"
+```
+
+The digest is a compare-and-swap guard: a stale preview cannot overwrite a
+concurrent policy change. The update records only before/after policy digests
+in the service audit log.
+
 ## Exchanges
 
 - `POST /v1/auth/service/exchange`: service-local subject to inference token.
 - `POST /v1/auth/google/exchange`: Core verifies Google signature, issuer,
   lifetime, and the service's configured OAuth audience before issuing a token.
+- `POST /v1/auth/wallet/challenge`: Core issues a service-, app-subject-,
+  wallet-, origin-, Base-chain-, expiry-, and nonce-bound EIP-4361 message.
+- `POST /v1/auth/wallet/exchange`: Core verifies that exact proof, consumes it
+  once, and attaches or merges the wallet and namespaced app identity.
 - `POST /v1/auth/service/bind`: after recent Google/SIWE proof, bind one local
   service subject to the canonical account.
 - `POST /v1/accounts/wallet/verify`: Core verifies its one-use wallet nonce and
@@ -87,11 +123,11 @@ unless `GRID_LEGACY_SESSION_KEYS_ENABLED=1`.
 
 ## Deployment Order
 
-1. Back up PostgreSQL and apply Alembic through `0015`.
+1. Back up PostgreSQL and apply Alembic through `0019`.
 2. Set `GRID_USER_TOKEN_SIGNING_KEY` to a new 32-byte-or-longer secret.
 3. Provision and fund/credit each service account; configure ceilings.
 4. Deploy Core with charging and free/promo spending flags unchanged.
-5. Deploy Console, Art, and Chat with their distinct service keys.
+5. Deploy Console, Art, Chat, and Music with their distinct service keys.
 6. Canary service-owned work and delegated-user work for every modality.
 7. Confirm no production caller uses `GRID_INTERNAL_TOKEN`, then remove it.
 8. Enable charging/free/promo independently only after shadow parity.
