@@ -412,7 +412,7 @@ ledger = sa.Table(
 # A USDC deposit credits 1:1 (micro-USD); a completion debits per `pricing`. The
 # balance is a cache of the ledger sum — `grid_credit_ledger` is the truth and
 # makes every credit/debit idempotent (unique `ref`). See services/credits.py.
-# Ships dark (GRID_CHARGING_ENABLED=0): the request path only logs would-charge.
+# Ships dark (GRID_CHARGING_MODE=off): demand paths only log would-charge.
 
 credits = sa.Table(
     "grid_credits",

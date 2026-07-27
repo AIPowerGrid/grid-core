@@ -86,6 +86,23 @@ async def test_authorize_records_reservation_atomically_and_idempotently(db, mon
 
 
 @pytest.mark.asyncio
+async def test_existing_hold_settles_after_new_charging_is_disabled(db, monkeypatch):
+    """The kill switch stops new holds; it must not corrupt in-flight ones."""
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 10_000_000, "topup", ref="seed-kill-switch")
+    reserved = await _reserve(aid, "job-kill-switch", prompt=1000, mx=1000)
+    assert reserved > 0
+
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", False)
+    await credits.settle_job("job-kill-switch", completion_tokens=10)
+
+    actual = pricing.quote_text(PRICED, 1000, 10)
+    assert await _reservation_status("job-kill-switch") == "settled"
+    assert await credits.get_balance(aid) == 10_000_000 - actual
+
+
+@pytest.mark.asyncio
 async def test_authorize_rolls_back_debit_if_reservation_write_fails(db, monkeypatch):
     monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
     aid = uuid.uuid4()

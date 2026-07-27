@@ -1,6 +1,6 @@
-# ⚠️ WIRED-DARK (2026-06-23): the request path quotes against this book via
-# credits.charge_request, but only in dry-run (GRID_CHARGING_ENABLED=0) — the quote
-# is logged, never billed. Re-peg prices here before charging goes live. See task #73.
+# WIRED-DARK: the request path always quotes against this book, but
+# GRID_CHARGING_MODE=off only logs the quote. Re-peg and review prices before
+# expanding beyond an allowlisted canary.
 
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later

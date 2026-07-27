@@ -63,6 +63,15 @@ async def _stale_job_reclaimer():
                 logger.info(f"Reclaimed {reclaimed} stale jobs")
         except Exception as e:
             logger.error(f"Stale job reclaimer error: {e}")
+            from .services import alerts
+
+            alerts.emit(
+                "stale_job_reclaimer_failed",
+                "critical",
+                "The background queue reclaimer failed.",
+                fields={"error_type": type(e).__name__},
+                dedupe_key="stale-job-reclaimer-failed",
+            )
         await asyncio.sleep(60)  # Check every minute
 
 
@@ -82,6 +91,15 @@ async def _reservation_sweeper():
             await sweep_stale_spends(older_than_seconds=stale)
         except Exception as e:
             logger.error(f"Reservation sweeper error: {e}")
+            from .services import alerts
+
+            alerts.emit(
+                "reservation_sweeper_failed",
+                "critical",
+                "The stale monetary-hold recovery loop failed.",
+                fields={"error_type": type(e).__name__},
+                dedupe_key="reservation-sweeper-failed",
+            )
         await asyncio.sleep(interval)
 
 
@@ -100,13 +118,71 @@ async def _recipe_sync_loop():
         await asyncio.sleep(interval)
 
 
+async def _billing_monitor():
+    """Periodically prove the cached purchased balance matches its ledger."""
+    import os
+
+    from .services import alerts
+    from .services.credits import billing_health
+
+    interval = max(60, int(os.getenv("GRID_BILLING_MONITOR_SECONDS", "300") or 300))
+    held_warning = int(os.getenv("GRID_BILLING_HELD_WARNING_SECONDS", "900") or 900)
+    while True:
+        try:
+            health = await billing_health(held_warning_seconds=held_warning)
+            if not health["ok"]:
+                alerts.emit(
+                    "billing_invariant_failed",
+                    "critical",
+                    "The purchased-credit cache no longer matches its append-only ledger.",
+                    fields=health,
+                    dedupe_key="billing-invariant-failed",
+                )
+            if health["stale_held"]:
+                alerts.emit(
+                    "billing_holds_aging",
+                    "warning",
+                    "Monetary reservations are still held beyond the warning threshold.",
+                    fields={
+                        "held_count": health["stale_held"],
+                        "warning_age_seconds": held_warning,
+                    },
+                    dedupe_key="billing-holds-aging",
+                )
+        except Exception as exc:
+            logger.error("Billing invariant monitor error: %s", exc)
+            alerts.emit(
+                "billing_monitor_failed",
+                "critical",
+                "The read-only billing invariant monitor failed.",
+                fields={"error_type": type(exc).__name__},
+                dedupe_key="billing-monitor-failed",
+            )
+        await asyncio.sleep(interval)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
+    from .services import alerts
+
     logger.info("Starting Grid Streaming API...")
-    await init_database()
-    await init_redis()
-    await init_p2p()  # Initialize P2P (no-op if disabled)
+    await alerts.start()
+    try:
+        await init_database()
+        await init_redis()
+        await init_p2p()  # Initialize P2P (no-op if disabled)
+    except Exception as exc:
+        alerts.emit(
+            "core_startup_failed",
+            "critical",
+            "Grid Core failed during dependency initialization.",
+            fields={"error_type": type(exc).__name__},
+            dedupe_key="core-startup-failed",
+        )
+        await alerts.flush()
+        await alerts.stop()
+        raise
     reclaimer = asyncio.create_task(_stale_job_reclaimer())
     # Media recipes: load curated local recipes now (servable immediately), then
     # refresh from RecipeVault on an interval (no-op until BASE_RPC/addr configured).
@@ -122,20 +198,36 @@ async def lifespan(app: FastAPI):
     _styles.load_local_styles(os.path.join(_base, "styles"))
     recipe_sync = asyncio.create_task(_recipe_sync_loop())
     sweeper = asyncio.create_task(_reservation_sweeper())
+    billing_monitor = asyncio.create_task(_billing_monitor())
     # Verification probes ("validator zero") — dormant unless GRID_PROBE_ENABLED;
     # even ON it only records evidence (no reward/slash). See VERIFICATION_PROBES.md.
     from .services import probe as _probe
     prober = asyncio.create_task(_probe.probe_loop())
+    from .services import credits as _credits
+    alerts.emit(
+        "core_started",
+        "success",
+        "Grid Core started and its background safety loops are running.",
+        fields={
+            "charging_mode": _credits.charging_mode(),
+            "charging_accounts": len(_credits.CHARGING_ALLOW_ACCOUNTS),
+            "charging_services": len(_credits.CHARGING_ALLOW_SERVICES),
+            "charging_models": len(_credits.CHARGING_ALLOW_MODELS),
+        },
+        dedupe_key="core-started",
+    )
     logger.info("Grid Streaming API ready.")
     yield
     logger.info("Shutting down Grid Streaming API...")
     reclaimer.cancel()
     recipe_sync.cancel()
     sweeper.cancel()
+    billing_monitor.cancel()
     prober.cancel()
     await close_p2p()  # Shutdown P2P
     await close_redis()
     await close_database()
+    await alerts.stop()
 
 
 app = FastAPI(
@@ -148,8 +240,38 @@ app = FastAPI(
 app.state.limiter = limiter
 
 
+@app.middleware("http")
+async def alert_unhandled_http_failure(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        from .services import alerts
+
+        alerts.emit(
+            "unhandled_http_failure",
+            "critical",
+            "A Core HTTP request failed with an unhandled server exception.",
+            fields={
+                "method": request.method,
+                "path": request.url.path,
+                "error_type": type(exc).__name__,
+            },
+            dedupe_key=f"http-500:{request.method}:{request.url.path}:{type(exc).__name__}",
+        )
+        raise
+
+
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    from .services import alerts
+
+    alerts.emit(
+        "http_rate_limited",
+        "warning",
+        "A public API route is being rate limited.",
+        fields={"method": request.method, "path": request.url.path},
+        dedupe_key=f"http-429:{request.method}:{request.url.path}",
+    )
     return JSONResponse(
         status_code=429,
         content={"error": {"message": "Rate limit exceeded. Please slow down.", "type": "rate_limit_error"}},

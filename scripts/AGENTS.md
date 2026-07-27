@@ -22,6 +22,8 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   moving its account balance.
 - `rotate_service_key.py` - atomically revokes a service's old keys and prints
   one replacement key exactly once.
+- `grant_canary_credit.py` - dry-run-by-default, capped operator credit for one
+  allowlisted demand-billing canary.
 
 ## Local Contracts
 
