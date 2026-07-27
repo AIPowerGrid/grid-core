@@ -204,10 +204,62 @@ async def _verified_funding_wallets(account: dict) -> list[str]:
     return wallets
 
 
+async def _daily_cap_usage(account_id) -> dict[str, tuple[int, int]]:
+    """Return today's account and network credited totals by asset."""
+    if not account_id:
+        return {}
+    canonical_id = await identities.canonical_account_id(account_id)
+    start = _now().replace(hour=0, minute=0, second=0, microsecond=0)
+    async with await new_session() as session:
+        rows = (
+            await session.execute(
+                sa.select(
+                    deposits_t.c.asset,
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            sa.case(
+                                (
+                                    deposits_t.c.account_id == canonical_id,
+                                    deposits_t.c.credited_micro,
+                                ),
+                                else_=0,
+                            ),
+                        ),
+                        0,
+                    ).label("account_used"),
+                    sa.func.coalesce(
+                        sa.func.sum(deposits_t.c.credited_micro),
+                        0,
+                    ).label("network_used"),
+                )
+                .where(
+                    deposits_t.c.status == "credited",
+                    deposits_t.c.created >= start,
+                )
+                .group_by(deposits_t.c.asset),
+            )
+        ).all()
+    return {
+        str(asset): (int(account_used), int(network_used))
+        for asset, account_used, network_used in rows
+    }
+
+
 async def funding_config(account: dict) -> dict:
     """Safe client configuration for the signed-in Console funding flow."""
     epoch = _aipg_price_epoch()
     wallets = await _verified_funding_wallets(account)
+    usage = await _daily_cap_usage(account.get("account_id"))
+
+    def cap_status(asset: str, account_limit: int, network_limit: int) -> dict:
+        account_used, network_used = usage.get(asset, (0, 0))
+        return {
+            "account_daily_micro": account_limit,
+            "account_daily_used_micro": account_used,
+            "account_daily_remaining_micro": max(0, account_limit - account_used),
+            "network_daily_remaining_micro": max(0, network_limit - network_used),
+        }
+
     return {
         "chain": {"id": CHAIN_ID, "name": "Base"},
         # Keep the singular field during the Console rollout.
@@ -229,8 +281,12 @@ async def funding_config(account: dict) -> dict:
                 "price_micro": 1_000_000,
                 "minimum_credit_micro": MIN_CREDIT_MICRO,
                 "maximum_credit_micro": USDC_MAX_DEPOSIT_MICRO,
-                "account_daily_micro": USDC_ACCOUNT_DAILY_MICRO,
                 "status": "available" if is_configured() else "disabled",
+                **cap_status(
+                    "USDC",
+                    USDC_ACCOUNT_DAILY_MICRO,
+                    USDC_NETWORK_DAILY_MICRO,
+                ),
             },
             {
                 "asset": "AIPG",
@@ -244,8 +300,12 @@ async def funding_config(account: dict) -> dict:
                 "haircut_bps": AIPG_HAIRCUT_BPS,
                 "minimum_credit_micro": MIN_CREDIT_MICRO,
                 "maximum_credit_micro": AIPG_MAX_DEPOSIT_MICRO,
-                "account_daily_micro": AIPG_ACCOUNT_DAILY_MICRO,
                 "status": "available" if aipg_is_configured() else "price_unavailable",
+                **cap_status(
+                    "AIPG",
+                    AIPG_ACCOUNT_DAILY_MICRO,
+                    AIPG_NETWORK_DAILY_MICRO,
+                ),
             },
             {
                 "asset": "ETH",
@@ -271,6 +331,11 @@ async def funding_config(account: dict) -> dict:
                     else "operator_pilot"
                     if eth_is_configured()
                     else "conversion_required"
+                ),
+                **cap_status(
+                    "ETH",
+                    ETH_ACCOUNT_DAILY_MICRO,
+                    ETH_NETWORK_DAILY_MICRO,
                 ),
             },
         ],
