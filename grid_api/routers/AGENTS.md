@@ -7,10 +7,13 @@ transport, accounts, stats, health/metrics.
 
 ## Ownership
 
-- `openai.py` - `POST /v1/chat/completions`, `GET /v1/models`,
+- `openai.py` - `POST /v1/chat/completions`,
+  `POST /v1/x402/chat/completions`, `GET /v1/models`,
   `GET /v1/models/{model_id}`. Sanitizes messages pre-dispatch, detects
   chat-routed media models, reserves text credits in live mode, and streams or
   collects worker output.
+  The x402 route is a separate default-off, accountless Base-USDC lane. It is
+  non-streaming and text-only until a stream-aware settlement adapter exists.
 - `anthropic.py` - `POST /v1/messages` raw Anthropic Messages passthrough.
 - `responses.py` - `POST /v1/responses` raw OpenAI Responses passthrough.
 - `_passthrough.py` - shared raw passthrough submit/stream/collect and deep
@@ -33,7 +36,8 @@ transport, accounts, stats, health/metrics.
   pockets; `total_spendable_*` = what can pay NOW vs `total_preview_*`;
   `free.active` tracks GRID_FREE_SPENDABLE_LIVE), `GET /v1/account/jobs`
   (operator trust view: my workers' jobs + den + result_hash + signed flag,
-  scoped to the payout wallet), deposit claims (USDC + Chainlink-priced ETH).
+  scoped to the payout wallet), immutable deposit history/config, and deposit
+  claims (USDC launch rail, bounded expiring-price AIPG, conversion-gated ETH).
   `POST /v1/accounts/session` is the retired internal-token bridge. It
   resolves on exactly one authoritative identity (`oauth_sub` first, then
   wallet, then verified email only when it is the sole identity); supplemental
@@ -73,6 +77,9 @@ transport, accounts, stats, health/metrics.
 - Demand billing must be applied uniformly across all paid inference entry
   points before live charging. Do not add a new work-submitting route without
   reserve/reconcile or an explicit no-charge policy.
+- x402 requests must use the external reservation path and return the final
+  grid-counted micro-USD amount through the SDK settlement override. Never let
+  them draw daily free, promotional, or purchased account credit.
 - `worker_ws.py` must not trust worker-reported counts for rewards or customer
   billing without a server-side cap or verification path.
 - Core rejects retired model identities during the worker handshake. Worker-side

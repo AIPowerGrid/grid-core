@@ -12,6 +12,7 @@ overdraw. Skipped unless CREDITS_TEST_DB_URL points at a real Postgres.
 import asyncio
 import os
 import uuid
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -19,7 +20,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from grid_api import database
-from grid_api.services import credits, identities
+from grid_api.services import credits, identities, pricing, x402_payments
 from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import metadata as v2_metadata
 
@@ -67,7 +68,7 @@ async def test_concurrent_debits_never_overdraft(pg):
     assert await credits.credit(aid, cost * covered, "seed", ref=f"seed:{aid}")
 
     results = await asyncio.gather(
-        *[credits.debit(aid, cost, "race", ref=f"race:{aid}:{i}") for i in range(n)]
+        *[credits.debit(aid, cost, "race", ref=f"race:{aid}:{i}") for i in range(n)],
     )
 
     oks = sum(1 for r in results if r == "ok")
@@ -119,3 +120,47 @@ async def test_credit_racing_merge_is_not_stranded_on_retired_account(pg):
     canonical = await identities.canonical_account_id(source)
     assert canonical == await identities.canonical_account_id(destination)
     assert await credits.get_balance(canonical) == 50_000
+
+
+@pytest.mark.asyncio
+async def test_x402_authorization_cannot_open_multiple_jobs_under_race(pg, monkeypatch):
+    payer = "0x1111111111111111111111111111111111111111"
+    usdc = "0x2222222222222222222222222222222222222222"
+    treasury = "0x3333333333333333333333333333333333333333"
+    model = "gpt-oss-120b"
+    maximum = pricing.quote_text(model, 100, 500)
+    monkeypatch.setattr(x402_payments, "ENABLED", True)
+    monkeypatch.setattr(x402_payments, "NETWORK", "eip155:8453")
+    monkeypatch.setattr(x402_payments, "USDC", usdc)
+    monkeypatch.setattr(x402_payments, "PAY_TO", treasury)
+    payload = SimpleNamespace(
+        payload={
+            "permit2Authorization": {
+                "from": payer,
+                "nonce": "same-signed-permit",
+            },
+        },
+    )
+    requirements = SimpleNamespace(
+        network="eip155:8453",
+        asset=usdc,
+        pay_to=treasury,
+        amount=str(maximum),
+    )
+
+    results = await asyncio.gather(
+        *[
+            credits.authorize_x402_request(
+                model,
+                100,
+                500,
+                str(uuid.uuid4()),
+                payment_payload=payload,
+                payment_requirements=requirements,
+            )
+            for _ in range(20)
+        ],
+    )
+
+    assert sum(1 for result in results if result["ok"]) == 1, results
+    assert sum(1 for result in results if result["status"] == "conflict") == 19, results

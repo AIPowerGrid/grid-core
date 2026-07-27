@@ -41,6 +41,7 @@ from .routers import (
     worker_enrollment,
     worker_ws,
 )
+from .services import x402_payments
 from .services.p2p import close_p2p, init_p2p
 
 logging.basicConfig(
@@ -277,6 +278,8 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
         content={"error": {"message": "Rate limit exceeded. Please slow down.", "type": "rate_limit_error"}},
     )
 
+
+x402_payments.install_middleware(app)
 
 app.add_middleware(
     CORSMiddleware,

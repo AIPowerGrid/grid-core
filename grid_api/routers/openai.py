@@ -30,7 +30,7 @@ TEXT_CONCURRENCY = int(os.getenv("GRID_TEXT_CONCURRENCY", "24"))
 # 32768 (le); keep this in step. Tunable via env.
 DEFAULT_MAX_TOKENS = int(os.getenv("GRID_DEFAULT_MAX_TOKENS", "32768"))
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from ..ratelimit import limiter
@@ -58,6 +58,8 @@ async def _observe_dry(user, model, prompt_tokens, completion_tokens, job_id):
     every job whether or not the client stayed connected. Doing it here too would
     double-settle and depend on the client staying connected. Never breaks a
     response (already sent), so errors are swallowed."""
+    if (user or {}).get("billing_source") == "x402":
+        return
     if credits.charging_enabled_for(user, model):
         return
     try:
@@ -136,6 +138,44 @@ async def chat_completions(
         # never leak internal paths / SQL / stack details to the public.
         logger.error(f"chat_completions error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal error while processing the request.")
+
+
+@router.post("/v1/x402/chat/completions")
+@limiter.limit("30/minute")
+async def x402_chat_completions(
+    request: Request,
+    response: Response,
+    body: ChatCompletionRequest,
+):
+    """Accountless, non-streaming chat paid per request in Base USDC."""
+    from ..services import x402_payments
+
+    if not x402_payments.ENABLED:
+        raise HTTPException(status_code=404, detail="x402 payments are not enabled")
+    if body.stream:
+        raise HTTPException(
+            status_code=400,
+            detail="x402 streaming is not enabled; send stream=false",
+        )
+    body.max_tokens = body.max_tokens or x402_payments.DEFAULT_MAX_TOKENS
+    payment_payload = getattr(request.state, "payment_payload", None)
+    payment_requirements = getattr(request.state, "payment_requirements", None)
+    if payment_payload is None or payment_requirements is None:
+        raise HTTPException(status_code=500, detail="x402 middleware did not verify this request")
+    details = x402_payments.payment_payload_details(
+        payment_payload,
+        payment_requirements,
+    )
+    user = {
+        "wallet": details["payer"],
+        "billing_source": "x402",
+    }
+    return await _handle_chat_completions_for_user(
+        body,
+        user,
+        x402_payment=(payment_payload, payment_requirements),
+        x402_response=response,
+    )
 
 
 async def _detect_media_model(model: str) -> Optional[str]:
@@ -292,6 +332,16 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str,
         apikey, user_assertion, user_token=user_token,
         required_scope="inference.submit",
     )
+    return await _handle_chat_completions_for_user(request, user)
+
+
+async def _handle_chat_completions_for_user(
+    request: ChatCompletionRequest,
+    user: dict,
+    *,
+    x402_payment: tuple | None = None,
+    x402_response: Response | None = None,
+):
     _assert_request_size(request.messages)
 
     # Media abstraction: if the requested model is an image/video model, run a
@@ -300,6 +350,11 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str,
     # dedicated /v1/images|videos endpoints stay for advanced control.
     media_kind = await _detect_media_model(request.model)
     if media_kind:
+        if x402_payment is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="the initial x402 rail supports text models only",
+            )
         await quota.check_and_consume(dict(user))
         return await _chat_media(
             request, media_kind, account_id=user.get("account_id"), user=user,
@@ -348,7 +403,8 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str,
 
     # Free-tier daily quota. Checked here (after auth + worker availability)
     # so a user only spends quota on a request that's actually going to queue.
-    await quota.check_and_consume(dict(user))
+    if x402_payment is None:
+        await quota.check_and_consume(dict(user))
 
     # Sanitize messages — strip credentials before they reach workers.
     # We can read+scrub here because this is the OBSERVE-mode path (the grid is
@@ -386,6 +442,8 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str,
 
     # Create job
     job_id = str(uuid4())
+    if x402_response is not None:
+        x402_response.headers["X-Grid-Job-ID"] = job_id
     payload = {
         "request": request_body,
         "api_format": "openai-chat",
@@ -411,15 +469,27 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str,
     # allowed). Released in the finally below (collect/error) or, for a stream,
     # handed to the generator's finally (which fires on finish AND disconnect).
     aid = (user or {}).get("account_id")
+    if x402_payment is not None:
+        aid = f"x402:{(user or {}).get('wallet', '').lower()}"
     if aid and not await concurrency.acquire(aid, "text", TEXT_CONCURRENCY):
         raise HTTPException(status_code=429,
                             detail=f"Too many concurrent requests (limit {TEXT_CONCURRENCY}). Retry shortly.")
     inflight_held = bool(aid)
     try:
-        auth = await credits.authorize_request(
-            user, model, prompt_toks, request.max_tokens, job_id,
-            record_reservation=True,
-        )
+        if x402_payment is not None:
+            auth = await credits.authorize_x402_request(
+                model,
+                prompt_toks,
+                request.max_tokens,
+                job_id,
+                payment_payload=x402_payment[0],
+                payment_requirements=x402_payment[1],
+            )
+        else:
+            auth = await credits.authorize_request(
+                user, model, prompt_toks, request.max_tokens, job_id,
+                record_reservation=True,
+            )
         if not auth["ok"]:
             raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
 
@@ -449,7 +519,30 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str,
             return resp
         else:
             # Awaited → the handler stays alive through it; the finally releases.
-            return await _collect_response(job_id, model, user, request.seed, prompt_toks, routing_meta)
+            result = await _collect_response(
+                job_id,
+                model,
+                user,
+                request.seed,
+                prompt_toks,
+                routing_meta,
+            )
+            if x402_payment is not None:
+                from x402.http.middleware.fastapi import set_settlement_overrides
+
+                actual_micro = await credits.reservation_actual_micro(job_id)
+                if actual_micro is None or actual_micro <= 0:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="x402 usage settlement is not ready; no payment was collected",
+                    )
+                if x402_response is None:
+                    raise RuntimeError("x402 response context missing")
+                set_settlement_overrides(
+                    x402_response,
+                    {"amount": str(actual_micro)},
+                )
+            return result
     finally:
         if inflight_held:
             await concurrency.release(aid, "text")
