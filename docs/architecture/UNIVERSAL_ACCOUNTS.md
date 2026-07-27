@@ -171,3 +171,36 @@ The Core contract tests
 stay green. They exchange one verified identity through distinct Art, Chat,
 and Music clients, then prove every delegated token's narrow credits response
 returns the same funded account and purchased balance without multiplying it.
+
+## Production parity gate
+
+Charging must remain `off` until one human signs into every surface with the
+same verified Google identity and, separately, the same wallet. Capture the
+following authenticated, `no-store` responses without recording cookies,
+service keys, Core user tokens, Google tokens, or SIWE signatures:
+
+| Surface | Read endpoint | Account field | Purchased balance field |
+| --- | --- | --- | --- |
+| Console | `GET /api/account/credits` | `account_id` | `paid.balance_usd` |
+| aipg.art | `GET /api/credits` | `account_id` | `paid.balance_usd` |
+| aipg.music | `GET /api/auth/session` | `accountId` | `paidUsd` |
+| aipg.chat | `GET /api/grid/account` | `account_id` | `paid_balance_usd` |
+
+The gate passes only when:
+
+1. All four account IDs are byte-for-byte equal.
+2. All four purchased balances are numerically equal before any new job.
+3. Art, Music, and Chat each obtained their response through a distinct bounded
+   service client; no public shared-demo credential was used.
+4. The Google run and wallet run each pass independently. A wallet linked to a
+   Google account must resolve to that same canonical ID in both runs.
+5. Core remains `GRID_CHARGING_MODE=off` throughout this identity proof.
+
+After parity passes, set `GRID_CHARGING_MODE=allowlist` for only this account.
+Run one minimum-cost successful job through Art, Music, and Chat, waiting for
+each durable reservation to settle before starting the next. After every job,
+all four read endpoints must converge on the same decreased purchased balance,
+and the Core ledger must contain exactly one settled charge for that job.
+Any mismatch, stranded hold, duplicate charge, service-owned charge, or
+unallowlisted debit fails the canary and requires returning the mode to `off`.
+Global `on` remains a separate rollout decision after the canary window.
