@@ -8,11 +8,11 @@
 
 """Prepaid credit ledger — USD-native (integer micro-USD, USD × 1e6).
 
-No runtime oracle: a USDC deposit credits the balance 1:1 (micro-USD), and a
-charge debits USD directly (priced by `pricing`, which pegs to competitors at
-deploy time only). `balance_micro` / `delta_micro` are micro-USD. Non-USDC
-deposits (ETH/cbBTC) are swapped to USDC at the door; AIPG deposits credit at
-the peg — the conversion happens in the deposit watcher, never here.
+No request-time oracle: a USDC deposit credits the balance 1:1 (micro-USD), and
+a charge debits USD directly (priced by `pricing`, which pegs to competitors at
+deploy time only). `balance_micro` / `delta_micro` are micro-USD. Non-stable
+funding adapters perform and record their bounded deposit-time valuation before
+calling this ledger; request settlement never reprices deposited value.
 
 `debit` is overdraft-safe (a conditional UPDATE: balance only moves if it
 covers the charge) and idempotent (unique `ref` per charge — a retried request
@@ -246,7 +246,9 @@ async def _insert_reservation_in_session(s, job_id, account_id, model: str, rese
                                           prompt_toks: int, free_micro: int = 0,
                                           promo_micro: int = 0, input_rate: int | None = None,
                                           output_rate: int | None = None, discount_bps: int = 0,
-                                          service_id: str | None = None) -> None:
+                                          service_id: str | None = None,
+                                          billing_source: str = "credits",
+                                          external_payer: str | None = None) -> None:
     await s.execute(sa.insert(reservations_t).values(
         job_id=str(job_id), account_id=account_id, model=model,
         reserved_micro=int(reserved_micro or 0), free_micro=int(free_micro or 0),
@@ -256,6 +258,8 @@ async def _insert_reservation_in_session(s, job_id, account_id, model: str, rese
         output_per_mtok_micro=output_rate,
         discount_bps=int(discount_bps or 0),
         service_id=service_id,
+        billing_source=billing_source,
+        external_payer=external_payer,
         status="held", created=_now(),
     ))
 
@@ -599,6 +603,164 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
                 aid, model, cost, from_free)
     return {"ok": False, "reserved": 0, "status": "insufficient",
             "reason": "insufficient credits"}
+
+
+async def authorize_x402_request(
+    model: str,
+    prompt_tokens: int,
+    max_tokens: int,
+    job_id,
+    *,
+    payment_payload,
+    payment_requirements,
+) -> dict:
+    """Open a durable external reservation after x402 verification.
+
+    This never touches a Grid credit balance or daily free/promotional pockets.
+    The x402 middleware already verified the payer's authorization; we still
+    price default-deny, require the quoted maximum to fit inside the signed
+    authorization, and atomically write both reservation and payment receipt
+    before dispatch.
+    """
+    from . import x402_payments
+
+    if not x402_payments.ENABLED:
+        return {
+            "ok": False,
+            "reserved": 0,
+            "status": "disabled",
+            "reason": "x402 payments are not enabled",
+        }
+    if not pricing.is_priced_for(model, "text"):
+        return {
+            "ok": False,
+            "reserved": 0,
+            "status": "unpriced",
+            "reason": f"model '{model}' has no text price",
+        }
+
+    details = x402_payments.payment_payload_details(
+        payment_payload,
+        payment_requirements,
+    )
+    if details["network"] != x402_payments.NETWORK:
+        return {
+            "ok": False,
+            "reserved": 0,
+            "status": "wrong_network",
+            "reason": "x402 payment uses the wrong network",
+        }
+    if details["asset"] != x402_payments.USDC:
+        return {
+            "ok": False,
+            "reserved": 0,
+            "status": "wrong_asset",
+            "reason": "x402 payment must use configured Base USDC",
+        }
+    if details["pay_to"] != x402_payments.PAY_TO:
+        return {
+            "ok": False,
+            "reserved": 0,
+            "status": "wrong_recipient",
+            "reason": "x402 payment uses the wrong recipient",
+        }
+
+    input_rate, output_rate = _snapshot_rates(model)
+    cost = _quote_snapshot(prompt_tokens, max_tokens, input_rate, output_rate, 0)
+    if cost <= 0:
+        return {
+            "ok": False,
+            "reserved": 0,
+            "status": "invalid_price",
+            "reason": "x402 requires a positive quoted amount",
+        }
+    if cost > int(details["authorized_micro"]):
+        return {
+            "ok": False,
+            "reserved": 0,
+            "status": "authorization_too_small",
+            "reason": (
+                f"request can cost up to {cost} micro-USD; "
+                f"x402 authorization covers {details['authorized_micro']}"
+            ),
+        }
+
+    async with await new_session() as session:
+        try:
+            await _insert_reservation_in_session(
+                session,
+                job_id,
+                None,
+                model,
+                cost,
+                prompt_tokens,
+                input_rate=input_rate,
+                output_rate=output_rate,
+                billing_source="x402",
+                external_payer=details["payer"],
+            )
+            await x402_payments.insert_verified_in_session(
+                session,
+                job_id=str(job_id),
+                details=details,
+            )
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            async with await new_session() as check:
+                row = (
+                    await check.execute(
+                        sa.select(
+                            reservations_t.c.reserved_micro,
+                            reservations_t.c.external_payer,
+                            reservations_t.c.billing_source,
+                        ).where(reservations_t.c.job_id == str(job_id))
+                    )
+                ).first()
+            if (
+                row
+                and row[1] == details["payer"]
+                and row[2] == "x402"
+                and int(row[0]) <= int(details["authorized_micro"])
+            ):
+                return {"ok": True, "reserved": int(row[0]), "status": "already"}
+            return {
+                "ok": False,
+                "reserved": 0,
+                "status": "conflict",
+                "reason": "x402 request id conflicts with another payment",
+            }
+        except Exception:
+            await session.rollback()
+            logger.exception("x402 reservation failed job=%s", job_id)
+            return {
+                "ok": False,
+                "reserved": 0,
+                "status": "reservation_failed",
+                "reason": "x402 reservation failed",
+            }
+    return {
+        "ok": True,
+        "reserved": cost,
+        "status": "ok",
+        "payer": details["payer"],
+    }
+
+
+async def reservation_actual_micro(job_id) -> int | None:
+    """Return the immutable terminal charge once worker-side settlement wins."""
+    async with await new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(
+                    reservations_t.c.status,
+                    reservations_t.c.actual_micro,
+                ).where(reservations_t.c.job_id == str(job_id))
+            )
+        ).first()
+        if not row or row[0] != "settled" or row[1] is None:
+            return None
+        return int(row[1])
 
 
 async def reconcile(user: dict, model: str, prompt_tokens: int, completion_tokens: int,
@@ -1063,18 +1225,50 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
                           reservations_t.c.input_per_mtok_micro,
                           reservations_t.c.output_per_mtok_micro,
                           reservations_t.c.discount_bps,
-                          reservations_t.c.service_id)
+                          reservations_t.c.service_id,
+                          reservations_t.c.billing_source)
                 .where(reservations_t.c.job_id == job_id)
             )).first()
             if not row:
                 await s.commit()  # ledger stands; nothing to settle (dry-run/legacy/free)
                 return "no_reservation"
 
+            aid, model = row[0], row[1]
+            from .identities import canonical_account_id
+            paid_account_id = await canonical_account_id(aid, session=s) if aid else aid
+            reserved, prompt_toks = int(row[2] or 0), int(row[3] or 0)
+            free_held = int(row[4] or 0)
+            promo_held = int(row[5] or 0)
+            free_restore = None  # (keep_micro) — Redis, applied after commit
+            promo_restore = None
+            service_keep = reserved
+            billing_source = row[10] or "credits"
+            actual = reserved
+            if reserved > 0 and not exact:
+                if row[6] is not None and row[7] is not None:
+                    actual = _quote_snapshot(
+                        prompt_toks, completion_tokens, int(row[6]), int(row[7]), int(row[8] or 0),
+                    )
+                else:
+                    # Compatibility for reservations opened before migration 0015.
+                    actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
+                if actual > reserved and billing_source == "x402":
+                    _economic_alert(
+                        "x402_settlement_under_authorized",
+                        "critical",
+                        "Grid-counted usage exceeded the payer's x402 authorization.",
+                        job=job_id,
+                        model=model,
+                        actual_micro=actual,
+                        authorized_micro=reserved,
+                    )
+                    actual = reserved
+                service_keep = actual
             res = await s.execute(
                 sa.update(reservations_t)
                 .where(sa.and_(reservations_t.c.job_id == job_id,
                                reservations_t.c.status == "held"))
-                .values(status="settled", settled=_now())
+                .values(status="settled", settled=_now(), actual_micro=actual)
             )
             if res.rowcount == 0:
                 # A reservation EXISTS but is no longer held — it was already
@@ -1088,30 +1282,13 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
                     "late_success_no_payout",
                     "warning",
                     "A worker success arrived after its demand reservation was already closed.",
-                    account=row[0],
+                    account=aid,
                     job=job_id,
-                    model=row[1],
+                    model=model,
                 )
                 return "stale_no_payout"
 
-            aid, model = row[0], row[1]
-            from .identities import canonical_account_id
-            paid_account_id = await canonical_account_id(aid, session=s) if aid else aid
-            reserved, prompt_toks = int(row[2] or 0), int(row[3] or 0)
-            free_held = int(row[4] or 0)
-            promo_held = int(row[5] or 0)
-            free_restore = None  # (keep_micro) — Redis, applied after commit
-            promo_restore = None
-            service_keep = reserved
-            if aid and reserved > 0 and not exact:
-                if row[6] is not None and row[7] is not None:
-                    actual = _quote_snapshot(
-                        prompt_toks, completion_tokens, int(row[6]), int(row[7]), int(row[8] or 0),
-                    )
-                else:
-                    # Compatibility for reservations opened before migration 0015.
-                    actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
-                service_keep = actual
+            if aid and reserved > 0 and billing_source == "credits" and not exact:
                 # Three pockets, never converted: promo → daily free → paid
                 # (matching the draw); the paid refund/extra moves in THIS txn,
                 # the free restore follows the commit (crash between = free-day
