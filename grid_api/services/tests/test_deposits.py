@@ -14,8 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from grid_api import database
-from grid_api.services import credits, deposits
-from grid_api.v2.schema import accounts, credit_ledger, metadata
+from grid_api.services import credits, deposits, identities
+from grid_api.v2.schema import account_identities, accounts, credit_ledger, metadata
 from grid_api.v2.schema import deposits as deposits_t
 
 WALLET = "0x1111111111111111111111111111111111111111"
@@ -222,6 +222,44 @@ async def test_claim_requires_transaction_from_linked_wallet(db, funding, monkey
         await deposits.verify_and_credit(TX, {"account_id": db, "wallet": WALLET})
     assert exc.value.status_code == 403
     assert await credits.get_balance(db) == 0
+
+
+@pytest.mark.asyncio
+async def test_claim_accepts_any_verified_wallet_on_canonical_account(
+    db,
+    funding,
+    monkeypatch,
+):
+    now = datetime.now(UTC)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.insert(account_identities).values(
+                id=uuid.uuid4(),
+                account_id=db,
+                kind="wallet",
+                subject_hash=identities.subject_hash("wallet", OTHER),
+                display_hint=OTHER,
+                metadata={},
+                verified_at=now,
+                is_primary=False,
+                created=now,
+            ),
+        )
+        await session.commit()
+    monkeypatch.setattr(
+        deposits,
+        "_rpc",
+        _rpc_for(USDC, 5_000_000, sender=OTHER),
+    )
+
+    result = await deposits.verify_and_credit(
+        TX,
+        {"account_id": db, "wallet": WALLET},
+    )
+
+    assert result["credited"] is True
+    assert result["from"] == OTHER
+    assert await credits.get_balance(db) == 5_000_000
 
 
 @pytest.mark.asyncio
@@ -433,8 +471,9 @@ async def _deposit_count() -> int:
         )
 
 
-def test_funding_config_is_explicit_about_credit_terms(funding):
-    config = deposits.funding_config({"wallet": WALLET})
+@pytest.mark.asyncio
+async def test_funding_config_is_explicit_about_credit_terms(funding):
+    config = await deposits.funding_config({"wallet": WALLET})
     assets = {asset["asset"]: asset for asset in config["assets"]}
     assert config["chain"] == {"id": 8453, "name": "Base"}
     assert config["terms"]["credits_transferable"] is False
@@ -446,9 +485,31 @@ def test_funding_config_is_explicit_about_credit_terms(funding):
     assert assets["ETH"]["status"] == "conversion_required"
 
 
-def test_funding_config_exposes_swap_receipt_without_direct_send(funding, monkeypatch):
+@pytest.mark.asyncio
+async def test_funding_config_lists_verified_secondary_wallet(
+    db,
+    funding,
+):
+    await identities.attach_identity(
+        db,
+        "wallet",
+        OTHER,
+        display_hint=OTHER,
+        make_primary=False,
+    )
+
+    config = await deposits.funding_config(
+        {"account_id": db, "wallet": WALLET},
+    )
+
+    assert config["linked_wallet"] == WALLET
+    assert config["linked_wallets"] == [WALLET, OTHER]
+
+
+@pytest.mark.asyncio
+async def test_funding_config_exposes_swap_receipt_without_direct_send(funding, monkeypatch):
     monkeypatch.setattr(deposits, "ETH_CONVERSION_MODE", "swap_receipt")
-    config = deposits.funding_config({"wallet": WALLET})
+    config = await deposits.funding_config({"wallet": WALLET})
     eth = next(asset for asset in config["assets"] if asset["asset"] == "ETH")
     assert eth["enabled"] is False
     assert eth["backend_claim_enabled"] is True

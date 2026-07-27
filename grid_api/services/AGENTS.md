@@ -25,8 +25,9 @@ content sanitization, and reward settlement.
   `assertions.py` (legacy app-only assertions), `economics.py`
   (splits, payout-asset + conversion-fee knobs, `worker_share_bps`),
   `holdings.py` (cached on-chain AIPG balance + Chainlink ETH/USD),
-  `deposits.py` (atomic Base funding receipts plus USDC, bounded AIPG, and
-  conversion-gated ETH claims), `x402_payments.py` (default-off accountless
+  `deposits.py` (atomic Base funding receipts from verified account wallets
+  plus USDC, bounded AIPG, and conversion-gated ETH claims),
+  `x402_payments.py` (default-off accountless
   Base USDC authorization and settlement receipts), `model_registry.py`
   (ModelVault sync).
 - **Worker trust:** `worker_identity.py` verifies a payout-wallet delegation to
@@ -97,6 +98,9 @@ content sanitization, and reward settlement.
 - Account merges require proof of both sides, refuse active holds, revoke source
   keys, preserve accrued payout reachability, and move purchased balance through
   paired append-only ledger entries.
+- Deposit senders must match a verified wallet identity on the canonical
+  account. Never accept a client-supplied funding address without checking its
+  verified identity hash.
 - Service keys remain long-lived backend credentials but cannot manage user
   accounts. Global Google/SIWE proof is verified by Core; app delegation is
   namespaced to one service and receives bounded inference authority.

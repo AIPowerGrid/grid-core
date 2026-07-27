@@ -34,7 +34,7 @@ from sqlalchemy.exc import IntegrityError
 from ..database import new_session
 from ..v2.schema import credits as credits_t
 from ..v2.schema import deposits as deposits_t
-from . import alerts, credits
+from . import alerts, credits, identities
 
 logger = logging.getLogger("grid_api.deposits")
 
@@ -191,13 +191,28 @@ def eth_swap_receipt_is_configured() -> bool:
     )
 
 
-def funding_config(account: dict) -> dict:
+async def _verified_funding_wallets(account: dict) -> list[str]:
+    """Resolve every wallet that has been proved for the canonical account."""
+    wallets: list[str] = []
+    primary = (account.get("wallet") or "").lower()
+    if _valid_address(primary):
+        wallets.append(primary)
+    if account.get("account_id"):
+        for wallet in await identities.verified_wallet_addresses(account["account_id"]):
+            if wallet not in wallets:
+                wallets.append(wallet)
+    return wallets
+
+
+async def funding_config(account: dict) -> dict:
     """Safe client configuration for the signed-in Console funding flow."""
     epoch = _aipg_price_epoch()
-    wallet = (account.get("wallet") or "").lower()
+    wallets = await _verified_funding_wallets(account)
     return {
         "chain": {"id": CHAIN_ID, "name": "Base"},
-        "linked_wallet": wallet if _valid_address(wallet) else None,
+        # Keep the singular field during the Console rollout.
+        "linked_wallet": wallets[0] if wallets else None,
+        "linked_wallets": wallets,
         "terms": {
             "unit": "USD",
             "credits_transferable": False,
@@ -323,16 +338,16 @@ async def _confirmed_transaction(tx_hash: str, asset: str) -> tuple[dict, dict, 
     return tx, receipt, block_number
 
 
-def _linked_sender(tx: dict, account: dict, asset: str) -> str:
+async def _linked_sender(tx: dict, account: dict, asset: str) -> str:
     sender = (tx.get("from") or "").lower()
-    wallet = (account.get("wallet") or "").lower()
-    if not _valid_address(wallet):
+    wallets = await _verified_funding_wallets(account)
+    if not wallets:
         raise HTTPException(403, detail="Link a wallet before claiming Base deposits.")
-    if sender != wallet:
+    if sender not in wallets:
         alerts.emit(
             "deposit_wallet_mismatch",
             "warning",
-            "A deposit claim sender did not match the authenticated wallet.",
+            "A deposit claim sender did not match a verified account wallet.",
             fields={
                 "asset": asset,
                 "account": alerts.opaque_id(account.get("account_id")),
@@ -340,7 +355,10 @@ def _linked_sender(tx: dict, account: dict, asset: str) -> str:
             },
             dedupe_key=f"deposit-wallet-mismatch:{alerts.opaque_id(account.get('account_id'))}",
         )
-        raise HTTPException(403, detail="This deposit was sent from a different wallet than your account's.")
+        raise HTTPException(
+            403,
+            detail="This deposit was sent from a wallet that is not verified on your account.",
+        )
     return sender
 
 
@@ -591,7 +609,7 @@ async def verify_and_credit(tx_hash: str, account: dict) -> dict:
         raise HTTPException(503, detail="USDC deposits are not enabled on this grid yet.")
     tx_hash = _normalize_tx_hash(tx_hash)
     tx, receipt, block_number = await _confirmed_transaction(tx_hash, "USDC")
-    sender = _linked_sender(tx, account, "USDC")
+    sender = await _linked_sender(tx, account, "USDC")
     amount_raw = _direct_erc20_amount(receipt, USDC, TREASURY, sender)
     if amount_raw <= 0:
         raise HTTPException(400, detail="No direct USDC transfer to the grid treasury was found.")
@@ -642,7 +660,7 @@ async def verify_and_credit_aipg(tx_hash: str, account: dict) -> dict:
         raise HTTPException(503, detail="AIPG deposits do not have a valid funding price right now.")
     tx_hash = _normalize_tx_hash(tx_hash)
     tx, receipt, block_number = await _confirmed_transaction(tx_hash, "AIPG")
-    sender = _linked_sender(tx, account, "AIPG")
+    sender = await _linked_sender(tx, account, "AIPG")
     amount_raw = _direct_erc20_amount(receipt, AIPG_TOKEN, AIPG_TREASURY, sender)
     if amount_raw <= 0:
         raise HTTPException(400, detail="No direct AIPG transfer to the grid treasury was found.")
@@ -705,7 +723,7 @@ async def verify_and_credit_eth(tx_hash: str, account: dict) -> dict:
         )
     tx_hash = _normalize_tx_hash(tx_hash)
     tx, receipt, block_number = await _confirmed_transaction(tx_hash, "ETH")
-    sender = _linked_sender(tx, account, "ETH")
+    sender = await _linked_sender(tx, account, "ETH")
     if (tx.get("to") or "").lower() != ETH_TREASURY:
         raise HTTPException(400, detail="This transaction did not send ETH to the grid treasury.")
     amount_raw = int(tx.get("value", "0x0") or "0x0", 16)
@@ -777,7 +795,7 @@ async def verify_and_credit_converted_eth(tx_hash: str, account: dict) -> dict:
         )
     tx_hash = _normalize_tx_hash(tx_hash)
     tx, receipt, block_number = await _confirmed_transaction(tx_hash, "ETH->USDC")
-    sender = _linked_sender(tx, account, "ETH")
+    sender = await _linked_sender(tx, account, "ETH")
     amount_raw = int(tx.get("value", "0x0") or "0x0", 16)
     if amount_raw <= 0:
         raise HTTPException(
