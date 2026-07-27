@@ -12,6 +12,19 @@ All rails fund one integer micro-USD purchased-credit balance. Credits buy Grid
 services; they are non-transferable and non-withdrawable. Operator-reviewed
 refunds go back to the recorded source address.
 
+## Production registry
+
+- **Network:** Base mainnet, chain ID `8453`.
+- **Canonical USDC:** `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`.
+- **Customer funding Safe:**
+  [`0xd19a391FAB4aeFd5f59e4be4918364f57b9c5346`](https://basescan.org/address/0xd19a391FAB4aeFd5f59e4be4918364f57b9c5346),
+  verified as a deployed 2-of-2 Safe on 2026-07-27.
+- **Operational status:** dark-configured; no funding rail is enabled until its
+  supervised canary and rollback checks pass.
+
+The Safe is an operational custody endpoint, not a protocol contract. Core
+stores its public address only and must never receive Safe signer material.
+
 ## Invariants
 
 Every successful Base claim commits one SQL transaction containing:
