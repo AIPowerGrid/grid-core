@@ -1342,7 +1342,7 @@ async def get_deposit_config(
     user = await _require_v2(apikey, authorization)
     from ..services import deposits
 
-    return deposits.funding_config(user)
+    return await deposits.funding_config(user)
 
 
 @router.get("/v1/account/deposits")
