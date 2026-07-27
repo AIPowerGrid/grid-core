@@ -100,7 +100,9 @@ content sanitization, and reward settlement.
   paired append-only ledger entries.
 - Deposit senders must match a verified wallet identity on the canonical
   account. Never accept a client-supplied funding address without checking its
-  verified identity hash.
+  verified identity hash. A transaction or receipt that the configured RPC has
+  not seen yet is retryable (`425`), not an invalid claim; clients must retry
+  the same transaction hash and must never resend value to recover credit.
 - Service keys remain long-lived backend credentials but cannot manage user
   accounts. Global Google/SIWE proof is verified by Core; app delegation is
   namespaced to one service and receives bounded inference authority.
