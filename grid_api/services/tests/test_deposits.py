@@ -279,6 +279,40 @@ async def test_claim_rejects_rpc_on_the_wrong_chain(db, funding, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("missing_method", "missing_value"),
+    [
+        ("eth_getTransactionByHash", None),
+        ("eth_getTransactionReceipt", None),
+    ],
+)
+async def test_claim_retries_when_transaction_is_not_yet_visible(
+    db,
+    funding,
+    monkeypatch,
+    missing_method,
+    missing_value,
+):
+    rpc = _rpc_for(USDC, 5_000_000)
+
+    async def lagging_rpc(method, params):
+        if method == missing_method:
+            return missing_value
+        return await rpc(method, params)
+
+    monkeypatch.setattr(deposits, "_rpc", lagging_rpc)
+    with pytest.raises(HTTPException) as exc:
+        await deposits.verify_and_credit(
+            TX,
+            {"account_id": db, "wallet": WALLET},
+        )
+    assert exc.value.status_code == 425
+    assert "Retry shortly" in exc.value.detail
+    assert await credits.get_balance(db) == 0
+    assert await _deposit_count() == 0
+
+
+@pytest.mark.asyncio
 async def test_aipg_claim_uses_epoch_haircut_and_records_provenance(db, funding, monkeypatch):
     # 10,000 AIPG at $0.002, less 3% = $19.40.
     amount = 10_000 * 10**18
