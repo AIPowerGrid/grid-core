@@ -1664,6 +1664,10 @@ async def get_credits(
     promo_active = promotions.PROMO_ENABLED and promotions.PROMO_SPENDABLE_LIVE
     spendable = paid + (free_left if free_active else 0) + (promo_left if promo_active else 0)
     return {
+        # Include the canonical principal on this deliberately narrow read
+        # surface so partner apps can prove identity and balance together
+        # without receiving /v1/account key or linked-identity metadata.
+        "account_id": str(aid),
         "promotional": {
             "remaining_micro": promo_left,
             "remaining_usd": usd(promo_left),
