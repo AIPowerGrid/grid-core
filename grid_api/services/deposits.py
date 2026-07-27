@@ -48,6 +48,18 @@ USDC = os.getenv(
 ).strip().lower()
 CONFIRMATIONS = max(1, int(os.getenv("GRID_DEPOSIT_CONFIRMATIONS", "3") or 3))
 MIN_CREDIT_MICRO = max(1, int(os.getenv("GRID_DEPOSIT_MIN_MICRO", "10000") or 10000))
+USDC_MAX_DEPOSIT_MICRO = max(
+    MIN_CREDIT_MICRO,
+    int(os.getenv("GRID_USDC_MAX_DEPOSIT_MICRO", "10000000000") or 10_000_000_000),
+)
+USDC_ACCOUNT_DAILY_MICRO = max(
+    USDC_MAX_DEPOSIT_MICRO,
+    int(os.getenv("GRID_USDC_ACCOUNT_DAILY_MICRO", "25000000000") or 25_000_000_000),
+)
+USDC_NETWORK_DAILY_MICRO = max(
+    USDC_ACCOUNT_DAILY_MICRO,
+    int(os.getenv("GRID_USDC_NETWORK_DAILY_MICRO", "100000000000") or 100_000_000_000),
+)
 
 AIPG_ENABLED = os.getenv("GRID_AIPG_DEPOSITS_ENABLED", "0").lower() in ("1", "true", "yes", "on")
 AIPG_TOKEN = os.getenv(
@@ -105,6 +117,7 @@ ETH_NETWORK_DAILY_MICRO = max(
 )
 
 _TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+_MAX_SIGNED_BIGINT = (1 << 63) - 1
 
 
 def _now() -> datetime:
@@ -168,6 +181,16 @@ def eth_is_configured() -> bool:
     )
 
 
+def eth_swap_receipt_is_configured() -> bool:
+    """True when Core may credit actual USDC proceeds from an ETH swap."""
+    return (
+        DEPOSITS_ENABLED
+        and ETH_CONVERSION_MODE == "swap_receipt"
+        and _valid_address(TREASURY)
+        and _valid_address(USDC)
+    )
+
+
 def funding_config(account: dict) -> dict:
     """Safe client configuration for the signed-in Console funding flow."""
     epoch = _aipg_price_epoch()
@@ -190,6 +213,8 @@ def funding_config(account: dict) -> dict:
                 "decimals": 6,
                 "price_micro": 1_000_000,
                 "minimum_credit_micro": MIN_CREDIT_MICRO,
+                "maximum_credit_micro": USDC_MAX_DEPOSIT_MICRO,
+                "account_daily_micro": USDC_ACCOUNT_DAILY_MICRO,
                 "status": "available" if is_configured() else "disabled",
             },
             {
@@ -212,15 +237,26 @@ def funding_config(account: dict) -> dict:
                 # A buffered treasury pilot can accept operator-reviewed claims,
                 # but the public Console must wait for conversion-backed funding.
                 "enabled": False,
-                "backend_claim_enabled": eth_is_configured(),
-                "treasury": ETH_TREASURY or None,
+                "backend_claim_enabled": (
+                    eth_is_configured() or eth_swap_receipt_is_configured()
+                ),
+                "treasury": (
+                    TREASURY if eth_swap_receipt_is_configured() else ETH_TREASURY
+                )
+                or None,
                 "token_address": None,
                 "decimals": 18,
                 "conversion_mode": ETH_CONVERSION_MODE,
                 "haircut_bps": ETH_HAIRCUT_BPS,
                 "minimum_credit_micro": MIN_CREDIT_MICRO,
                 "maximum_credit_micro": ETH_MAX_DEPOSIT_MICRO,
-                "status": "operator_pilot" if eth_is_configured() else "conversion_required",
+                "status": (
+                    "conversion_ready"
+                    if eth_swap_receipt_is_configured()
+                    else "operator_pilot"
+                    if eth_is_configured()
+                    else "conversion_required"
+                ),
             },
         ],
     }
@@ -322,6 +358,37 @@ def _direct_erc20_amount(receipt: dict, token: str, treasury: str, sender: str) 
         ):
             amount += int(event.get("data", "0x0"), 16)
     return amount
+
+
+def _erc20_received(receipt: dict, token: str, treasury: str) -> int:
+    """Sum canonical-token transfers received by treasury from any swap route."""
+    amount = 0
+    for event in receipt.get("logs", []):
+        topics = event.get("topics", [])
+        if (
+            (event.get("address") or "").lower() == token
+            and len(topics) >= 3
+            and topics[0].lower() == _TRANSFER_TOPIC
+            and _addr_from_topic(topics[2]) == treasury
+        ):
+            amount += int(event.get("data", "0x0"), 16)
+    return amount
+
+
+async def _block_timestamp(block_number: int) -> datetime:
+    try:
+        block = await _rpc("eth_getBlockByNumber", [hex(block_number), False])
+        return datetime.fromtimestamp(int(block["timestamp"], 16), tz=UTC)
+    except Exception as exc:
+        logger.warning(
+            "deposit block timestamp read failed block=%s: %s",
+            block_number,
+            exc,
+        )
+        raise HTTPException(
+            502,
+            detail="Could not verify the deposit block timestamp.",
+        ) from exc
 
 
 async def _lock_network_cap(session, asset: str) -> None:
@@ -530,6 +597,7 @@ async def verify_and_credit(tx_hash: str, account: dict) -> dict:
         raise HTTPException(400, detail="No direct USDC transfer to the grid treasury was found.")
     if amount_raw < MIN_CREDIT_MICRO:
         raise HTTPException(422, detail="USDC deposit is below the minimum funding amount.")
+    block_timestamp = await _block_timestamp(block_number)
     applied, deposit, balance = await _record_and_credit(
         account=account,
         asset="USDC",
@@ -542,9 +610,14 @@ async def verify_and_credit(tx_hash: str, account: dict) -> dict:
         decimals=6,
         price_micro=1_000_000,
         price_source="usdc:1:1",
-        price_timestamp=_now(),
+        price_timestamp=block_timestamp,
         price_block=block_number,
         credited_micro=amount_raw,
+        caps=(
+            USDC_MAX_DEPOSIT_MICRO,
+            USDC_ACCOUNT_DAILY_MICRO,
+            USDC_NETWORK_DAILY_MICRO,
+        ),
     )
     if applied:
         alerts.emit(
@@ -573,6 +646,12 @@ async def verify_and_credit_aipg(tx_hash: str, account: dict) -> dict:
     amount_raw = _direct_erc20_amount(receipt, AIPG_TOKEN, AIPG_TREASURY, sender)
     if amount_raw <= 0:
         raise HTTPException(400, detail="No direct AIPG transfer to the grid treasury was found.")
+    block_timestamp = await _block_timestamp(block_number)
+    if not epoch[0] <= block_timestamp <= epoch[1]:
+        raise HTTPException(
+            422,
+            detail="The AIPG transfer was not mined inside the active funding price epoch.",
+        )
     market_micro = amount_raw * AIPG_PRICE_MICRO // (10 ** AIPG_DECIMALS)
     credited_micro = market_micro * (10_000 - AIPG_HAIRCUT_BPS) // 10_000
     if credited_micro < MIN_CREDIT_MICRO:
@@ -679,6 +758,79 @@ async def verify_and_credit_eth(tx_hash: str, account: dict) -> dict:
                 "amount_micro": credited_micro,
             },
             dedupe_key=f"deposit-credited:eth:{alerts.opaque_id(tx_hash)}",
+        )
+    return _response(applied, deposit, balance)
+
+
+async def verify_and_credit_converted_eth(tx_hash: str, account: dict) -> dict:
+    """Credit actual USDC received by treasury from a linked-wallet ETH swap.
+
+    The transaction must carry native ETH from the account's linked wallet and
+    its confirmed receipt must contain a canonical-USDC Transfer to the Grid's
+    USDC treasury. Credit equals those actual six-decimal USDC proceeds, so the
+    Grid never books a fixed-dollar liability against ETH inventory.
+    """
+    if not eth_swap_receipt_is_configured():
+        raise HTTPException(
+            503,
+            detail="Conversion-backed ETH funding is not enabled on this grid.",
+        )
+    tx_hash = _normalize_tx_hash(tx_hash)
+    tx, receipt, block_number = await _confirmed_transaction(tx_hash, "ETH->USDC")
+    sender = _linked_sender(tx, account, "ETH")
+    amount_raw = int(tx.get("value", "0x0") or "0x0", 16)
+    if amount_raw <= 0:
+        raise HTTPException(
+            400,
+            detail="The conversion transaction did not spend native ETH.",
+        )
+    usdc_received = _erc20_received(receipt, USDC, TREASURY)
+    if usdc_received < MIN_CREDIT_MICRO:
+        raise HTTPException(
+            422,
+            detail="The conversion did not deliver the minimum USDC amount to the grid treasury.",
+        )
+    block_timestamp = await _block_timestamp(block_number)
+    effective_price_micro = usdc_received * (10**18) // amount_raw
+    if not 0 < effective_price_micro <= _MAX_SIGNED_BIGINT:
+        raise HTTPException(
+            422,
+            detail="The conversion execution price is outside supported accounting bounds.",
+        )
+    applied, deposit, balance = await _record_and_credit(
+        account=account,
+        asset="ETH",
+        token_address=None,
+        tx_hash=tx_hash,
+        block_number=block_number,
+        sender=sender,
+        treasury=TREASURY,
+        amount_raw=amount_raw,
+        decimals=18,
+        price_micro=effective_price_micro,
+        price_source="swap:actual-base-usdc-proceeds",
+        price_timestamp=block_timestamp,
+        price_block=block_number,
+        credited_micro=usdc_received,
+        caps=(
+            ETH_MAX_DEPOSIT_MICRO,
+            ETH_ACCOUNT_DAILY_MICRO,
+            ETH_NETWORK_DAILY_MICRO,
+        ),
+    )
+    if applied:
+        alerts.emit(
+            "deposit_credited",
+            "success",
+            "A verified Base ETH conversion was credited to a Grid account.",
+            fields={
+                "asset": "ETH",
+                "account": alerts.opaque_id(account["account_id"]),
+                "tx": alerts.opaque_id(tx_hash),
+                "amount_micro": usdc_received,
+                "valuation": "actual_usdc_proceeds",
+            },
+            dedupe_key=f"deposit-credited:converted-eth:{alerts.opaque_id(tx_hash)}",
         )
     return _response(applied, deposit, balance)
 

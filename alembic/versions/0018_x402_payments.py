@@ -45,6 +45,13 @@ def upgrade() -> None:
         sa.Column("tx_hash", sa.String(length=80), nullable=True),
         sa.Column("status", sa.String(length=16), nullable=False),
         sa.Column("error", sa.String(length=255), nullable=True),
+        sa.Column(
+            "attempts",
+            sa.Integer(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column("last_attempt", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created", sa.DateTime(timezone=True), nullable=False),
         sa.Column("settled", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint(

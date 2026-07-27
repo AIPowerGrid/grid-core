@@ -12,8 +12,11 @@ The first production surface is deliberately narrow:
 * disabled unless every required operator setting is present.
 
 An x402 signature is authorization, not revenue. The request handler writes a
-``verified`` payment row before dispatch and the SDK after-settle hook records
-the transfer. Worker payout queries exclude the job until that row is settled.
+``verified`` payment row before dispatch. A before-settle hook durably records
+the exact attempted amount before the facilitator can touch chain. Facilitator
+success is only ``reported``; Core promotes it to ``settled`` after independently
+proving the exact canonical-USDC transfer on Base. Worker payout queries exclude
+every other state.
 """
 
 from __future__ import annotations
@@ -26,10 +29,11 @@ import os
 import secrets
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 
 import sqlalchemy as sa
+from fastapi import HTTPException
 
 from ..database import new_session
 from ..v2.schema import x402_payments as payments_t
@@ -62,6 +66,10 @@ MAX_AUTH_MICRO = max(1, int(os.getenv("GRID_X402_MAX_AUTH_MICRO", "1000000") or 
 DEFAULT_MAX_TOKENS = max(
     1,
     int(os.getenv("GRID_X402_DEFAULT_MAX_TOKENS", "4096") or 4096),
+)
+STALE_SECONDS = max(
+    300,
+    int(os.getenv("GRID_X402_STALE_SECONDS", "900") or 900),
 )
 ROUTE = "/v1/x402/chat/completions"
 
@@ -216,60 +224,328 @@ async def settled_amount(job_id: str) -> int | None:
         row = (
             await session.execute(
                 sa.select(payments_t.c.settled_micro).where(
-                    payments_t.c.job_id == str(job_id),
+                    sa.and_(
+                        payments_t.c.job_id == str(job_id),
+                        payments_t.c.status == "settled",
+                    ),
                 ),
-            ),
+            )
         ).first()
         return int(row[0]) if row and row[0] is not None else None
 
 
-async def _update_from_hook(context, *, status: str, error: str | None = None) -> None:
+def _job_id_from_context(context) -> str | None:
     transport = getattr(context, "transport_context", None)
     headers = getattr(transport, "response_headers", None) or {}
-    job_id = next(
+    return next(
         (value for key, value in headers.items() if key.lower() == "x-grid-job-id"),
         None,
     )
-    if not job_id:
-        logger.error("x402 %s hook missing X-Grid-Job-ID", status)
-        return
 
-    values: dict = {"status": status, "error": (error or "")[:255] or None}
-    if status == "settled":
-        result = context.result
-        values.update(
-            settled_micro=int(context.requirements.amount),
-            tx_hash=str(result.transaction),
-            settled=_now(),
-            error=None,
+
+async def _before_settle(context) -> None:
+    """Persist the exact attempted amount before any facilitator side effect."""
+    job_id = _job_id_from_context(context)
+    if not job_id:
+        raise RuntimeError("x402 before-settle hook missing X-Grid-Job-ID")
+    amount = int(context.requirements.amount)
+    if amount <= 0:
+        raise RuntimeError("x402 settlement amount must be positive")
+
+    async with await new_session() as session:
+        updated = await session.execute(
+            sa.update(payments_t)
+            .where(
+                sa.and_(
+                    payments_t.c.job_id == str(job_id),
+                    payments_t.c.status == "verified",
+                    amount <= payments_t.c.authorized_micro,
+                ),
+            )
+            .values(
+                status="settling",
+                settled_micro=amount,
+                attempts=payments_t.c.attempts + 1,
+                last_attempt=_now(),
+                error=None,
+            ),
         )
+        if updated.rowcount != 1:
+            await session.rollback()
+            raise RuntimeError(
+                f"x402 payment {job_id} is missing, already attempted, or under-authorized",
+            )
+        await session.commit()
+
+
+async def _after_settle(context) -> None:
+    job_id = _job_id_from_context(context)
+    if not job_id:
+        raise RuntimeError("x402 after-settle hook missing X-Grid-Job-ID")
+    result = context.result
+    tx_hash = str(result.transaction or "").lower()
+    if not (
+        tx_hash.startswith("0x")
+        and len(tx_hash) == 66
+        and all(char in "0123456789abcdef" for char in tx_hash[2:])
+    ):
+        raise RuntimeError("x402 facilitator success omitted a valid transaction hash")
     try:
         async with await new_session() as session:
             updated = await session.execute(
-                sa.update(payments_t).where(payments_t.c.job_id == str(job_id)).values(**values),
+                sa.update(payments_t)
+                .where(
+                    sa.and_(
+                        payments_t.c.job_id == str(job_id),
+                        payments_t.c.status == "settling",
+                    ),
+                )
+                .values(
+                    status="reported",
+                    tx_hash=tx_hash,
+                    settled=None,
+                    error=None,
+                ),
             )
             if updated.rowcount != 1:
-                raise RuntimeError(f"x402 payment row missing for job {job_id}")
+                raise RuntimeError(f"x402 payment {job_id} was not in settling state")
             await session.commit()
     except Exception:
-        logger.exception("x402 %s could not be persisted job=%s", status, job_id)
+        logger.exception("x402 settled receipt could not be persisted job=%s", job_id)
         alerts.emit(
             "x402_receipt_persist_failed",
             "critical",
-            "An x402 facilitator result could not be persisted.",
-            fields={"job": alerts.opaque_id(job_id), "status": status},
+            "An x402 facilitator receipt could not be persisted.",
+            fields={"job": alerts.opaque_id(job_id), "status": "settling"},
             dedupe_key=f"x402-receipt:{alerts.opaque_id(job_id)}",
         )
         raise
 
 
-async def _after_settle(context) -> None:
-    await _update_from_hook(context, status="settled")
-
-
 async def _on_settle_failure(context):
-    await _update_from_hook(context, status="failed", error=str(context.error))
+    job_id = _job_id_from_context(context)
+    if not job_id:
+        logger.error("x402 failure hook missing X-Grid-Job-ID")
+        return None
+    error = str(context.error)[:255] or "settlement failed"
+    try:
+        async with await new_session() as session:
+            # Only a call that crossed the durable before-settle boundary is
+            # ambiguous. A failure before that boundary leaves `verified`
+            # retryable and cannot have called the facilitator.
+            await session.execute(
+                sa.update(payments_t)
+                .where(
+                    sa.and_(
+                        payments_t.c.job_id == str(job_id),
+                        payments_t.c.status == "settling",
+                    ),
+                )
+                .values(status="manual_review", error=error),
+            )
+            await session.commit()
+    except Exception:
+        logger.exception("x402 failure state could not be persisted job=%s", job_id)
+        alerts.emit(
+            "x402_failure_persist_failed",
+            "critical",
+            "An ambiguous x402 settlement failure could not be persisted.",
+            fields={"job": alerts.opaque_id(job_id)},
+            dedupe_key=f"x402-failure:{alerts.opaque_id(job_id)}",
+        )
+        raise
     return None
+
+
+async def flag_stale_settlements(older_than_seconds: int | None = None) -> int:
+    """Move abandoned `settling`/`reported` rows to manual review."""
+    cutoff = _now() - timedelta(seconds=older_than_seconds or STALE_SECONDS)
+    async with await new_session() as session:
+        updated = await session.execute(
+            sa.update(payments_t)
+            .where(
+                sa.and_(
+                    payments_t.c.status.in_(("settling", "reported")),
+                    payments_t.c.last_attempt < cutoff,
+                ),
+            )
+            .values(
+                status="manual_review",
+                error="settlement outcome not independently proven before timeout",
+            ),
+        )
+        await session.commit()
+        count = int(updated.rowcount or 0)
+    if count:
+        alerts.emit(
+            "x402_settlement_stale",
+            "critical",
+            "x402 settlements require on-chain operator reconciliation.",
+            fields={"count": count},
+            dedupe_key="x402-settlement-stale",
+        )
+    return count
+
+
+async def verify_reported_settlements(limit: int = 50) -> dict[str, int]:
+    """Promote facilitator reports only after exact Base transfer proof."""
+    limit = max(1, min(int(limit or 50), 250))
+    async with await new_session() as session:
+        rows = (
+            await session.execute(
+                sa.select(payments_t.c.job_id, payments_t.c.tx_hash)
+                .where(payments_t.c.status == "reported")
+                .order_by(payments_t.c.last_attempt)
+                .limit(limit),
+            )
+        ).all()
+    outcome = {"settled": 0, "pending": 0, "manual_review": 0}
+    for job_id, tx_hash in rows:
+        try:
+            await reconcile_transaction(str(job_id), str(tx_hash))
+            outcome["settled"] += 1
+        except HTTPException:
+            # Not mined, not sufficiently confirmed, or RPC unavailable. Keep
+            # the report payout-ineligible and try again until the stale gate.
+            outcome["pending"] += 1
+        except RuntimeError as exc:
+            async with await new_session() as session:
+                updated = await session.execute(
+                    sa.update(payments_t)
+                    .where(
+                        sa.and_(
+                            payments_t.c.job_id == str(job_id),
+                            payments_t.c.status == "reported",
+                        ),
+                    )
+                    .values(status="manual_review", error=str(exc)[:255]),
+                )
+                await session.commit()
+            if updated.rowcount:
+                outcome["manual_review"] += 1
+                alerts.emit(
+                    "x402_report_unproven",
+                    "critical",
+                    "A facilitator-reported x402 transfer failed independent Base verification.",
+                    fields={"job": alerts.opaque_id(job_id)},
+                    dedupe_key=f"x402-unproven:{alerts.opaque_id(job_id)}",
+                )
+    return outcome
+
+
+async def reconcile_transaction(job_id: str, tx_hash: str) -> dict:
+    """Prove an ambiguous x402 payment from its confirmed Base USDC transfer.
+
+    This is intentionally an operator path, not an automatic retry. The
+    transaction must contain canonical-USDC transfers from the recorded payer
+    to the recorded recipient totaling the exact grid-counted charge.
+    """
+    from ..v2.schema import reservations as reservations_t
+    from . import deposits
+
+    job_id = str(job_id).strip()
+    tx_hash = deposits._normalize_tx_hash(tx_hash)
+    async with await new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(
+                    payments_t.c.payer,
+                    payments_t.c.asset,
+                    payments_t.c.pay_to,
+                    payments_t.c.authorized_micro,
+                    payments_t.c.settled_micro,
+                    payments_t.c.tx_hash,
+                    payments_t.c.status,
+                    payments_t.c.last_attempt,
+                    reservations_t.c.actual_micro,
+                )
+                .join(
+                    reservations_t,
+                    reservations_t.c.job_id == payments_t.c.job_id,
+                )
+                .where(payments_t.c.job_id == job_id),
+            )
+        ).mappings().first()
+    if not row:
+        raise RuntimeError("x402 payment job was not found")
+    if row["status"] == "settled":
+        if (row["tx_hash"] or "").lower() != tx_hash:
+            raise RuntimeError("x402 payment is already settled by another transaction")
+        return {
+            "job_id": job_id,
+            "status": "settled",
+            "tx_hash": tx_hash,
+            "already_reconciled": True,
+        }
+
+    actual = int(row["actual_micro"] or 0)
+    attempted = int(row["settled_micro"] or 0)
+    if actual <= 0 or attempted != actual:
+        raise RuntimeError("x402 payment has no exact terminal charge to reconcile")
+    if actual > int(row["authorized_micro"]):
+        raise RuntimeError("x402 terminal charge exceeds its authorization")
+    attempted_at = row["last_attempt"]
+    if attempted_at is None:
+        raise RuntimeError("x402 payment has no durable settlement attempt")
+    if attempted_at.tzinfo is None:
+        attempted_at = attempted_at.replace(tzinfo=UTC)
+
+    _tx, receipt, block_number = await deposits._confirmed_transaction(
+        tx_hash,
+        "x402 USDC",
+    )
+    block_time = await deposits._block_timestamp(block_number)
+    if block_time < attempted_at - timedelta(minutes=5) or block_time > _now() + timedelta(minutes=5):
+        raise RuntimeError("confirmed transaction is outside the x402 settlement window")
+    received = deposits._direct_erc20_amount(
+        receipt,
+        str(row["asset"]).lower(),
+        str(row["pay_to"]).lower(),
+        str(row["payer"]).lower(),
+    )
+    if received != actual:
+        raise RuntimeError(
+            "confirmed transaction does not prove the exact x402 USDC transfer",
+        )
+
+    async with await new_session() as session:
+        try:
+            updated = await session.execute(
+                sa.update(payments_t)
+                .where(
+                    sa.and_(
+                        payments_t.c.job_id == job_id,
+                        payments_t.c.status != "settled",
+                        payments_t.c.settled_micro == actual,
+                    ),
+                )
+                .values(
+                    status="settled",
+                    tx_hash=tx_hash,
+                    settled=_now(),
+                    error=None,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("x402 payment changed during reconciliation")
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+    alerts.emit(
+        "x402_payment_reconciled",
+        "success",
+        "An ambiguous x402 payment was reconciled from a confirmed Base transfer.",
+        fields={"job": alerts.opaque_id(job_id), "tx": alerts.opaque_id(tx_hash)},
+        dedupe_key=f"x402-reconciled:{alerts.opaque_id(job_id)}",
+    )
+    return {
+        "job_id": job_id,
+        "status": "settled",
+        "tx_hash": tx_hash,
+        "settled_micro": actual,
+        "already_reconciled": False,
+    }
 
 
 @dataclass(frozen=True)
@@ -291,6 +567,7 @@ def build_runtime() -> X402Runtime:
     )
     server = x402ResourceServer(facilitator)
     server.register(NETWORK, UptoEvmServerScheme())
+    server.on_before_settle(_before_settle)
     server.on_after_settle(_after_settle)
     server.on_settle_failure(_on_settle_failure)
     routes = {
@@ -324,3 +601,27 @@ def install_middleware(app) -> None:
         routes=runtime.routes,
         server=runtime.server,
     )
+
+
+async def _run_reconcile_cli(job_id: str, tx_hash: str) -> None:
+    from ..database import close_database, init_database
+
+    await init_database()
+    try:
+        result = await reconcile_transaction(job_id, tx_hash)
+        print(json.dumps(result, sort_keys=True))
+    finally:
+        await close_database()
+
+
+if __name__ == "__main__":
+    import argparse
+    import asyncio
+
+    parser = argparse.ArgumentParser(
+        description="Reconcile one ambiguous x402 job from a confirmed Base transaction.",
+    )
+    parser.add_argument("--reconcile-job", required=True, help="Grid job UUID")
+    parser.add_argument("--tx", required=True, help="Base transaction hash")
+    args = parser.parse_args()
+    asyncio.run(_run_reconcile_cli(args.reconcile_job, args.tx))

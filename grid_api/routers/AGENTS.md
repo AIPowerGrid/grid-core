@@ -37,7 +37,8 @@ transport, accounts, stats, health/metrics.
   `free.active` tracks GRID_FREE_SPENDABLE_LIVE), `GET /v1/account/jobs`
   (operator trust view: my workers' jobs + den + result_hash + signed flag,
   scoped to the payout wallet), immutable deposit history/config, and deposit
-  claims (USDC launch rail, bounded expiring-price AIPG, conversion-gated ETH).
+  claims (USDC launch rail, bounded expiring-price AIPG, actual-USDC
+  swap-receipt ETH, and operator-only buffered ETH).
   `POST /v1/accounts/session` is the retired internal-token bridge. It
   resolves on exactly one authoritative identity (`oauth_sub` first, then
   wallet, then verified email only when it is the sole identity); supplemental

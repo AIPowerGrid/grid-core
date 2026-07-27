@@ -150,6 +150,8 @@ async def _billing_monitor():
                     },
                     dedupe_key="billing-holds-aging",
                 )
+            await x402_payments.verify_reported_settlements()
+            await x402_payments.flag_stale_settlements()
         except Exception as exc:
             logger.error("Billing invariant monitor error: %s", exc)
             alerts.emit(

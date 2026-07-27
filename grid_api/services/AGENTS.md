@@ -65,9 +65,19 @@ content sanitization, and reward settlement.
   narrow exception to the no-request-path-chain-read rule: they must verify the
   configured RPC is on the expected chain before trusting transaction/receipt
   data, and they must never sit in the inference hot path.
+- Production ETH funding uses `swap_receipt`: the linked wallet spends native
+  ETH and the confirmed transaction must deliver canonical Base USDC directly
+  to the configured USDC treasury. Credit only the actual USDC Transfer amount.
+  The oracle-priced `buffered` mode is an operator-only pilot, not a public
+  funding path.
+- AIPG funding claims must bind the transfer block timestamp to the active
+  operator price epoch. Never value a historical transfer under a newer epoch.
 - x402 authorization is not revenue. Its reservation and verified-payment row
-  commit before dispatch; worker payout aggregation must exclude that job until
-  the facilitator result is durably `settled`. The initial route is Base USDC,
+  commit before dispatch; its exact attempt is persisted as `settling` before
+  the facilitator can touch chain. Facilitator success is only `reported`;
+  worker payout aggregation must exclude that job until Core independently
+  proves the exact canonical-USDC Base transfer and records `settled`.
+  Ambiguous attempts go to `manual_review`. The initial route is Base USDC,
   `upto`, text-only, and non-streaming because the upstream middleware buffers
   the response before settlement.
 - Media billing reserves exact deterministic cost before dispatch and refunds on
