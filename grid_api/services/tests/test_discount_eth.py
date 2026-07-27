@@ -65,7 +65,7 @@ async def test_charge_request_dry_run_reflects_discount(monkeypatch):
     user = {"account_id": "00000000-0000-0000-0000-000000000001", "wallet": WALLET}
     out = await credits.charge_request(user, PRICED_MODEL, 1000, 2000, "job-disc-1")
     assert out["status"] == "dry_run"
-    assert out["would_charge"] == full * 7500 // 10_000  # 25% off
+    assert out["would_charge"] == (full * 7500 + 9_999) // 10_000  # 25% off, rounded up
 
 
 # ── ETH deposit pricing (Chainlink parse + credit math) ─────────────────────

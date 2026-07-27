@@ -51,15 +51,14 @@ logger = logging.getLogger("grid_api.openai")
 
 
 async def _observe_dry(user, model, prompt_tokens, completion_tokens, job_id):
-    """Dry-run observability ONLY (GRID_CHARGING_ENABLED=0): log the would-charge
-    against grid-counted usage so we can watch pricing on real traffic.
+    """Log would-charge usage when this request is outside the charging cohort.
 
     LIVE settlement is NOT done here — it's durable and authoritative in the
     worker-WS handler (credits.settle_job), which reaches a terminal state for
     every job whether or not the client stayed connected. Doing it here too would
     double-settle and depend on the client staying connected. Never breaks a
     response (already sent), so errors are swallowed."""
-    if credits.CHARGING_ENABLED:
+    if credits.charging_enabled_for(user, model):
         return
     try:
         await credits.charge_request(
@@ -417,13 +416,12 @@ async def _handle_chat_completions(request: ChatCompletionRequest, apikey: str,
                             detail=f"Too many concurrent requests (limit {TEXT_CONCURRENCY}). Retry shortly.")
     inflight_held = bool(aid)
     try:
-        if credits.CHARGING_ENABLED:
-            auth = await credits.authorize_request(
-                user, model, prompt_toks, request.max_tokens, job_id,
-                record_reservation=True,
-            )
-            if not auth["ok"]:
-                raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
+        auth = await credits.authorize_request(
+            user, model, prompt_toks, request.max_tokens, job_id,
+            record_reservation=True,
+        )
+        if not auth["ok"]:
+            raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
 
         # Submit to the Grid Redis Stream for workers.
         # If dispatch itself fails the job never runs, so the held reservation must be

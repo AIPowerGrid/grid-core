@@ -17,7 +17,7 @@ from starlette.requests import Request
 
 from grid_api import database
 from grid_api.routers import accounts as accounts_router
-from grid_api.services import accounts, quota, service_limits, user_tokens
+from grid_api.services import accounts, alerts, quota, service_limits, user_tokens
 from grid_api.v2.schema import accounts as accounts_table
 from grid_api.v2.schema import metadata
 from grid_api.v2.schema import service_clients as service_clients_table
@@ -75,6 +75,31 @@ async def test_service_exchange_is_namespaced_and_short_lived(db):
         authorization=None,
     )
     assert same["account_id"] == result["account_id"]
+
+
+@pytest.mark.asyncio
+async def test_account_creation_emits_redacted_signup_alert(db, monkeypatch):
+    events = []
+    monkeypatch.setattr(alerts, "emit", lambda *args, **kwargs: events.append((args, kwargs)) or True)
+
+    account, _ = await accounts.create_account(
+        username="Private Person",
+        email="private@example.com",
+        oauth_sub="google-private-subject",
+        email_verified=True,
+        issue_initial_key=False,
+        grant_verified_welcome=False,
+    )
+
+    assert len(events) == 1
+    args, kwargs = events[0]
+    assert args[:3] == ("account_created", "success", "A new Grid account was created.")
+    rendered = str(kwargs)
+    assert "private@example.com" not in rendered
+    assert "google-private-subject" not in rendered
+    assert "Private Person" not in rendered
+    assert kwargs["fields"]["provider"] == "google"
+    assert kwargs["fields"]["account"] == alerts.opaque_id(account["id"])
 
 
 def test_user_token_signature_audience_expiry_and_step_up(monkeypatch):
@@ -199,15 +224,33 @@ async def test_service_creation_is_atomic_on_duplicate_id(db):
 class _LimitRedis:
     def __init__(self):
         self.used = 0
-        self.refs: set[str] = set()
+        self.refs: dict[str, str] = {}
 
-    async def eval(self, _script, _key_count, _spend_key, ref_key, amount, cap, _ttl):
+    async def get(self, key):
+        return self.refs.get(key)
+
+    async def eval(self, script, _key_count, _spend_key, ref_key, *args):
+        if script == service_limits._RELEASE_LUA:
+            expected, amount = args
+            if self.refs.get(ref_key) != expected:
+                return 0
+            self.used = max(self.used - int(amount), 0)
+            del self.refs[ref_key]
+            return 1
+        if script == service_limits._RECONCILE_LUA:
+            expected, reserved, keep, day = args
+            if self.refs.get(ref_key) != expected:
+                return 0
+            self.used = max(self.used - (int(reserved) - int(keep)), 0)
+            self.refs[ref_key] = f"{day}:{keep}"
+            return 1
+        amount, cap, _ttl, day = args
         if ref_key in self.refs:
             return 1
         if int(cap) > 0 and self.used + int(amount) > int(cap):
             return 0
         self.used += int(amount)
-        self.refs.add(ref_key)
+        self.refs[ref_key] = f"{day}:{amount}"
         return 1
 
 
@@ -228,7 +271,18 @@ async def test_service_spending_limits_are_idempotent_and_fail_closed(db, monkey
     assert await service_limits.authorize(user, 500, "job-1") == (True, None)
     assert await service_limits.authorize(user, 500, "job-1") == (True, None)
     assert redis.used == 500
+    assert await service_limits.reconcile("limits-test", "job-1", 200) is True
+    assert await service_limits.reconcile("limits-test", "job-1", 200) is True
+    assert redis.used == 200
+    assert await service_limits.authorize(user, 300, "job-release") == (True, None)
+    assert redis.used == 500
+    assert await service_limits.release("limits-test", "job-release") is True
+    assert await service_limits.release("limits-test", "job-release") is False
+    assert redis.used == 200
     allowed, reason = await service_limits.authorize(user, 501, "job-2")
+    assert allowed and reason is None
+    assert redis.used == 701
+    allowed, reason = await service_limits.authorize(user, 300, "job-over")
     assert not allowed and "daily" in reason
     allowed, reason = await service_limits.authorize(user, 601, "job-3")
     assert not allowed and "per-request" in reason

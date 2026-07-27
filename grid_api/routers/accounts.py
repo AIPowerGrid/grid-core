@@ -12,11 +12,14 @@ Key management (list/issue/revoke) authenticates with any active key on the
 account. Plaintext keys are returned exactly once and never stored.
 """
 
+import json
 import logging
 import os
 import re
 import uuid as uuid_mod
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlsplit
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -46,12 +49,30 @@ _NONCE_TTL = 300
 _NONCE_PREFIX = "grid:siwe_nonce:"
 
 
-async def _nonce_issue() -> str:
+async def _nonce_issue(value: dict | None = None, *, nonce: str | None = None) -> str:
     from ..redis_client import get_redis
 
-    nonce = uuid_mod.uuid4().hex
-    await get_redis().set(f"{_NONCE_PREFIX}{nonce}", "1", ex=_NONCE_TTL)
+    nonce = nonce or uuid_mod.uuid4().hex
+    stored = json.dumps(value, separators=(",", ":"), sort_keys=True) if value else "1"
+    await get_redis().set(f"{_NONCE_PREFIX}{nonce}", stored, ex=_NONCE_TTL)
     return nonce
+
+
+async def _nonce_peek(nonce: str) -> dict | None:
+    if not nonce:
+        return None
+    from ..redis_client import get_redis
+
+    raw = await get_redis().get(f"{_NONCE_PREFIX}{nonce}")
+    if not raw:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode()
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return {"kind": "legacy"}
+    return value if isinstance(value, dict) else {"kind": "legacy"}
 
 
 async def _nonce_consume(nonce: str) -> bool:
@@ -79,6 +100,13 @@ class WalletVerifyForm(BaseModel):
     signature: str
     address: str
     username: Optional[str] = None
+
+
+class WalletChallengeForm(BaseModel):
+    address: str
+    domain: str = Field(min_length=1, max_length=255)
+    uri: str = Field(min_length=1, max_length=2048)
+    chain_id: int = 8453
 
 
 class WalletLinkForm(BaseModel):
@@ -159,6 +187,80 @@ async def wallet_nonce(request: Request):
     return {"nonce": await _nonce_issue()}
 
 
+def _allowed_siwe_domain(domain: str, uri: str) -> bool:
+    domain = domain.strip().lower()
+    parsed = urlsplit(uri)
+    if not parsed.hostname or parsed.netloc.lower() != domain:
+        return False
+    local = parsed.hostname.lower() in {"localhost", "127.0.0.1", "::1"}
+    if parsed.scheme != "https" and not (local and parsed.scheme == "http"):
+        return False
+    configured = os.getenv(
+        "GRID_SIWE_ALLOWED_DOMAINS",
+        "console.aipowergrid.io,aipg.art,aipg.chat,aipg.music",
+    )
+    allowed = {item.strip().lower() for item in configured.split(",") if item.strip()}
+    return domain in allowed or local
+
+
+def _siwe_message(*, domain: str, address: str, uri: str, chain_id: int,
+                  nonce: str, issued_at: str, expiration_time: str) -> str:
+    return (
+        f"{domain} wants you to sign in with your Ethereum account:\n"
+        f"{address}\n\n"
+        "Sign in to AI Power Grid.\n\n"
+        f"URI: {uri}\n"
+        "Version: 1\n"
+        f"Chain ID: {chain_id}\n"
+        f"Nonce: {nonce}\n"
+        f"Issued At: {issued_at}\n"
+        f"Expiration Time: {expiration_time}"
+    )
+
+
+@router.post("/v1/accounts/wallet/challenge")
+@limiter.limit("30/minute")
+async def wallet_challenge(request: Request, form: WalletChallengeForm):
+    """Issue a domain-, address-, URI-, chain-, and time-bound EIP-4361 message."""
+    if not accounts_svc.is_valid_eth_address(form.address):
+        raise HTTPException(422, detail="Invalid wallet address")
+    if form.chain_id != 8453:
+        raise HTTPException(422, detail="Wallet sign-in requires Base chain ID 8453")
+    if not _allowed_siwe_domain(form.domain, form.uri):
+        raise HTTPException(422, detail="Wallet sign-in origin is not allowed")
+
+    nonce = uuid_mod.uuid4().hex
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    issued_at = now.isoformat().replace("+00:00", "Z")
+    expiration_time = (now + timedelta(seconds=_NONCE_TTL)).isoformat().replace("+00:00", "Z")
+    message = _siwe_message(
+        domain=form.domain.strip().lower(),
+        address=form.address,
+        uri=form.uri,
+        chain_id=form.chain_id,
+        nonce=nonce,
+        issued_at=issued_at,
+        expiration_time=expiration_time,
+    )
+    await _nonce_issue(
+        {
+            "kind": "siwe",
+            "address": form.address.lower(),
+            "domain": form.domain.strip().lower(),
+            "uri": form.uri,
+            "chain_id": form.chain_id,
+            "message": message,
+        },
+        nonce=nonce,
+    )
+    return {
+        "nonce": nonce,
+        "message": message,
+        "expires_in": _NONCE_TTL,
+        "chain_id": form.chain_id,
+    }
+
+
 @router.post("/v1/accounts/wallet/verify")
 @limiter.limit("10/minute")
 async def wallet_verify(request: Request, form: WalletVerifyForm):
@@ -171,16 +273,18 @@ async def wallet_verify(request: Request, form: WalletVerifyForm):
 
     m = re.search(r"Nonce: ([0-9a-fA-F]+)", form.message)
     nonce = m.group(1) if m else None
-    if not await _nonce_consume(nonce):
+    challenge = await _nonce_peek(nonce)
+    if not challenge:
         raise HTTPException(401, detail="Invalid or expired nonce. Please retry.")
 
-    # Bind the signed message to the EXACT canonical sign-in text (the client
-    # signs this verbatim). Without this, a signature the victim made elsewhere
-    # (another dApp's login, a token approval) that merely contains our nonce
-    # string could be replayed here to mint their session. Requiring the exact
-    # message eliminates that replay class. (Follow-up: upgrade to full EIP-4361
-    # with domain/issued-at when the console/gallery clients migrate.)
-    expected_message = f"Sign in to AIPG Grid\n\nNonce: {nonce}"
+    if challenge.get("kind") == "siwe":
+        expected_message = challenge.get("message")
+        if challenge.get("address") != form.address.lower():
+            raise HTTPException(401, detail="Sign-in challenge belongs to a different wallet.")
+    elif os.getenv("GRID_LEGACY_SIWE_VERIFY_ENABLED", "0").lower() in {"1", "true", "yes", "on"}:
+        expected_message = f"Sign in to AIPG Grid\n\nNonce: {nonce}"
+    else:
+        raise HTTPException(401, detail="Legacy wallet sign-in is disabled; request a SIWE challenge.")
     if form.message != expected_message:
         raise HTTPException(401, detail="Unexpected sign-in message; refusing to verify.")
 
@@ -193,6 +297,8 @@ async def wallet_verify(request: Request, form: WalletVerifyForm):
         raise HTTPException(401, detail="Signature verification failed.")
     if recovered.lower() != form.address.lower():
         raise HTTPException(401, detail="Signature does not match the address.")
+    if not await _nonce_consume(nonce):
+        raise HTTPException(401, detail="Sign-in challenge was already used. Please retry.")
 
     wallet = recovered.lower()
     account = await accounts_svc.get_account_by_wallet(wallet)
@@ -1213,7 +1319,8 @@ async def get_credits(
     semantics), gated on GRID_FREE_SPENDABLE_LIVE. `free.active` below reflects
     that flag: false → free is display-only and total_spendable = paid only;
     true → charges draw free-first and total_spendable includes it.
-    charging_enabled is the overall live gate (dark = nothing is charged).
+    charging_enabled is the effective gate for this account. charging_mode
+    exposes the operator rollout state without exposing the allowlist.
     """
     user = await _require_v2(
         apikey,
@@ -1266,7 +1373,8 @@ async def get_credits(
         # promo + daily free + paid after all shadow gates are enabled.
         "total_preview_micro": total,
         "total_preview_usd": usd(total),
-        "charging_enabled": credits_svc.CHARGING_ENABLED,  # false while dark
+        "charging_enabled": credits_svc.charging_enabled_for(user),
+        "charging_mode": credits_svc.charging_mode(),
     }
 
 

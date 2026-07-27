@@ -26,7 +26,7 @@ import os
 import httpx
 from fastapi import HTTPException
 
-from . import credits
+from . import alerts, credits
 
 logger = logging.getLogger("grid_api.deposits")
 
@@ -77,6 +77,13 @@ async def verify_and_credit(tx_hash: str, account: dict) -> dict:
         receipt = await _rpc("eth_getTransactionReceipt", [tx_hash])
     except Exception as e:
         logger.warning("deposit rpc failed for %s: %s", tx_hash, e)
+        alerts.emit(
+            "deposit_rpc_failed",
+            "critical",
+            "A USDC deposit claim could not be verified against Base.",
+            fields={"asset": "USDC", "tx": alerts.opaque_id(tx_hash), "error_type": type(e).__name__},
+            dedupe_key="deposit-rpc:usdc",
+        )
         raise HTTPException(502, detail="Could not reach Base to verify the transaction.")
     if not receipt:
         raise HTTPException(400, detail="Transaction not found or not yet mined.")
@@ -115,12 +122,36 @@ async def verify_and_credit(tx_hash: str, account: dict) -> dict:
     if not acct_wallet:
         raise HTTPException(403, detail="Link a wallet (sign in with your wallet) before claiming deposits.")
     if acct_wallet != sender:
+        alerts.emit(
+            "deposit_wallet_mismatch",
+            "warning",
+            "A deposit claim was rejected because its sender did not match the authenticated wallet.",
+            fields={
+                "asset": "USDC",
+                "account": alerts.opaque_id(account.get("account_id")),
+                "tx": alerts.opaque_id(tx_hash),
+            },
+            dedupe_key=f"deposit-wallet-mismatch:{alerts.opaque_id(account.get('account_id'))}",
+        )
         raise HTTPException(403, detail="This deposit was sent from a different wallet than your account's.")
 
     applied = await credits.credit(
         account["account_id"], value_micro, reason="usdc_deposit", ref=f"usdc:{tx_hash}"
     )
     balance = await credits.get_balance(account["account_id"])
+    if applied:
+        alerts.emit(
+            "deposit_credited",
+            "success",
+            "A verified Base deposit was credited to a Grid account.",
+            fields={
+                "asset": "USDC",
+                "account": alerts.opaque_id(account["account_id"]),
+                "tx": alerts.opaque_id(tx_hash),
+                "amount_micro": value_micro,
+            },
+            dedupe_key=f"deposit-credited:usdc:{alerts.opaque_id(tx_hash)}",
+        )
     return {
         "credited": bool(applied),
         "already_claimed": not applied,
@@ -152,6 +183,13 @@ async def verify_and_credit_eth(tx_hash: str, account: dict) -> dict:
         receipt = await _rpc("eth_getTransactionReceipt", [tx_hash])
     except Exception as e:
         logger.warning("eth deposit rpc failed for %s: %s", tx_hash, e)
+        alerts.emit(
+            "deposit_rpc_failed",
+            "critical",
+            "An ETH deposit claim could not be verified against Base.",
+            fields={"asset": "ETH", "tx": alerts.opaque_id(tx_hash), "error_type": type(e).__name__},
+            dedupe_key="deposit-rpc:eth",
+        )
         raise HTTPException(502, detail="Could not reach Base to verify the transaction.")
     if not tx or not receipt:
         raise HTTPException(400, detail="Transaction not found or not yet mined.")
@@ -181,6 +219,17 @@ async def verify_and_credit_eth(tx_hash: str, account: dict) -> dict:
     if not acct_wallet:
         raise HTTPException(403, detail="Link a wallet (sign in with your wallet) before claiming deposits.")
     if acct_wallet != sender:
+        alerts.emit(
+            "deposit_wallet_mismatch",
+            "warning",
+            "A deposit claim was rejected because its sender did not match the authenticated wallet.",
+            fields={
+                "asset": "ETH",
+                "account": alerts.opaque_id(account.get("account_id")),
+                "tx": alerts.opaque_id(tx_hash),
+            },
+            dedupe_key=f"deposit-wallet-mismatch:{alerts.opaque_id(account.get('account_id'))}",
+        )
         raise HTTPException(403, detail="This deposit was sent from a different wallet than your account's.")
 
     # Price ETH→USD at claim time (Chainlink on Base). Never guess a price.
@@ -189,6 +238,13 @@ async def verify_and_credit_eth(tx_hash: str, account: dict) -> dict:
         px_micro = await holdings.eth_usd_micro()  # micro-USD per 1 ETH
     except Exception as e:
         logger.warning("eth/usd price read failed for deposit %s: %s", tx_hash, e)
+        alerts.emit(
+            "deposit_oracle_failed",
+            "critical",
+            "An ETH deposit could not be priced from the Base Chainlink feed.",
+            fields={"asset": "ETH", "tx": alerts.opaque_id(tx_hash), "error_type": type(e).__name__},
+            dedupe_key="deposit-oracle:eth-usd",
+        )
         raise HTTPException(502, detail="Could not read the ETH/USD price feed; retry shortly.")
     value_micro = value_wei * px_micro // (10 ** 18)
     if value_micro <= 0:
@@ -198,6 +254,19 @@ async def verify_and_credit_eth(tx_hash: str, account: dict) -> dict:
         account["account_id"], value_micro, reason="eth_deposit", ref=f"eth:{tx_hash}"
     )
     balance = await credits.get_balance(account["account_id"])
+    if applied:
+        alerts.emit(
+            "deposit_credited",
+            "success",
+            "A verified Base deposit was credited to a Grid account.",
+            fields={
+                "asset": "ETH",
+                "account": alerts.opaque_id(account["account_id"]),
+                "tx": alerts.opaque_id(tx_hash),
+                "amount_micro": value_micro,
+            },
+            dedupe_key=f"deposit-credited:eth:{alerts.opaque_id(tx_hash)}",
+        )
     return {
         "credited": bool(applied),
         "already_claimed": not applied,

@@ -20,20 +20,21 @@ to a **grid account** and call the grid; the grid prices, meters, debits, and
 enforces limits. One USD balance per account, spendable everywhere; funded by
 many rails (Stripe, USDC/ETH/AIPG on Base, x402).
 
-**Charging is currently OFF** (`GRID_CHARGING_ENABLED=0`): the metering path runs
+**Charging is currently OFF** (`GRID_CHARGING_MODE=off`): the metering path runs
 in **dry-run** — it computes and logs what it *would* charge but never debits or
-blocks. Nothing in production moves customer money today. We want this audited
-**before** we flip it live.
+blocks. `allowlist` is the mandatory first live stage; `on` is the broad
+rollout. The old `GRID_CHARGING_ENABLED` boolean is only a compatibility
+fallback.
 
 ---
 
-## GO-LIVE BLOCKER CHECKLIST (from the audit — must be ✅ before `GRID_CHARGING_ENABLED=1`)
+## GO-LIVE BLOCKER CHECKLIST (must be complete before `GRID_CHARGING_MODE=on`)
 
 The independent review (2026-06) confirmed the brief asks the right questions and
 that several risks are **already real in code** (they only bite once charging is
 on). These are hard gates, not suggestions:
 
-- [~] **B1 (SUBSTANTIALLY DONE — core reserve path landed b8d4ca2; second pass
+- [x] **B1 (DONE — core reserve path landed b8d4ca2; second pass
   hardened the leaks; fifth pass `b02ada2c` added FREE-FIRST: authorize_request/
   authorize_media draw the daily free allowance before paid, split durable in
   grid_reservations.free_micro, settlement restores free-to-free / refunds
@@ -80,16 +81,21 @@ on). These are hard gates, not suggestions:
   when a reservation exists but is no longer held ('stale_no_payout'), so a
   refunded job can't later mint a worker payout. Alembic 0001 genesis brought to
   parity with schema.py (grid_ledger.job_id UNIQUE — the idempotency guard — plus
-  duration/ttft). **Remaining before flip:** Postgres concurrency test (atomicity
-  proven on SQLite only); media price peg.
+  duration/ttft). Real Postgres 16 tests now prove overdraft and duplicate-ref
+  behavior. Existing reservations remain settleable or refundable after the
+  operator disables new charging.
 - [~] **B2 (SUBSTANTIALLY DONE).** Account-admin actions
   (change payout wallet, issue/revoke keys) now require a wallet-proven **session
   key** (`api_keys.is_session`, set only by SIWE wallet-login / dashboard-login;
   `issue_key` forces it false so it isn't caller-settable). A leaked inference key
   can no longer redirect earnings or manage keys. API keys now carry capability
   scopes and Core can bootstrap bridge keys limited to `account.read`,
-  `inference.submit`, and `identity.assert`. **Still TODO:** split the remaining session-level account
-  authority into finer billing/worker scopes after client migration.
+  `inference.submit`, and `identity.assert`. Wallet login now has a strict
+  EIP-4361 challenge that binds the selected address, allowlisted frontend
+  domain/URI, Base chain id, issue/expiry time, and single-use nonce; generic
+  sign-in verification is default-off. **Still TODO:** deploy Core and the
+  Console challenge client together, then split the remaining session-level
+  account authority into finer billing/worker scopes.
 - [x] **B3a (P0 FIXED `cf0cfd08`, 2026-07-08) — Identity-bridge confused deputy.**
   `POST /v1/accounts/session` OR-matched oauth_sub|wallet|email then `.first()`
   (no ORDER BY) and minted a dashboard-session key for the arbitrary winner.
@@ -124,24 +130,28 @@ on). These are hard gates, not suggestions:
   never the worker/backend `usage`. They reserve before dispatch (402 on
   insufficient funds, native error envelope) and reconcile/refund on the terminal
   event or in a `finally` on disconnect, same as chat.
-  **Remaining before flip:** peg media prices (currently placeholders); the
-  per-format flatten is a tiktoken proxy (o200k_base), not each backend's native
-  tokenizer, so counts are approximate — acceptable as a billing proxy, document it.
-- [x] **B5 (DONE, b8d4ca2) — Default-deny unpriced models in enforce mode.** Flip
-  `BLOCK_UNPRICED` semantics so an unpriced/renamed model can't be free when
-  charging is on.
+  Price coverage is now modality-specific, production display/recipe names map
+  through explicit aliases, omitted video duration bills the selected recipe's
+  baked graph default, and ACE-Step uses the approved low-cost launch peg.
+  **Remaining before flip:** approve the provisional Qwen/SmolLM/media pegs from
+  measured worker economics; the per-format flatten is a tiktoken proxy
+  (o200k_base), not each backend's native tokenizer, so counts are approximate.
+- [x] **B5 (DONE, b8d4ca2 + launch-hardening follow-up) — Default-deny unpriced
+  model/modality pairs in enforce mode.** A renamed model or a model priced only
+  for another modality cannot become free. Positive sub-micro quotes round up to
+  one ledger unit.
 - [x] **B6 (code-guard DONE, b8d4ca2; hard DB constraint → B7) — Idempotency is structural, not caller-discipline.** `ref` **non-null
   required** for value-moving ledger rows (Postgres allows multiple NULLs through
   the unique index); validate in code; tests.
-- [~] **B7 (PARTIAL — credit-ledger `ref` NOT NULL landed, alembic `0008` / `229bca16`).**
+- [x] **B7 (DONE — credit-ledger `ref` NOT NULL landed, alembic `0008` / `229bca16`).**
   `grid_credit_ledger.ref` is now DB-enforced NOT NULL (+ existing UNIQUE), so the
   value-moving idempotency invariant is reproducible in migrations, not just guarded
   in code. Since extended: `0009` payout-preference cols (HOT-auth-path — must run
   before the code that SELECTs them), `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` grid_reservations.free_micro; `0008` made SQLite-safe (batch_alter_table).
-  **Still TODO for full B7:** reconcile the rest of Alembic with `schema.py`
-  metadata (`grid_ledger.job_id` UNIQUE, telemetry columns) and add a drift check so
-  create_all-vs-migration divergence can't recur.
+  Genesis and follow-up migrations now match `schema.py`. CI creates a clean
+  Postgres 16 database, runs `alembic upgrade head`, and requires `alembic
+  check` to report no generated operations before the full Grid suite.
 - [~] **B8 (SUBSTANTIALLY DONE) — Sybil / free-credit hard rules.** Done:
   canonical provider identity uniqueness, per-key rate limits, a finite welcome
   campaign budget, verified-Google gating for welcome plus daily baseline, and
@@ -159,17 +169,40 @@ on). These are hard gates, not suggestions:
   dispatch, stream reserve/refund, media-job charging, unpriced blocked in
   enforce mode.
 
-**Recommended build order:** B1+B6+B5 (+ tests) → B4 (universal metering) →
-B2+B3 (scoped keys + signed bridge identity) → B7 → B8.
+### 2026-07 demand-launch hardening (code complete; deploy/canary pending)
 
-The single most security-sensitive new piece is the **identity bridge** for chat
-(trusting a caller-supplied user header). Please focus there.
+- Positive purchased-credit accounts bypass only the free request-count quota;
+  the atomic prepaid reserve remains the authoritative spend gate.
+- Bounded service ceilings now reserve by job id, release on failed
+  authorization/no-work terminals, and reconcile max text exposure to actual
+  spend after the SQL terminal commit.
+- Core strict-SIWE tests cover cross-domain rejection, exact-message matching,
+  non-burning invalid attempts, and single-use replay rejection. The Console
+  client signs the Core-issued message verbatim.
+- Charging now has `off | allowlist | on` rollout modes. Account/service cohorts
+  can be selected and optionally narrowed to exact model IDs.
+- A read-only monitor checks purchased-balance/ledger equality, negative
+  balances, invalid reservation splits, and aging holds. Redacted, rate-limited
+  Discord alerts cover signup, deposits, reservations, settlement, sweepers,
+  invariants, HTTP 500s, and rate limiting.
+- Global charging remains off until production deploy order, price approval,
+  funding UX, and the allowlisted canary in
+  `deploy/DEMAND_BILLING_RUNBOOK.md` are complete.
+
+**Remaining launch order:** deploy Core dark → deploy strict-SIWE Console →
+verify Google/wallet account continuity → run one funded allowlisted canary →
+approve price pegs and funding UX → consider broad mode.
+
+The most security-sensitive remaining integration is frontend identity
+delegation: Core must verify global Google/SIWE proof itself, while service
+principals may delegate only their own namespaced application subjects.
 
 ---
 
-## 1. What is BUILT today (shipped dark)
+## 1. What is BUILT today (release candidate, still dark)
 
-All in `system-core/grid_api`, deployed to prod, gated OFF.
+All in `grid-core/grid_api`; production deployment state must be checked against
+the immutable release SHA rather than inferred from this document.
 
 - **Credit ledger** (`services/credits.py`, `v2/schema.py`):
   - `grid_credits(account_id PK, balance_micro BIGINT, updated)` — balance cache.
@@ -180,19 +213,19 @@ All in `system-core/grid_api`, deployed to prod, gated OFF.
     IntegrityError → treated as "already applied"). `debit()` is
     **overdraft-safe + race-safe** via a conditional `UPDATE … WHERE balance >=
     amount` (rowcount 0 ⇒ insufficient, ledger insert rolled back).
-- **Pricing** (`services/pricing.py`): USD-native, "half the cheapest
-  competitor", per-model; `quote_text/image/video` → micro-USD.
+- **Pricing** (`services/pricing.py`): USD-native, per model and modality;
+  `quote_text/image/video/audio/3d` returns integer micro-USD. Some launch pegs
+  remain provisional pending measured worker economics.
 - **Split knobs** (`services/economics.py`): protocol/sentinel/worker split (bps),
   worker USDC/AIPG payout split, AIPG-payment bonus, buyback cap — all integer
   bps, splits sum to the whole (no dust). Currently config-of-record, not yet
   consumed by payout.
-- **Request-path metering** (`routers/openai.py::_meter_charge` →
-  `credits.charge_request`): called once per chat completion (stream +
-  non-stream). Returns `free | legacy | dry_run | ok | already | insufficient`.
-  **In dry-run it logs `would_charge` and returns; never debits/blocks.**
-- **Accounts/identity**: `/v1/accounts/session` (internal-token find-or-create +
-  per-user key), per-account API keys, `/v1/account`, `/v1/account/workers`.
-  Console uses this end-to-end.
+- **Request-path metering**: all text and media submission paths call
+  `authorize_request` or `authorize_media` before dispatch. Selected requests
+  write durable holds; non-selected requests remain dry-run.
+- **Accounts/identity**: canonical identities, strict Core-issued SIWE
+  challenges, Google exchange, scoped per-account keys, and bounded service
+  principals. The internal-token session endpoint is retired by default.
 
 **Built ship-dark / migrating:** durable promotional grants, reduced daily free
 credit, three-pocket reserve/reconcile, canonical identities and merge aliases,
@@ -202,45 +235,29 @@ x402, chat conversion UX, and developer revenue-share.
 
 ---
 
-## 2. The identity keystone — and its threat model (review this hardest)
+## 2. The identity keystone — and its threat model
 
-**Problem.** The chat (Onyx fork) currently calls the grid with **one shared
-`AIPG_GRID_API_KEY`** configured as its LLM provider. The grid therefore sees
-*all* chat traffic as a single account — per-user metering/credits/limits are
-impossible as-is.
+Global identity authority belongs to Core. Google tokens are verified against
+an allowlisted service audience, and wallet login signs an exact Core-issued
+EIP-4361 message with a single-use nonce. Both resolve to a canonical Grid
+account and produce short-lived native user tokens.
 
-**RESOLVED (post-audit): signed user assertions, not a raw header.** The earlier
-"trusted `X-Grid-User` header" idea is **superseded** (it also contradicted
-`GRID_ECONOMICS.md`, which proposed per-user keys). Adopted model = **B2 + B3**:
-the chat authenticates with a **scoped bridge key** (`account.read` +
-`inference.submit` + `identity.assert` only) and sends a **short-lived signed assertion**
-(`iss/sub/aud/exp/nonce`) identifying the end user; the grid verifies the
-signature and meters/attributes to that user. No raw-header trust; the bridge
-key cannot mint keys, change payout wallets, or manage workers. The original
-header proposal is kept below only as the rejected baseline / threat reference.
+First-party backends authenticate with a scoped service key. They may exchange
+only a namespaced application subject (for example `gallery:<local-id>`) and are
+bounded by per-request and daily monetary ceilings. A service key cannot assert
+an arbitrary global Google subject or wallet and cannot manage the delegated
+user's account.
 
-**Rejected baseline — trusted-caller + user header.** The chat keeps its shared key
-but passes the signed-in user's identity per call (`X-Grid-User: <onyx-user-id>`).
-The grid resolves that to a grid account and meters/enforces against it.
+**Threat model:**
 
-**Threat model (the crux):**
-- **Spoofing / cross-user billing.** If *any* caller could set `X-Grid-User`,
-  they could bill other users or evade their own limits. **Mitigation
-  (mandatory):** the header is honored **only** when the request is authenticated
-  by a key explicitly flagged as a *trusted front-end* key — never by ordinary
-  user/API keys. Ordinary keys ignore the header and bill themselves. **Auditor:
-  verify there is no path where an untrusted key's `X-Grid-User` is honored.**
-- **Shared-key blast radius.** The chat's shared key becomes a high-value secret
-  (it can act on behalf of any user). Requires: secret hygiene, rotation, and
-  scoping (trusted-front-end keys should be able to *meter as a user* but not,
-  e.g., mint keys or change payout wallets for that user).
-- **Honest-but-curious chat.** We trust our own front-end to assert the right
-  user. Acceptable for first-party surfaces; **not** a model we'd extend to
-  third parties (they get their own per-account keys instead).
-- **Alternative considered:** provision a real grid key per chat user and thread
-  it through Onyx's LLM call path. Stronger isolation, much more invasive to
-  Onyx (one-key-per-provider model). We chose the header approach for first-party
-  surfaces; auditor input welcome on whether the isolation tradeoff is acceptable.
+- A stolen service key can spend only within its configured ceilings, but it can
+  impersonate that service's local subjects. Rotate it and audit service events.
+- A frontend must not send raw email, wallet, or account IDs as billing
+  authority. Core accepts only its verified proof/token formats.
+- Linking service, Google, and wallet identities must require proof of both
+  sides and must conserve balances through canonical account merges.
+- Long-lived service credentials stay server-side. Browsers receive only
+  short-lived user tokens and never the service key.
 
 ---
 
@@ -288,9 +305,8 @@ The grid resolves that to a grid account and meters/enforces against it.
    (claw back credits? go negative? freeze?).
 8. **Rounding / FX.** All integer micro-USD; swaps introduce slippage. Confirm no
    rounding path lets value be created or destroyed across credit↔debit↔payout.
-9. **Dry-run → live cutover.** The flip is a single env flag. What's the rollback
-   if pricing/metering is wrong under real traffic? (We've been observing dry-run
-   logs against prod traffic first.)
+9. **Dry-run → live cutover.** Review the `off → allowlist → on` policy, cohort
+   matching, kill switch, existing-hold behavior, and required canary evidence.
 10. **Supply-side coupling.** Worker payouts (separate settlement docs) are the
     other half; confirm demand-side revenue and supply-side payout can't be
     conflated or double-counted.
@@ -311,16 +327,16 @@ stake/slash is the load-bearing token utility. Full detail in
 
 ## 6. Open questions for the auditor
 
-- Is the **trusted-header** identity model acceptable for first-party front-ends,
-  or do you require per-user keys / signed user assertions even there?
+- Are Core-verified Google/SIWE plus bounded, namespaced service delegation
+  sufficient for every first-party surface?
 - Sybil/abuse controls for **free credits** — minimum bar before going live?
 - **Refund/chargeback** policy for Stripe and its credit-clawback semantics.
 - **AIPG pricing** on a thin pool — required TWAP window + manipulation bounds,
   or should AIPG deposits be disabled until liquidity deepens?
-- Cutover gating — what evidence from dry-run would you require before
-  `GRID_CHARGING_ENABLED=1`?
-- Key scoping — should "trusted front-end" be a new key class with a restricted
-  capability set (meter-as-user only)?
+- Cutover gating — what allowlisted canary evidence is required before
+  `GRID_CHARGING_MODE=on`?
+- Are current service-client scopes and monetary ceilings narrow enough for each
+  frontend's actual authority?
 
 ---
 
