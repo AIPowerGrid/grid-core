@@ -12,17 +12,21 @@ overdraw. Skipped unless CREDITS_TEST_DB_URL points at a real Postgres.
 import asyncio
 import os
 import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from grid_api import database
-from grid_api.services import credits, identities, pricing, x402_payments
+from grid_api.services import credits, deposits, identities, pricing, x402_payments
 from grid_api.v2.schema import accounts as accounts_t
+from grid_api.v2.schema import deposits as deposits_t
 from grid_api.v2.schema import metadata as v2_metadata
+from grid_api.v2.schema import x402_payments as x402_payments_t
 
 
 async def _seed_account() -> uuid.UUID:
@@ -164,3 +168,103 @@ async def test_x402_authorization_cannot_open_multiple_jobs_under_race(pg, monke
 
     assert sum(1 for result in results if result["ok"]) == 1, results
     assert sum(1 for result in results if result["status"] == "conflict") == 19, results
+
+
+@pytest.mark.asyncio
+async def test_x402_settlement_attempt_is_claimed_once_under_race(pg, monkeypatch):
+    payer = "0x1111111111111111111111111111111111111111"
+    usdc = "0x2222222222222222222222222222222222222222"
+    treasury = "0x3333333333333333333333333333333333333333"
+    model = "gpt-oss-120b"
+    job_id = str(uuid.uuid4())
+    maximum = pricing.quote_text(model, 100, 500)
+    actual = pricing.quote_text(model, 100, 50)
+    monkeypatch.setattr(x402_payments, "ENABLED", True)
+    monkeypatch.setattr(x402_payments, "NETWORK", "eip155:8453")
+    monkeypatch.setattr(x402_payments, "USDC", usdc)
+    monkeypatch.setattr(x402_payments, "PAY_TO", treasury)
+    payload = SimpleNamespace(
+        payload={"permit2Authorization": {"from": payer, "nonce": "one-attempt"}},
+    )
+    requirements = SimpleNamespace(
+        network="eip155:8453",
+        asset=usdc,
+        pay_to=treasury,
+        amount=str(maximum),
+    )
+    assert (
+        await credits.authorize_x402_request(
+            model,
+            100,
+            500,
+            job_id,
+            payment_payload=payload,
+            payment_requirements=requirements,
+        )
+    )["ok"]
+
+    context = SimpleNamespace(
+        requirements=SimpleNamespace(amount=str(actual)),
+        transport_context=SimpleNamespace(
+            response_headers={"X-Grid-Job-ID": job_id},
+        ),
+    )
+    results = await asyncio.gather(
+        *[x402_payments._before_settle(context) for _ in range(20)],
+        return_exceptions=True,
+    )
+    assert sum(result is None for result in results) == 1
+    assert sum(isinstance(result, RuntimeError) for result in results) == 19
+
+    async with await database.new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(
+                    x402_payments_t.c.status,
+                    x402_payments_t.c.settled_micro,
+                    x402_payments_t.c.attempts,
+                ).where(x402_payments_t.c.job_id == job_id),
+            )
+        ).one()
+    assert row == ("settling", actual, 1)
+
+
+@pytest.mark.asyncio
+async def test_usdc_daily_caps_hold_under_concurrent_deposits(pg, monkeypatch):
+    aid = await _seed_account()
+    wallet = "0x1111111111111111111111111111111111111111"
+    treasury = "0x2222222222222222222222222222222222222222"
+    token = "0x3333333333333333333333333333333333333333"
+    per_deposit = 1_000
+    allowed = 5
+    monkeypatch.setattr(deposits, "CHAIN_ID", 8453)
+
+    async def fund(index: int):
+        return await deposits._record_and_credit(
+            account={"account_id": aid, "wallet": wallet},
+            asset="USDC",
+            token_address=token,
+            tx_hash="0x" + f"{index:064x}",
+            block_number=100 + index,
+            sender=wallet,
+            treasury=treasury,
+            amount_raw=per_deposit,
+            decimals=6,
+            price_micro=1_000_000,
+            price_source="usdc:1:1",
+            price_timestamp=datetime.now(UTC),
+            price_block=100 + index,
+            credited_micro=per_deposit,
+            caps=(per_deposit, per_deposit * allowed, per_deposit * allowed),
+        )
+
+    results = await asyncio.gather(
+        *[fund(index) for index in range(20)],
+        return_exceptions=True,
+    )
+    assert sum(isinstance(result, tuple) and result[0] for result in results) == allowed
+    assert sum(isinstance(result, HTTPException) for result in results) == 20 - allowed
+    assert await credits.get_balance(aid) == per_deposit * allowed
+    async with await database.new_session() as session:
+        count = await session.scalar(sa.select(sa.func.count()).select_from(deposits_t))
+    assert count == allowed

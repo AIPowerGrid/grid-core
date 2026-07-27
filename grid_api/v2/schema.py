@@ -550,10 +550,10 @@ reservations = sa.Table(
 
 
 # x402 is a post-response on-chain settlement rail. A verified authorization is
-# recorded before dispatch, then an SDK after-settle hook records the actual USDC
-# transfer. Worker payout aggregation excludes x402 jobs until this row is
-# `settled`, so a verified signature or failed facilitator call cannot mint a
-# worker payout.
+# recorded before dispatch. The before-settle hook durably records the exact
+# attempted amount before the facilitator can touch chain. Facilitator success
+# becomes `reported`; only independent exact-transfer verification moves it to
+# `settled`. Worker payout aggregation excludes every other state.
 x402_payments = sa.Table(
     "grid_x402_payments",
     metadata,
@@ -568,6 +568,8 @@ x402_payments = sa.Table(
     sa.Column("tx_hash", sa.String(80), nullable=True),
     sa.Column("status", sa.String(16), nullable=False, default="verified", index=True),
     sa.Column("error", sa.String(255), nullable=True),
+    sa.Column("attempts", sa.Integer, nullable=False, server_default=sa.text("0"), default=0),
+    sa.Column("last_attempt", sa.DateTime(timezone=True), nullable=True),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
     sa.Column("settled", sa.DateTime(timezone=True), nullable=True),
     sa.CheckConstraint("authorized_micro > 0", name="ck_grid_x402_positive_authorization"),

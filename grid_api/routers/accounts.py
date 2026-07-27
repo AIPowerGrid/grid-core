@@ -1318,6 +1318,21 @@ async def claim_eth_deposit(
     return await deposits.verify_and_credit_eth(form.tx_hash, user)
 
 
+@router.post("/v1/account/deposits/claim-eth-converted")
+@limiter.limit("20/minute")
+async def claim_converted_eth_deposit(
+    request: Request,
+    form: ClaimDepositForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Credit actual USDC delivered by a confirmed Base ETH swap transaction."""
+    user = await _require_v2(apikey, authorization)
+    from ..services import deposits
+
+    return await deposits.verify_and_credit_converted_eth(form.tx_hash, user)
+
+
 @router.get("/v1/account/deposits/config")
 async def get_deposit_config(
     apikey: Optional[str] = Header(None),

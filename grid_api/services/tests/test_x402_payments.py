@@ -25,6 +25,8 @@ MODEL = "gpt-oss-120b"
 PAYER = "0x1111111111111111111111111111111111111111"
 USDC = "0x2222222222222222222222222222222222222222"
 TREASURY = "0x3333333333333333333333333333333333333333"
+TX_HASH = "0x" + "ab" * 32
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
 
 @pytest_asyncio.fixture
@@ -70,9 +72,44 @@ def _payment(amount: int):
     return payload, requirements
 
 
+def _topic(address: str) -> str:
+    return "0x" + "0" * 24 + address[2:]
+
+
 async def _rows(table):
     async with await database.new_session() as session:
         return (await session.execute(sa.select(table))).all()
+
+
+def _hook_context(job_id: str, amount: int, *, transaction: str | None = None):
+    return SimpleNamespace(
+        requirements=SimpleNamespace(amount=str(amount)),
+        transport_context=SimpleNamespace(
+            response_headers={"X-Grid-Job-ID": job_id},
+        ),
+        result=SimpleNamespace(transaction=transaction),
+        error=RuntimeError("facilitator outcome ambiguous"),
+    )
+
+
+async def _terminal_payment(job_id: str, maximum: int, actual: int) -> None:
+    payload, requirements = _payment(maximum)
+    result = await credits.authorize_x402_request(
+        MODEL,
+        100,
+        500,
+        job_id,
+        payment_payload=payload,
+        payment_requirements=requirements,
+    )
+    assert result["ok"] is True
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(reservations)
+            .where(reservations.c.job_id == job_id)
+            .values(status="settled", actual_micro=actual, settled=datetime.now(UTC)),
+        )
+        await session.commit()
 
 
 def test_cdp_headers_are_short_lived_and_bound_to_each_endpoint(monkeypatch):
@@ -315,3 +352,235 @@ async def test_actual_cost_is_recorded_and_payout_waits_for_onchain_settlement(d
             "payout_address": PAYER,
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_settlement_hooks_persist_attempt_before_receipt(db, enabled):
+    job_id = str(uuid.uuid4())
+    maximum = pricing.quote_text(MODEL, 100, 500)
+    actual = pricing.quote_text(MODEL, 100, 50)
+    await _terminal_payment(job_id, maximum, actual)
+    context = _hook_context(job_id, actual, transaction=TX_HASH)
+
+    await x402_payments._before_settle(context)
+    attempted = (await _rows(payments))[0]
+    assert attempted.status == "settling"
+    assert attempted.settled_micro == actual
+    assert attempted.attempts == 1
+    assert attempted.last_attempt is not None
+
+    await x402_payments._after_settle(context)
+    reported = (await _rows(payments))[0]
+    assert reported.status == "reported"
+    assert reported.tx_hash == TX_HASH
+    assert await x402_payments.settled_amount(job_id) is None
+
+
+@pytest.mark.asyncio
+async def test_reported_payment_requires_independent_base_proof(
+    db,
+    enabled,
+    monkeypatch,
+):
+    job_id = str(uuid.uuid4())
+    maximum = pricing.quote_text(MODEL, 100, 500)
+    actual = pricing.quote_text(MODEL, 100, 50)
+    await _terminal_payment(job_id, maximum, actual)
+    context = _hook_context(job_id, actual, transaction=TX_HASH)
+    await x402_payments._before_settle(context)
+    await x402_payments._after_settle(context)
+    receipt = {
+        "status": "0x1",
+        "blockNumber": "0x64",
+        "logs": [
+            {
+                "address": USDC,
+                "topics": [TRANSFER_TOPIC, _topic(PAYER), _topic(TREASURY)],
+                "data": hex(actual),
+            },
+        ],
+    }
+
+    async def confirmed(_tx_hash, _label):
+        return {"hash": TX_HASH}, receipt, 100
+
+    async def block_timestamp(_block):
+        return datetime.now(UTC)
+
+    from grid_api.services import deposits
+
+    monkeypatch.setattr(deposits, "_confirmed_transaction", confirmed)
+    monkeypatch.setattr(deposits, "_block_timestamp", block_timestamp)
+    assert await x402_payments.verify_reported_settlements() == {
+        "settled": 1,
+        "pending": 0,
+        "manual_review": 0,
+    }
+    assert (await _rows(payments))[0].status == "settled"
+    assert await x402_payments.settled_amount(job_id) == actual
+
+
+@pytest.mark.asyncio
+async def test_unproven_facilitator_report_goes_to_manual_review(
+    db,
+    enabled,
+    monkeypatch,
+):
+    job_id = str(uuid.uuid4())
+    maximum = pricing.quote_text(MODEL, 100, 500)
+    actual = pricing.quote_text(MODEL, 100, 50)
+    await _terminal_payment(job_id, maximum, actual)
+    context = _hook_context(job_id, actual, transaction=TX_HASH)
+    await x402_payments._before_settle(context)
+    await x402_payments._after_settle(context)
+    receipt = {
+        "status": "0x1",
+        "blockNumber": "0x64",
+        "logs": [
+            {
+                "address": USDC,
+                "topics": [TRANSFER_TOPIC, _topic(PAYER), _topic(TREASURY)],
+                "data": hex(actual - 1),
+            },
+        ],
+    }
+
+    async def confirmed(_tx_hash, _label):
+        return {"hash": TX_HASH}, receipt, 100
+
+    async def block_timestamp(_block):
+        return datetime.now(UTC)
+
+    from grid_api.services import deposits
+
+    monkeypatch.setattr(deposits, "_confirmed_transaction", confirmed)
+    monkeypatch.setattr(deposits, "_block_timestamp", block_timestamp)
+    assert await x402_payments.verify_reported_settlements() == {
+        "settled": 0,
+        "pending": 0,
+        "manual_review": 1,
+    }
+    assert (await _rows(payments))[0].status == "manual_review"
+    assert await x402_payments.settled_amount(job_id) is None
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_settlement_never_auto_retries_or_unlocks_payout(db, enabled):
+    job_id = str(uuid.uuid4())
+    maximum = pricing.quote_text(MODEL, 100, 500)
+    actual = pricing.quote_text(MODEL, 100, 50)
+    await _terminal_payment(job_id, maximum, actual)
+    context = _hook_context(job_id, actual)
+
+    await x402_payments._before_settle(context)
+    await x402_payments._on_settle_failure(context)
+
+    row = (await _rows(payments))[0]
+    assert row.status == "manual_review"
+    assert row.settled_micro == actual
+    assert await x402_payments.settled_amount(job_id) is None
+
+
+@pytest.mark.asyncio
+async def test_stale_settling_is_flagged_for_manual_review(db, enabled):
+    job_id = str(uuid.uuid4())
+    maximum = pricing.quote_text(MODEL, 100, 500)
+    actual = pricing.quote_text(MODEL, 100, 50)
+    await _terminal_payment(job_id, maximum, actual)
+    context = _hook_context(job_id, actual)
+    await x402_payments._before_settle(context)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(payments)
+            .where(payments.c.job_id == job_id)
+            .values(last_attempt=datetime.now(UTC) - timedelta(hours=2)),
+        )
+        await session.commit()
+
+    assert await x402_payments.flag_stale_settlements(older_than_seconds=60) == 1
+    row = (await _rows(payments))[0]
+    assert row.status == "manual_review"
+
+
+@pytest.mark.asyncio
+async def test_operator_reconcile_requires_exact_confirmed_usdc_transfer(
+    db,
+    enabled,
+    monkeypatch,
+):
+    job_id = str(uuid.uuid4())
+    maximum = pricing.quote_text(MODEL, 100, 500)
+    actual = pricing.quote_text(MODEL, 100, 50)
+    await _terminal_payment(job_id, maximum, actual)
+    context = _hook_context(job_id, actual)
+    await x402_payments._before_settle(context)
+    await x402_payments._on_settle_failure(context)
+
+    receipt = {
+        "status": "0x1",
+        "blockNumber": "0x64",
+        "logs": [
+            {
+                "address": USDC,
+                "topics": [TRANSFER_TOPIC, _topic(PAYER), _topic(TREASURY)],
+                "data": hex(actual),
+            },
+        ],
+    }
+
+    async def confirmed(tx_hash, _label):
+        assert tx_hash == TX_HASH
+        return {"hash": tx_hash}, receipt, 100
+
+    async def block_timestamp(_block):
+        return datetime.now(UTC)
+
+    from grid_api.services import deposits
+
+    monkeypatch.setattr(deposits, "_confirmed_transaction", confirmed)
+    monkeypatch.setattr(deposits, "_block_timestamp", block_timestamp)
+    result = await x402_payments.reconcile_transaction(job_id, TX_HASH)
+    assert result["status"] == "settled"
+    assert result["settled_micro"] == actual
+    assert result["already_reconciled"] is False
+    assert (await _rows(payments))[0].tx_hash == TX_HASH
+
+    again = await x402_payments.reconcile_transaction(job_id, TX_HASH)
+    assert again["already_reconciled"] is True
+
+
+@pytest.mark.asyncio
+async def test_operator_reconcile_rejects_wrong_amount(db, enabled, monkeypatch):
+    job_id = str(uuid.uuid4())
+    maximum = pricing.quote_text(MODEL, 100, 500)
+    actual = pricing.quote_text(MODEL, 100, 50)
+    await _terminal_payment(job_id, maximum, actual)
+    context = _hook_context(job_id, actual)
+    await x402_payments._before_settle(context)
+    await x402_payments._on_settle_failure(context)
+
+    receipt = {
+        "status": "0x1",
+        "blockNumber": "0x64",
+        "logs": [
+            {
+                "address": USDC,
+                "topics": [TRANSFER_TOPIC, _topic(PAYER), _topic(TREASURY)],
+                "data": hex(actual - 1),
+            },
+        ],
+    }
+
+    async def confirmed(_tx_hash, _label):
+        return {"hash": TX_HASH}, receipt, 100
+
+    async def block_timestamp(_block):
+        return datetime.now(UTC)
+
+    from grid_api.services import deposits
+
+    monkeypatch.setattr(deposits, "_confirmed_transaction", confirmed)
+    monkeypatch.setattr(deposits, "_block_timestamp", block_timestamp)
+    with pytest.raises(RuntimeError, match="exact x402 USDC"):
+        await x402_payments.reconcile_transaction(job_id, TX_HASH)
+    assert (await _rows(payments))[0].status == "manual_review"

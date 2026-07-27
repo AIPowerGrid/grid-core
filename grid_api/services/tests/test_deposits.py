@@ -23,6 +23,8 @@ OTHER = "0x2222222222222222222222222222222222222222"
 TREASURY = "0x3333333333333333333333333333333333333333"
 USDC = "0x4444444444444444444444444444444444444444"
 AIPG = "0x5555555555555555555555555555555555555555"
+ROUTER = "0x6666666666666666666666666666666666666666"
+POOL = "0x7777777777777777777777777777777777777777"
 TX = "0x" + "ab" * 32
 
 
@@ -66,6 +68,9 @@ def funding(monkeypatch):
     monkeypatch.setattr(deposits, "DEPOSITS_ENABLED", True)
     monkeypatch.setattr(deposits, "TREASURY", TREASURY)
     monkeypatch.setattr(deposits, "USDC", USDC)
+    monkeypatch.setattr(deposits, "USDC_MAX_DEPOSIT_MICRO", 100_000_000)
+    monkeypatch.setattr(deposits, "USDC_ACCOUNT_DAILY_MICRO", 100_000_000)
+    monkeypatch.setattr(deposits, "USDC_NETWORK_DAILY_MICRO", 500_000_000)
     monkeypatch.setattr(deposits, "AIPG_ENABLED", True)
     monkeypatch.setattr(deposits, "AIPG_TREASURY", TREASURY)
     monkeypatch.setattr(deposits, "AIPG_TOKEN", AIPG)
@@ -79,6 +84,7 @@ def funding(monkeypatch):
     monkeypatch.setattr(deposits, "AIPG_MAX_DEPOSIT_MICRO", 100_000_000)
     monkeypatch.setattr(deposits, "AIPG_ACCOUNT_DAILY_MICRO", 100_000_000)
     monkeypatch.setattr(deposits, "AIPG_NETWORK_DAILY_MICRO", 500_000_000)
+    monkeypatch.setattr(deposits, "ETH_CONVERSION_MODE", "disabled")
     monkeypatch.setattr(deposits, "CONFIRMATIONS", 3)
     monkeypatch.setattr(deposits, "MIN_CREDIT_MICRO", 10_000)
 
@@ -113,6 +119,42 @@ def _rpc_for(token: str, amount: int, *, sender: str = WALLET):
             "eth_getTransactionByHash": transaction,
             "eth_getTransactionReceipt": receipt,
             "eth_blockNumber": hex(102),
+            "eth_getBlockByNumber": {"timestamp": hex(int(datetime.now(UTC).timestamp()))},
+        }[method]
+
+    return rpc
+
+
+def _rpc_for_swap(
+    usdc_received: int,
+    *,
+    eth_value: int = 10**18,
+    sender: str = WALLET,
+):
+    transaction = {
+        "hash": TX,
+        "from": sender,
+        "to": ROUTER,
+        "value": hex(eth_value),
+    }
+    logs = (
+        [_transfer_log(USDC, POOL, TREASURY, usdc_received)]
+        if usdc_received
+        else []
+    )
+    receipt = {
+        "status": "0x1",
+        "blockNumber": hex(100),
+        "logs": logs,
+    }
+
+    async def rpc(method, _params):
+        return {
+            "eth_chainId": hex(8453),
+            "eth_getTransactionByHash": transaction,
+            "eth_getTransactionReceipt": receipt,
+            "eth_blockNumber": hex(102),
+            "eth_getBlockByNumber": {"timestamp": hex(1_785_139_200)},
         }[method]
 
     return rpc
@@ -160,6 +202,20 @@ async def test_credit_failure_rolls_back_deposit_receipt(db, funding, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_usdc_claim_rejects_over_cap_transfer(db, funding, monkeypatch):
+    monkeypatch.setattr(deposits, "_rpc", _rpc_for(USDC, 100_000_001))
+
+    with pytest.raises(HTTPException) as exc:
+        await deposits.verify_and_credit(
+            TX,
+            {"account_id": db, "wallet": WALLET},
+        )
+    assert exc.value.status_code == 422
+    assert await credits.get_balance(db) == 0
+    assert await _deposit_count() == 0
+
+
+@pytest.mark.asyncio
 async def test_claim_requires_transaction_from_linked_wallet(db, funding, monkeypatch):
     monkeypatch.setattr(deposits, "_rpc", _rpc_for(USDC, 5_000_000, sender=OTHER))
     with pytest.raises(HTTPException) as exc:
@@ -200,6 +256,30 @@ async def test_aipg_claim_uses_epoch_haircut_and_records_provenance(db, funding,
     assert result["amount_usd"] == 19.4
     assert result["price_source"] == "operator:test-epoch:haircut-300bps"
     assert await credits.get_balance(db) == 19_400_000
+
+
+@pytest.mark.asyncio
+async def test_aipg_rejects_transfer_outside_price_epoch(db, funding, monkeypatch):
+    rpc = _rpc_for(AIPG, 10_000 * 10**18)
+
+    async def old_block(method, params):
+        if method == "eth_getBlockByNumber":
+            return {
+                "timestamp": hex(
+                    int((datetime.now(UTC) - timedelta(days=2)).timestamp()),
+                ),
+            }
+        return await rpc(method, params)
+
+    monkeypatch.setattr(deposits, "_rpc", old_block)
+    with pytest.raises(HTTPException) as exc:
+        await deposits.verify_and_credit_aipg(
+            TX,
+            {"account_id": db, "wallet": WALLET},
+        )
+    assert exc.value.status_code == 422
+    assert await credits.get_balance(db) == 0
+    assert await _deposit_count() == 0
 
 
 @pytest.mark.asyncio
@@ -285,6 +365,74 @@ async def test_aipg_network_daily_cap_is_atomic(db, funding, monkeypatch):
     assert await credits.get_balance(other_id) == 0
 
 
+@pytest.mark.asyncio
+async def test_converted_eth_credits_actual_usdc_and_records_execution(db, funding, monkeypatch):
+    monkeypatch.setattr(deposits, "ETH_CONVERSION_MODE", "swap_receipt")
+    monkeypatch.setattr(deposits, "_rpc", _rpc_for_swap(25_000_000))
+    account = {"account_id": db, "wallet": WALLET}
+
+    first = await deposits.verify_and_credit_converted_eth(TX, account)
+    second = await deposits.verify_and_credit_converted_eth(TX, account)
+
+    assert first["credited"] is True
+    assert first["asset"] == "ETH"
+    assert first["amount"] == "1"
+    assert first["amount_usd"] == 25.0
+    assert first["price_source"] == "swap:actual-base-usdc-proceeds"
+    assert second["already_claimed"] is True
+    assert await credits.get_balance(db) == 25_000_000
+
+    async with await database.new_session() as session:
+        row = (await session.execute(sa.select(deposits_t))).mappings().one()
+    assert int(row["amount_raw"]) == 10**18
+    assert row["credited_micro"] == 25_000_000
+    assert row["price_micro"] == 25_000_000
+    assert row["price_block"] == 100
+    assert row["price_timestamp"].replace(tzinfo=UTC) == datetime.fromtimestamp(
+        1_785_139_200,
+        tz=UTC,
+    )
+
+
+@pytest.mark.asyncio
+async def test_converted_eth_rejects_missing_usdc_proceeds(db, funding, monkeypatch):
+    monkeypatch.setattr(deposits, "ETH_CONVERSION_MODE", "swap_receipt")
+    monkeypatch.setattr(deposits, "_rpc", _rpc_for_swap(0))
+
+    with pytest.raises(HTTPException) as exc:
+        await deposits.verify_and_credit_converted_eth(
+            TX,
+            {"account_id": db, "wallet": WALLET},
+        )
+    assert exc.value.status_code == 422
+    assert await credits.get_balance(db) == 0
+    assert await _deposit_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_converted_eth_rejects_over_cap_proceeds(db, funding, monkeypatch):
+    monkeypatch.setattr(deposits, "ETH_CONVERSION_MODE", "swap_receipt")
+    monkeypatch.setattr(deposits, "_rpc", _rpc_for_swap(100_000_001))
+
+    with pytest.raises(HTTPException) as exc:
+        await deposits.verify_and_credit_converted_eth(
+            TX,
+            {"account_id": db, "wallet": WALLET},
+        )
+    assert exc.value.status_code == 422
+    assert await credits.get_balance(db) == 0
+    assert await _deposit_count() == 0
+
+
+async def _deposit_count() -> int:
+    async with await database.new_session() as session:
+        return int(
+            await session.scalar(
+                sa.select(sa.func.count()).select_from(deposits_t),
+            ),
+        )
+
+
 def test_funding_config_is_explicit_about_credit_terms(funding):
     config = deposits.funding_config({"wallet": WALLET})
     assets = {asset["asset"]: asset for asset in config["assets"]}
@@ -292,6 +440,17 @@ def test_funding_config_is_explicit_about_credit_terms(funding):
     assert config["terms"]["credits_transferable"] is False
     assert config["terms"]["credits_withdrawable"] is False
     assert assets["USDC"]["enabled"] is True
+    assert assets["USDC"]["maximum_credit_micro"] == 100_000_000
     assert assets["AIPG"]["enabled"] is True
     assert assets["ETH"]["enabled"] is False
     assert assets["ETH"]["status"] == "conversion_required"
+
+
+def test_funding_config_exposes_swap_receipt_without_direct_send(funding, monkeypatch):
+    monkeypatch.setattr(deposits, "ETH_CONVERSION_MODE", "swap_receipt")
+    config = deposits.funding_config({"wallet": WALLET})
+    eth = next(asset for asset in config["assets"] if asset["asset"] == "ETH")
+    assert eth["enabled"] is False
+    assert eth["backend_claim_enabled"] is True
+    assert eth["status"] == "conversion_ready"
+    assert eth["treasury"] == TREASURY
