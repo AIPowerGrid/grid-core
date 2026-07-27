@@ -131,6 +131,43 @@ async def list_identities(account_id) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+async def verified_wallet_addresses(account_id) -> list[str]:
+    """Return wallet addresses whose stored hint matches their verified identity hash."""
+    aid = await canonical_account_id(account_id)
+    async with await new_session() as session:
+        rows = (await session.execute(
+            sa.select(
+                account_identities.c.display_hint,
+                account_identities.c.subject_hash,
+                account_identities.c.is_primary,
+                account_identities.c.created,
+            ).where(
+                account_identities.c.account_id == aid,
+                account_identities.c.kind == "wallet",
+                account_identities.c.verified_at.is_not(None),
+            ).order_by(
+                account_identities.c.is_primary.desc(),
+                account_identities.c.created,
+            )
+        )).mappings().all()
+
+    wallets: list[str] = []
+    for row in rows:
+        try:
+            wallet = canonical_subject("wallet", row["display_hint"] or "")
+        except ValueError:
+            continue
+        if (
+            len(wallet) == 42
+            and wallet.startswith("0x")
+            and all(char in "0123456789abcdef" for char in wallet[2:])
+            and subject_hash("wallet", wallet) == row["subject_hash"]
+            and wallet not in wallets
+        ):
+            wallets.append(wallet)
+    return wallets
+
+
 async def attach_identity(account_id, kind: str, subject: str, *, display_hint: str | None = None,
                           metadata: dict | None = None, make_primary: bool = True,
                           ref: str | None = None) -> dict:
