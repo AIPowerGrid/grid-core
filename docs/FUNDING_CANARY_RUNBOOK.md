@@ -46,6 +46,12 @@ flag.
 Use a dedicated, monitored Base treasury address. Core needs only its public
 address and RPC URL; it must not hold the treasury or payout private key.
 
+The production target is Base Safe
+[`0xd19a391FAB4aeFd5f59e4be4918364f57b9c5346`](https://basescan.org/address/0xd19a391FAB4aeFd5f59e4be4918364f57b9c5346).
+Read-only Base verification on 2026-07-27 found deployed bytecode, two distinct
+owners, and threshold 2. It is dark-configured in Core; this entry does not
+authorize enabling deposits or sending the canary.
+
 ```dotenv
 GRID_BASE_CHAIN_ID=8453
 GRID_BASE_RPC=<monitored Base RPC>
@@ -55,7 +61,7 @@ GRID_USDC_MAX_DEPOSIT_MICRO=10000000000
 GRID_USDC_ACCOUNT_DAILY_MICRO=25000000000
 GRID_USDC_NETWORK_DAILY_MICRO=100000000000
 GRID_USDC_CONTRACT=0x833589fcd6edb6e08f4c7c32d4f71b54bda02913
-GRID_USDC_TREASURY=<dedicated Base treasury>
+GRID_USDC_TREASURY=0xd19a391FAB4aeFd5f59e4be4918364f57b9c5346
 GRID_DEPOSITS_ENABLED=1
 GRID_AIPG_DEPOSITS_ENABLED=0
 GRID_ETH_CONVERSION_MODE=disabled
