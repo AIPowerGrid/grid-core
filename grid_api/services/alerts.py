@@ -127,9 +127,16 @@ def _configured_url() -> str:
     return secret.get_secret_value().strip() if secret else ""
 
 
+def _harden_transport_logging() -> None:
+    """Prevent HTTP client request logs from printing credential-bearing URLs."""
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
 async def start() -> None:
     """Start the delivery worker. Safe and idempotent."""
     global _queue, _worker_task, _client
+    _harden_transport_logging()
     if _worker_task and not _worker_task.done():
         return
     url = _configured_url()
