@@ -541,6 +541,29 @@ async def test_funding_config_lists_verified_secondary_wallet(
 
 
 @pytest.mark.asyncio
+async def test_funding_config_exposes_remaining_daily_capacity(
+    db,
+    funding,
+    monkeypatch,
+):
+    monkeypatch.setattr(deposits, "_rpc", _rpc_for(USDC, 5_000_000))
+    await deposits.verify_and_credit(
+        TX,
+        {"account_id": db, "wallet": WALLET},
+    )
+
+    config = await deposits.funding_config(
+        {"account_id": db, "wallet": WALLET},
+    )
+    usdc = next(asset for asset in config["assets"] if asset["asset"] == "USDC")
+
+    assert usdc["account_daily_micro"] == 100_000_000
+    assert usdc["account_daily_used_micro"] == 5_000_000
+    assert usdc["account_daily_remaining_micro"] == 95_000_000
+    assert usdc["network_daily_remaining_micro"] == 495_000_000
+
+
+@pytest.mark.asyncio
 async def test_funding_config_exposes_swap_receipt_without_direct_send(funding, monkeypatch):
     monkeypatch.setattr(deposits, "ETH_CONVERSION_MODE", "swap_receipt")
     config = await deposits.funding_config({"wallet": WALLET})

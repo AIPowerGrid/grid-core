@@ -103,6 +103,8 @@ content sanitization, and reward settlement.
   verified identity hash. A transaction or receipt that the configured RPC has
   not seen yet is retryable (`425`), not an invalid claim; clients must retry
   the same transaction hash and must never resend value to recover credit.
+  Funding configuration may expose advisory daily-cap usage for preflight, but
+  `_record_and_credit` remains the authoritative locked enforcement point.
 - Service keys remain long-lived backend credentials but cannot manage user
   accounts. Global Google/SIWE proof is verified by Core; app delegation is
   namespaced to one service and receives bounded inference authority.
