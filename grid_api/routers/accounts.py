@@ -1319,7 +1319,8 @@ async def get_credits(
     semantics), gated on GRID_FREE_SPENDABLE_LIVE. `free.active` below reflects
     that flag: false → free is display-only and total_spendable = paid only;
     true → charges draw free-first and total_spendable includes it.
-    charging_enabled is the overall live gate (dark = nothing is charged).
+    charging_enabled is the effective gate for this account. charging_mode
+    exposes the operator rollout state without exposing the allowlist.
     """
     user = await _require_v2(
         apikey,
@@ -1372,7 +1373,8 @@ async def get_credits(
         # promo + daily free + paid after all shadow gates are enabled.
         "total_preview_micro": total,
         "total_preview_usd": usd(total),
-        "charging_enabled": credits_svc.CHARGING_ENABLED,  # false while dark
+        "charging_enabled": credits_svc.charging_enabled_for(user),
+        "charging_mode": credits_svc.charging_mode(),
     }
 
 

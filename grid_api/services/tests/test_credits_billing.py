@@ -74,6 +74,28 @@ async def test_credit_idempotent_on_ref(db):
 
 
 @pytest.mark.asyncio
+async def test_billing_health_detects_balance_ledger_drift(db):
+    aid = uuid.uuid4()
+    await credits.credit(aid, 5000, "topup", ref="health-seed")
+    healthy = await credits.billing_health()
+    assert healthy["ok"] is True
+    assert healthy["balance_total_micro"] == healthy["ledger_total_micro"] == 5000
+
+    from grid_api.v2.schema import credits as credits_table
+
+    async with await database.new_session() as session:
+        await session.execute(
+            credits_table.update()
+            .where(credits_table.c.account_id == aid)
+            .values(balance_micro=4999),
+        )
+        await session.commit()
+    drifted = await credits.billing_health()
+    assert drifted["ok"] is False
+    assert drifted["balance_delta_micro"] == -1
+
+
+@pytest.mark.asyncio
 async def test_debit_idempotent_and_overdraft_safe(db):
     aid = uuid.uuid4()
     await credits.credit(aid, 1000, "topup", ref="seed")

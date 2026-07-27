@@ -15,8 +15,9 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - `models/` - Pydantic request/response models for OpenAI-compatible requests
   and worker structures.
 - `abis/` / `_abi.py` - local contract ABI loaders used by background sync.
-- `main.py` - lifecycle: DB/Redis init, stale-job reclaimer, recipe sync loop,
-  router registration, and root health metadata.
+- `main.py` - lifecycle: DB/Redis init, stale-job reclaimer, reservation and
+  billing invariant monitors, operator alerts, recipe sync, router registration,
+  and root health metadata.
 
 ## Local Contracts
 

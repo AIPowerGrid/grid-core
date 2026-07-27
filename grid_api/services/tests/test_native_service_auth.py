@@ -17,7 +17,7 @@ from starlette.requests import Request
 
 from grid_api import database
 from grid_api.routers import accounts as accounts_router
-from grid_api.services import accounts, quota, service_limits, user_tokens
+from grid_api.services import accounts, alerts, quota, service_limits, user_tokens
 from grid_api.v2.schema import accounts as accounts_table
 from grid_api.v2.schema import metadata
 from grid_api.v2.schema import service_clients as service_clients_table
@@ -75,6 +75,31 @@ async def test_service_exchange_is_namespaced_and_short_lived(db):
         authorization=None,
     )
     assert same["account_id"] == result["account_id"]
+
+
+@pytest.mark.asyncio
+async def test_account_creation_emits_redacted_signup_alert(db, monkeypatch):
+    events = []
+    monkeypatch.setattr(alerts, "emit", lambda *args, **kwargs: events.append((args, kwargs)) or True)
+
+    account, _ = await accounts.create_account(
+        username="Private Person",
+        email="private@example.com",
+        oauth_sub="google-private-subject",
+        email_verified=True,
+        issue_initial_key=False,
+        grant_verified_welcome=False,
+    )
+
+    assert len(events) == 1
+    args, kwargs = events[0]
+    assert args[:3] == ("account_created", "success", "A new Grid account was created.")
+    rendered = str(kwargs)
+    assert "private@example.com" not in rendered
+    assert "google-private-subject" not in rendered
+    assert "Private Person" not in rendered
+    assert kwargs["fields"]["provider"] == "google"
+    assert kwargs["fields"]["account"] == alerts.opaque_id(account["id"])
 
 
 def test_user_token_signature_audience_expiry_and_step_up(monkeypatch):

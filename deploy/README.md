@@ -92,8 +92,10 @@ worker reconnects before declaring the deploy healthy.
 
 ## Money-path controls
 
-- `GRID_CHARGING_ENABLED=0` keeps demand charging in dry-run. Do not flip it as
-  part of an unrelated deploy.
+- `GRID_CHARGING_MODE=off` keeps demand charging in dry-run. Use `allowlist`
+  for a bounded canary before considering `on`; do not change the mode as part
+  of an unrelated deploy. `GRID_CHARGING_ENABLED` is a compatibility fallback
+  only when the mode is absent.
 - `GRID_FREE_SPENDABLE_LIVE` is a separate free-credit spending gate.
 - `aipg-payout.timer` drives the live custodial worker payout CLI. Stop/restart
   it only under the settlement runbook in

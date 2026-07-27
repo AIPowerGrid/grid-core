@@ -3,10 +3,13 @@
 
 from functools import lru_cache
 
-from pydantic_settings import BaseSettings
+from pydantic import SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class GridSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
     # PostgreSQL — reads the same env vars as the Flask app
     postgres_user: str = "postgres"
     postgres_pass: str = "changeme"
@@ -47,9 +50,11 @@ class GridSettings(BaseSettings):
     )
     worker_enrollment_ttl_seconds: int = 900
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    # Best-effort operator alerts. The webhook is a production secret and must
+    # never be committed, logged, or returned by an API.
+    grid_alert_discord_webhook: SecretStr | None = None
+    grid_alert_queue_size: int = 256
+    grid_alert_dedupe_seconds: int = 300
 
     @property
     def async_database_url(self) -> str:

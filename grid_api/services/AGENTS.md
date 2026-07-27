@@ -21,7 +21,8 @@ content sanitization, and reward settlement.
   `identities.py` (verified identities, aliases, and value-conserving merges),
   `user_tokens.py` (Core-issued short-lived sessions), `service_auth.py`
   (bounded service clients + proof exchange), `service_limits.py` (fail-closed
-  request/day ceilings), `assertions.py` (legacy app-only assertions), `economics.py`
+  request/day ceilings), `alerts.py` (redacted, bounded operator event delivery),
+  `assertions.py` (legacy app-only assertions), `economics.py`
   (splits, payout-asset + conversion-fee knobs, `worker_share_bps`),
   `holdings.py` (cached on-chain AIPG balance + Chainlink ETH/USD),
   `deposits.py` (USDC/ETH deposit claims), `model_registry.py` (ModelVault sync).
@@ -84,6 +85,11 @@ content sanitization, and reward settlement.
 - Price coverage is modality-specific. A model entry with only a video rate is
   unpriced for image/text, and positive quotes round up to one micro-USD rather
   than silently becoming free.
+- New monetary holds obey `off | allowlist | on`; an existing durable hold must
+  still settle or refund after the operator disables new charging.
+- Operator alerts are best-effort and data-minimized. Never include prompts,
+  outputs, email addresses, credentials, signatures, raw exceptions, or
+  unredacted identity values in alert fields.
 - Text reservations snapshot input/output rates and holder discount at reserve
   time. Never reprice an in-flight job from the current price book.
 - `ledger.py` writes one completion event per job. Settlement and stats depend on

@@ -4,7 +4,7 @@
 """Tests for the dark-shipped credit metering path.
 
 These exercise the no-DB branches of `charge_request` — the only ones the live
-request path hits while GRID_CHARGING_ENABLED=0 — so they need no Postgres:
+request path hits while GRID_CHARGING_MODE=off — so they need no Postgres:
 
 * dry-run (charging disabled): reports `would_charge`, never debits.
 * free (unpriced model): 0, no account lookup.
@@ -20,6 +20,44 @@ from grid_api.services import credits, pricing
 
 
 PRICED_MODEL = "deepseek-v4-flash"  # in the price book → quote > 0
+
+
+def test_charging_policy_modes(monkeypatch):
+    user = {"account_id": "A-1", "service_id": "Gallery"}
+
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "off")
+    assert credits.charging_enabled_for(user, PRICED_MODEL) is False
+
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "on")
+    assert credits.charging_enabled_for({}, PRICED_MODEL) is True
+
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "allowlist")
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_ACCOUNTS", frozenset({"a-1"}))
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_SERVICES", frozenset())
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_MODELS", frozenset())
+    assert credits.charging_enabled_for(user, PRICED_MODEL) is True
+    assert credits.charging_enabled_for({"account_id": "a-2"}, PRICED_MODEL) is False
+
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_MODELS", frozenset({PRICED_MODEL}))
+    assert credits.charging_enabled_for(user, PRICED_MODEL) is True
+    assert credits.charging_enabled_for(user, "other-model") is False
+    # Account status can report cohort membership without choosing a model.
+    assert credits.charging_enabled_for(user) is True
+
+
+def test_legacy_boolean_remains_emergency_compatible(monkeypatch):
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "")
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", False)
+    assert credits.charging_mode() == "off"
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    assert credits.charging_mode() == "on"
+
+
+def test_invalid_charging_mode_fails_closed(monkeypatch):
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "surprise")
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    assert credits.charging_mode() == "off"
+    assert credits.charging_enabled_for({"account_id": "a-1"}, PRICED_MODEL) is False
 
 
 @pytest.mark.asyncio

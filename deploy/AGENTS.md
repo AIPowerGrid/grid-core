@@ -11,6 +11,8 @@ executes an immutable release selected through `/home/aipg/current`.
   commit SHA. Installs only the Grid API, PostgreSQL, Redis, and Nginx.
 - `env.template` - `/etc/aipg/grid.env` source of production env names.
 - `README.md` - deploy/cutover/runbook notes.
+- `DEMAND_BILLING_RUNBOOK.md` - dark deploy, allowlisted canary, alert,
+  rollback, and staged demand-charging procedure.
 - `nginx/aipg-api.conf` - Grid routes, restricted metrics, public docs/health,
   and static `410 Gone` responses for retired API paths.
 - `systemd/aipg-gridapi.service` - uvicorn Grid API unit.
