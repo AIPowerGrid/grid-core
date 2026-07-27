@@ -1278,6 +1278,26 @@ async def claim_deposit(
     return await deposits.verify_and_credit(form.tx_hash, user)
 
 
+@router.post("/v1/account/deposits/claim-aipg")
+@limiter.limit("20/minute")
+async def claim_aipg_deposit(
+    request: Request,
+    form: ClaimDepositForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Credit a direct AIPG-on-Base deposit under the current price epoch.
+
+    AIPG funding is available only while an operator-published valuation is
+    fresh. Core applies a haircut and hard transaction/account/network caps
+    before atomically writing the deposit receipt and purchased credit.
+    """
+    user = await _require_v2(apikey, authorization)
+    from ..services import deposits
+
+    return await deposits.verify_and_credit_aipg(form.tx_hash, user)
+
+
 @router.post("/v1/account/deposits/claim-eth")
 @limiter.limit("20/minute")
 async def claim_eth_deposit(
@@ -1288,16 +1308,54 @@ async def claim_eth_deposit(
 ):
     """Credit the account for a native-ETH deposit to the grid treasury.
 
-    The user sends ETH on Base, then submits the tx hash here; the grid verifies
-    the transfer (to the treasury, from the account's own wallet, enough
-    confirmations) and credits the prepaid balance in USD, priced ETH→USD via the
-    Chainlink feed at claim time. Idempotent on the tx hash. 503 until the grid is
-    configured with a treasury (GRID_ETH_TREASURY, or the shared GRID_USDC_TREASURY).
+    Direct ETH is disabled by default. A tightly capped ``buffered`` pilot can
+    be enabled explicitly; the target production flow swaps ETH to USDC first
+    and credits the actual stablecoin received.
     """
     user = await _require_v2(apikey, authorization)
     from ..services import deposits
 
     return await deposits.verify_and_credit_eth(form.tx_hash, user)
+
+
+@router.post("/v1/account/deposits/claim-eth-converted")
+@limiter.limit("20/minute")
+async def claim_converted_eth_deposit(
+    request: Request,
+    form: ClaimDepositForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Credit actual USDC delivered by a confirmed Base ETH swap transaction."""
+    user = await _require_v2(apikey, authorization)
+    from ..services import deposits
+
+    return await deposits.verify_and_credit_converted_eth(form.tx_hash, user)
+
+
+@router.get("/v1/account/deposits/config")
+async def get_deposit_config(
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Funding assets, Base addresses, limits, and non-withdrawable terms."""
+    user = await _require_v2(apikey, authorization)
+    from ..services import deposits
+
+    return deposits.funding_config(user)
+
+
+@router.get("/v1/account/deposits")
+async def get_deposit_history(
+    limit: int = 50,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Immutable Base funding receipts for the authenticated account."""
+    user = await _require_v2(apikey, authorization)
+    from ..services import deposits
+
+    return {"deposits": await deposits.list_deposits(user, limit)}
 
 
 @router.get("/v1/account/credits")

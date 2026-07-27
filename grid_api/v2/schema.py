@@ -458,6 +458,54 @@ credit_ledger = sa.Table(
 )
 
 
+# Immutable Base funding receipts. A deposit credit and this audit row are
+# committed in the same SQL transaction, so the purchased-credit balance can be
+# traced back to the exact chain, asset, raw amount, valuation, and refund
+# address that funded it. Credits are service value, not a withdrawable token
+# balance; refund_address exists for operator-reviewed refunds to the source.
+deposits = sa.Table(
+    "grid_deposits",
+    metadata,
+    sa.Column(
+        "id",
+        sa.BigInteger().with_variant(sa.Integer(), "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    ),
+    sa.Column(
+        "account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("chain_id", sa.BigInteger, nullable=False),
+    sa.Column("asset", sa.String(12), nullable=False, index=True),
+    sa.Column("token_address", sa.String(42), nullable=True),
+    sa.Column("tx_hash", sa.String(66), nullable=False),
+    sa.Column("block_number", sa.BigInteger, nullable=False),
+    sa.Column("from_address", sa.String(42), nullable=False),
+    sa.Column("treasury_address", sa.String(42), nullable=False),
+    # Numeric(78, 0) safely stores uint256 token values; BigInteger cannot hold
+    # normal 18-decimal ETH/AIPG deposits.
+    sa.Column("amount_raw", sa.Numeric(78, 0), nullable=False),
+    sa.Column("amount_decimals", sa.Integer, nullable=False),
+    # micro-USD per one whole asset. USDC is exactly 1_000_000; non-stable
+    # assets record the bounded deposit-time valuation used for this receipt.
+    sa.Column("price_micro", sa.BigInteger, nullable=False),
+    sa.Column("price_source", sa.String(128), nullable=False),
+    sa.Column("price_timestamp", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("price_block", sa.BigInteger, nullable=True),
+    sa.Column("credited_micro", sa.BigInteger, nullable=False),
+    sa.Column("refund_address", sa.String(42), nullable=False),
+    sa.Column("status", sa.String(24), nullable=False, default="credited", index=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+    sa.UniqueConstraint("chain_id", "asset", "tx_hash", name="uq_grid_deposit_chain_asset_tx"),
+    sa.CheckConstraint("credited_micro > 0", name="ck_grid_deposit_positive_credit"),
+    sa.CheckConstraint("amount_raw > 0", name="ck_grid_deposit_positive_amount"),
+)
+
+
 # Durable per-job reservation state. A reserve writes one 'held' row before
 # dispatch; the worker-WS handler (the authority that reaches a terminal state
 # for EVERY job regardless of whether the client stayed connected) flips it
@@ -485,11 +533,59 @@ reservations = sa.Table(
     sa.Column("output_per_mtok_micro", sa.BigInteger, nullable=True),
     sa.Column("discount_bps", sa.Integer, nullable=False, server_default=sa.text("0"), default=0),
     sa.Column("service_id", sa.String(64), nullable=True, index=True),
+    # Purchased credits remain the default. x402 reservations authorize an
+    # external USDC payment instead of debiting an account balance.
+    sa.Column("billing_source", sa.String(16), nullable=False,
+              server_default=sa.text("'credits'"), default="credits", index=True),
+    sa.Column("external_payer", sa.String(64), nullable=True, index=True),
+    # Final grid-counted charge. This makes variable-price external settlement
+    # auditable without reconstructing historical pricing code.
+    sa.Column("actual_micro", sa.BigInteger, nullable=True),
     # 'held' until a terminal state settles it; the held→settled UPDATE is the
     # exactly-once guard (only the winning UPDATE moves money).
     sa.Column("status", sa.String(16), nullable=False, default="held", index=True),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
     sa.Column("settled", sa.DateTime(timezone=True), nullable=True),
+)
+
+
+# x402 is a post-response on-chain settlement rail. A verified authorization is
+# recorded before dispatch. The before-settle hook durably records the exact
+# attempted amount before the facilitator can touch chain. Facilitator success
+# becomes `reported`; only independent exact-transfer verification moves it to
+# `settled`. Worker payout aggregation excludes every other state.
+x402_payments = sa.Table(
+    "grid_x402_payments",
+    metadata,
+    sa.Column("job_id", sa.String(64), primary_key=True),
+    sa.Column("authorization_id", sa.String(64), nullable=False),
+    sa.Column("payer", sa.String(64), nullable=False, index=True),
+    sa.Column("network", sa.String(64), nullable=False),
+    sa.Column("asset", sa.String(64), nullable=False),
+    sa.Column("pay_to", sa.String(64), nullable=False),
+    sa.Column("authorized_micro", sa.BigInteger, nullable=False),
+    sa.Column("settled_micro", sa.BigInteger, nullable=True),
+    sa.Column("tx_hash", sa.String(80), nullable=True),
+    sa.Column("status", sa.String(16), nullable=False, default="verified", index=True),
+    sa.Column("error", sa.String(255), nullable=True),
+    sa.Column("attempts", sa.Integer, nullable=False, server_default=sa.text("0"), default=0),
+    sa.Column("last_attempt", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+    sa.Column("settled", sa.DateTime(timezone=True), nullable=True),
+    sa.CheckConstraint("authorized_micro > 0", name="ck_grid_x402_positive_authorization"),
+    sa.CheckConstraint(
+        "settled_micro IS NULL OR settled_micro > 0",
+        name="ck_grid_x402_positive_settlement",
+    ),
+    sa.CheckConstraint(
+        "settled_micro IS NULL OR settled_micro <= authorized_micro",
+        name="ck_grid_x402_settlement_within_authorization",
+    ),
+    sa.UniqueConstraint(
+        "authorization_id",
+        name="uq_grid_x402_payments_authorization_id",
+    ),
+    sa.UniqueConstraint("tx_hash", name="uq_grid_x402_payments_tx_hash"),
 )
 
 

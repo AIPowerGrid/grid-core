@@ -25,7 +25,35 @@ import sqlalchemy as sa
 from ...database import new_session
 from ...v2.schema import accounts as accounts_table
 from ...v2.schema import ledger as ledger_table
+from ...v2.schema import reservations as reservations_table
 from ...v2.schema import workers as workers_table
+from ...v2.schema import x402_payments as x402_payments_table
+
+
+def _funded_job():
+    """Exclude x402 work until its on-chain USDC settlement is durable.
+
+    Credit-funded and legacy jobs have no x402 reservation and pass directly.
+    """
+    unsettled_x402 = (
+        sa.select(sa.literal(1))
+        .select_from(
+            reservations_table.join(
+                x402_payments_table,
+                x402_payments_table.c.job_id == reservations_table.c.job_id,
+                isouter=True,
+            ),
+        )
+        .where(
+            sa.func.replace(reservations_table.c.job_id, "-", "") == sa.func.replace(sa.cast(ledger_table.c.job_id, sa.String()), "-", ""),
+            reservations_table.c.billing_source == "x402",
+            sa.or_(
+                x402_payments_table.c.job_id.is_(None),
+                x402_payments_table.c.status != "settled",
+            ),
+        )
+    )
+    return ~sa.exists(unsettled_x402)
 
 
 async def aggregate_den_by_account(start: datetime, end: datetime, *, min_den: float = 0.0) -> list[dict]:
@@ -40,10 +68,8 @@ async def aggregate_den_by_account(start: datetime, end: datetime, *, min_den: f
 
     Returns [{account_id, den, payout_address}] where payout_address is None when
     the account hasn't set a wallet yet (→ the caller ACCRUES that share)."""
-    j = (
-        ledger_table
-        .join(workers_table, workers_table.c.id == ledger_table.c.worker_id, isouter=True)
-        .join(accounts_table, accounts_table.c.id == workers_table.c.account_id, isouter=True)
+    j = ledger_table.join(workers_table, workers_table.c.id == ledger_table.c.worker_id, isouter=True).join(
+        accounts_table, accounts_table.c.id == workers_table.c.account_id, isouter=True,
     )
     async with await new_session() as session:
         result = await session.execute(
@@ -58,10 +84,10 @@ async def aggregate_den_by_account(start: datetime, end: datetime, *, min_den: f
                 ledger_table.c.created >= start,
                 ledger_table.c.created < end,
                 workers_table.c.account_id.isnot(None),
+                _funded_job(),
             )
-            .group_by(workers_table.c.account_id,
-                      accounts_table.c.payout_wallet, accounts_table.c.wallet)
-            .having(sa.func.sum(ledger_table.c.den) > min_den)
+            .group_by(workers_table.c.account_id, accounts_table.c.payout_wallet, accounts_table.c.wallet)
+            .having(sa.func.sum(ledger_table.c.den) > min_den),
         )
         out = []
         for row in result:
@@ -75,10 +101,15 @@ async def total_den_in_window(start: datetime, end: datetime) -> float:
     truly has NO account (vs the per-account rollup which excludes account_id IS
     NULL). den_no_account = total - sum(per-account)."""
     async with await new_session() as session:
-        row = (await session.execute(
-            sa.select(sa.func.coalesce(sa.func.sum(ledger_table.c.den), 0.0))
-            .where(ledger_table.c.created >= start, ledger_table.c.created < end)
-        )).first()
+        row = (
+            await session.execute(
+                sa.select(sa.func.coalesce(sa.func.sum(ledger_table.c.den), 0.0)).where(
+                    ledger_table.c.created >= start,
+                    ledger_table.c.created < end,
+                    _funded_job(),
+                ),
+            )
+        ).first()
         return float(row[0] or 0.0)
 
 
@@ -107,14 +138,12 @@ async def aggregate_den_for_period(
                 ledger_table.c.created < end,
                 ledger_table.c.wallet != "",
                 ledger_table.c.wallet.isnot(None),
+                _funded_job(),
             )
             .group_by(ledger_table.c.wallet)
-            .having(sa.func.sum(ledger_table.c.den) > min_den)
+            .having(sa.func.sum(ledger_table.c.den) > min_den),
         )
-        return [
-            {"address": row.wallet, "den": float(row.den)}
-            for row in result
-        ]
+        return [{"address": row.wallet, "den": float(row.den)} for row in result]
 
 
 async def count_unattributed_den(start: datetime, end: datetime) -> dict:
@@ -135,7 +164,8 @@ async def count_unattributed_den(start: datetime, end: datetime) -> dict:
                     ledger_table.c.wallet == "",
                     ledger_table.c.wallet.is_(None),
                 ),
-            )
+                _funded_job(),
+            ),
         )
         row = result.first()
         return {"jobs": int(row.jobs), "den": float(row.den)}
