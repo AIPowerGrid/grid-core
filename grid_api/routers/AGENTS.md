@@ -25,7 +25,7 @@ transport, accounts, stats, health/metrics.
 - `worker_ws.py` - `/v1/workers/ws`: registration + dispatch + health/eviction + streaming.
   **God-file (~1.1K LOC); split target = registration / dispatch / health / stream.** Highest
   bug history (eviction cascade, idle-redelivery) - change carefully, add tests.
-- `accounts.py` - native Google/SIWE auth, bounded service exchange, and
+- `accounts.py` - native Google/strict EIP-4361 SIWE auth, bounded service exchange, and
   default-off legacy dashboard/internal session creation,
   account profile (incl. resolved `payout{asset, aipg_bps, active, live_asset}`),
   payout wallet + `POST /v1/account/payout-preference` (both SESSION-gated),
@@ -42,6 +42,10 @@ transport, accounts, stats, health/metrics.
   tokens are verified at `/v1/auth/google/exchange`; `/v1/auth/service/bind`
   binds an app subject after recent Google/SIWE proof. `/v1/accounts/bridges`
   bootstraps a bounded service client only when separately enabled.
+  Wallet login uses `/v1/accounts/wallet/challenge`; the signed message binds
+  wallet, allowlisted frontend domain/URI, Base chain id, issue/expiry time, and
+  a single-use nonce. `/wallet/nonce` remains for authenticated wallet-link
+  proofs, not for minting a login session.
 - `stats.py` - `GET /v1/workers`, progress polling, recipe-aware model status
   (raw worker checkpoints plus executable recipe-backed public model names), usage totals,
   model stats, wallet earnings, `GET /v1/payouts/public` (aggregate payout

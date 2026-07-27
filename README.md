@@ -66,8 +66,9 @@ Verify `http://127.0.0.1:7010/health` and
 
 ## Safety posture
 
-- Demand charging defaults off with `GRID_CHARGING_ENABLED=0`; metering code
-  existing does not mean charging is live.
+- Demand charging defaults to `GRID_CHARGING_MODE=off`. `allowlist` supports a
+  bounded canary cohort before `on`; the legacy `GRID_CHARGING_ENABLED` boolean
+  remains a compatibility fallback.
 - Free-credit spending has its own `GRID_FREE_SPENDABLE_LIVE` gate.
 - Promotional-credit spending has its own `GRID_PROMO_SPENDABLE_LIVE` gate.
 - The live worker reward bridge is the custodial, Transfer-verified AIPG payout

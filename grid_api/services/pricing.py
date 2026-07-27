@@ -1,6 +1,6 @@
-# ⚠️ WIRED-DARK (2026-06-23): the request path quotes against this book via
-# credits.charge_request, but only in dry-run (GRID_CHARGING_ENABLED=0) — the quote
-# is logged, never billed. Re-peg prices here before charging goes live. See task #73.
+# WIRED-DARK: the request path always quotes against this book, but
+# GRID_CHARGING_MODE=off only logs the quote. Re-peg and review prices before
+# expanding beyond an allowlisted canary.
 
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
@@ -23,6 +23,7 @@ editing the USD numbers here; nothing converts at request time.
     cost_usd = (prompt_tokens * input_per_mtok + completion_tokens * output_per_mtok) / 1_000_000
 """
 
+import math
 from dataclasses import dataclass
 
 MICRO = 1_000_000  # micro-USD per USD (the ledger's integer unit)
@@ -57,6 +58,10 @@ def half_of(usd_input: float, usd_output: float, **media) -> ModelPrice:
 PRICING: dict[str, ModelPrice] = {
     "gpt-oss-120b":       half_of(0.15, 0.60),   # floor Fireworks/Groq
     "deepseek-v4-flash":  half_of(0.14, 0.28),   # floor Fireworks
+    # Guarded launch pegs for Grid-hosted models without a stable public API
+    # comparator. Re-peg from measured worker cost before the global live flip.
+    "qwen3-27b":          ModelPrice(0.05, 0.15),
+    "smollm-135m":        ModelPrice(0.005, 0.01),
     "deepseek-v4-pro":    half_of(0.40, 1.20),
     "minimax-2.5-fast":   half_of(0.60, 2.40),
     "minimax-2.7-fast":   half_of(0.60, 2.40),
@@ -79,14 +84,19 @@ PRICING: dict[str, ModelPrice] = {
     # enabling audio charging. Explicit pricing prevents accidental free jobs.
     # Guarded XL launch peg. The 4B DiT has roughly twice the 2B Turbo weight
     # footprint; benchmark worker cost before enabling charging and re-peg then.
-    "ace-step-v1.5-xl-turbo": ModelPrice(0, 0, audio_per_second=0.004),
+    "ace-step-v1.5-xl-turbo": ModelPrice(0, 0, audio_per_second=0.0002),
     # Initial guarded peg for a multi-minute textured mesh workload. Re-peg from
     # measured worker cost before enabling charging; explicit is safer than free.
     "trellis2":             ModelPrice(0, 0, mesh_per_generation=0.25),
 }
 
-BLOCK_UNPRICED = False  # unpriced model → 0 (free) unless flipped
-
+# Public recipe names and worker variants share the canonical model's price.
+# Aliases are explicit so an arbitrary renamed worker model still fails closed.
+PRICE_ALIASES: dict[str, str] = {
+    "deepseek-v4-flash-nvfp4": "deepseek-v4-flash",
+    "ltx director 2.0": "ltx-2.3",
+    "ltx-2.3 audio": "ltx-2.3",
+}
 
 def register(model: str, price: ModelPrice) -> None:
     if model:
@@ -94,13 +104,42 @@ def register(model: str, price: ModelPrice) -> None:
 
 
 def get_price(model: str) -> ModelPrice | None:
-    return PRICING.get((model or "").lower().strip())
+    key = (model or "").lower().strip()
+    return PRICING.get(PRICE_ALIASES.get(key, key))
 
 
 def is_priced(model: str) -> bool:
-    """True if the model has an entry in the price book. Enforce mode
-    default-denies anything unpriced so a renamed/new model can't be free."""
+    """Compatibility check for callers that do not yet know the modality."""
     return get_price(model) is not None
+
+
+def is_priced_for(model: str, job_type: str) -> bool:
+    """Return whether ``model`` has a positive rate for ``job_type``.
+
+    An entry for a different modality is not a price. This is the fail-closed
+    boundary that prevents, for example, an LTX video rate from making an image
+    request look intentionally free.
+    """
+    p = get_price(model)
+    if not p:
+        return False
+    rates = {
+        "text": p.input_per_mtok > 0 or p.output_per_mtok > 0,
+        "image": p.image_per_image > 0,
+        "video": p.video_per_second > 0,
+        "audio": p.audio_per_second > 0,
+        "3d": p.mesh_per_generation > 0,
+    }
+    return bool(rates.get((job_type or "").lower()))
+
+
+def _micro_usd(usd: float) -> int:
+    """Round a positive quote up to the smallest ledger unit.
+
+    Normal rounding made tiny but explicitly priced requests free. Ceiling keeps
+    the price book's default-deny promise while adding at most one micro-dollar.
+    """
+    return math.ceil(usd * MICRO) if usd > 0 else 0
 
 
 def quote_text(model: str, prompt_tokens: int, completion_tokens: int) -> int:
@@ -109,24 +148,24 @@ def quote_text(model: str, prompt_tokens: int, completion_tokens: int) -> int:
     if not p:
         return 0
     usd = (prompt_tokens * p.input_per_mtok + completion_tokens * p.output_per_mtok) / 1_000_000.0
-    return int(round(usd * MICRO))
+    return _micro_usd(usd)
 
 
 def quote_image(model: str, n: int = 1) -> int:
     p = get_price(model)
-    return int(round((p.image_per_image * max(n, 1)) * MICRO)) if p else 0
+    return _micro_usd(p.image_per_image * max(n, 1)) if p else 0
 
 
 def quote_video(model: str, seconds: float = 0.0) -> int:
     p = get_price(model)
-    return int(round((p.video_per_second * max(seconds, 0.0)) * MICRO)) if p else 0
+    return _micro_usd(p.video_per_second * max(seconds, 0.0)) if p else 0
 
 
 def quote_audio(model: str, seconds: float = 0.0) -> int:
     p = get_price(model)
-    return int(round((p.audio_per_second * max(seconds, 0.0)) * MICRO)) if p else 0
+    return _micro_usd(p.audio_per_second * max(seconds, 0.0)) if p else 0
 
 
 def quote_3d(model: str, n: int = 1) -> int:
     p = get_price(model)
-    return int(round((p.mesh_per_generation * max(n, 1)) * MICRO)) if p else 0
+    return _micro_usd(p.mesh_per_generation * max(n, 1)) if p else 0

@@ -11,6 +11,8 @@ executes an immutable release selected through `/home/aipg/current`.
   commit SHA. Installs only the Grid API, PostgreSQL, Redis, and Nginx.
 - `env.template` - `/etc/aipg/grid.env` source of production env names.
 - `README.md` - deploy/cutover/runbook notes.
+- `DEMAND_BILLING_RUNBOOK.md` - dark deploy, allowlisted canary, alert,
+  rollback, and staged demand-charging procedure.
 - `nginx/aipg-api.conf` - Grid routes, restricted metrics, public docs/health,
   and static `410 Gone` responses for retired API paths.
 - `systemd/aipg-gridapi.service` - uvicorn Grid API unit.
@@ -35,6 +37,9 @@ executes an immutable release selected through `/home/aipg/current`.
   firewall/nginx impact.
 - `GRID_SALT` stays server-side. The developer console has no local DB/salt path
   and must not receive it.
+- `GRID_SIWE_ALLOWED_DOMAINS` is the exact frontend authority allowlist for
+  wallet-login challenges. Keep `GRID_LEGACY_SIWE_VERIFY_ENABLED=0`; it is an
+  emergency client-migration switch, not a permanent compatibility mode.
 - If you rename Base/contract env vars, update `docs/`, `grid_api/services/*`,
   and any SDK examples in the same change.
 

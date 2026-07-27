@@ -270,8 +270,6 @@ async def authorize_passthrough(user: dict, model: str, api_format: str,
     (charging off) it's a no-op: ok, reserved=0. The caller shapes its own
     402 from `{ok: False, reason}` so each endpoint keeps its native error body."""
     prompt_toks = den.count_tokens(extract_prompt_text(api_format, raw_request))
-    if not credits.CHARGING_ENABLED:
-        return {"ok": True, "reserved": 0, "prompt_toks": prompt_toks, "status": "dry_run"}
     auth = dict(await credits.authorize_request(
         user, model, prompt_toks, max_len, job_id, record_reservation=True))
     auth["prompt_toks"] = prompt_toks
@@ -283,7 +281,7 @@ async def _observe_dry_passthrough(user, model, prompt_toks, completion_toks, jo
     settlement is durable + authoritative in the worker-WS handler
     (credits.settle_job) — doing it here too would double-settle and depend on the
     client staying connected. Never breaks a response."""
-    if credits.CHARGING_ENABLED:
+    if credits.charging_enabled_for(user, model):
         return
     try:
         await credits.charge_request(

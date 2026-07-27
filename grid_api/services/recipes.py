@@ -284,6 +284,16 @@ def _set_path(spec: dict, path: str, value: Any) -> None:
     cur[parts[-1]] = value
 
 
+def _get_path(spec: dict, path: str) -> Any:
+    """Read a declared recipe slot without mutating the graph."""
+    cur: Any = spec
+    for part in path.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            raise RecipeError(f"slot '{path}' targets a missing path")
+        cur = cur[part]
+    return cur
+
+
 def _fmt(n: float) -> str:
     return str(int(n)) if float(n).is_integer() else str(n)
 
@@ -390,16 +400,8 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
     }
 
 
-def resolve_for_model(model: str, inputs: dict | None = None, *, has_source: bool = False) -> Optional[dict]:
-    """Media-layer entry point: pick the right recipe for `model` and resolve it to a
-    concrete graph spec; else return None so the caller falls back to legacy dispatch.
-
-    Variant selection: a model may have a text-only (t2i) recipe AND an image-input
-    (i2i / edit) recipe. When the job carries a source frame (`has_source`), prefer
-    the recipe that declares an `image` var; otherwise prefer the one that doesn't.
-    Falls back to whatever recipe exists if there's no exact match (e.g. LTX i2v,
-    whose only recipe takes an image but runs a baked default frame when none given).
-    `inputs` may be the raw payload — only declared vars present get injected."""
+def _recipe_for_model(model: str, inputs: dict | None = None, *,
+                      has_source: bool = False) -> Optional[Recipe]:
     cands = recipes_for_model(model)
     if not cands:
         return None
@@ -419,9 +421,41 @@ def resolve_for_model(model: str, inputs: dict | None = None, *, has_source: boo
             return False
         return True
 
-    chosen = (next((r for r in cands if _matches(r)), None)
-              or next((r for r in cands if ("image" in r.vars) == has_source), None)
-              or cands[0])
+    return (next((r for r in cands if _matches(r)), None)
+            or next((r for r in cands if ("image" in r.vars) == has_source), None)
+            or cands[0])
+
+
+def baked_default_for_model(model: str, input_name: str, inputs: dict | None = None, *,
+                            has_source: bool = False) -> Any:
+    """Return a recipe's baked value for a declared client input.
+
+    Billing uses this when a client omits a deterministic unit such as video
+    seconds. It must charge the graph that will actually run, not a global guess.
+    """
+    chosen = _recipe_for_model(model, inputs, has_source=has_source)
+    if not chosen:
+        return None
+    path = chosen.vars.get(input_name)
+    if not path:
+        return None
+    first_path = path[0] if isinstance(path, list) else path
+    return _get_path(chosen.spec, first_path)
+
+
+def resolve_for_model(model: str, inputs: dict | None = None, *, has_source: bool = False) -> Optional[dict]:
+    """Media-layer entry point: pick the right recipe for `model` and resolve it to a
+    concrete graph spec; else return None so the caller falls back to legacy dispatch.
+
+    Variant selection: a model may have a text-only (t2i) recipe AND an image-input
+    (i2i / edit) recipe. When the job carries a source frame (`has_source`), prefer
+    the recipe that declares an `image` var; otherwise prefer the one that doesn't.
+    Falls back to whatever recipe exists if there's no exact match (e.g. LTX i2v,
+    whose only recipe takes an image but runs a baked default frame when none given).
+    `inputs` may be the raw payload — only declared vars present get injected."""
+    chosen = _recipe_for_model(model, inputs, has_source=has_source)
+    if not chosen:
+        return None
     return resolve(chosen.recipe_root, inputs)
 
 

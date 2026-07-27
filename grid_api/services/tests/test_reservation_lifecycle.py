@@ -86,6 +86,23 @@ async def test_authorize_records_reservation_atomically_and_idempotently(db, mon
 
 
 @pytest.mark.asyncio
+async def test_existing_hold_settles_after_new_charging_is_disabled(db, monkeypatch):
+    """The kill switch stops new holds; it must not corrupt in-flight ones."""
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 10_000_000, "topup", ref="seed-kill-switch")
+    reserved = await _reserve(aid, "job-kill-switch", prompt=1000, mx=1000)
+    assert reserved > 0
+
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", False)
+    await credits.settle_job("job-kill-switch", completion_tokens=10)
+
+    actual = pricing.quote_text(PRICED, 1000, 10)
+    assert await _reservation_status("job-kill-switch") == "settled"
+    assert await credits.get_balance(aid) == 10_000_000 - actual
+
+
+@pytest.mark.asyncio
 async def test_authorize_rolls_back_debit_if_reservation_write_fails(db, monkeypatch):
     monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
     aid = uuid.uuid4()
@@ -122,6 +139,36 @@ async def test_settle_refunds_unused_remainder(db, monkeypatch):
     await credits.settle_job("jobA", 100)
     await credits.settle_job("jobA", 999)
     assert await credits.get_balance(aid) == 10_000_000 - actual
+
+
+@pytest.mark.asyncio
+async def test_settle_reconciles_service_exposure_to_actual(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    reconciled = []
+
+    async def authorize(_user, _amount, _ref):
+        return True, None
+
+    async def reconcile(service_id, ref, keep_micro):
+        reconciled.append((service_id, ref, keep_micro))
+        return True
+
+    monkeypatch.setattr(credits.service_limits, "authorize", authorize)
+    monkeypatch.setattr(credits.service_limits, "reconcile", reconcile)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 10_000_000, "topup", ref="service-seed")
+    user = {
+        "account_id": aid,
+        "service_id": "chat-frontend",
+        "service_limits": {"per_request_micro": 1_000_000, "daily_micro": 10_000_000},
+    }
+    auth = await credits.authorize_request(
+        user, PRICED, 1000, 1000, "service-job", record_reservation=True,
+    )
+    assert auth["ok"]
+    await credits.settle_job("service-job", 100)
+    actual = pricing.quote_text(PRICED, 1000, 100)
+    assert reconciled == [("chat-frontend", "service-job", actual)]
 
 
 @pytest.mark.asyncio

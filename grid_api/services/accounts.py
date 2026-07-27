@@ -430,6 +430,27 @@ async def create_account(
         except Exception:
             logger.warning("Welcome grant failed for account %s", account_id, exc_info=True)
     logger.info(f"Account created: {account_id} (wallet={wallet or '-'})")
+    from . import alerts
+
+    provider = (
+        identity_kind
+        or (oauth_kind if oauth_sub else None)
+        or ("wallet" if wallet else None)
+        or ("verified_email" if email and email_verified else None)
+        or "internal"
+    )
+    alerts.emit(
+        "account_created",
+        "success",
+        "A new Grid account was created.",
+        fields={
+            "account": alerts.opaque_id(account_id),
+            "provider": provider,
+            "initial_key": bool(issue_initial_key),
+            "welcome_eligible": bool(grant_verified_welcome and provider == "google"),
+        },
+        dedupe_key=f"account-created:{alerts.opaque_id(account_id)}",
+    )
     return {"id": str(account_id), "username": username, "wallet": wallet}, (plain if issue_initial_key else None)
 
 
@@ -694,6 +715,21 @@ async def create_service_client(
             ),
         )
         await session.commit()
+    from . import alerts
+
+    alerts.emit(
+        "service_client_created",
+        "success",
+        "A bounded frontend or application service principal was provisioned.",
+        fields={
+            "account": alerts.opaque_id(account_id),
+            "service": sid,
+            "provider_count": len(allowed),
+            "per_request_micro": per_request_micro if per_request_micro is not None else "unset",
+            "daily_micro": daily_micro if daily_micro is not None else "unset",
+        },
+        dedupe_key=f"service-created:{sid}",
+    )
     return {"id": sid, "account_id": str(account_id), "name": name}, plain
 
 

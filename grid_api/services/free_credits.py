@@ -26,7 +26,8 @@ and hold only the remainder from paid; the reservation row records the split
 and refunds paid-to-paid — the pockets never convert. The whole draw is gated on
 **GRID_FREE_SPENDABLE_LIVE** (default OFF): flag off → free is display-only and
 `/v1/account/credits` reports free.active=false / total_spendable=paid, exactly
-matching behavior. Flip it together with GRID_CHARGING_ENABLED at go-live.
+matching behavior. Enable it only alongside a reviewed
+`GRID_CHARGING_MODE=allowlist` canary or the later global rollout.
 """
 
 import logging
