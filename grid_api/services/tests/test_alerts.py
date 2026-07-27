@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import logging
+
 import httpx
 import pytest
 
@@ -34,6 +36,22 @@ def test_only_official_discord_webhooks_are_accepted():
     assert not alerts._valid_webhook("http://discord.com/api/webhooks/123/abc")
     assert not alerts._valid_webhook("https://example.com/api/webhooks/123/abc")
     assert not alerts._valid_webhook("https://discord.com/channels/123")
+
+
+def test_transport_request_logs_are_suppressed():
+    httpx_logger = logging.getLogger("httpx")
+    httpcore_logger = logging.getLogger("httpcore")
+    old_httpx = httpx_logger.level
+    old_httpcore = httpcore_logger.level
+    try:
+        httpx_logger.setLevel("INFO")
+        httpcore_logger.setLevel("INFO")
+        alerts._harden_transport_logging()
+        assert httpx_logger.level >= logging.WARNING
+        assert httpcore_logger.level >= logging.WARNING
+    finally:
+        httpx_logger.setLevel(old_httpx)
+        httpcore_logger.setLevel(old_httpcore)
 
 
 @pytest.mark.asyncio
