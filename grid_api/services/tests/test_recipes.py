@@ -122,6 +122,22 @@ def test_resolve_for_model_by_name_and_fallback():
     print("ok: resolve_for_model by name + legacy fallback")
 
 
+def test_baked_default_uses_selected_recipe_graph():
+    _clear()
+    recipes.register_recipe("0xdefault-seconds", "duration-default", {
+        "_grid": {
+            "modelName": "duration-default",
+            "jobType": "video",
+            "vars": {"seconds": "9.inputs.value", "seed": "3.inputs.seed"},
+        },
+        "3": {"inputs": {"seed": 0}},
+        "9": {"inputs": {"value": 10}},
+    })
+    assert recipes.baked_default_for_model("duration-default", "seconds") == 10
+    assert recipes.baked_default_for_model("duration-default", "width") is None
+    assert recipes.baked_default_for_model("missing", "seconds") is None
+
+
 def test_bad_slot_path_rejected():
     _clear()
     recipes.register_recipe("0xbad", "bad", {"_grid": {"vars": {"prompt": "nope.inputs.text"}},

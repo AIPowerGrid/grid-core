@@ -97,6 +97,32 @@ async def test_authorize_blocks_insufficient(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_insufficient_credit_releases_service_exposure(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    released = []
+
+    async def authorize(_user, _amount, _ref):
+        return True, None
+
+    async def release(service_id, ref):
+        released.append((service_id, ref))
+        return True
+
+    monkeypatch.setattr(credits.service_limits, "authorize", authorize)
+    monkeypatch.setattr(credits.service_limits, "release", release)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 5, "topup", ref="seed-service")
+    user = {
+        "account_id": aid,
+        "service_id": "gallery",
+        "service_limits": {"per_request_micro": 1_000_000, "daily_micro": 10_000_000},
+    }
+    auth = await credits.authorize_request(user, PRICED, 1000, 1000, "job-service-402")
+    assert auth["status"] == "insufficient"
+    assert released == [("gallery", "job-service-402")]
+
+
+@pytest.mark.asyncio
 async def test_authorize_unpriced_blocked_in_enforce(db, monkeypatch):
     monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
     auth = await credits.authorize_request(
@@ -104,6 +130,17 @@ async def test_authorize_unpriced_blocked_in_enforce(db, monkeypatch):
     )
     assert auth["ok"] is False
     assert auth["status"] == "unpriced"
+
+
+@pytest.mark.asyncio
+async def test_authorize_wrong_modality_blocked_in_enforce(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    auth = await credits.authorize_request(
+        {"account_id": uuid.uuid4()}, VID, 10, 10, "job-video-as-text"
+    )
+    assert auth["ok"] is False
+    assert auth["status"] == "unpriced"
+    assert "text price" in auth["reason"]
 
 
 @pytest.mark.asyncio
@@ -170,6 +207,45 @@ async def test_authorize_media_unpriced_blocked(db, monkeypatch):
     monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
     auth = await credits.authorize_media(uuid.uuid4(), "no-such-image-xyz", "image", 1, None, "mjob3")
     assert auth["ok"] is False and auth["status"] == "unpriced"
+
+
+@pytest.mark.asyncio
+async def test_authorize_media_wrong_modality_blocked(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    auth = await credits.authorize_media(
+        uuid.uuid4(), VID, "image", 1, None, "mjob-video-as-image"
+    )
+    assert auth["ok"] is False and auth["status"] == "unpriced"
+    assert "image price" in auth["reason"]
+
+
+def test_live_model_names_have_explicit_modality_prices():
+    assert pricing.is_priced_for("deepseek-v4-flash-nvfp4", "text")
+    assert pricing.is_priced_for("qwen3-27b", "text")
+    assert pricing.is_priced_for("Smollm-135m", "text")
+    assert pricing.is_priced_for("Krea 2 Turbo", "image")
+    assert pricing.is_priced_for("LTX Director 2.0", "video")
+    assert pricing.is_priced_for("LTX-2.3 Audio", "video")
+    assert pricing.is_priced_for("ace-step-v1.5-xl-turbo", "audio")
+    assert not pricing.is_priced_for("LTX-2.3", "image")
+    assert not pricing.is_priced_for("Krea 2 Turbo", "video")
+
+
+def test_positive_price_never_rounds_to_free():
+    assert pricing.quote_text("Smollm-135m", 1, 0) == 1
+
+
+@pytest.mark.asyncio
+async def test_tiny_positive_text_reserve_never_rounds_to_free(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 10, "topup", ref="tiny-seed")
+    auth = await credits.authorize_request(
+        {"account_id": aid}, "Smollm-135m", 1, 0, "tiny-job",
+    )
+    assert auth["ok"] is True
+    assert auth["status"] == "ok"
+    assert auth["reserved"] == 1
 
 
 @pytest.mark.asyncio

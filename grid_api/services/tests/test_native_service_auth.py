@@ -199,15 +199,33 @@ async def test_service_creation_is_atomic_on_duplicate_id(db):
 class _LimitRedis:
     def __init__(self):
         self.used = 0
-        self.refs: set[str] = set()
+        self.refs: dict[str, str] = {}
 
-    async def eval(self, _script, _key_count, _spend_key, ref_key, amount, cap, _ttl):
+    async def get(self, key):
+        return self.refs.get(key)
+
+    async def eval(self, script, _key_count, _spend_key, ref_key, *args):
+        if script == service_limits._RELEASE_LUA:
+            expected, amount = args
+            if self.refs.get(ref_key) != expected:
+                return 0
+            self.used = max(self.used - int(amount), 0)
+            del self.refs[ref_key]
+            return 1
+        if script == service_limits._RECONCILE_LUA:
+            expected, reserved, keep, day = args
+            if self.refs.get(ref_key) != expected:
+                return 0
+            self.used = max(self.used - (int(reserved) - int(keep)), 0)
+            self.refs[ref_key] = f"{day}:{keep}"
+            return 1
+        amount, cap, _ttl, day = args
         if ref_key in self.refs:
             return 1
         if int(cap) > 0 and self.used + int(amount) > int(cap):
             return 0
         self.used += int(amount)
-        self.refs.add(ref_key)
+        self.refs[ref_key] = f"{day}:{amount}"
         return 1
 
 
@@ -228,7 +246,18 @@ async def test_service_spending_limits_are_idempotent_and_fail_closed(db, monkey
     assert await service_limits.authorize(user, 500, "job-1") == (True, None)
     assert await service_limits.authorize(user, 500, "job-1") == (True, None)
     assert redis.used == 500
+    assert await service_limits.reconcile("limits-test", "job-1", 200) is True
+    assert await service_limits.reconcile("limits-test", "job-1", 200) is True
+    assert redis.used == 200
+    assert await service_limits.authorize(user, 300, "job-release") == (True, None)
+    assert redis.used == 500
+    assert await service_limits.release("limits-test", "job-release") is True
+    assert await service_limits.release("limits-test", "job-release") is False
+    assert redis.used == 200
     allowed, reason = await service_limits.authorize(user, 501, "job-2")
+    assert allowed and reason is None
+    assert redis.used == 701
+    allowed, reason = await service_limits.authorize(user, 300, "job-over")
     assert not allowed and "daily" in reason
     allowed, reason = await service_limits.authorize(user, 601, "job-3")
     assert not allowed and "per-request" in reason

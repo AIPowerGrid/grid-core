@@ -74,9 +74,16 @@ content sanitization, and reward settlement.
 - Service keys remain long-lived backend credentials but cannot manage user
   accounts. Global Google/SIWE proof is verified by Core; app delegation is
   namespaced to one service and receives bounded inference authority.
-- The free request-count quota exempts a direct service key only when both its
-  per-request and daily micro-USD ceilings are positive. Delegated users and
-  unbounded service keys remain in the free-user quota path.
+- The free request-count quota exempts positive purchased-credit accounts and a
+  direct service key only when both its per-request and daily micro-USD ceilings
+  are positive. Promotional/daily-free value, delegated users without purchased
+  credit, and unbounded service keys remain in the free-user quota path.
+- Service ceilings are exposure reservations keyed by job id: reserve before
+  dispatch, reduce to actual text spend on success, and release on 402/no-work
+  terminals. Redis failure stays conservative until the day bucket expires.
+- Price coverage is modality-specific. A model entry with only a video rate is
+  unpriced for image/text, and positive quotes round up to one micro-USD rather
+  than silently becoming free.
 - Text reservations snapshot input/output rates and holder discount at reserve
   time. Never reprice an in-flight job from the current price book.
 - `ledger.py` writes one completion event per job. Settlement and stats depend on

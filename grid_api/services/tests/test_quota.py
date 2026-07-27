@@ -62,6 +62,40 @@ async def test_paid_user_is_not_metered(fake_redis, monkeypatch):
     assert fake_redis.store == {}
 
 
+@pytest.mark.asyncio
+async def test_positive_purchased_balance_is_not_metered(fake_redis, monkeypatch):
+    async def has_credit(user):
+        return user.get("account_id") == "paid-account"
+
+    monkeypatch.setattr("grid_api.services.credits.has_credit", has_credit)
+    user = {"id": 1, "account_id": "paid-account", "quota_exempt": False}
+    await quota.check_and_consume(user)
+    assert await quota.remaining(user) is None
+    assert fake_redis.store == {}
+
+
+@pytest.mark.asyncio
+async def test_zero_purchased_balance_stays_in_free_quota(fake_redis, monkeypatch):
+    async def has_credit(_user):
+        return False
+
+    monkeypatch.setattr("grid_api.services.credits.has_credit", has_credit)
+    user = {"id": 1, "account_id": "free-account", "quota_exempt": False}
+    await quota.check_and_consume(user)
+    assert len(fake_redis.store) == 1
+
+
+@pytest.mark.asyncio
+async def test_balance_lookup_failure_does_not_grant_paid_bypass(fake_redis, monkeypatch):
+    async def has_credit(_user):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr("grid_api.services.credits.has_credit", has_credit)
+    user = {"id": 1, "account_id": "unknown-account", "quota_exempt": False}
+    await quota.check_and_consume(user)
+    assert len(fake_redis.store) == 1
+
+
 def test_is_paid_uses_explicit_policy():
     assert quota.is_paid({"quota_exempt": True}) is True
     assert quota.is_paid({"quota_exempt": False}) is False
