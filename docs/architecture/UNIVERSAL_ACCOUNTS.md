@@ -34,8 +34,8 @@ sequenceDiagram
     participant C as Grid Core
     participant R as Redis
     U->>F: Sign in or use an app-local account
-    F->>C: Google ID token or namespaced app subject
-    C->>C: Verify Google, or bind subject to this service only
+    F->>C: Google ID token, Core SIWE proof, or namespaced app subject
+    C->>C: Verify global proof and bind the service-local subject
     C-->>F: 15-minute scoped Core user token
     F->>C: Service key plus X-Grid-User-Token
     C->>C: Verify token audience, service state, scopes, and ceilings
@@ -49,10 +49,48 @@ The service key remains server-side and has only `account.read`,
 authority, never key, payout, worker, or account-management authority. Native
 tokens live for 15 minutes and are audience-bound to an active service.
 
-Compromise of a service can impersonate only subjects in that service's app
-namespace, not arbitrary global Google users or wallets. Per-request and daily
-ceilings cap exposure. Service-owned jobs remain supported and charge the
+Compromise of a service can impersonate subjects in that service's app
+namespace, but cannot claim a global Google user or wallet without fresh proof
+verified by Core. Per-request and daily ceilings cap exposure. A service must
+derive `app_subject` from its authenticated server session; accepting an
+arbitrary browser value would let a caller target another local account during
+a proof-authorized merge. Service-owned jobs remain supported and charge the
 service account. External integrators may instead use their own user-held keys.
+
+Legacy signed app assertions used the service account UUID as their namespace;
+native exchange uses the stable service id. On first native exchange, Core
+resolves both forms, attaches the stable identity to a legacy owner, and
+value-conservingly merges a conflict. This prevents an auth upgrade from
+splitting an existing app user's balance.
+
+## Product topology
+
+The Grid is one account and economy with several focused interfaces, not one
+monolithic frontend:
+
+| Surface | Product role | Canonical identity path |
+| --- | --- | --- |
+| Console | Account control plane: funding, keys, usage, workers | Direct Google/SIWE Core session |
+| aipg.chat | Text, tools, search, and agent workflows | Chat-local subject linked by Google/SIWE |
+| aipg.art | Image/video creation and gallery | Gallery-local subject linked by Google/SIWE |
+| aipg.music | Music generation and playback | Random signed Music subject linked by Google/SIWE |
+| SDK/API | Programmatic use | User API key or delegated Core token |
+
+Navigation and account language should make these feel like one offering, while
+each application keeps its modality-specific workflow. Funding, balance,
+identity, metering, receipts, and account history are Core-owned. A frontend
+must not recreate a separate free-try counter or local paid balance.
+
+Partner wallet login is a two-call Core flow. The service requests
+`POST /v1/auth/wallet/challenge` with its server-held key, an exact allowlisted
+domain and URI, wallet address, Base chain id, and optional server-derived app
+subject. The wallet signs Core's returned EIP-4361 message unchanged. The
+service forwards it to `POST /v1/auth/wallet/exchange`; Core verifies and
+consumes the service-, subject-, wallet-, origin-, and nonce-bound challenge,
+then merges or attaches the identities under the invariants below.
+EOAs verify locally. Deployed EIP-1271 smart wallets verify against Base and
+fail closed when RPC proof is unavailable. Counterfactual ERC-6492 wallets need
+an audited universal-signature verifier before they are accepted.
 
 ## Wallet linking and merge
 
@@ -108,12 +146,13 @@ alias family so linked users still see that history without rewriting evidence.
 
 ## Rollout gates
 
-1. Apply Alembic through `0015` before deploying native-token or service-account
+1. Apply Alembic through `0019` before deploying partner-wallet exchange
    code.
 2. Create a distinct bridge key per first-party frontend and store it only in
    server-side secret storage.
-3. Provision separate bounded service accounts for Art, Chat, and Console;
-   migrate them to native tokens or app-only assertions and wallet linking.
+3. Provision separate bounded service accounts for Art, Chat, Music, and
+   Console. Allow only each app's required providers, Google audiences, and
+   exact SIWE domains.
 4. Run shadow accounting and compare Core balances with real completed jobs.
 5. Remove frontend-owned free counters only after parity.
 6. Enable promotional spending with rollback metrics and campaign-budget
@@ -122,3 +161,9 @@ alias family so linked users still see that history without rewriting evidence.
    daily free spending independently.
 8. Keep `GRID_LEGACY_INTERNAL_SESSION_ENABLED=0` and remove
    `GRID_INTERNAL_TOKEN` after rollback windows close.
+
+The Core contract test
+`test_verified_google_account_and_balance_are_shared_across_products` must stay
+green. It exchanges one verified Google identity through distinct Art, Chat,
+and Music clients, then proves every delegated token resolves to the same
+funded account without multiplying its balance.

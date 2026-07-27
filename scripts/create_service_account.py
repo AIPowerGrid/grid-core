@@ -25,6 +25,7 @@ async def _run(args) -> None:
             args.name,
             allowed_providers=args.provider,
             google_audiences=args.google_audience,
+            siwe_domains=args.siwe_domain,
             per_request_micro=args.per_request_micro,
             daily_micro=args.daily_micro,
         )
@@ -40,8 +41,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--id", required=True, help="Stable id, e.g. grid-console")
     parser.add_argument("--name", required=True)
-    parser.add_argument("--provider", action="append", choices=("app", "google"), default=[])
+    parser.add_argument("--provider", action="append", choices=("app", "google", "wallet"), default=[])
     parser.add_argument("--google-audience", action="append", default=[])
+    parser.add_argument(
+        "--siwe-domain",
+        action="append",
+        default=[],
+        help="Exact allowed wallet sign-in authority, e.g. aipg.art",
+    )
     parser.add_argument("--per-request-micro", type=int)
     parser.add_argument("--daily-micro", type=int)
     args = parser.parse_args()

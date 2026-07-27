@@ -27,6 +27,7 @@ async def _run(args) -> None:
             key_label=args.key_label,
             allowed_providers=args.provider,
             google_audiences=args.google_audience,
+            siwe_domains=args.siwe_domain,
             per_request_micro=args.per_request_micro,
             daily_micro=args.daily_micro,
         )
@@ -43,8 +44,14 @@ def main() -> None:
     parser.add_argument("--name", required=True)
     parser.add_argument("--account-id", required=True)
     parser.add_argument("--key-label", required=True)
-    parser.add_argument("--provider", action="append", choices=("app", "google"), default=[])
+    parser.add_argument("--provider", action="append", choices=("app", "google", "wallet"), default=[])
     parser.add_argument("--google-audience", action="append", default=[])
+    parser.add_argument(
+        "--siwe-domain",
+        action="append",
+        default=[],
+        help="Exact allowed wallet sign-in authority, e.g. aipg.art",
+    )
     parser.add_argument("--per-request-micro", type=int, required=True)
     parser.add_argument("--daily-micro", type=int, required=True)
     args = parser.parse_args()

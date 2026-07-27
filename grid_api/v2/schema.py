@@ -237,6 +237,7 @@ service_clients = sa.Table(
     sa.Column("name", sa.String(120), nullable=False),
     sa.Column("allowed_providers", PortableJSON, nullable=False, default=list),
     sa.Column("google_audiences", PortableJSON, nullable=False, default=list),
+    sa.Column("siwe_domains", PortableJSON, nullable=False, default=list),
     sa.Column("per_request_micro", sa.BigInteger, nullable=True),
     sa.Column("daily_micro", sa.BigInteger, nullable=True),
     sa.Column("active", sa.Boolean, nullable=False, default=True, index=True),
