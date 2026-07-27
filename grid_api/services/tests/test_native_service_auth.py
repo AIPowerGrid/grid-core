@@ -145,12 +145,18 @@ async def test_verified_google_account_and_balance_are_shared_across_products(
     async def no_grant(*_args, **_kwargs):
         return {"status": "disabled"}
 
+    async def no_value(*_args, **_kwargs):
+        return 0
+
     monkeypatch.setattr(service_auth, "verify_google_id_token", verified_google)
     monkeypatch.setattr(
         "grid_api.services.promotions.ensure_builtin_campaign",
         no_campaign,
     )
     monkeypatch.setattr("grid_api.services.promotions.grant_once", no_grant)
+    monkeypatch.setattr("grid_api.services.promotions.available_micro", no_value)
+    monkeypatch.setattr("grid_api.services.free_credits.daily_cap_micro", no_value)
+    monkeypatch.setattr("grid_api.services.free_credits.available_micro", no_value)
 
     services = {}
     for service_id in ("aipg-art", "aipg-chat", "aipg-music"):
@@ -198,7 +204,14 @@ async def test_verified_google_account_and_balance_are_shared_across_products(
                 f"{service['id']}:{service_id}:local-user-{index}",
             ),
         ) == account_id
-        assert await credits.get_balance(UUID(account_id)) == 20_000
+        credit_view = await accounts_router.get_credits(
+            apikey=key,
+            authorization=None,
+            x_grid_user_assertion=None,
+            x_grid_user_token=result["access_token"],
+        )
+        assert credit_view["account_id"] == account_id
+        assert credit_view["paid"]["balance_micro"] == 20_000
 
 
 class _NonceRedis:
@@ -226,9 +239,17 @@ async def test_verified_wallet_account_and_balance_are_shared_across_products(
 
     redis = _NonceRedis()
     monkeypatch.setattr("grid_api.redis_client.get_redis", lambda: redis)
+
+    async def no_value(*_args, **_kwargs):
+        return 0
+
+    monkeypatch.setattr("grid_api.services.promotions.available_micro", no_value)
+    monkeypatch.setattr("grid_api.services.free_credits.daily_cap_micro", no_value)
+    monkeypatch.setattr("grid_api.services.free_credits.available_micro", no_value)
     services = {}
     for service_id, domain in (
         ("aipg-art", "aipg.art"),
+        ("aipg-chat", "aipg.chat"),
         ("aipg-music", "aipg.music"),
     ):
         services[service_id] = await accounts.create_service_client(
@@ -244,7 +265,11 @@ async def test_verified_wallet_account_and_balance_are_shared_across_products(
     )
     account_id = None
     for index, (service_id, (_service, key)) in enumerate(services.items()):
-        domain = "aipg.art" if service_id == "aipg-art" else "aipg.music"
+        domain = {
+            "aipg-art": "aipg.art",
+            "aipg-chat": "aipg.chat",
+            "aipg-music": "aipg.music",
+        }[service_id]
         app_subject = f"local-wallet-user-{index}"
         challenge = await accounts_router.exchange_wallet_challenge(
             request,
@@ -287,7 +312,14 @@ async def test_verified_wallet_account_and_balance_are_shared_across_products(
                 f"{service_id}:{app_subject}",
             ),
         ) == account_id
-        assert await credits.get_balance(UUID(account_id)) == 20_000
+        credit_view = await accounts_router.get_credits(
+            apikey=key,
+            authorization=None,
+            x_grid_user_assertion=None,
+            x_grid_user_token=result["access_token"],
+        )
+        assert credit_view["account_id"] == account_id
+        assert credit_view["paid"]["balance_micro"] == 20_000
 
 
 @pytest.mark.asyncio

@@ -131,7 +131,10 @@ preventing subject collisions across partners even when local IDs match.
 
 Clients must gate generation on `total_spendable_micro`, not preview totals or
 frontend-owned counters. `GET /v1/account/credits` reports each pocket and its
-active state separately.
+active state separately and includes the canonical `account_id`. Partner apps
+use that narrow response to prove account and balance together; delegated
+tokens do not need access to the broader `/v1/account` key and identity
+metadata.
 
 The daily allowance is not ready to activate from an instantaneous token
 balance alone. A holder could move the same tokens through multiple wallets and
@@ -162,8 +165,9 @@ alias family so linked users still see that history without rewriting evidence.
 8. Keep `GRID_LEGACY_INTERNAL_SESSION_ENABLED=0` and remove
    `GRID_INTERNAL_TOKEN` after rollback windows close.
 
-The Core contract test
-`test_verified_google_account_and_balance_are_shared_across_products` must stay
-green. It exchanges one verified Google identity through distinct Art, Chat,
-and Music clients, then proves every delegated token resolves to the same
-funded account without multiplying its balance.
+The Core contract tests
+`test_verified_google_account_and_balance_are_shared_across_products` and
+`test_verified_wallet_account_and_balance_are_shared_across_products` must
+stay green. They exchange one verified identity through distinct Art, Chat,
+and Music clients, then prove every delegated token's narrow credits response
+returns the same funded account and purchased balance without multiplying it.
