@@ -54,7 +54,7 @@ def half_of(usd_input: float, usd_output: float, **media) -> ModelPrice:
 
 # ── Price book (keyed by lowercased model name) — HALF cheapest competitor ──
 # half_of() takes the competitor USD floor and stores HALF of it, in USD.
-# KEYS MUST MATCH the model name workers advertise. Sourced 2026-06-15.
+# KEYS MUST MATCH the model name workers advertise. Last media peg: 2026-07-28.
 PRICING: dict[str, ModelPrice] = {
     "gpt-oss-120b":       half_of(0.15, 0.60),   # floor Fireworks/Groq
     "deepseek-v4-flash":  half_of(0.14, 0.28),   # floor Fireworks
@@ -73,12 +73,12 @@ PRICING: dict[str, ModelPrice] = {
     "mimo-v2.5-pro":      half_of(0.435, 0.87),
 
     # ── Media (image per-image, video per-second) ──
-    # Pegged 2026-07-05 to competitor floors, HALVED (half_of divides by 2), so the
+    # Pegged 2026-07-28 to competitor floors, HALVED (half_of divides by 2), so the
     # arg is the competitor floor and the stored price is what we charge. Keys are
     # the lowercased model names workers advertise. Effective charge in comments.
-    "z-image-turbo":        half_of(0, 0, usd_image=0.006),      # → $0.003/image (turbo/schnell-tier)
+    "z-image-turbo":        half_of(0, 0, usd_image=0.006),      # → $0.003/image (1 MP turbo)
     "flux.2 klein 4b fp8":  half_of(0, 0, usd_image=0.02),       # → $0.010/image (Flux distilled 4B)
-    "krea 2 turbo":         half_of(0, 0, usd_image=0.03),       # → $0.015/image (quality turbo)
+    "krea 2 turbo":         half_of(0, 0, usd_image=0.01),       # → $0.005/image (txt2img or img2img)
     "ltx-2.3":              half_of(0, 0, usd_video_sec=0.04),   # → $0.020/second video (Justin)
     # Guarded launch peg only; benchmark against three real worker tiers before
     # enabling audio charging. Explicit pricing prevents accidental free jobs.
