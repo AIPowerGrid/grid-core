@@ -81,6 +81,31 @@ each application keeps its modality-specific workflow. Funding, balance,
 identity, metering, receipts, and account history are Core-owned. A frontend
 must not recreate a separate free-try counter or local paid balance.
 
+## Google OAuth ownership
+
+Production Google identity is owned in Google Cloud project
+`aipg-art-486319` (project number `786974751408`) under the `v2v.tech`
+organization. The project-wide external, in-production consent app is branded
+`AI Power Grid`. It may serve the first-party product domains, but each product
+must retain a distinct Web OAuth client:
+
+| Client name | Authorized JavaScript origin | Authorized redirect URI |
+| --- | --- | --- |
+| `AIPG Art` | `https://aipg.art` | None required by the Google ID-token flow |
+| `AIPG Music` | `https://aipg.music` | None required by the Google ID-token flow |
+| `AIPG Chat` | `https://aipg.chat` | `https://aipg.chat/auth/oauth/callback` |
+
+The corresponding Core service policy must allow only that client's audience.
+Art and Music client IDs are public build-time configuration plus server-side
+verification configuration. Chat's client secret is server-only and must never
+enter source, frontend bundles, logs, or docs.
+
+Do not point production back at OAuth project number `706974751400`. That
+historical project is not accessible to the current operator accounts. A client
+migration is complete only after the frontend configuration, server verifier,
+and Core service audience all use the new client and a real Google login works
+from the production origin.
+
 Partner wallet login is a two-call Core flow. The service requests
 `POST /v1/auth/wallet/challenge` with its server-held key, an exact allowlisted
 domain and URI, wallet address, Base chain id, and optional server-derived app
