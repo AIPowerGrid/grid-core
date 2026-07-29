@@ -33,6 +33,34 @@ API_KEY_PREFIX = "grid_"
 SESSION_SCOPES = ["account.read", "account.manage", "inference.submit"]
 INFERENCE_SCOPES = ["account.read", "inference.submit"]
 SERVICE_SCOPES = ["account.read", "inference.submit", "identity.exchange", "identity.assert"]
+DIRECT_SERVICE_INFERENCE_SCOPE = "inference.service_submit"
+
+
+def service_scopes(*, allow_direct_inference: bool = False) -> list[str]:
+    """Return bridge scopes, with direct service spending as an explicit opt-in."""
+    scopes = list(SERVICE_SCOPES)
+    if allow_direct_inference:
+        scopes.append(DIRECT_SERVICE_INFERENCE_SCOPE)
+    return scopes
+
+
+def _validate_direct_service_limits(
+    allow_direct_inference: bool,
+    per_request_micro: int | None,
+    daily_micro: int | None,
+) -> None:
+    if not allow_direct_inference:
+        return
+    if (
+        per_request_micro is None
+        or daily_micro is None
+        or per_request_micro <= 0
+        or daily_micro <= 0
+        or per_request_micro > daily_micro
+    ):
+        raise ValueError(
+            "direct service inference requires positive per-request and daily ceilings",
+        )
 
 
 def generate_api_key() -> str:
@@ -259,8 +287,20 @@ async def authenticate(
         return delegated
 
     if not user_assertion:
-        if required_scope == "inference.submit" and "identity.assert" in scopes and user.get("key_kind") != "service":
-            raise HTTPException(status_code=401, detail="Identity bridge requires a user assertion")
+        if required_scope == "inference.submit":
+            if (
+                user.get("key_kind") == "service"
+                and DIRECT_SERVICE_INFERENCE_SCOPE not in scopes
+            ):
+                raise HTTPException(
+                    status_code=401,
+                    detail="Service inference requires a delegated user token",
+                )
+            if "identity.assert" in scopes and user.get("key_kind") != "service":
+                raise HTTPException(
+                    status_code=401,
+                    detail="Identity bridge requires a user assertion",
+                )
         return user
 
     from sqlalchemy.exc import IntegrityError
@@ -671,6 +711,7 @@ async def create_service_client(
     siwe_domains: list[str] | None = None,
     per_request_micro: int | None = None,
     daily_micro: int | None = None,
+    allow_direct_inference: bool = False,
 ) -> tuple[dict, str]:
     """Atomically create one backend service principal and its initial key."""
     from .service_auth import normalize_service_id, normalize_siwe_domains
@@ -685,6 +726,11 @@ async def create_service_client(
         raise ValueError("Google provider requires at least one audience")
     if "wallet" in allowed and not domains:
         raise ValueError("wallet provider requires at least one SIWE domain")
+    _validate_direct_service_limits(
+        allow_direct_inference,
+        per_request_micro,
+        daily_micro,
+    )
     account_id = uuid4()
     plain = generate_api_key()
     now = datetime.now(timezone.utc)
@@ -719,7 +765,9 @@ async def create_service_client(
                 is_session=False,
                 key_kind="service",
                 service_id=sid,
-                scopes=SERVICE_SCOPES,
+                scopes=service_scopes(
+                    allow_direct_inference=allow_direct_inference,
+                ),
                 created=now,
                 revoked=False,
             ),
@@ -737,6 +785,7 @@ async def create_service_client(
             "provider_count": len(allowed),
             "per_request_micro": per_request_micro if per_request_micro is not None else "unset",
             "daily_micro": daily_micro if daily_micro is not None else "unset",
+            "direct_inference": allow_direct_inference,
         },
         dedupe_key=f"service-created:{sid}",
     )
@@ -754,6 +803,7 @@ async def adopt_service_client(
     siwe_domains: list[str] | None = None,
     per_request_micro: int,
     daily_micro: int,
+    allow_direct_inference: bool = False,
 ) -> dict:
     """Promote one existing server-held key into a bounded service client.
 
@@ -773,6 +823,11 @@ async def adopt_service_client(
         raise ValueError("bounded service adoption requires positive per-request and daily ceilings")
     if per_request_micro > daily_micro:
         raise ValueError("per-request ceiling cannot exceed the daily ceiling")
+    _validate_direct_service_limits(
+        allow_direct_inference,
+        per_request_micro,
+        daily_micro,
+    )
     allowed = sorted(set(allowed_providers or ["app"]))
     audiences = list(google_audiences or [])
     if not set(allowed).issubset({"app", "google", "wallet"}):
@@ -865,7 +920,9 @@ async def adopt_service_client(
                 is_session=False,
                 key_kind="service",
                 service_id=sid,
-                scopes=SERVICE_SCOPES,
+                scopes=service_scopes(
+                    allow_direct_inference=allow_direct_inference,
+                ),
             ),
         )
         await session.commit()
@@ -873,7 +930,7 @@ async def adopt_service_client(
 
 
 async def rotate_service_key(service_id: str) -> str:
-    """Atomically revoke a service's old keys and return one replacement."""
+    """Atomically revoke a service's old keys and preserve their authority."""
     from .service_auth import normalize_service_id
 
     sid = normalize_service_id(service_id)
@@ -892,6 +949,25 @@ async def rotate_service_key(service_id: str) -> str:
         ).first()
         if not client:
             raise ValueError("active service client not found")
+        active_scope_rows = (
+            await session.execute(
+                sa.select(api_keys_table.c.scopes)
+                .where(
+                    api_keys_table.c.service_id == sid,
+                    api_keys_table.c.revoked.is_(False),
+                )
+                .with_for_update(),
+            )
+        ).scalars().all()
+        if not active_scope_rows:
+            raise ValueError("active service key not found")
+        normalized_scopes = {
+            tuple(sorted(scopes or SERVICE_SCOPES))
+            for scopes in active_scope_rows
+        }
+        if len(normalized_scopes) != 1:
+            raise ValueError("active service keys have conflicting scopes")
+        replacement_scopes = list(next(iter(normalized_scopes)))
         await session.execute(
             sa.update(api_keys_table).where(api_keys_table.c.service_id == sid, api_keys_table.c.revoked.is_(False)).values(revoked=True),
         )
@@ -903,7 +979,7 @@ async def rotate_service_key(service_id: str) -> str:
                 is_session=False,
                 key_kind="service",
                 service_id=sid,
-                scopes=SERVICE_SCOPES,
+                scopes=replacement_scopes,
                 created=now,
                 revoked=False,
             ),

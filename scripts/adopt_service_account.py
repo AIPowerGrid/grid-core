@@ -30,6 +30,7 @@ async def _run(args) -> None:
             siwe_domains=args.siwe_domain,
             per_request_micro=args.per_request_micro,
             daily_micro=args.daily_micro,
+            allow_direct_inference=args.allow_direct_inference,
         )
     finally:
         await close_database()
@@ -54,6 +55,11 @@ def main() -> None:
     )
     parser.add_argument("--per-request-micro", type=int, required=True)
     parser.add_argument("--daily-micro", type=int, required=True)
+    parser.add_argument(
+        "--allow-direct-inference",
+        action="store_true",
+        help="Allow capped service-owned inference without a delegated user token",
+    )
     args = parser.parse_args()
     if not args.provider:
         args.provider = ["app"]

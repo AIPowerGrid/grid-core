@@ -171,6 +171,7 @@ class CreateBridgeForm(BaseModel):
     siwe_domains: list[str] = Field(default_factory=list)
     per_request_micro: Optional[int] = None
     daily_micro: Optional[int] = None
+    allow_direct_inference: bool = False
 
 
 class ServiceExchangeForm(BaseModel):
@@ -543,6 +544,7 @@ async def create_identity_bridge(
             siwe_domains=form.siwe_domains,
             per_request_micro=form.per_request_micro,
             daily_micro=form.daily_micro,
+            allow_direct_inference=form.allow_direct_inference,
         )
     except (ValueError, IntegrityError) as exc:
         raise HTTPException(409, detail=str(exc))
@@ -550,7 +552,9 @@ async def create_identity_bridge(
         "service_id": service["id"],
         "account_id": str(service["account_id"]),
         "api_key": key,
-        "scopes": ["account.read", "inference.submit", "identity.exchange", "identity.assert"],
+        "scopes": accounts_svc.service_scopes(
+            allow_direct_inference=form.allow_direct_inference,
+        ),
     }
 
 
