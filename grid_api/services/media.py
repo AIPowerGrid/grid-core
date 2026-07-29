@@ -349,15 +349,21 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
             await credits.release_job(job_id)
             raise HTTPException(status_code=429,
                                 detail=f"Too many concurrent jobs (limit {concurrency_limit}). Retry shortly.")
+    dispatch_state = {"attempted": False}
     try:
         return await _submit_and_wait_inner(model, job_type, payload, timeout, job_id,
                                             preferred_worker=preferred_worker,
-                                            progress_token=progress_token)
+                                            progress_token=progress_token,
+                                            dispatch_state=dispatch_state)
     except Exception:
-        # Generation failed/timed out/never-dispatched → release the hold. Idempotent
-        # with worker_ws's terminal settle via the held→settled conditional UPDATE
-        # (whoever reaches terminal first wins; the other is a no-op).
-        await credits.release_job(job_id)
+        # Before a queue submission attempt, this request is the only lifecycle
+        # authority and must release its hold. After dispatch, worker_ws is the
+        # sole terminal authority: an HTTP timeout/disconnect can race a valid
+        # late worker success, so releasing here could refund the customer and
+        # make the completed worker ineligible for payout. The worker terminal,
+        # dead-letter path, or stale-hold sweeper will settle/release it.
+        if not dispatch_state["attempted"]:
+            await credits.release_job(job_id)
         raise
     finally:
         if account_id is not None and concurrency_limit:
@@ -365,7 +371,8 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
 
 
 async def _submit_and_wait_inner(model: str, job_type: str, payload: dict, timeout: int,
-                                 job_id: str, preferred_worker: str = "", progress_token: str = "") -> tuple[list[dict], dict]:
+                                 job_id: str, preferred_worker: str = "", progress_token: str = "",
+                                 dispatch_state: dict | None = None) -> tuple[list[dict], dict]:
 
     # Recipe-governed path: if `model` selects an approved RecipeVault recipe,
     # resolve it to a concrete ComfyUI graph and ride it in the payload — the
@@ -375,7 +382,7 @@ async def _submit_and_wait_inner(model: str, job_type: str, payload: dict, timeo
     try:
         # Build recipe inputs from INTENT only, not the whole payload: prompt/seed/
         # negative/image are always intended; numeric knobs (size, seconds, …) ride
-        # in `recipe_inputs` and are present ONLY when the caller set them explicitly.
+    # in `recipe_inputs` and are present ONLY when the caller set them explicitly.
         # An omitted knob never reaches the resolver, so it keeps the recipe's baked
         # default (the dumb happy path). i2v start frame may arrive as `source_image`.
         # NB: the image slot is NOT injected here. When a source image is supplied
@@ -416,6 +423,12 @@ async def _submit_and_wait_inner(model: str, job_type: str, payload: dict, timeo
     # runs the resolved recipe_spec regardless of display name. Falls back to the model
     # name for the legacy path (no recipe) or a recipe with no requiredModels.
     route_models = (spec.get("required_models") if spec and spec.get("required_models") else [model])
+    # Mark before the Redis call. A connection can drop after Redis accepted
+    # XADD but before its reply reached Core; conservatively treating that as
+    # dispatched leaves the hold to the durable terminal/sweeper instead of
+    # risking completed-but-refunded work.
+    if dispatch_state is not None:
+        dispatch_state["attempted"] = True
     await job_queue.submit_job(job_id, payload, route_models, job_type=job_type,
                                preferred_worker=preferred_worker, progress_token=progress_token)
     logger.info(f"{job_type} job {job_id} queued model={model} route={route_models}"
