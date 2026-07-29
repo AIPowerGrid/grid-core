@@ -159,13 +159,23 @@ async def test_verified_google_account_and_balance_are_shared_across_products(
     monkeypatch.setattr("grid_api.services.free_credits.available_micro", no_value)
 
     services = {}
-    for service_id in ("aipg-art", "aipg-chat", "aipg-music"):
+    for service_id in (
+        "grid-console",
+        "aipg-art",
+        "aipg-chat",
+        "aipg-music",
+    ):
+        supports_wallet = service_id != "grid-console"
         services[service_id] = await accounts.create_service_client(
             service_id,
             service_id,
-            allowed_providers=["app", "google", "wallet"],
+            allowed_providers=(
+                ["app", "google", "wallet"]
+                if supports_wallet
+                else ["app", "google"]
+            ),
             google_audiences=["shared-google-client"],
-            siwe_domains=[f"{service_id}.test"],
+            siwe_domains=[f"{service_id}.test"] if supports_wallet else [],
         )
 
     request = Request(
@@ -212,6 +222,24 @@ async def test_verified_google_account_and_balance_are_shared_across_products(
         )
         assert credit_view["account_id"] == account_id
         assert credit_view["paid"]["balance_micro"] == 20_000
+
+    api_key = await accounts.issue_key(
+        UUID(account_id),
+        label="universal-parity-api",
+    )
+    api_user = await accounts.authenticate(
+        api_key,
+        required_scope="inference.submit",
+    )
+    assert str(api_user["account_id"]) == account_id
+    api_credit_view = await accounts_router.get_credits(
+        apikey=api_key,
+        authorization=None,
+        x_grid_user_assertion=None,
+        x_grid_user_token=None,
+    )
+    assert api_credit_view["account_id"] == account_id
+    assert api_credit_view["paid"]["balance_micro"] == 20_000
 
 
 class _NonceRedis:
