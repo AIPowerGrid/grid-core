@@ -161,6 +161,15 @@ use that narrow response to prove account and balance together; delegated
 tokens do not need access to the broader `/v1/account` key and identity
 metadata.
 
+Before rendering a generation estimate, clients call
+`POST /v1/account/credits/quote`. The response repeats the same canonical
+account and pocket balances, then adds the Core-owned model/modality price,
+holder discount, expected promotion → daily → purchased split, and any
+shortfall. The call never reserves or moves value. An unpriced request returns
+`priced: false` with a null cost; clients must never reinterpret it as free.
+The work-submission route remains authoritative if balance changes after the
+quote.
+
 The daily allowance is not ready to activate from an instantaneous token
 balance alone. A holder could move the same tokens through multiple wallets and
 collect the bonus repeatedly. Before `GRID_FREE_SPENDABLE_LIVE=1`, replace that

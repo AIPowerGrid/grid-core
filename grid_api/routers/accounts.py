@@ -19,12 +19,12 @@ import os
 import re
 import uuid as uuid_mod
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import urlsplit
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Header, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 
 from ..auth import extract_api_key
@@ -190,6 +190,23 @@ class BindServiceIdentityForm(BaseModel):
 
 class ClaimDepositForm(BaseModel):
     tx_hash: str
+
+
+class CreditQuoteForm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(min_length=1, max_length=256)
+    modality: Literal["text", "image", "video", "audio", "3d"]
+    prompt_tokens: int = Field(default=0, ge=0, le=2_000_000)
+    max_tokens: int = Field(default=0, ge=0, le=1_000_000)
+    n: int = Field(default=1, ge=1, le=16)
+    seconds: Optional[float] = Field(default=None, gt=0, le=3_600)
+
+    @model_validator(mode="after")
+    def require_modality_inputs(self):
+        if self.modality in {"video", "audio"} and self.seconds is None:
+            raise ValueError(f"seconds is required for {self.modality} quotes")
+        return self
 
 
 @router.post("/v1/accounts/wallet/nonce")
@@ -1649,58 +1666,39 @@ async def get_credits(
         x_grid_user_assertion,
         x_grid_user_token,
     )
-    aid = user["account_id"]
-    wallet = user.get("wallet") or None
     from ..services import credits as credits_svc
-    from ..services import free_credits, promotions
 
-    paid = await credits_svc.get_balance(aid)
-    promo_left = await promotions.available_micro(aid)
-    cap = await free_credits.daily_cap_micro(aid, wallet)
-    free_left = await free_credits.available_micro(aid, wallet)
-    total = promo_left + free_left + paid
+    return await credits_svc.account_credit_summary(user)
 
-    def usd(m):
-        return round(m / 1_000_000, 6)
 
-    # `active` says whether each shadowed pocket can currently pay a charge.
-    free_active = free_credits.FREE_ENABLED and free_credits.FREE_SPENDABLE_LIVE
-    promo_active = promotions.PROMO_ENABLED and promotions.PROMO_SPENDABLE_LIVE
-    spendable = paid + (free_left if free_active else 0) + (promo_left if promo_active else 0)
-    return {
-        # Include the canonical principal on this deliberately narrow read
-        # surface so partner apps can prove identity and balance together
-        # without receiving /v1/account key or linked-identity metadata.
-        "account_id": str(aid),
-        "promotional": {
-            "remaining_micro": promo_left,
-            "remaining_usd": usd(promo_left),
-            "active": promo_active,
-        },
-        "free": {
-            "daily_cap_micro": cap,
-            "remaining_micro": free_left,
-            "daily_cap_usd": usd(cap),
-            "remaining_usd": usd(free_left),
-            "resets": "utc-midnight",
-            "holder_bonus_active": cap > free_credits.FREE_DAILY_MICRO,  # AIPG-tier bonus applied?
-            # False = shown for transparency but NOT spendable on paid inference yet.
-            "active": free_active,
-        },
-        "paid": {
-            "balance_micro": paid,
-            "balance_usd": usd(paid),
-        },
-        # What can ACTUALLY cover a paid charge right now (free excluded until it's
-        # in the live reserve path). This is the number a client must gate on.
-        "total_spendable_micro": spendable,
-        "total_spendable_usd": usd(spendable),
-        # promo + daily free + paid after all shadow gates are enabled.
-        "total_preview_micro": total,
-        "total_preview_usd": usd(total),
-        "charging_enabled": credits_svc.charging_enabled_for(user),
-        "charging_mode": credits_svc.charging_mode(),
-    }
+@router.post("/v1/account/credits/quote")
+@limiter.limit("120/minute")
+async def quote_credits(
+    request: Request,
+    form: CreditQuoteForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+    x_grid_user_assertion: Optional[str] = Header(None),
+    x_grid_user_token: Optional[str] = Header(None),
+):
+    """Canonical balance and non-mutating pre-dispatch price estimate."""
+    user = await _require_v2(
+        apikey,
+        authorization,
+        x_grid_user_assertion,
+        x_grid_user_token,
+    )
+    from ..services import credits as credits_svc
+
+    return await credits_svc.quote_for_account(
+        user,
+        model=form.model,
+        modality=form.modality,
+        prompt_tokens=form.prompt_tokens,
+        max_tokens=form.max_tokens,
+        n=form.n,
+        seconds=float(form.seconds or 0),
+    )
 
 
 @router.post("/v1/account/keys")
