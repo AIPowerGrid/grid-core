@@ -142,6 +142,10 @@ content sanitization, and reward settlement.
   than silently becoming free.
 - New monetary holds obey `off | allowlist | on`; an existing durable hold must
   still settle or refund after the operator disables new charging.
+- Charging allowlists select delegated/user work by canonical account. Service
+  IDs select only direct service principals carrying
+  `inference.service_submit`; never let a frontend service allowlist charge all
+  of its delegated users.
 - Operator alerts are best-effort and data-minimized. Never include prompts,
   outputs, email addresses, credentials, signatures, raw exceptions, or
   unredacted identity values in alert fields.

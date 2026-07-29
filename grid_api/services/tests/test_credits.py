@@ -38,6 +38,32 @@ def test_charging_policy_modes(monkeypatch):
     assert credits.charging_enabled_for(user, PRICED_MODEL) is True
     assert credits.charging_enabled_for({"account_id": "a-2"}, PRICED_MODEL) is False
 
+    # A service allowlist is only for explicitly scoped, service-owned work.
+    # It must not charge every delegated user routed through that service.
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_ACCOUNTS", frozenset())
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_SERVICES", frozenset({"gallery"}))
+    delegated = {
+        "account_id": "a-2",
+        "service_id": "gallery",
+        "key_kind": "delegated_user",
+        "scopes": ["inference.submit"],
+    }
+    assert credits.charging_enabled_for(delegated, PRICED_MODEL) is False
+    direct_service = {
+        "account_id": "service-account",
+        "service_id": "gallery",
+        "key_kind": "service",
+        "scopes": ["inference.submit", "inference.service_submit"],
+    }
+    assert credits.charging_enabled_for(direct_service, PRICED_MODEL) is True
+    direct_without_exception = {
+        **direct_service,
+        "scopes": ["inference.submit"],
+    }
+    assert credits.charging_enabled_for(direct_without_exception, PRICED_MODEL) is False
+
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_ACCOUNTS", frozenset({"a-1"}))
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_SERVICES", frozenset())
     monkeypatch.setattr(credits, "CHARGING_ALLOW_MODELS", frozenset({PRICED_MODEL}))
     assert credits.charging_enabled_for(user, PRICED_MODEL) is True
     assert credits.charging_enabled_for(user, "other-model") is False

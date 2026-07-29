@@ -16,8 +16,11 @@
 
 `GRID_CHARGING_MODE=allowlist` charges only an account listed in
 `GRID_CHARGING_ALLOW_ACCOUNTS` or a service listed in
-`GRID_CHARGING_ALLOW_SERVICES`. `GRID_CHARGING_ALLOW_MODELS`, when non-empty,
-further restricts the selected cohort to exact model IDs.
+`GRID_CHARGING_ALLOW_SERVICES`. Account selection applies to user and delegated
+frontend work. Service selection applies only to a direct service principal
+that has the exceptional `inference.service_submit` scope; it never selects
+users delegated through that service. `GRID_CHARGING_ALLOW_MODELS`, when
+non-empty, further restricts the selected cohort to exact model IDs.
 
 `GRID_CHARGING_MODE=on` charges every authenticated request and default-denies
 unpriced work. Do not use this mode for the first production test.
@@ -82,10 +85,12 @@ the production funding rail and is not the launch canary.
 ## Allowlisted canary
 
 1. Set `GRID_CHARGING_MODE=allowlist`.
-2. Put only the canary UUID in `GRID_CHARGING_ALLOW_ACCOUNTS`, list only the
-   first-party Chat, Art, Music, Console, and direct-API service IDs in
-   `GRID_CHARGING_ALLOW_SERVICES`, and put only the approved production models
-   in `GRID_CHARGING_ALLOW_MODELS`.
+2. Put only the canary UUID in `GRID_CHARGING_ALLOW_ACCOUNTS` and put only the
+   approved production models in `GRID_CHARGING_ALLOW_MODELS`. Leave
+   `GRID_CHARGING_ALLOW_SERVICES` empty for delegated Chat, Art, Music, Console,
+   and user API-key tests. Add a service ID only for an intentionally
+   service-owned workload whose key has `inference.service_submit` and bounded
+   per-request/daily exposure.
 3. Restart Core and confirm the startup alert reports the expected account,
    service, and model counts.
 4. Verify `GET /v1/account/credits` reports `charging_mode=allowlist` and
