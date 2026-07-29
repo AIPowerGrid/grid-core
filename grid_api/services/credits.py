@@ -75,8 +75,10 @@ def charging_mode() -> str:
 def charging_enabled_for(user: dict | None = None, model: str | None = None) -> bool:
     """Whether this request may create a live monetary reservation.
 
-    In allowlist mode an account or service principal must be explicitly
-    selected. The optional model list narrows that cohort; it never enables
+    In allowlist mode, user/delegated work is selected only by canonical
+    account. The service allowlist is reserved for an explicitly scoped direct
+    service principal; it must never make every user behind that service
+    chargeable. The optional model list narrows that cohort and never enables
     charging by itself.
     """
     mode = charging_mode()
@@ -87,9 +89,14 @@ def charging_enabled_for(user: dict | None = None, model: str | None = None) -> 
     user = user or {}
     account_id = str(user.get("account_id") or "").lower()
     service_id = str(user.get("service_id") or "").lower()
+    direct_service = (
+        user.get("key_kind") == "service"
+        and "inference.service_submit" in set(user.get("scopes") or [])
+    )
     selected = (
-        bool(account_id and account_id in CHARGING_ALLOW_ACCOUNTS)
-        or bool(service_id and service_id in CHARGING_ALLOW_SERVICES)
+        bool(service_id and service_id in CHARGING_ALLOW_SERVICES)
+        if direct_service
+        else bool(account_id and account_id in CHARGING_ALLOW_ACCOUNTS)
     )
     if not selected:
         return False
