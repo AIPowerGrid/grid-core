@@ -112,7 +112,12 @@ content sanitization, and reward settlement.
   service-local subject. App delegation is namespaced to one service and
   receives bounded inference authority. The service must derive any exchanged
   app subject from its authenticated server session, never directly from an
-  untrusted request field.
+  untrusted request field. A normal service key cannot submit inference as its
+  own account: it must include a service-bound short-lived user token. The
+  `inference.service_submit` scope is an explicit exception for capped,
+  service-owned workloads such as bots and demos; provisioning requires positive
+  per-request and daily ceilings, and key rotation preserves the existing scope
+  set.
 - Native service exchange uses the stable service-id namespace. During
   migration it also resolves the former service-account-UUID namespace used by
   signed assertions, attaches the stable identity, and value-conservingly

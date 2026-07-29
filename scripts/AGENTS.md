@@ -49,6 +49,9 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - Add explicit dry-run defaults to any new chain, database, or cleanup tool.
 - A service with `--provider wallet` must also list every intended exact
   authority with `--siwe-domain`; never grant a wildcard domain.
+- Frontend bridge services must not receive `--allow-direct-inference`. Reserve
+  that explicit scope for capped service-owned bots or demos that cannot act for
+  an end-user account; both per-request and daily ceilings are mandatory.
 - Existing-service identity policy changes use
   `configure_service_identity.py`: run without `--apply`, inspect the complete
   policy, then apply with that preview's exact `current_digest`.

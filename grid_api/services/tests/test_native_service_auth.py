@@ -601,18 +601,45 @@ def test_user_token_signature_audience_expiry_and_step_up(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_service_key_remains_valid_for_service_owned_work(db):
-    service, key = await accounts.create_service_client("worker-api", "Worker API")
+async def test_service_bridge_key_requires_delegated_user_for_inference(db):
+    _, key = await accounts.create_service_client("frontend-api", "Frontend API")
+    with pytest.raises(HTTPException) as exc:
+        await accounts.authenticate(key, required_scope="inference.submit")
+    assert exc.value.status_code == 401
+    assert "delegated user token" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_bounded_direct_service_scope_survives_rotation(db):
+    service, key = await accounts.create_service_client(
+        "worker-api",
+        "Worker API",
+        per_request_micro=500_000,
+        daily_micro=2_000_000,
+        allow_direct_inference=True,
+    )
     user = await accounts.authenticate(key, required_scope="inference.submit")
     assert user["key_kind"] == "service"
     assert user["service_id"] == service["id"]
     assert str(user["account_id"]) == str(service["account_id"])
+    assert accounts.DIRECT_SERVICE_INFERENCE_SCOPE in user["scopes"]
 
     replacement = await accounts.rotate_service_key(service["id"])
     with pytest.raises(HTTPException):
         await accounts.authenticate(key)
     rotated = await accounts.authenticate(replacement, required_scope="inference.submit")
     assert rotated["service_id"] == service["id"]
+    assert accounts.DIRECT_SERVICE_INFERENCE_SCOPE in rotated["scopes"]
+
+
+@pytest.mark.asyncio
+async def test_direct_service_inference_requires_bounded_policy(db):
+    with pytest.raises(ValueError, match="per-request and daily ceilings"):
+        await accounts.create_service_client(
+            "unbounded-worker-api",
+            "Unbounded Worker API",
+            allow_direct_inference=True,
+        )
 
 
 @pytest.mark.asyncio
@@ -631,6 +658,7 @@ async def test_existing_key_can_be_atomically_adopted_as_bounded_service(db):
         allowed_providers=["app"],
         per_request_micro=500_000,
         daily_micro=100_000_000,
+        allow_direct_inference=True,
     )
     assert service["account_id"] == account["id"]
 
@@ -652,6 +680,7 @@ async def test_existing_key_can_be_atomically_adopted_as_bounded_service(db):
         allowed_providers=["app"],
         per_request_micro=500_000,
         daily_micro=100_000_000,
+        allow_direct_inference=True,
     )
     assert again == service
     assert (await accounts.authenticate(key))["service_id"] == "aigarth"
