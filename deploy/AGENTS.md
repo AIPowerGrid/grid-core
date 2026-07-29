@@ -26,6 +26,9 @@ executes an immutable release selected through `/home/aipg/current`.
   - `/v1/*`, `/`, `/health`, `/docs`, and `/openapi.json` -> Grid API.
   - `/api/v2/*` and `/v2/*` -> static `410 Gone`; no legacy process.
   - `/metrics` should remain restricted by nginx.
+- Existing-host deployments install the versioned Nginx site from the selected
+  release, run `nginx -t`, and reload Nginx. Do not let the live site drift from
+  `nginx/aipg-api.conf`.
 - Secrets belong in `/etc/aipg/grid.env` with restrictive permissions, never in
   git, command argv, or logs.
 - Deployment scripts may be destructive on fresh VMs. Do not run them locally

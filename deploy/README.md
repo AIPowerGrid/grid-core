@@ -59,11 +59,15 @@ Install the versioned unit assets, select the release atomically, and restart:
 sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-gridapi.service" /etc/systemd/system/
 sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-payout.service" /etc/systemd/system/
 sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-payout.timer" /etc/systemd/system/
+sudo install -m 0644 "$RELEASE/deploy/nginx/aipg-api.conf" /etc/nginx/sites-available/aipg-api.conf
+sudo ln -sfn /etc/nginx/sites-available/aipg-api.conf /etc/nginx/sites-enabled/aipg-api.conf
 sudo ln -s "$RELEASE" /home/aipg/.current.next
 sudo mv -Tf /home/aipg/.current.next /home/aipg/current
 sudo systemctl daemon-reload
 sudo systemd-analyze verify aipg-gridapi.service aipg-payout.service aipg-payout.timer
+sudo nginx -t
 sudo systemctl restart aipg-gridapi
+sudo systemctl reload nginx
 ```
 
 The payout timer is a money-moving control. Preserve its prior enabled/active
@@ -84,6 +88,8 @@ curl -fsS http://127.0.0.1:7010/v1/models
 curl -fsS http://127.0.0.1:7010/v1/validator/capabilities
 curl -s -o /dev/null -w '%{http_code}\n' \
   http://127.0.0.1:7010/v1/validator/assignments
+test "$(curl -sS -o /dev/null -w '%{http_code}' https://api.aipowergrid.io/health)" = 200
+test "$(curl -sS -o /dev/null -w '%{http_code}' https://api.aipowergrid.io/v2/status/heartbeat)" = 410
 ```
 
 The unauthenticated validator-assignment request should return `401`. Also smoke
