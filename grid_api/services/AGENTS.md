@@ -85,6 +85,9 @@ content sanitization, and reward settlement.
 - Media billing reserves exact deterministic cost before dispatch and refunds on
   non-running paths; text billing reserves max cost and reconciles against trusted
   usage.
+- After a media queue submission attempt, only the worker terminal,
+  dead-letter path, or stale-reservation sweeper may settle/release the hold.
+  An HTTP timeout or disconnect is not proof that GPU work stopped.
 - Successful image, video, 3D, and audio responses expose the Core-generated
   `grid.job_id`. Consumer applications should retain it as the immutable handle
   joining the generation to the completion and credit ledgers.

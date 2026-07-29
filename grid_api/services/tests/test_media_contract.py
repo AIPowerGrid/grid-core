@@ -133,3 +133,71 @@ async def test_media_success_metadata_includes_job_id(monkeypatch):
         "model": "z-image-turbo",
         "recipe_root": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_media_releases_hold_when_recipe_fails_before_dispatch(monkeypatch):
+    released = []
+
+    async def authorize(*_args, **_kwargs):
+        return {"ok": True, "reserved": 3000}
+
+    async def release(job_id):
+        released.append(job_id)
+
+    def invalid_recipe(*_args, **_kwargs):
+        raise recipes.RecipeError("invalid recipe input")
+
+    monkeypatch.setattr(credits, "authorize_media", authorize)
+    monkeypatch.setattr(credits, "release_job", release)
+    monkeypatch.setattr(recipes, "resolve_for_model", invalid_recipe)
+
+    with pytest.raises(HTTPException) as exc:
+        await media.submit_and_wait(
+            "z-image-turbo",
+            "image",
+            {"prompt": "bad recipe"},
+            1,
+            account_id="account",
+        )
+
+    assert exc.value.status_code == 422
+    assert len(released) == 1
+
+
+@pytest.mark.asyncio
+async def test_media_http_timeout_does_not_release_after_dispatch(monkeypatch):
+    released = []
+    submitted = []
+
+    async def authorize(*_args, **_kwargs):
+        return {"ok": True, "reserved": 3000}
+
+    async def release(job_id):
+        released.append(job_id)
+
+    async def submit(job_id, *_args, **_kwargs):
+        submitted.append(job_id)
+
+    async def no_terminal(*_args, **_kwargs):
+        if False:
+            yield None
+
+    monkeypatch.setattr(credits, "authorize_media", authorize)
+    monkeypatch.setattr(credits, "release_job", release)
+    monkeypatch.setattr(recipes, "resolve_for_model", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(job_queue, "submit_job", submit)
+    monkeypatch.setattr(token_stream, "subscribe_tokens", no_terminal)
+
+    with pytest.raises(HTTPException) as exc:
+        await media.submit_and_wait(
+            "z-image-turbo",
+            "image",
+            {"prompt": "late success"},
+            1,
+            account_id="account",
+        )
+
+    assert exc.value.status_code == 504
+    assert len(submitted) == 1
+    assert released == []
