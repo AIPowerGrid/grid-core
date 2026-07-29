@@ -194,6 +194,144 @@ async def get_balance(account_id) -> int:
         return int(row[0]) if row else 0
 
 
+def _usd(micro: int) -> float:
+    return round(int(micro or 0) / pricing.MICRO, 6)
+
+
+async def account_credit_summary(user: dict) -> dict:
+    """Canonical read model for every first-party balance display."""
+    account_id = _account_id(user)
+    if not account_id:
+        raise ValueError("credit summary requires a v2 account")
+    wallet = user.get("wallet") or None
+    paid = await get_balance(account_id)
+    promo_left = await promotions.available_micro(account_id)
+    daily_cap = await free_credits.daily_cap_micro(account_id, wallet)
+    free_left = await free_credits.available_micro(account_id, wallet)
+    free_active = free_credits.FREE_ENABLED and free_credits.FREE_SPENDABLE_LIVE
+    promo_active = promotions.PROMO_ENABLED and promotions.PROMO_SPENDABLE_LIVE
+    spendable = paid + (free_left if free_active else 0) + (promo_left if promo_active else 0)
+    preview = paid + free_left + promo_left
+    return {
+        "account_id": str(account_id),
+        "promotional": {
+            "remaining_micro": promo_left,
+            "remaining_usd": _usd(promo_left),
+            "active": promo_active,
+        },
+        "free": {
+            "daily_cap_micro": daily_cap,
+            "remaining_micro": free_left,
+            "daily_cap_usd": _usd(daily_cap),
+            "remaining_usd": _usd(free_left),
+            "resets": "utc-midnight",
+            "holder_bonus_active": daily_cap > free_credits.FREE_DAILY_MICRO,
+            "active": free_active,
+        },
+        "paid": {
+            "balance_micro": paid,
+            "balance_usd": _usd(paid),
+        },
+        "total_spendable_micro": spendable,
+        "total_spendable_usd": _usd(spendable),
+        "total_preview_micro": preview,
+        "total_preview_usd": _usd(preview),
+        "charging_enabled": charging_enabled_for(user),
+        "charging_mode": charging_mode(),
+    }
+
+
+async def quote_for_account(
+    user: dict,
+    *,
+    model: str,
+    modality: str,
+    prompt_tokens: int = 0,
+    max_tokens: int = 0,
+    n: int = 1,
+    seconds: float = 0.0,
+) -> dict:
+    """Return a non-mutating quote that mirrors reservation-time pricing."""
+    modality = (modality or "").lower()
+    summary = await account_credit_summary(user)
+    priced = pricing.is_priced_for(model, modality)
+    request_shape = {
+        "prompt_tokens": prompt_tokens if modality == "text" else None,
+        "max_tokens": max_tokens if modality == "text" else None,
+        "n": n if modality in {"image", "3d"} else None,
+        "seconds": seconds if modality in {"video", "audio"} else None,
+    }
+    if not priced:
+        summary["charging_enabled"] = charging_enabled_for(user, model)
+        summary["estimate"] = {
+            "model": model,
+            "modality": modality,
+            "priced": False,
+            "reason": "unpriced",
+            "base_cost_micro": None,
+            "base_cost_usd": None,
+            "discount_bps": 0,
+            "cost_micro": None,
+            "cost_usd": None,
+            "balance_sufficient": False,
+            "from_promotional_micro": None,
+            "from_daily_micro": None,
+            "from_paid_micro": None,
+            "shortfall_micro": None,
+            **request_shape,
+        }
+        return summary
+
+    if modality == "text":
+        input_rate, output_rate = _snapshot_rates(model)
+        base_cost = _quote_snapshot(prompt_tokens, max_tokens, input_rate, output_rate, 0)
+    elif modality == "image":
+        base_cost = pricing.quote_image(model, n)
+    elif modality == "video":
+        base_cost = pricing.quote_video(model, seconds)
+    elif modality == "audio":
+        base_cost = pricing.quote_audio(model, seconds)
+    else:
+        base_cost = pricing.quote_3d(model, n)
+
+    discount_bps = await holder_discount_bps(
+        wallet=user.get("wallet"),
+        account_id=_account_id(user),
+    )
+    factor = 10_000 - discount_bps
+    cost = (base_cost * factor + 9_999) // 10_000 if base_cost > 0 and factor > 0 else 0
+    promo_available = (
+        summary["promotional"]["remaining_micro"]
+        if summary["promotional"]["active"]
+        else 0
+    )
+    daily_available = summary["free"]["remaining_micro"] if summary["free"]["active"] else 0
+    paid_available = summary["paid"]["balance_micro"]
+    from_promo = min(cost, promo_available)
+    from_daily = min(cost - from_promo, daily_available)
+    from_paid = min(cost - from_promo - from_daily, paid_available)
+    shortfall = max(0, cost - from_promo - from_daily - from_paid)
+    summary["charging_enabled"] = charging_enabled_for(user, model)
+    summary["estimate"] = {
+        "model": model,
+        "modality": modality,
+        "priced": True,
+        "reason": None,
+        "base_cost_micro": base_cost,
+        "base_cost_usd": _usd(base_cost),
+        "discount_bps": discount_bps,
+        "cost_micro": cost,
+        "cost_usd": _usd(cost),
+        "balance_sufficient": shortfall == 0,
+        "from_promotional_micro": from_promo,
+        "from_daily_micro": from_daily,
+        "from_paid_micro": from_paid,
+        "shortfall_micro": shortfall,
+        **request_shape,
+    }
+    return summary
+
+
 async def _locked_canonical_account(s, account_id):
     """Serialize value movement with account merges, then resolve aliases."""
     from .identities import canonical_account_id

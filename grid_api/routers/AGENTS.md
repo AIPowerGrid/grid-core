@@ -35,7 +35,9 @@ transport, accounts, stats, health/metrics.
   worker listing, API-key issue/revoke, `GET /v1/account/credits` (canonical
   `account_id` plus promotional/free/paid pockets; `total_spendable_*` = what
   can pay NOW vs `total_preview_*`; `free.active` tracks
-  GRID_FREE_SPENDABLE_LIVE), `GET /v1/account/jobs`
+  GRID_FREE_SPENDABLE_LIVE), `POST /v1/account/credits/quote` (the same balance
+  truth plus a non-mutating, reservation-equivalent model/modality estimate and
+  expected pocket split), `GET /v1/account/jobs`
   (operator trust view: my workers' jobs + den + result_hash + signed flag,
   scoped to the payout wallet), immutable deposit history/config, and deposit
   claims (USDC launch rail, bounded expiring-price AIPG, actual-USDC
