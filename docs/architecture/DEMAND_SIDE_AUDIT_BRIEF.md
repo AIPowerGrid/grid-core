@@ -193,11 +193,11 @@ on). These are hard gates, not suggestions:
 
 | Surface | Source commit | Production evidence |
 | --- | --- | --- |
-| Core | `e768101866a39dbba9d339d2d282202a989be7ca` | `/home/aipg/current` resolves to `/home/aipg/releases/grid-core-e7681018`; the running process reports `GRID_CHARGING_ENABLED=0` and `GRID_CHARGING_MODE=off`. |
+| Core | `e9b4e00383a0feeecb27fe3325fdbe042e0465d7` | `/home/aipg/current` resolves to `/home/aipg/releases/grid-core-e9b4e003`; the running process reports `GRID_CHARGING_ENABLED=0` and `GRID_CHARGING_MODE=off`. Public `/health`, `/docs`, and `/openapi.json` return `200`, while the retired `/v2/status/heartbeat` returns `410`. |
 | Console | `ca59b41a8f8522ea06b9d5cffee5ec47b7865336` | Vercel production deployment `dpl_744HTcM6HsqwGYn3CQahKg4y8R6e` is Ready and owns `console.aipowergrid.io`. |
 | Chat | `3d38d1e2d3e8f648d976c9bbe252425e026a983d` | Backend, background, and web containers use matching `grid-3d38d1e2` images from `/home/aipg/releases/aipg-chat-3d38d1e2`. |
-| Art | `ed51f86ca0c2b644b73d1b32cb1f3433cd00e8e2` | The active release resolves to `/opt/aipg-gallery-releases/gallery-ed51f86c`. |
-| Music | `2c23aab083c44504af8f7400832eaf3da682e6f7` | The active release resolves to `/opt/aipg-music-releases/music-2c23aab0`. |
+| Art | `9640470ac6ea39767355a8854986083976ee7248` | The active release resolves to `/opt/aipg-gallery-releases/gallery-9640470a`; successful items retain the Core `grid.job_id` as a provenance receipt. |
+| Music | `90b08debd9e0774e1a76babf68bae46bd16b8aa2` | The active release resolves to `/opt/aipg-music-releases/music-90b08deb`; the production dependency audit reports no known vulnerabilities. A signed-in charging-off generation produced Grid job `b8b1fd0e-523a-457b-ba52-f2a4c21fce2a`, displayed its receipt in the UI, wrote one audio completion row, wrote no reservation or credit movement, and left the purchased balance unchanged. |
 
 This table records source provenance, not authorization to enable charging.
 Core remains the sole charging-mode authority; frontend deployments cannot
