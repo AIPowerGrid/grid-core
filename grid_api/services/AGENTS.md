@@ -85,6 +85,9 @@ content sanitization, and reward settlement.
 - Media billing reserves exact deterministic cost before dispatch and refunds on
   non-running paths; text billing reserves max cost and reconciles against trusted
   usage.
+- Successful image, video, 3D, and audio responses expose the Core-generated
+  `grid.job_id`. Consumer applications should retain it as the immutable handle
+  joining the generation to the completion and credit ledgers.
 - **Three credit pockets, never converted:** charges draw promotional, daily
   free, then purchased value when each pocket's gate is live. The split is
   durable in `grid_reservations.promo_micro/free_micro`, and settlement restores
