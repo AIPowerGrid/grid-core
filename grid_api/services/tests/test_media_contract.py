@@ -1,10 +1,12 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import json
+
 import pytest
 from fastapi import HTTPException
 
-from grid_api.services import credits, media, recipes
+from grid_api.services import credits, job_queue, media, recipes, token_stream
 
 
 def test_strict_size_rejects_silent_adjustments():
@@ -81,3 +83,53 @@ async def test_live_media_bills_recipe_baked_duration(monkeypatch):
             "billing-duration", "video", {"n": 1}, 1, account_id="account",
         )
     assert observed["seconds"] == 10
+
+
+@pytest.mark.asyncio
+async def test_media_success_metadata_includes_job_id(monkeypatch):
+    submitted = {}
+
+    async def submit(job_id, payload, route_models, **kwargs):
+        submitted.update(
+            job_id=job_id,
+            payload=payload,
+            route_models=route_models,
+            kwargs=kwargs,
+        )
+
+    async def events(job_id, timeout):
+        assert job_id == "job-receipt"
+        assert timeout == 30
+        yield {
+            "text": token_stream.DONE_SENTINEL,
+            "full_text": json.dumps(
+                {
+                    "media": [{"url": "https://example.invalid/output.webp"}],
+                    "worker": "worker-a",
+                    "gen_time": 1.25,
+                    "model": "z-image-turbo",
+                },
+            ),
+        }
+
+    monkeypatch.setattr(recipes, "resolve_for_model", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(job_queue, "submit_job", submit)
+    monkeypatch.setattr(token_stream, "subscribe_tokens", events)
+
+    outputs, meta = await media._submit_and_wait_inner(
+        "z-image-turbo",
+        "image",
+        {"prompt": "receipt test"},
+        30,
+        "job-receipt",
+    )
+
+    assert outputs == [{"url": "https://example.invalid/output.webp"}]
+    assert submitted["job_id"] == "job-receipt"
+    assert meta == {
+        "job_id": "job-receipt",
+        "worker": "worker-a",
+        "gen_time": 1.25,
+        "model": "z-image-turbo",
+        "recipe_root": None,
+    }

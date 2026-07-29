@@ -94,6 +94,8 @@ transport, accounts, stats, health/metrics.
   filtering is defense in depth, not the network authority for retirement.
 - Media routes must pass `user.get("account_id")` to `services.media`; quota IDs
   like `v2:<uuid>` are not credit ledger account IDs.
+- Successful media envelopes carry `grid.job_id`; preserve it through first-party
+  brokers so users can identify the corresponding completion and charge record.
 - Worker affinity (`worker` request field) is ownership-gated before queueing.
 - Public stats/health/metrics are unauthenticated by design; keep sensitive
   account/ledger details behind account auth.

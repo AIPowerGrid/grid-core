@@ -435,6 +435,7 @@ async def _submit_and_wait_inner(model: str, job_type: str, payload: dict, timeo
             raise HTTPException(status_code=502, detail="No media returned")
         logger.info(f"{job_type} job {job_id} done: {len(media)} output(s)")
         meta = {
+            "job_id": job_id,
             "worker": result.get("worker", ""),
             "gen_time": result.get("gen_time"),
             "model": result.get("model", model),
