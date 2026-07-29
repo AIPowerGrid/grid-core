@@ -51,50 +51,66 @@ The disposable database must not be production or share production tables.
 ## Dark deployment
 
 1. Deploy Core using the immutable-release procedure in `deploy/README.md`.
-2. Keep `GRID_CHARGING_MODE=off`, free/promo spending off, and deposits off.
+2. Keep `GRID_CHARGING_MODE=off` and free/promo spending off. The independently
+   verified Base USDC deposit rail may remain enabled; keep AIPG, direct ETH,
+   and x402 funding dark.
 3. Add `GRID_ALERT_DISCORD_WEBHOOK` only to `/etc/aipg/grid.env`; preserve its
    restrictive permissions and never print the file.
 4. Restart Core. Confirm `core_started` arrives without secrets and reports
    `charging_mode=off`.
 5. Check `/health`, `/v1/models`, worker reconnects, Core logs, and the billing
    invariant monitor. Any `billing_invariant_failed` alert blocks the canary.
-6. Deploy the strict-SIWE Console release and verify Google plus wallet login
-   before removing any temporary legacy SIWE compatibility flag.
+6. Deploy immutable Console, Chat, Art, and Music releases. Verify that Google
+   plus linked-wallet login resolves to the same canonical account and
+   purchased balance on every surface.
 
 ## Fund one canary
 
-The grant tool is dry-run by default and capped at $10:
+Use a dedicated canonical account and fund it through the production Console
+with approximately `$0.25` of Base USDC. Record:
 
-```bash
-python scripts/grant_canary_credit.py \
-  --account-id <canonical-account-uuid> \
-  --amount-usd 2.00 \
-  --ref canary:<date>
-```
+- canonical account UUID;
+- linked funding wallet;
+- Base transaction hash and deposit receipt ID;
+- purchased balance before and after funding;
+- credit-ledger ref and amount.
 
-After verifying the account, amount, and idempotency ref, repeat with `--apply`.
-Run it from the selected production release with the protected service
-environment loaded. A repeat with the same ref must print `applied=false` and
-must not increase the balance.
+Retry the same deposit claim. It must return the same receipt without changing
+the balance. An operator grant is useful for disposable tests but does not prove
+the production funding rail and is not the launch canary.
 
 ## Allowlisted canary
 
 1. Set `GRID_CHARGING_MODE=allowlist`.
-2. Put only the canary UUID in `GRID_CHARGING_ALLOW_ACCOUNTS`. Optionally set
-   one exact model in `GRID_CHARGING_ALLOW_MODELS`.
-3. Restart Core and confirm the startup alert reports one selected account.
+2. Put only the canary UUID in `GRID_CHARGING_ALLOW_ACCOUNTS`, list only the
+   first-party Chat, Art, Music, Console, and direct-API service IDs in
+   `GRID_CHARGING_ALLOW_SERVICES`, and put only the approved production models
+   in `GRID_CHARGING_ALLOW_MODELS`.
+3. Restart Core and confirm the startup alert reports the expected account,
+   service, and model counts.
 4. Verify `GET /v1/account/credits` reports `charging_mode=allowlist` and
    `charging_enabled=true` for the canary. A second account must report false.
-5. Submit one short non-streaming request. Verify one held reservation becomes
-   settled, the balance decreases by actual grid-counted usage, and the worker
-   completion ledger has one row.
-6. Submit one stream and disconnect after output begins. Verify the worker
-   terminal still settles the reservation.
-7. Request work whose maximum quote exceeds the remaining balance. It must
+5. Run one successful request through Chat Completions, Responses, and
+   Anthropic Messages. Include a streaming request and a disconnect after
+   output begins.
+6. Run Krea text-to-image, Z-Image, one supported image-to-image request, Music,
+   and video. Record each frontend quote, job ID, reservation, terminal state,
+   actual charge, and worker ledger row.
+7. For every request, verify the hold exists before dispatch, success settles
+   exactly once, and the purchased balance plus active promotional/daily
+   pockets move in the documented spending order.
+8. Force one worker failure or timeout per lifecycle family (text,
+   passthrough, media). Each hold must release exactly once without a worker
+   payout.
+9. Request work whose maximum quote exceeds the remaining balance. It must
    return `402` before queueing and generate an `insufficient_credit` alert.
-8. Retry the canary-credit grant with its original ref. Balance must not move.
-9. Confirm no stale holds, no negative balances, no ledger drift, and no
-   settlement or service-exposure alerts.
+10. Retry one completed request and one terminal event. Neither may
+    double-charge or double-pay.
+11. Confirm no stale holds, negative balances, ledger drift, settlement errors,
+    or service-exposure alerts.
+12. Leave the same allowlist active for 24 hours of normal first-party use.
+    Reconcile funding receipts, balances, credit ledger, reservations, worker
+    completion ledger, and alerts before expanding the cohort.
 
 ## Alerts
 

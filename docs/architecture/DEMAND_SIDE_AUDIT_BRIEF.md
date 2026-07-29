@@ -169,7 +169,7 @@ on). These are hard gates, not suggestions:
   dispatch, stream reserve/refund, media-job charging, unpriced blocked in
   enforce mode.
 
-### 2026-07 demand-launch hardening (code complete; deploy/canary pending)
+### 2026-07 demand-launch hardening (code complete; dark-deployed)
 
 - Positive purchased-credit accounts bypass only the free request-count quota;
   the atomic prepaid reserve remains the authoritative spend gate.
@@ -185,13 +185,29 @@ on). These are hard gates, not suggestions:
   balances, invalid reservation splits, and aging holds. Redacted, rate-limited
   Discord alerts cover signup, deposits, reservations, settlement, sweepers,
   invariants, HTTP 500s, and rate limiting.
-- Global charging remains off until production deploy order, price approval,
-  funding UX, and the allowlisted canary in
+- Global charging remains off until identity parity, cross-modality billing
+  proofs, price approval, funding UX, and the allowlisted canary in
   `deploy/DEMAND_BILLING_RUNBOOK.md` are complete.
 
-**Remaining launch order:** deploy Core dark → deploy strict-SIWE Console →
-verify Google/wallet account continuity → run one funded allowlisted canary →
-approve price pegs and funding UX → consider broad mode.
+#### Immutable dark-deployment record (2026-07-29)
+
+| Surface | Source commit | Production evidence |
+| --- | --- | --- |
+| Core | `e768101866a39dbba9d339d2d282202a989be7ca` | `/home/aipg/current` resolves to `/home/aipg/releases/grid-core-e7681018`; the running process reports `GRID_CHARGING_ENABLED=0` and `GRID_CHARGING_MODE=off`. |
+| Console | `ca59b41a8f8522ea06b9d5cffee5ec47b7865336` | Vercel production deployment `dpl_744HTcM6HsqwGYn3CQahKg4y8R6e` is Ready and owns `console.aipowergrid.io`. |
+| Chat | `3d38d1e2d3e8f648d976c9bbe252425e026a983d` | Backend, background, and web containers use matching `grid-3d38d1e2` images from `/home/aipg/releases/aipg-chat-3d38d1e2`. |
+| Art | `ed51f86ca0c2b644b73d1b32cb1f3433cd00e8e2` | The active release resolves to `/opt/aipg-gallery-releases/gallery-ed51f86c`. |
+| Music | `2c23aab083c44504af8f7400832eaf3da682e6f7` | The active release resolves to `/opt/aipg-music-releases/music-2c23aab0`. |
+
+This table records source provenance, not authorization to enable charging.
+Core remains the sole charging-mode authority; frontend deployments cannot
+turn billing on.
+
+**Remaining launch order:** prove one Google/wallet-linked canonical account
+and balance across Console, Chat, Art, Music, and direct API use → prove
+reserve/settle/release invariants for every supported modality → run one funded
+account/service/model allowlisted canary → reconcile all receipts and ledgers →
+hold the canary for 24 hours → expand cohorts gradually.
 
 The most security-sensitive remaining integration is frontend identity
 delegation: Core must verify global Google/SIWE proof itself, while service
