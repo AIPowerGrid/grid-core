@@ -149,10 +149,10 @@ preventing subject collisions across partners even when local IDs match.
 
 | Pocket | Default | Reset or expiry | Sybil control | Live gate |
 | --- | ---: | --- | --- | --- |
-| Daily free | $0.05/day | UTC midnight | Verified Google | `GRID_FREE_SPENDABLE_LIVE` |
-| AIPG holder bonus | +$0.20/day | UTC midnight | Cached Base holding | `GRID_FREE_SPENDABLE_LIVE` |
-| Welcome promotion | $0.15 once | 30 days | Verified Google plus global budget | `GRID_PROMO_SPENDABLE_LIVE` |
-| Purchased | Deposited value | None | Payment confirmation | `GRID_CHARGING_ENABLED` |
+| Daily free | $0.01/day | UTC midnight | Verified Google | `GRID_FREE_SPENDABLE_LIVE` |
+| AIPG holder bonus | Disabled | N/A | Deferred until non-recyclable | `GRID_FREE_SPENDABLE_LIVE` |
+| Welcome promotion | $0.10 once; $500 campaign cap | 30 days | Verified Google plus global budget | `GRID_PROMO_SPENDABLE_LIVE` |
+| Purchased | Deposited value | None | Payment confirmation | `GRID_CHARGING_MODE` |
 
 Clients must gate generation on `total_spendable_micro`, not preview totals or
 frontend-owned counters. `GET /v1/account/credits` reports each pocket and its
@@ -170,12 +170,12 @@ shortfall. The call never reserves or moves value. An unpriced request returns
 The work-submission route remains authoritative if balance changes after the
 quote.
 
-The daily allowance is not ready to activate from an instantaneous token
-balance alone. A holder could move the same tokens through multiple wallets and
-collect the bonus repeatedly. Before `GRID_FREE_SPENDABLE_LIVE=1`, replace that
-check with a non-recyclable qualification such as bonded stake or a prior-epoch
-balance snapshot, and enforce a network-wide daily subsidy ceiling. Verified
-Google identity reduces casual abuse but is not, by itself, a Sybil proof.
+The launch default gives wallet-only accounts no automatic value. A holder
+could move the same tokens through multiple wallets and collect a naive bonus
+repeatedly, so the holder bonus remains zero until qualification uses bonded
+stake or a prior-epoch snapshot. Before `GRID_FREE_SPENDABLE_LIVE=1`, also
+enforce a network-wide daily subsidy ceiling. Verified Google identity reduces
+casual abuse but is not, by itself, a Sybil proof.
 
 Account merges preserve append-only payout and job ledgers on their original
 account and wallet identifiers. Canonical account views resolve the complete

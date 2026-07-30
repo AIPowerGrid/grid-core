@@ -60,6 +60,32 @@ async def test_grant_once_is_idempotent_and_budgeted(promo_db):
 
 
 @pytest.mark.asyncio
+async def test_builtin_campaign_syncs_bounded_launch_policy(promo_db, monkeypatch):
+    monkeypatch.setattr(promotions, "WELCOME_CAMPAIGN_ID", "welcome-test")
+    monkeypatch.setattr(promotions, "WELCOME_GRANT_MICRO", 100_000)
+    monkeypatch.setattr(promotions, "WELCOME_BUDGET_MICRO", 500_000_000)
+    monkeypatch.setattr(promotions, "WELCOME_EXPIRES_DAYS", 30)
+
+    await promotions.ensure_builtin_campaign()
+
+    async with await database.new_session() as session:
+        campaign = (await session.execute(
+            sa.select(
+                promo_campaigns.c.grant_micro,
+                promo_campaigns.c.budget_micro,
+                promo_campaigns.c.expires_days,
+                promo_campaigns.c.eligibility,
+            ).where(promo_campaigns.c.id == "welcome-test")
+        )).one()
+    assert campaign == (
+        100_000,
+        500_000_000,
+        30,
+        {"verified_google": True},
+    )
+
+
+@pytest.mark.asyncio
 async def test_consume_and_release_restore_same_grant(promo_db):
     await promotions.grant_once(promo_db, "welcome-test")
     assert await promotions.consume(promo_db, 100_000, "job-1") == 100_000

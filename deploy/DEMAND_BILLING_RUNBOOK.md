@@ -57,6 +57,19 @@ The disposable database must not be production or share production tables.
 2. Keep `GRID_CHARGING_MODE=off` and free/promo spending off. The independently
    verified Base USDC deposit rail may remain enabled; keep AIPG, direct ETH,
    and x402 funding dark.
+   Pin the reviewed launch policy explicitly in `/etc/aipg/grid.env`:
+
+   ```dotenv
+   GRID_WELCOME_GRANT_MICRO=100000
+   GRID_WELCOME_BUDGET_MICRO=500000000
+   GRID_FREE_DAILY_MICRO=10000
+   GRID_FREE_HOLDER_BONUS_MICRO=0
+   GRID_PROMO_SPENDABLE_LIVE=0
+   GRID_FREE_SPENDABLE_LIVE=0
+   ```
+
+   These values mean `$0.10` once for verified Google, a `$500` global welcome
+   ceiling, `$0.01/day` for verified Google, and no wallet-only holder faucet.
 3. Add `GRID_ALERT_DISCORD_WEBHOOK` only to `/etc/aipg/grid.env`; preserve its
    restrictive permissions and never print the file.
 4. Restart Core. Confirm `core_started` arrives without secrets and reports

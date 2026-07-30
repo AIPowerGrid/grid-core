@@ -57,6 +57,19 @@ async def test_wallet_only_non_holder_gets_no_free_faucet(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_wallet_only_launch_policy_disables_holder_faucet(monkeypatch):
+    monkeypatch.setattr(free_credits, "FREE_ENABLED", True)
+    monkeypatch.setattr(free_credits, "FREE_HOLDER_BONUS_MICRO", 0)
+    monkeypatch.setattr(free_credits, "_has_verified_google", _async(False))
+
+    async def unexpected_chain_read(*_args, **_kwargs):
+        raise AssertionError("disabled holder policy must not read the chain")
+
+    monkeypatch.setattr(holdings, "aipg_balance_raw", unexpected_chain_read)
+    assert await free_credits.daily_cap_micro("wallet-account", "0xabc") == 0
+
+
+@pytest.mark.asyncio
 async def test_wallet_only_holder_gets_holder_bonus(monkeypatch):
     monkeypatch.setattr(free_credits, "FREE_ENABLED", True)
     monkeypatch.setattr(free_credits, "FREE_HOLDER_MIN_AIPG", 100_000)
@@ -109,3 +122,31 @@ async def test_charge_dry_run_free_covers_everything(monkeypatch):
     out = await credits.charge_request(user, PRICED, 1000, 2000, "job-free-2")
     assert out["from_free"] == full
     assert out["from_paid"] == 0
+
+
+@pytest.mark.asyncio
+async def test_live_legacy_charge_respects_disabled_free_spending(monkeypatch):
+    async def unexpected_consume(*_args, **_kwargs):
+        raise AssertionError("disabled free pocket must not be consumed")
+
+    async def paid_ok(*_args, **_kwargs):
+        return "ok"
+
+    full = pricing.quote_text(PRICED, 1000, 2000)
+    monkeypatch.setattr(credits, "charging_enabled_for", lambda *_args: True)
+    monkeypatch.setattr(credits, "apply_holder_discount", _async(full))
+    monkeypatch.setattr(credits, "_promo_first", _async(0))
+    monkeypatch.setattr(free_credits, "FREE_SPENDABLE_LIVE", False)
+    monkeypatch.setattr(free_credits, "consume", unexpected_consume)
+    monkeypatch.setattr(credits, "debit", paid_ok)
+
+    out = await credits.charge_request(
+        {"account_id": "00000000-0000-0000-0000-000000000001"},
+        PRICED,
+        1000,
+        2000,
+        "job-live-free-off",
+    )
+    assert out["status"] == "ok"
+    assert out["from_free"] == 0
+    assert out["from_paid"] == out["charged"] == full
