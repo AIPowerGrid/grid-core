@@ -200,11 +200,12 @@ alias family so linked users still see that history without rewriting evidence.
    `GRID_INTERNAL_TOKEN` after rollback windows close.
 
 The Core contract tests
-`test_verified_google_account_and_balance_are_shared_across_products` and
-`test_verified_wallet_account_and_balance_are_shared_across_products` must
-stay green. They exchange one verified identity through distinct Art, Chat,
-and Music clients, then prove every delegated token's narrow credits response
-returns the same funded account and purchased balance without multiplying it.
+`test_verified_google_account_and_balance_are_shared_across_products`,
+`test_verified_wallet_account_and_balance_are_shared_across_products`, and
+`test_verified_google_and_wallet_link_to_one_canonical_account` must stay
+green. They exchange verified identities through distinct Console, Art, Chat,
+and Music clients, prove direct API-key parity, and verify that Google plus
+wallet proof resolves to one funded account without multiplying its balance.
 
 ## Production parity gate
 
