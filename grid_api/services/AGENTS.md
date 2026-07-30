@@ -25,6 +25,8 @@ content sanitization, and reward settlement.
   request/day ceilings), `alerts.py` (redacted, bounded operator event delivery),
   `assertions.py` (legacy app-only assertions), `economics.py`
   (splits, payout-asset + conversion-fee knobs, `worker_share_bps`),
+  `canary_audit.py` (read-only account/job reconciliation for supervised
+  demand-billing rollout),
   `holdings.py` (cached on-chain AIPG balance + Chainlink ETH/USD),
   `deposits.py` (atomic Base funding receipts from verified account wallets
   plus USDC, bounded AIPG, and conversion-gated ETH claims),

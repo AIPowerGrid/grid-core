@@ -28,6 +28,9 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   authorities.
 - `grant_canary_credit.py` - dry-run-by-default, capped operator credit for one
   allowlisted demand-billing canary.
+- `verify_demand_canary.py` - read-only reconciliation of one canonical
+  account's balance, reservations, purchased-credit refs, and worker ledger
+  terminals.
 
 ## Local Contracts
 
@@ -47,6 +50,9 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - Money-path changes belong primarily in
   `grid_api/services/settlement/payouts.py`; keep this wrapper thin.
 - Add explicit dry-run defaults to any new chain, database, or cleanup tool.
+- Read-only audit tools must connect with PostgreSQL
+  `default_transaction_read_only=on`; do not initialize schemas or reuse a
+  write-capable application session.
 - A service with `--provider wallet` must also list every intended exact
   authority with `--siwe-domain`; never grant a wildcard domain.
 - Frontend bridge services must not receive `--allow-direct-inference`. Reserve

@@ -113,6 +113,27 @@ the production funding rail and is not the launch canary.
     double-charge or double-pay.
 11. Confirm no stale holds, negative balances, ledger drift, settlement errors,
     or service-exposure alerts.
+    Reconcile the recorded job IDs from the selected immutable release without
+    using browser cookies, API keys, or a write-capable database session:
+
+    ```bash
+    .venv/bin/python scripts/verify_demand_canary.py \
+      --account-id "$CANARY_ACCOUNT_ID" \
+      --success "$CHAT_JOB_ID" \
+      --success "$IMAGE_JOB_ID" \
+      --success "$MUSIC_JOB_ID" \
+      --failure "$FORCED_FAILURE_JOB_ID" \
+      --absent "$INSUFFICIENT_JOB_ID" \
+      --allow-service aipg-chat \
+      --allow-service aipg-art \
+      --allow-service aipg-music
+    ```
+
+    Exit `0` and `"ok": true` are required. The tool uses a PostgreSQL
+    read-only session and fails on account/global ledger drift, negative
+    balances, stale holds, invalid pocket splits, wrong account/service
+    attribution, missing terminal evidence, or inconsistent per-job credit
+    movements.
 12. Leave the same allowlist active for 24 hours of normal first-party use.
     Reconcile funding receipts, balances, credit ledger, reservations, worker
     completion ledger, and alerts before expanding the cohort.
