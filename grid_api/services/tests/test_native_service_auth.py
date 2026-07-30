@@ -158,24 +158,20 @@ async def test_verified_google_account_and_balance_are_shared_across_products(
     monkeypatch.setattr("grid_api.services.free_credits.daily_cap_micro", no_value)
     monkeypatch.setattr("grid_api.services.free_credits.available_micro", no_value)
 
+    service_domains = {
+        "grid-console": "console.aipowergrid.io",
+        "aipg-art": "aipg.art",
+        "aipg-chat": "aipg.chat",
+        "aipg-music": "aipg.music",
+    }
     services = {}
-    for service_id in (
-        "grid-console",
-        "aipg-art",
-        "aipg-chat",
-        "aipg-music",
-    ):
-        supports_wallet = service_id != "grid-console"
+    for service_id, domain in service_domains.items():
         services[service_id] = await accounts.create_service_client(
             service_id,
             service_id,
-            allowed_providers=(
-                ["app", "google", "wallet"]
-                if supports_wallet
-                else ["app", "google"]
-            ),
+            allowed_providers=["app", "google", "wallet"],
             google_audiences=["shared-google-client"],
-            siwe_domains=[f"{service_id}.test"] if supports_wallet else [],
+            siwe_domains=[domain],
         )
 
     request = Request(
@@ -258,6 +254,116 @@ class _NonceRedis:
 
 
 @pytest.mark.asyncio
+async def test_verified_google_and_wallet_link_to_one_canonical_account(
+    db,
+    monkeypatch,
+):
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+
+    async def verified_google(_id_token, audiences):
+        assert audiences == ["shared-google-client"]
+        return {
+            "subject": "google-link-user-123",
+            "email": "linked@example.test",
+            "email_verified": True,
+            "name": "Linked User",
+        }
+
+    async def no_campaign(*_args, **_kwargs):
+        return None
+
+    async def no_grant(*_args, **_kwargs):
+        return {"status": "disabled"}
+
+    async def no_value(*_args, **_kwargs):
+        return 0
+
+    redis = _NonceRedis()
+    monkeypatch.setattr("grid_api.redis_client.get_redis", lambda: redis)
+    monkeypatch.setattr(service_auth, "verify_google_id_token", verified_google)
+    monkeypatch.setattr(
+        "grid_api.services.promotions.ensure_builtin_campaign",
+        no_campaign,
+    )
+    monkeypatch.setattr("grid_api.services.promotions.grant_once", no_grant)
+    monkeypatch.setattr("grid_api.services.promotions.available_micro", no_value)
+    monkeypatch.setattr("grid_api.services.free_credits.daily_cap_micro", no_value)
+    monkeypatch.setattr("grid_api.services.free_credits.available_micro", no_value)
+
+    service, key = await accounts.create_service_client(
+        "aipg-art",
+        "AIPG Art",
+        allowed_providers=["app", "google", "wallet"],
+        google_audiences=["shared-google-client"],
+        siwe_domains=["aipg.art"],
+    )
+    request = Request(
+        {"type": "http", "method": "POST", "path": "/", "headers": []},
+    )
+    app_subject = "gallery-user-123"
+    google_result = await accounts_router.exchange_google_identity(
+        request,
+        accounts_router.GoogleExchangeForm(
+            id_token="google-proof",
+            app_subject=app_subject,
+        ),
+        apikey=key,
+        authorization=None,
+    )
+    canonical_id = google_result["account_id"]
+    assert await credits.credit(
+        UUID(canonical_id),
+        20_000,
+        "test_funding",
+        "test:google-wallet-link-balance",
+    )
+
+    wallet = Account.create()
+    challenge = await accounts_router.exchange_wallet_challenge(
+        request,
+        accounts_router.ServiceWalletChallengeForm(
+            address=wallet.address,
+            domain="aipg.art",
+            uri="https://aipg.art/create",
+            app_subject=app_subject,
+        ),
+        apikey=key,
+        authorization=None,
+    )
+    signature = Account.sign_message(
+        encode_defunct(text=challenge["message"]),
+        wallet.key,
+    ).signature.hex()
+    wallet_result = await accounts_router.exchange_wallet_identity(
+        request,
+        accounts_router.ServiceWalletExchangeForm(
+            message=challenge["message"],
+            signature=signature,
+            address=wallet.address,
+            app_subject=app_subject,
+        ),
+        apikey=key,
+        authorization=None,
+    )
+
+    assert wallet_result["account_id"] == canonical_id
+    assert str(
+        await identities.resolve_identity("google", "google-link-user-123"),
+    ) == canonical_id
+    assert str(
+        await identities.resolve_identity("wallet", wallet.address),
+    ) == canonical_id
+    assert str(
+        await identities.resolve_identity(
+            "app",
+            f"{service['id']}:{app_subject}",
+        ),
+    ) == canonical_id
+    assert await credits.get_balance(UUID(canonical_id)) == 20_000
+
+
+@pytest.mark.asyncio
 async def test_verified_wallet_account_and_balance_are_shared_across_products(
     db,
     monkeypatch,
@@ -274,12 +380,14 @@ async def test_verified_wallet_account_and_balance_are_shared_across_products(
     monkeypatch.setattr("grid_api.services.promotions.available_micro", no_value)
     monkeypatch.setattr("grid_api.services.free_credits.daily_cap_micro", no_value)
     monkeypatch.setattr("grid_api.services.free_credits.available_micro", no_value)
+    service_domains = {
+        "grid-console": "console.aipowergrid.io",
+        "aipg-art": "aipg.art",
+        "aipg-chat": "aipg.chat",
+        "aipg-music": "aipg.music",
+    }
     services = {}
-    for service_id, domain in (
-        ("aipg-art", "aipg.art"),
-        ("aipg-chat", "aipg.chat"),
-        ("aipg-music", "aipg.music"),
-    ):
+    for service_id, domain in service_domains.items():
         services[service_id] = await accounts.create_service_client(
             service_id,
             service_id,
@@ -292,12 +400,8 @@ async def test_verified_wallet_account_and_balance_are_shared_across_products(
         {"type": "http", "method": "POST", "path": "/", "headers": []},
     )
     account_id = None
-    for index, (service_id, (_service, key)) in enumerate(services.items()):
-        domain = {
-            "aipg-art": "aipg.art",
-            "aipg-chat": "aipg.chat",
-            "aipg-music": "aipg.music",
-        }[service_id]
+    for index, (service_id, (service, key)) in enumerate(services.items()):
+        domain = service_domains[service_id]
         app_subject = f"local-wallet-user-{index}"
         challenge = await accounts_router.exchange_wallet_challenge(
             request,
@@ -334,6 +438,13 @@ async def test_verified_wallet_account_and_balance_are_shared_across_products(
                 "test:universal-wallet-balance",
             )
         assert result["account_id"] == account_id
+        delegated = await accounts.authenticate(
+            key,
+            user_token=result["access_token"],
+            required_scope="inference.submit",
+        )
+        assert str(delegated["account_id"]) == account_id
+        assert delegated["service_id"] == service["id"]
         assert str(
             await identities.resolve_identity(
                 "app",
@@ -348,6 +459,24 @@ async def test_verified_wallet_account_and_balance_are_shared_across_products(
         )
         assert credit_view["account_id"] == account_id
         assert credit_view["paid"]["balance_micro"] == 20_000
+
+    api_key = await accounts.issue_key(
+        UUID(account_id),
+        label="universal-wallet-parity-api",
+    )
+    api_user = await accounts.authenticate(
+        api_key,
+        required_scope="inference.submit",
+    )
+    assert str(api_user["account_id"]) == account_id
+    api_credit_view = await accounts_router.get_credits(
+        apikey=api_key,
+        authorization=None,
+        x_grid_user_assertion=None,
+        x_grid_user_token=None,
+    )
+    assert api_credit_view["account_id"] == account_id
+    assert api_credit_view["paid"]["balance_micro"] == 20_000
 
 
 @pytest.mark.asyncio

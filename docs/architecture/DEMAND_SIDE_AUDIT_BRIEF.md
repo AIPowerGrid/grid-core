@@ -195,7 +195,7 @@ on). These are hard gates, not suggestions:
 | --- | --- | --- |
 | Core | `e9b4e00383a0feeecb27fe3325fdbe042e0465d7` | `/home/aipg/current` resolves to `/home/aipg/releases/grid-core-e9b4e003`; the running process reports `GRID_CHARGING_ENABLED=0` and `GRID_CHARGING_MODE=off`. Public `/health`, `/docs`, and `/openapi.json` return `200`, while the retired `/v2/status/heartbeat` returns `410`. |
 | Console | `ca59b41a8f8522ea06b9d5cffee5ec47b7865336` | Vercel production deployment `dpl_744HTcM6HsqwGYn3CQahKg4y8R6e` is Ready and owns `console.aipowergrid.io`. |
-| Chat | `3d38d1e2d3e8f648d976c9bbe252425e026a983d` | Backend, background, and web containers use matching `grid-3d38d1e2` images from `/home/aipg/releases/aipg-chat-3d38d1e2`. |
+| Chat | `e50687907d760f715ca1fb5cfa0a6a2e1a3921aa` | Backend, background, and web containers use matching `grid-e5068790` images from `/home/aipg/releases/aipg-chat-e50687907d`; public API health and the signed-in footer both report `e5068790`. |
 | Art | `9640470ac6ea39767355a8854986083976ee7248` | The active release resolves to `/opt/aipg-gallery-releases/gallery-9640470a`; successful items retain the Core `grid.job_id` as a provenance receipt. |
 | Music | `90b08debd9e0774e1a76babf68bae46bd16b8aa2` | The active release resolves to `/opt/aipg-music-releases/music-90b08deb`; the production dependency audit reports no known vulnerabilities. A signed-in charging-off generation produced Grid job `b8b1fd0e-523a-457b-ba52-f2a4c21fce2a`, displayed its receipt in the UI, wrote one audio completion row, wrote no reservation or credit movement, and left the purchased balance unchanged. |
 
