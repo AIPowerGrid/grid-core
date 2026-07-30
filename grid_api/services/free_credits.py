@@ -48,11 +48,11 @@ FREE_ENABLED = os.getenv("GRID_FREE_CREDITS_ENABLED", "1").lower() in ("1", "tru
 # reserve/release (see the PREVIEW note above). Surfaced as free.active so the API
 # never implies free credit can cover a paid charge before that integration ships.
 FREE_SPENDABLE_LIVE = os.getenv("GRID_FREE_SPENDABLE_LIVE", "0").lower() in ("1", "true", "yes", "on")
-# Base free micro-USD per UTC day (50000 = $0.05).
-FREE_DAILY_MICRO = int(os.getenv("GRID_FREE_DAILY_MICRO", "50000"))
-# AIPG-holder bonus: wallets holding >= MIN get + BONUS micro-USD/day on top of base.
+# Base free micro-USD per UTC day (10000 = $0.01).
+FREE_DAILY_MICRO = int(os.getenv("GRID_FREE_DAILY_MICRO", "10000"))
+# Holder rewards stay disabled until qualification cannot be recycled between wallets.
 FREE_HOLDER_MIN_AIPG = int(os.getenv("GRID_FREE_HOLDER_MIN_AIPG", "100000"))
-FREE_HOLDER_BONUS_MICRO = int(os.getenv("GRID_FREE_HOLDER_BONUS_MICRO", "200000"))  # +$0.20/day
+FREE_HOLDER_BONUS_MICRO = int(os.getenv("GRID_FREE_HOLDER_BONUS_MICRO", "0"))
 
 _PREFIX = "grid:freecredit:"       # {_PREFIX}{account_id}:{day} -> micro spent today
 _REF_PREFIX = "grid:freeconsumed:" # {_REF_PREFIX}{ref} -> micro consumed for that job (idempotency)
@@ -100,7 +100,7 @@ async def _wallet_for_account(account_id) -> str | None:
 
 
 async def daily_cap_micro(account_id, wallet: str | None) -> int:
-    """Daily cap: verified-Google base plus an independent AIPG-holder bonus."""
+    """Daily cap: verified-Google base plus an optional qualified-holder bonus."""
     if not FREE_ENABLED:
         return 0
     cap = FREE_DAILY_MICRO if await _has_verified_google(account_id) else 0

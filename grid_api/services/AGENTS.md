@@ -102,8 +102,8 @@ content sanitization, and reward settlement.
   settle_job/release_job/settle_exact.
 - A wallet is not Sybil resistance. The welcome campaign requires a verified
   Google identity and has a finite global budget; wallet-only accounts do not
-  receive it. The daily baseline also requires verified Google; a wallet-only
-  account receives free value only when its cached AIPG holding qualifies.
+  receive it. The daily baseline also requires verified Google. Holder value
+  defaults to zero until qualification cannot be recycled between wallets.
 - Account merges require proof of both sides, refuse active holds, revoke source
   keys, preserve accrued payout reachability, and move purchased balance through
   paired append-only ledger entries.

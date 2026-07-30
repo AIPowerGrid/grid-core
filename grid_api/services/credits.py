@@ -556,7 +556,7 @@ async def charge_request(user: dict, model: str, prompt_tokens: int, completion_
                 "from_paid": cost - from_promo - from_free}
     # LIVE: draw the daily FREE allowance first, then the purchased balance.
     from_promo = await _promo_first(aid, cost, str(job_id))
-    from_free = await free_credits.consume(aid, wallet, cost - from_promo, ref=str(job_id))
+    from_free = await _free_first(aid, wallet, cost - from_promo, str(job_id))
     remainder = cost - from_promo - from_free
     if remainder <= 0:
         return {"status": "ok", "charged": cost, "from_promo": from_promo,

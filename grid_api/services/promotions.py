@@ -27,9 +27,9 @@ logger = logging.getLogger("grid_api.promotions")
 PROMO_ENABLED = os.getenv("GRID_PROMO_CREDITS_ENABLED", "1").lower() in {"1", "true", "yes", "on"}
 PROMO_SPENDABLE_LIVE = os.getenv("GRID_PROMO_SPENDABLE_LIVE", "0").lower() in {"1", "true", "yes", "on"}
 WELCOME_CAMPAIGN_ID = os.getenv("GRID_WELCOME_CAMPAIGN_ID", "universal-welcome-v1")
-WELCOME_GRANT_MICRO = int(os.getenv("GRID_WELCOME_GRANT_MICRO", "150000"))
+WELCOME_GRANT_MICRO = int(os.getenv("GRID_WELCOME_GRANT_MICRO", "100000"))
 WELCOME_EXPIRES_DAYS = int(os.getenv("GRID_WELCOME_EXPIRES_DAYS", "30"))
-WELCOME_BUDGET_MICRO = int(os.getenv("GRID_WELCOME_BUDGET_MICRO", "15000000000"))
+WELCOME_BUDGET_MICRO = int(os.getenv("GRID_WELCOME_BUDGET_MICRO", "500000000"))
 
 
 def _now() -> datetime:
