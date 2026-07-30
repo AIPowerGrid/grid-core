@@ -47,6 +47,7 @@ logger = logging.getLogger("grid_api.credits")
 CHARGING_ENABLED = os.getenv("GRID_CHARGING_ENABLED", "0").lower() in ("1", "true", "yes")
 _CHARGING_MODE_ENV = os.getenv("GRID_CHARGING_MODE", "").strip().lower()
 _CHARGING_MODES = {"off", "allowlist", "on"}
+_EXACT_COST_JOB_TYPES = frozenset({"image", "video", "audio", "3d"})
 
 
 def _csv_env(name: str) -> frozenset[str]:
@@ -1309,7 +1310,11 @@ async def settle_exact(job_id) -> None:
                 sa.update(reservations_t)
                 .where(sa.and_(reservations_t.c.job_id == str(job_id),
                                reservations_t.c.status == "held"))
-                .values(status="settled", settled=_now())
+                .values(
+                    status="settled",
+                    settled=_now(),
+                    actual_micro=reservations_t.c.reserved_micro,
+                ),
             )
             await s.commit()
             if res.rowcount == 0:
@@ -1526,7 +1531,7 @@ async def sweep_stale_reservations(older_than_seconds: int = 3600, limit: int = 
             released += 1
         else:
             job_type, units = led
-            if job_type in ("image", "video"):
+            if job_type in _EXACT_COST_JOB_TYPES:
                 await settle_exact(jid)        # media: exact reserve stands
             else:
                 await settle_job(jid, units)   # text/passthrough: charge grid usage

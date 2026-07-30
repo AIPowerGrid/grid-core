@@ -64,6 +64,14 @@ async def _reservation_status(job_id):
         return row[0] if row else None
 
 
+async def _reservation(job_id):
+    async with await database.new_session() as s:
+        row = (await s.execute(
+            sa.select(reservations_t).where(reservations_t.c.job_id == str(job_id)),
+        )).mappings().first()
+        return dict(row) if row else None
+
+
 @pytest.mark.asyncio
 async def test_authorize_records_reservation_atomically_and_idempotently(db, monkeypatch):
     monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
@@ -442,3 +450,49 @@ async def test_sweep_settles_ledgered_held_not_refund(db, monkeypatch):
     # Charged (reconciled), NOT refunded — worker was paid, so the user pays.
     assert await credits.get_balance(aid) == 10_000_000 - actual
     assert await _reservation_status(job) == "settled"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "job_type", "seconds", "expected_cost"),
+    [
+        ("ace-step-v1.5-xl-turbo", "audio", 60, 12_000),
+        ("trellis2", "3d", None, 250_000),
+    ],
+)
+async def test_sweep_keeps_exact_audio_and_3d_charge(
+    db,
+    monkeypatch,
+    model,
+    job_type,
+    seconds,
+    expected_cost,
+):
+    """A ledgered exact-cost job must never be text-repriced to zero by recovery."""
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    job = str(uuid.uuid4())
+    await credits.credit(aid, 1_000_000, "topup", ref=f"seed-{job_type}")
+    auth = await credits.authorize_media(
+        aid,
+        model,
+        job_type,
+        1,
+        seconds,
+        job,
+        record_reservation=True,
+    )
+    assert auth["ok"] and auth["reserved"] == expected_cost
+    await ledger_svc.record_completion(
+        **{
+            **_ledger_values(job, output_units=seconds or 1, job_type=job_type),
+            "model": model,
+        },
+    )
+
+    assert await credits.sweep_stale_reservations(older_than_seconds=0) == 1
+
+    row = await _reservation(job)
+    assert row["status"] == "settled"
+    assert row["actual_micro"] == expected_cost
+    assert await credits.get_balance(aid) == 1_000_000 - expected_cost
