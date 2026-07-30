@@ -457,7 +457,7 @@ async def test_sweep_settles_ledgered_held_not_refund(db, monkeypatch):
     ("model", "job_type", "seconds", "expected_cost"),
     [
         ("ace-step-v1.5-xl-turbo", "audio", 60, 12_000),
-        ("trellis2", "3d", None, 250_000),
+        ("test-exact-3d", "3d", None, 250_000),
     ],
 )
 async def test_sweep_keeps_exact_audio_and_3d_charge(
@@ -470,6 +470,12 @@ async def test_sweep_keeps_exact_audio_and_3d_charge(
 ):
     """A ledgered exact-cost job must never be text-repriced to zero by recovery."""
     monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    if job_type == "3d":
+        monkeypatch.setitem(
+            pricing.PRICING,
+            model,
+            pricing.ModelPrice(0, 0, mesh_per_generation=0.25),
+        )
     aid = uuid.uuid4()
     job = str(uuid.uuid4())
     await credits.credit(aid, 1_000_000, "topup", ref=f"seed-{job_type}")
