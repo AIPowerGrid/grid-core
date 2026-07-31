@@ -115,6 +115,21 @@ def _messages_to_prompt(messages: list[dict]) -> str:
     return "".join(parts)
 
 
+def _normalize_worker_request(request_body: dict) -> dict:
+    """Remove semantically empty optional fields rejected by some backends.
+
+    OpenAI-compatible servers are not consistent about ``tools: []``: some
+    accept it while others require the field to be absent. The empty list has
+    no behavior to preserve, so normalize it at the network boundary as a
+    compatibility guard for every client, not only first-party Chat.
+    """
+    if request_body.get("tools") == []:
+        request_body.pop("tools", None)
+        request_body.pop("tool_choice", None)
+        request_body.pop("parallel_tool_calls", None)
+    return request_body
+
+
 @router.post("/v1/chat/completions")
 @limiter.limit("30/minute")
 async def chat_completions(
@@ -437,7 +452,7 @@ async def _handle_chat_completions_for_user(
     # with only the sanitized messages swapped in. The worker overrides `model`
     # to its backend's name and forces streaming; everything else passes through
     # untouched so a model behaves on the grid exactly as it does locally.
-    request_body = request.model_dump(exclude_none=True)
+    request_body = _normalize_worker_request(request.model_dump(exclude_none=True))
     request_body["messages"] = clean_messages
 
     # Create job
