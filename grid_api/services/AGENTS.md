@@ -58,8 +58,10 @@ content sanitization, and reward settlement.
 
 ## Local Contracts
 
-- One queue: `job_queue.py`. Requeue is capped (Redis counter, dead-letter at the cap) to
-  prevent poison-job eviction cascades. Stale jobs reclaimed by the loop in `main.py`.
+- One queue: `job_queue.py`. Requeue is capped (Redis counter, dead-letter at
+  the cap) to prevent poison-job eviction cascades. Compatible-worker generation
+  failures use a tighter two-requeue budget than heterogeneous model-mismatch
+  bounces. Stale jobs are reclaimed by the loop in `main.py`.
 - Money paths must stay idempotent and tested; value-moving credit ledger writes
   require non-null refs and must not overdraft under concurrency.
 - A successful Base funding claim atomically writes its immutable

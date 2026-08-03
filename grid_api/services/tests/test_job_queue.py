@@ -22,6 +22,7 @@ class FakeRedis:
         self.xadds: list[dict] = []
         self.xacks: list[str] = []
         self.xclaims: list[dict] = []
+        self.counters: dict[str, int] = {}
 
     async def xadd(self, stream, data, **kwargs):
         # Accept maxlen/approximate (real redis trims the stream); the fake just
@@ -32,6 +33,13 @@ class FakeRedis:
     async def xack(self, stream, group, msg_id):
         self.xacks.append(msg_id)
         return 1
+
+    async def incr(self, key):
+        self.counters[key] = self.counters.get(key, 0) + 1
+        return self.counters[key]
+
+    async def expire(self, key, seconds):
+        return True
 
     async def xclaim(
         self,
@@ -142,3 +150,23 @@ async def test_touch_job_claim_preserves_worker_ownership(fake_redis):
             "justid": True,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_generation_retry_budget_dead_letters_after_two_requeues(fake_redis):
+    results = []
+    for index in range(3):
+        results.append(
+            await job_queue.requeue_job(
+                "poison-job",
+                {"prompt": "hi"},
+                ["gpt-oss-20b"],
+                stream_id=f"s-{index}",
+                max_attempts=job_queue.MAX_GENERATION_REQUEUE,
+            )
+        )
+
+    assert results[:2] == ["fake-1", "fake-2"]
+    assert results[2] is None
+    assert fake_redis.xacks == ["s-0", "s-1", "s-2"]
+    assert len(fake_redis.xadds) == 2

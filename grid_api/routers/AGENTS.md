@@ -90,6 +90,9 @@ transport, accounts, stats, health/metrics.
   them draw daily free, promotional, or purchased account credit.
 - `worker_ws.py` must not trust worker-reported counts for rewards or customer
   billing without a server-side cap or verification path.
+- Retried failures from one job count as at most one health strike per worker;
+  worker eviction requires independent failed jobs, not repeated poison-job
+  deliveries.
 - Core rejects retired model identities during the worker handshake. Worker-side
   filtering is defense in depth, not the network authority for retirement.
 - Media routes must pass `user.get("account_id")` to `services.media`; quota IDs

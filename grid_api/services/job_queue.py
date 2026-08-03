@@ -40,6 +40,11 @@ def _stale_ms_for(stream: str) -> int:
 # Set comfortably above the realistic number of model-mismatched workers a
 # job might bounce through in a healthy heterogeneous pool.
 MAX_REQUEUE = 25
+# An empty/failed generation has already reached a compatible worker and is a
+# much stronger failure signal than a model-mismatch bounce. Permit two retries
+# (three total backend attempts) so a transient can recover without hammering a
+# sole worker or holding the client open through the generic 25-bounce budget.
+MAX_GENERATION_REQUEUE = 2
 
 # Cap the job streams so they don't grow without bound. XACK removes a job from
 # the consumer group's pending list but NOT from the stream itself, so without
@@ -264,16 +269,18 @@ async def requeue_job(
     preferred_worker: str = "",
     hard_target_worker: str = "",
     affinity_passes: int = 0,
+    max_attempts: int = MAX_REQUEUE,
 ):
     """Requeue a failed job back into the stream, carrying + capping the retry
-    count. Returns the new stream id, or None if the job has hit MAX_REQUEUE and
-    must be dead-lettered.
+    count. Returns the new stream id, or None if the job has hit `max_attempts`
+    and must be dead-lettered.
 
     Without a cap a "poison" job (one that fails on every attempt — e.g. a
     request the backend can't serve, or a transient that recurs) loops forever:
     fail → requeue → redeliver → fail, striking and evicting every worker that
     touches it (the 2026-06-16 gpt-oss "0 tokens" eviction cascade). Capping it
-    turns an infinite loop into a clean per-client failure."""
+    turns an infinite loop into a clean per-client failure. Callers that have
+    stronger evidence of a poison job use a tighter limit than MAX_REQUEUE."""
     r = get_redis()
     if stream_id:
         await r.xack(stream or _stream_for(job_type), CONSUMER_GROUP, stream_id)
@@ -282,9 +289,9 @@ async def requeue_job(
     # failure path. Cleared by TTL (and the job_id is unique per request).
     attempts = await r.incr(f"grid:requeue:{job_id}")
     await r.expire(f"grid:requeue:{job_id}", 600)
-    if attempts > MAX_REQUEUE:
+    if attempts > max_attempts:
         logger.error(
-            f"Job {job_id} hit MAX_REQUEUE ({MAX_REQUEUE}) after repeated failures "
+            f"Job {job_id} hit its requeue limit ({max_attempts}) after repeated failures "
             f"— dead-lettering instead of requeuing"
         )
         return None
@@ -295,7 +302,7 @@ async def requeue_job(
         hard_target_worker=hard_target_worker,
         affinity_passes=affinity_passes,
     )
-    logger.info(f"Requeued job {job_id} as {new_id} (attempt {attempts}/{MAX_REQUEUE})")
+    logger.info(f"Requeued job {job_id} as {new_id} (attempt {attempts}/{max_attempts})")
     return new_id
 
 
