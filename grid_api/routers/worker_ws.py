@@ -163,10 +163,24 @@ EVICT_COOLDOWN_LADDER_S = [30, 120, 600, 3600]
 EVICT_COUNT_DECAY_S = 3600
 
 
-async def _record_strike(worker_id: str) -> int:
-    """Increment a worker's failure strike count; returns the new total."""
+async def _record_strike(worker_id: str, job_id: str) -> int:
+    """Count at most one health strike for a worker/job pair.
+
+    A retried poison job is one piece of evidence, not six independent backend
+    failures. The pair marker shares the strike decay window, so a different job
+    can still identify a genuinely unhealthy worker immediately.
+    """
     r = get_redis()
     key = f"{WORKER_STATUS_PREFIX}{worker_id}:strikes"
+    pair_key = f"{WORKER_STATUS_PREFIX}{worker_id}:strike-job:{job_id}"
+    first_failure = await r.set(
+        pair_key,
+        "1",
+        ex=STRIKE_DECAY_S,
+        nx=True,
+    )
+    if not first_failure:
+        return int(await r.get(key) or 0)
     n = await r.incr(key)
     await r.expire(key, STRIKE_DECAY_S)
     return n
@@ -791,7 +805,7 @@ async def worker_websocket(ws: WebSocket):
                     # streamed to the client yet, silently requeue so a healthy
                     # worker can serve it; otherwise surface the error. NEVER pay
                     # den for a failed generation.
-                    strikes = await _record_strike(worker_id)
+                    strikes = await _record_strike(worker_id, job["job_id"])
                     record_job_failed()
                     if token_count == 0:
                         new_id = await job_queue.requeue_job(
@@ -804,9 +818,10 @@ async def worker_websocket(ws: WebSocket):
                             preferred_worker=job.get("preferred_worker", ""),
                             hard_target_worker=job.get("hard_target_worker", ""),
                             affinity_passes=job.get("affinity_passes", 0),
+                            max_attempts=job_queue.MAX_GENERATION_REQUEUE,
                         )
                         if new_id is None:
-                            # Poison job hit MAX_REQUEUE — requeue_job already acked
+                            # Poison job hit the generation retry cap — requeue_job already acked
                             # and gave up. This is terminal: surface an error and
                             # refund, else the client hangs to the idle timeout and
                             # the reservation stays stranded until the sweeper.
