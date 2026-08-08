@@ -113,20 +113,20 @@ def _media_result_commitment(job_type: str, payload: dict, outputs: list[dict]):
     return output_hashes
 
 
-def _validated_audio_results(value: object, expected: int) -> dict[int, dict]:
-    """Require one canonical output digest for every presigned audio slot."""
+def _validated_media_results(value: object, expected: int) -> dict[int, dict]:
+    """Require one canonical output digest for every presigned media slot."""
     if not isinstance(value, list) or len(value) != expected:
-        raise ValueError("audio result count does not match the requested outputs")
+        raise ValueError("media result count does not match the requested outputs")
     reported: dict[int, dict] = {}
     for item in value:
         if not isinstance(item, dict):
-            raise ValueError("audio result entry is malformed")
+            raise ValueError("media result entry is malformed")
         index = item.get("index")
         if not isinstance(index, int) or isinstance(index, bool) or index < 0 or index >= expected or index in reported:
-            raise ValueError("audio result index is invalid or duplicated")
+            raise ValueError("media result index is invalid or duplicated")
         digest = item.get("sha256")
         if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
-            raise ValueError("audio result digest is not canonical SHA-256 hex")
+            raise ValueError("media result digest is not canonical SHA-256 hex")
         reported[index] = item
     return reported
 
@@ -1181,33 +1181,34 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 await token_stream.publish_error(job_id, "Worker recipe verification failed.")
                 await credits.release_job(job_id)
                 return True
-            if job_type == "audio":
-                try:
-                    reported = _validated_audio_results(msg.get("results"), n)
-                except ValueError as exc:
-                    logger.error("Audio output verification failed for job %s: %s", job_id, exc)
-                    await token_stream.publish_error(job_id, "Worker output verification failed.")
-                    await credits.release_job(job_id)
-                    return True
-            else:
-                reported = {r.get("index", i): r for i, r in enumerate(msg.get("results", []))}
-            if job_type == "audio":
-                try:
-                    uploaded = await asyncio.to_thread(
-                        storage.uploaded_outputs_present,
-                        upload_slots,
-                        min_bytes=audio.MIN_WAV_BYTES,
-                        max_bytes=audio.MAX_AUDIO_BYTES,
-                    )
-                except Exception as exc:
-                    logger.error("Audio storage verification unavailable for job %s: %s", job_id, exc)
-                    await token_stream.publish_error(job_id, "Output verification unavailable; please retry.")
-                    return False
-                if not uploaded:
-                    logger.error("Audio output object is missing or invalid for job %s", job_id)
-                    await token_stream.publish_error(job_id, "Worker output verification failed.")
-                    await credits.release_job(job_id)
-                    return True
+            try:
+                reported = _validated_media_results(msg.get("results"), n)
+            except ValueError as exc:
+                logger.error("Media output verification failed for job %s: %s", job_id, exc)
+                await token_stream.publish_error(job_id, "Worker output verification failed.")
+                await credits.release_job(job_id)
+                return True
+
+            storage_bounds = (
+                {"min_bytes": audio.MIN_WAV_BYTES, "max_bytes": audio.MAX_AUDIO_BYTES}
+                if job_type == "audio"
+                else {"min_bytes": 1}
+            )
+            try:
+                uploaded = await asyncio.to_thread(
+                    storage.uploaded_outputs_present,
+                    upload_slots,
+                    **storage_bounds,
+                )
+            except Exception as exc:
+                logger.error("Media storage verification unavailable for job %s: %s", job_id, exc)
+                await token_stream.publish_error(job_id, "Output verification unavailable; please retry.")
+                return False
+            if not uploaded:
+                logger.error("Media output object is missing or invalid for job %s", job_id)
+                await token_stream.publish_error(job_id, "Worker output verification failed.")
+                await credits.release_job(job_id)
+                return True
             outputs = []
             for i, slot in enumerate(upload_slots):
                 rep = reported.get(i, {})
