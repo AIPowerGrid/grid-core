@@ -183,6 +183,22 @@ def seeds_for_outputs(seed: int, n: int) -> list[int]:
     return [(int(seed) + i) % (MAX_SEED + 1) for i in range(count)]
 
 
+def validate_batch_request(job_type: str, n: int, *, has_source: bool) -> None:
+    """Reject batch shapes that no approved worker recipe can fulfill yet."""
+    if n <= 1:
+        return
+    if job_type == "video":
+        raise HTTPException(
+            status_code=422,
+            detail="video batch generation is unavailable until the recipe declares a verified batch strategy",
+        )
+    if has_source:
+        raise HTTPException(
+            status_code=422,
+            detail="source-image batch generation is unavailable until the recipe declares a verified batch strategy",
+        )
+
+
 def normalize_video_timing(seconds: float, fps: int) -> tuple[int, float]:
     try:
         fps_i = int(fps)
@@ -316,6 +332,12 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
     `preferred_worker` (a worker NAME the caller has verified the account owns)
     expresses soft affinity — the grid prefers that worker but won't stall if it's
     offline or busy."""
+    n = int(payload.get("n", 1) or 1)
+    validate_batch_request(
+        job_type,
+        n,
+        has_source=bool(payload.get("source_image_url")),
+    )
     job_id = str(uuid4())
 
     # Billing gate: media cost is deterministic from the request (n images /
@@ -327,7 +349,6 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
     # transaction (record_reservation), so the worker-WS handler is the sole
     # settler (settle_exact on success / release_job on failure) and a crash can't
     # strand the hold — the sweeper releases stale 'held' rows. No-op in dry-run.
-    n = int(payload.get("n", 1) or 1)
     seconds = payload.get("seconds") or (payload.get("recipe_inputs") or {}).get("seconds")
     if job_type == "video" and not seconds:
         # Bill the exact graph default. Recipe display names can share a

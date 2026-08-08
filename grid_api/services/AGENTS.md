@@ -89,6 +89,10 @@ content sanitization, and reward settlement.
 - Media billing reserves exact deterministic cost before dispatch and refunds on
   non-running paths; text billing reserves max cost and reconciles against trusted
   usage.
+- Batch is accepted only for workflows with a verified batch strategy. Until
+  recipe metadata carries that contract, video and source-image jobs are
+  single-output and must reject larger `n` before quota, upload, reservation,
+  or dispatch.
 - After a media queue submission attempt, only the worker terminal,
   dead-letter path, or stale-reservation sweeper may settle/release the hold.
   An HTTP timeout or disconnect is not proof that GPU work stopped.

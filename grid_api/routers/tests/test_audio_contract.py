@@ -112,7 +112,7 @@ def test_audio_receipt_binds_output_and_recipe_root():
 def test_audio_results_require_exact_canonical_output_hashes(results):
     expected = 2 if len(results) == 2 else 1
     with pytest.raises(ValueError):
-        worker_ws._validated_audio_results(results, expected)
+        worker_ws._validated_media_results(results, expected)
 
 
 def test_audio_registration_requires_managed_profile():

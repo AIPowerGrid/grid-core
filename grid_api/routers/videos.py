@@ -105,6 +105,8 @@ async def create_video(
                 detail=f"model '{model}' does not support strength/denoise",
             )
 
+        media.validate_batch_request("video", body.n, has_source=bool(body.image))
+
         await quota.check_and_consume(dict(user))
 
         set_fields = body.model_fields_set

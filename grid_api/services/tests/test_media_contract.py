@@ -38,6 +38,32 @@ def test_seed_contract_randomizes_only_when_omitted():
     assert media.seeds_for_outputs(42, 3) == [42, 43, 44]
 
 
+def test_batch_contract_rejects_uncertified_workflows_before_dispatch():
+    media.validate_batch_request("image", 4, has_source=False)
+    for job_type, has_source in (("image", True), ("video", False), ("video", True)):
+        with pytest.raises(HTTPException) as exc:
+            media.validate_batch_request(job_type, 2, has_source=has_source)
+        assert exc.value.status_code == 422
+        assert "verified batch strategy" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_uncertified_batch_rejects_before_billing(monkeypatch):
+    async def forbidden_authorize(*_args, **_kwargs):
+        raise AssertionError("unsupported batch must reject before billing")
+
+    monkeypatch.setattr(credits, "authorize_media", forbidden_authorize)
+    with pytest.raises(HTTPException) as exc:
+        await media.submit_and_wait(
+            "Krea 2 Turbo",
+            "image",
+            {"n": 4, "source_image_url": "https://source.invalid/input.webp"},
+            1,
+            account_id="account",
+        )
+    assert exc.value.status_code == 422
+
+
 def test_recipe_resolver_preserves_explicit_zero_seed():
     recipes.register_recipe("0xseedzero", "seed-zero-test", {
         "_grid": {"vars": {"seed": "3.inputs.seed"}, "modelName": "seed-zero-test"},

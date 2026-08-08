@@ -120,6 +120,8 @@ async def create_image(
                        "(no latent-blend img2img recipe; it edits via reference conditioning)",
             )
 
+        media.validate_batch_request("image", body.n, has_source=bool(body.image))
+
         # Validate cheap stuff BEFORE consuming quota (reject without charging).
         out_ext = media.normalize_image_format(body.output_format)
         loras = loras_svc.prepare_loras(model, (body.loras or []) + style_loras)

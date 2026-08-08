@@ -90,6 +90,9 @@ transport, accounts, stats, health/metrics.
   them draw daily free, promotional, or purchased account credit.
 - `worker_ws.py` must not trust worker-reported counts for rewards or customer
   billing without a server-side cap or verification path.
+- Media completion must report exactly one unique canonical digest per
+  presigned output slot, and every expected R2 object must pass existence,
+  content-type, and size validation before payout or demand settlement.
 - Retried failures from one job count as at most one health strike per worker;
   worker eviction requires independent failed jobs, not repeated poison-job
   deliveries.
