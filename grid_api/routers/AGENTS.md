@@ -47,7 +47,9 @@ transport, accounts, stats, health/metrics.
   wallet, then verified email only when it is the sole identity); supplemental
   or unverified email must never join accounts.
   Native service/app exchange lives at `/v1/auth/service/exchange`; Google ID
-  tokens are verified at `/v1/auth/google/exchange`; partner wallet proof uses
+  tokens are verified at `/v1/auth/google/exchange`, which also returns the
+  canonical account's primary verified wallet when one is linked; partner
+  wallet proof uses
   `/v1/auth/wallet/challenge` plus `/v1/auth/wallet/exchange`, bound to the
   service, its exact `siwe_domains`, the app subject, wallet, URI, Base chain,
   expiry, and one-use nonce. `/v1/auth/service/bind` binds an app subject after
