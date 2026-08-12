@@ -362,6 +362,18 @@ async def test_verified_google_and_wallet_link_to_one_canonical_account(
     ) == canonical_id
     assert await credits.get_balance(UUID(canonical_id)) == 20_000
 
+    repeated_google = await accounts_router.exchange_google_identity(
+        request,
+        accounts_router.GoogleExchangeForm(
+            id_token="google-proof-after-wallet-link",
+            app_subject=app_subject,
+        ),
+        apikey=key,
+        authorization=None,
+    )
+    assert repeated_google["account_id"] == canonical_id
+    assert repeated_google["wallet"] == wallet.address.lower()
+
 
 @pytest.mark.asyncio
 async def test_verified_wallet_account_and_balance_are_shared_across_products(
