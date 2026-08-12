@@ -943,7 +943,14 @@ async def exchange_google_identity(
         account_id=account_id,
         ref=service_auth.new_event_ref("exchange", service["service_id"]),
     )
-    return {"access_token": token, "token_type": "Bearer", "expires_in": 900, "account_id": str(account_id)}
+    wallets = await identities_svc.verified_wallet_addresses(account_id)
+    return {
+        "access_token": token,
+        "token_type": "Bearer",
+        "expires_in": 900,
+        "account_id": str(account_id),
+        "wallet": wallets[0] if wallets else None,
+    }
 
 
 @router.post("/v1/auth/service/bind")
