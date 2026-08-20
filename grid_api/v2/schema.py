@@ -657,7 +657,7 @@ validators = sa.Table(
         nullable=False,
         index=True,
     ),
-    sa.Column("signing_wallet", sa.String(42), nullable=False, unique=True, index=True),
+    sa.Column("signing_wallet", sa.String(42), nullable=False, index=True),
     sa.Column("software_version", sa.String(64), nullable=False),
     sa.Column("capabilities", PortableJSON, nullable=False, default=list),
     sa.Column("registration_signature", sa.String(132), nullable=False),
@@ -665,6 +665,7 @@ validators = sa.Table(
     sa.Column("last_heartbeat", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
     sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.UniqueConstraint("signing_wallet", name="uq_grid_validators_signing_wallet"),
     sa.UniqueConstraint("account_id", "signing_wallet", name="uq_grid_validators_account_wallet"),
 )
 
