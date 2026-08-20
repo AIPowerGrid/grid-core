@@ -49,7 +49,10 @@ def _client():
 
 
 def media_bucket() -> str:
-    return os.getenv("R2_TRANSIENT_BUCKET", "aipg-transient")
+    bucket = os.getenv("R2_TRANSIENT_BUCKET", "").strip()
+    if not bucket:
+        raise RuntimeError("R2_TRANSIENT_BUCKET not configured - media uploads unavailable")
+    return bucket
 
 
 def public_media_base() -> str:
