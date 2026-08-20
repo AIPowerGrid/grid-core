@@ -1,0 +1,50 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "aipg-internal-ip"
+description = "Internal AI Power Grid datacenter IP"
+regex = '''\b172\.(?:30|31)\.\d{1,3}\.\d{1,3}\b'''
+tags = ["aipg", "infra"]
+
+[[rules]]
+id = "aipg-local-dev-path"
+description = "Local developer absolute path"
+regex = '''/Users/[a-z0-9._-]+/'''
+tags = ["aipg", "infra"]
+
+[[rules]]
+id = "aipg-r2-bucket"
+description = "AI Power Grid operational R2 bucket name"
+regex = '''\b(?:aipgcoregen|aipg-transient|aipgcore[a-z0-9-]*)\b'''
+tags = ["aipg", "infra"]
+
+[[rules]]
+id = "aipg-evm-private-key"
+description = "EVM private key in a key-bearing assignment"
+regex = '''(?i)(?:private[_ -]?key|wallet[_ -]?key|signer[_ -]?key)\s*[:=]\s*["']?(?:0x)?[a-f0-9]{64}\b'''
+tags = ["aipg", "wallet"]
+
+[[rules]]
+id = "aipg-mnemonic"
+description = "BIP-39 mnemonic or seed phrase assignment"
+regex = '''(?i)(?:mnemonic|seed[\s_-]?phrase)\s*[:=]\s*["']?(?:\w+\s+){11,}'''
+tags = ["aipg", "wallet"]
+
+[allowlist]
+description = "Generated files and explicit non-secret fixtures"
+paths = [
+  '''(?i)(^|/)(?:\.venv[^/]*|venv[^/]*|node_modules|__pycache__|\.pytest_cache|\.ruff_cache|\.next|\.open-next|dist|build|out|cache)(/|$)''',
+  '''(?i)\.env\.(?:example|template|sample)$''',
+  '''(?i)(^|/)(?:examples?|samples?)/''',
+  '''(?i)(?:package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|Cargo\.lock|uv\.lock)$''',
+  '''(?i)\.gitleaks\.toml$''',
+  '''(?i)secret-scan\.ya?ml$''',
+]
+regexes = [
+  '''(?i)(?:your[-_]?api[-_]?key|example|placeholder|changeme|xxxx+|<[a-z_]+>)''',
+  '''0x[a-fA-F0-9]{40}\b''',
+  '''(?i)0x1{64}\b''',
+  '''receipt_signature=signature''',
+  '''aipg\.pendingDeposit\.v1''',
+]

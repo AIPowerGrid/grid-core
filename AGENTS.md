@@ -36,6 +36,9 @@ owning AGENTS.md and any affected parent Child DOX Index.
 - Root-owned files include `server.py`, `server_grid_api.py`, `requirements*.txt`,
   `pyproject.toml`, `Dockerfile`, `docker-compose.yaml`, root READMEs, assets,
   and one-off utility scripts.
+- `.github/workflows/secret-scan.yml` and `.gitleaks.toml` enforce
+  checksum-verified secret and operational-infrastructure scanning on pushes
+  and pull requests.
 
 ## Local Contracts
 
@@ -85,6 +88,8 @@ owning AGENTS.md and any affected parent Child DOX Index.
 - Legacy smoke tests live under `tests/` and may skip without external services.
 - For docs-only changes, run at least `git diff --check` and inspect the DOX
   chain for stale indexes.
+- Secret gate: `gitleaks detect --source . --no-git --config .gitleaks.toml
+  --redact` from a clean checkout.
 
 ## Child DOX Index
 

@@ -101,6 +101,9 @@ content sanitization, and reward settlement.
 - Successful image, video, 3D, and audio responses expose the Core-generated
   `grid.job_id`. Consumer applications should retain it as the immutable handle
   joining the generation to the completion and credit ledgers.
+- Media storage requires an explicit `R2_TRANSIENT_BUCKET`; missing storage
+  configuration fails closed and must never fall back to a repository-embedded
+  operational bucket name.
 - **Three credit pockets, never converted:** charges draw promotional, daily
   free, then purchased value when each pocket's gate is live. The split is
   durable in `grid_reservations.promo_micro/free_micro`, and settlement restores
