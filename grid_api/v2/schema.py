@@ -702,6 +702,8 @@ validator_assignments = sa.Table(
     sa.Column("quorum_outcome", sa.String(24), nullable=True),
     sa.Column("probe_job_id", sa.String(96), nullable=True, index=True),
     sa.Column("probe_status", sa.String(24), nullable=False, default="not_started"),
+    sa.Column("probe_attempts", sa.Integer, nullable=False, default=0),
+    sa.Column("probe_lease_expires", sa.DateTime(timezone=True), nullable=True),
     # Filled only after the Grid actually receives a hard-targeted probe reply.
     # Authoritative attestations must match this hash; a nonce alone is not
     # enough to claim assignment-bound evidence.

@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import asyncio
 import uuid
 import time
+from datetime import timedelta
 
 import pytest
 import pytest_asyncio
@@ -144,6 +146,24 @@ async def _assignment(account_id, *, verdict="healthy"):
         verdict=verdict,
     )
     return validator_id, assignment, payload
+
+
+async def _fresh_assignment(account_id):
+    validator_id = await _register(account_id)
+    worker_id = str(uuid.uuid4())
+    issued = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=[{
+            "worker_id": worker_id,
+            "name": "rig-lease",
+            "models": ["qwen3-27b"],
+            "job_types": ["text"],
+        }],
+        limit=1,
+    )
+    return validator_id, issued["assignments"][0]
 
 
 @pytest.mark.asyncio
@@ -389,6 +409,126 @@ async def test_issue_assignments_excludes_validator_owned_workers(db):
     assert issued["assignments"][0]["grid_nonce"]
 
 
+@pytest.mark.asyncio
+async def test_probe_lease_allows_only_one_concurrent_claim(db):
+    account_id = uuid.uuid4()
+    validator_id, assignment = await _fresh_assignment(account_id)
+
+    results = await asyncio.gather(
+        *[
+            validators_svc._claim_probe_lease(
+                account_id=account_id,
+                validator_id=validator_id,
+                assignment_id=assignment["assignment_id"],
+            )
+            for _ in range(8)
+        ],
+        return_exceptions=True,
+    )
+
+    winners = [result for result in results if isinstance(result, tuple)]
+    rejected = [result for result in results if isinstance(result, Exception)]
+    assert len(winners) == 1
+    assert len(rejected) == 7
+    assert all("already in progress" in str(error) for error in rejected)
+
+    async with await database.new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(assignments_t).where(
+                    assignments_t.c.id == assignment["assignment_id"]
+                )
+            )
+        ).mappings().one()
+    assert row["probe_attempts"] == 1
+    assert row["probe_status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_probe_lease_retry_budget_and_late_result_guard(db, monkeypatch):
+    monkeypatch.setattr(validators_svc, "PROBE_MAX_ATTEMPTS", 2)
+    account_id = uuid.uuid4()
+    validator_id, assignment = await _fresh_assignment(account_id)
+
+    _, first_job = await validators_svc._claim_probe_lease(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(assignments_t)
+            .where(assignments_t.c.id == assignment["assignment_id"])
+            .values(probe_lease_expires=validators_svc._now() - timedelta(seconds=1))
+        )
+        await session.commit()
+
+    _, second_job = await validators_svc._claim_probe_lease(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+    assert second_job != first_job
+
+    await validators_svc._mark_probe(
+        first_job,
+        "completed",
+        evidence_hash="a" * 64,
+    )
+    async with await database.new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(assignments_t).where(
+                    assignments_t.c.id == assignment["assignment_id"]
+                )
+            )
+        ).mappings().one()
+    assert row["probe_job_id"] == second_job
+    assert row["probe_status"] == "running"
+    assert row["probe_evidence_hash"] is None
+    assert row["probe_attempts"] == 2
+
+    await validators_svc._mark_probe(second_job, "failed")
+    with pytest.raises(validators_svc.AssignmentError, match="retry limit reached"):
+        await validators_svc._claim_probe_lease(
+            account_id=account_id,
+            validator_id=validator_id,
+            assignment_id=assignment["assignment_id"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_probe_dispatch_failure_releases_lease_for_retry(db, monkeypatch):
+    from grid_api.services import job_queue
+
+    account_id = uuid.uuid4()
+    validator_id, assignment = await _fresh_assignment(account_id)
+
+    async def fail_dispatch(*_args, **_kwargs):
+        raise RuntimeError("queue unavailable")
+
+    monkeypatch.setattr(job_queue, "submit_job", fail_dispatch)
+    result = await validators_svc.probe_assignment(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+
+    assert result["status"] == "error"
+    assert result["code"] == 503
+    async with await database.new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(assignments_t).where(
+                    assignments_t.c.id == assignment["assignment_id"]
+                )
+            )
+        ).mappings().one()
+    assert row["probe_status"] == "failed"
+    assert row["probe_lease_expires"] is None
+    assert row["probe_attempts"] == 1
+
+
 def test_validator_capabilities_expose_assignment_gates():
     app = FastAPI()
     app.state.limiter = limiter
@@ -404,6 +544,8 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["features"]["targeted_probe"] is True
     assert body["features"]["quorum"] is False
     assert body["features"]["validator_rewards"] is False
+    assert body["probe_policy"]["max_attempts"] >= 1
+    assert body["probe_policy"]["lease_seconds"] > validators_svc.PROBE_TIMEOUT_SECONDS
     assert (
         body["authority_model"]["authoritative"]
         == "requires Grid-issued assignment_id + grid_nonce + probe evidence hash"
@@ -440,3 +582,31 @@ def test_probe_route_returns_upstream_probe_error(monkeypatch):
 
     assert resp.status_code == 503
     assert resp.json()["message"] == "target unavailable"
+
+
+def test_probe_route_rejects_duplicate_assignment(monkeypatch):
+    account_id = uuid.uuid4()
+
+    async def fake_auth(_key, *, required_scope):
+        assert required_scope == "validator.probe"
+        return {"source": "v2", "account_id": account_id, "wallet": TEST_WALLET}
+
+    async def fake_active(**_kwargs):
+        return {"id": "val_test"}
+
+    async def fake_probe(**_kwargs):
+        raise validators_svc.AssignmentError("assignment probe already in progress")
+
+    monkeypatch.setattr(validator_router.accounts_svc, "authenticate", fake_auth)
+    monkeypatch.setattr(validator_router.validators_svc, "active_validator", fake_active)
+    monkeypatch.setattr(validator_router.validators_svc, "probe_assignment", fake_probe)
+
+    app = FastAPI()
+    app.state.limiter = limiter
+    app.include_router(validator_router.router)
+
+    with TestClient(app) as client:
+        resp = client.post("/v1/validator/probe/asg_busy", headers={"apikey": "k"})
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "assignment probe already in progress"

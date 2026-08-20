@@ -199,6 +199,9 @@ content sanitization, and reward settlement.
   canonical account. One registered validator may submit at most one
   authoritative attestation per assignment. Shared-challenge quorum remains a
   separate future protocol.
+- Targeted validator probes use an atomic, bounded assignment lease. Concurrent
+  calls cannot dispatch duplicate free inference; expired leases are
+  reclaimable, and late results cannot overwrite the current attempt.
 
 ## Work Guidance
 
