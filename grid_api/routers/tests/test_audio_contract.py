@@ -54,6 +54,7 @@ def test_audio_request_is_strict_and_bounded():
 
 def test_audio_pricing_and_den_are_duration_based():
     assert pricing.quote_audio(audio.DEFAULT_AUDIO_MODEL, 30) == 6_000
+    assert pricing.quote_audio(audio.DEFAULT_AUDIO_MODEL, 60) == 12_000
     assert den.calculate_media_den("audio", 1, 1, n=1, seconds=30) == 1.8
     assert den.calculate_media_den("audio", 4096, 4096, n=1, seconds=30) == 1.8
 

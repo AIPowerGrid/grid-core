@@ -80,10 +80,10 @@ PRICING: dict[str, ModelPrice] = {
     "flux.2 klein 4b fp8":  half_of(0, 0, usd_image=0.02),       # → $0.010/image (Flux distilled 4B)
     "krea 2 turbo":         half_of(0, 0, usd_image=0.01),       # → $0.005/image (txt2img or img2img)
     "ltx-2.3":              half_of(0, 0, usd_video_sec=0.04),   # → $0.020/second video (Justin)
-    # Guarded launch peg only; benchmark against three real worker tiers before
-    # enabling audio charging. Explicit pricing prevents accidental free jobs.
-    # Guarded XL launch peg. The 4B DiT has roughly twice the 2B Turbo weight
-    # footprint; benchmark worker cost before enabling charging and re-peg then.
+    # Aggressive 3090-native launch peg. Production telemetry through 2026-07-26
+    # measured 151 jobs averaging 78.8 output seconds in 10.3 runtime seconds.
+    # At $0.0002/output-second, a one-minute song costs $0.012 while measured
+    # full-utilization gross remains about $5.50/hour before network costs.
     "ace-step-v1.5-xl-turbo": ModelPrice(0, 0, audio_per_second=0.0002),
     # Initial guarded peg for a multi-minute textured mesh workload. Re-peg from
     # measured worker cost before enabling charging; explicit is safer than free.
