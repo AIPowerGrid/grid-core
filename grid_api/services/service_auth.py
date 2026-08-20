@@ -243,6 +243,7 @@ def issue_user_token(
     scopes = ["account.read", "inference.submit"]
     if account_manage:
         scopes.append("account.manage")
+        scopes.append("validator.read")
     return user_tokens.issue(
         account_id,
         audience=service_id,

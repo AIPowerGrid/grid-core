@@ -161,6 +161,7 @@ def _session_match(form: "SessionForm"):
 
 class IssueKeyForm(BaseModel):
     label: Optional[str] = None
+    purpose: Literal["inference", "validator"] = "inference"
 
 
 class CreateBridgeForm(BaseModel):
@@ -1715,8 +1716,23 @@ async def issue_key(
     authorization: Optional[str] = Header(None),
 ):
     user = await _require_session(apikey, authorization)
-    key = await accounts_svc.issue_key(user["account_id"], label=form.label or "")
-    return {"api_key": key, "label": form.label}
+    if form.purpose == "validator":
+        key = await accounts_svc.issue_key(
+            user["account_id"],
+            label=form.label or "validator",
+            scopes=accounts_svc.VALIDATOR_SCOPES,
+            key_kind="validator",
+        )
+        scopes = accounts_svc.VALIDATOR_SCOPES
+    else:
+        key = await accounts_svc.issue_key(user["account_id"], label=form.label or "")
+        scopes = accounts_svc.INFERENCE_SCOPES
+    return {
+        "api_key": key,
+        "label": form.label,
+        "purpose": form.purpose,
+        "scopes": scopes,
+    }
 
 
 @router.delete("/v1/account/keys/{key_id}")

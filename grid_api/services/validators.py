@@ -27,6 +27,7 @@ from sqlalchemy.exc import IntegrityError
 from ..database import new_session
 from ..v2.schema import validator_assignments as assignments_t
 from ..v2.schema import validator_attestations as attestations_t
+from ..v2.schema import validators as validators_t
 from ..v2.schema import workers as workers_t
 
 logger = logging.getLogger("grid_api.validators")
@@ -44,6 +45,10 @@ QUORUM_MIN = max(1, int(os.getenv("VALIDATOR_QUORUM_MIN", "1") or 1))
 # consumed by the reasoning phase → empty answer → probe returns no text →
 # the model can't be scored. Give enough room to think AND answer. Overridable.
 PROBE_MAX_TOKENS = max(32, int(os.getenv("VALIDATOR_PROBE_MAX_TOKENS", "512") or 512))
+REGISTRATION_MAX_CLOCK_SKEW_SECONDS = max(
+    60,
+    int(os.getenv("VALIDATOR_REGISTRATION_MAX_CLOCK_SKEW_SECONDS", "300") or 300),
+)
 
 _ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _SIG_RE = re.compile(r"^(0x)?[0-9a-fA-F]{130}$")
@@ -55,6 +60,10 @@ class AttestationError(ValueError):
 
 class AssignmentError(ValueError):
     """Raised when an assignment/probe request is invalid."""
+
+
+class RegistrationError(ValueError):
+    """Raised when a validator registration is malformed or unauthorized."""
 
 
 def _now() -> datetime:
@@ -167,6 +176,166 @@ def _signature_status(payload: dict[str, Any], signature: str | None) -> str:
     if recovered.lower() != wallet.lower():
         raise AttestationError("signature does not match validator wallet")
     return "verified"
+
+
+def _registration_capabilities(payload: dict[str, Any]) -> list[str]:
+    raw = payload.get("capabilities")
+    if not isinstance(raw, list) or not raw:
+        raise RegistrationError("payload.capabilities must be a non-empty list")
+    capabilities: list[str] = []
+    for item in raw:
+        if not isinstance(item, str) or not item.strip() or len(item.strip()) > 128:
+            raise RegistrationError("payload.capabilities contains an invalid capability")
+        capabilities.append(item.strip())
+    if len(capabilities) > 64:
+        raise RegistrationError("payload.capabilities may contain at most 64 entries")
+    return sorted(set(capabilities))
+
+
+async def register_validator(
+    *,
+    account_id,
+    account_wallet: str | None,
+    payload: dict[str, Any],
+    signature: str | None,
+) -> dict[str, Any]:
+    """Create or refresh one wallet-proven validator registration."""
+    if not isinstance(payload, dict) or _payload_size(payload) > MAX_PAYLOAD_BYTES:
+        raise RegistrationError("registration payload must be a bounded object")
+    if payload.get("registration_schema") != "aipg.validator.registration.v1":
+        raise RegistrationError("unsupported validator registration schema")
+    try:
+        wallet = _validator_wallet(payload)
+    except AttestationError as exc:
+        raise RegistrationError(str(exc)) from exc
+    linked_wallet = (account_wallet or "").strip().lower()
+    if not linked_wallet or not _ADDR_RE.match(linked_wallet):
+        raise RegistrationError("validator account must have a linked wallet")
+    if wallet != linked_wallet:
+        raise RegistrationError("validator signing wallet must match the account's linked wallet")
+    normalized_signature = _normalize_signature(signature)
+    if not normalized_signature:
+        raise RegistrationError("validator registration requires a wallet signature")
+    try:
+        signature_status = _signature_status(payload, normalized_signature)
+    except AttestationError as exc:
+        raise RegistrationError(str(exc)) from exc
+    if signature_status != "verified":
+        raise RegistrationError("validator registration signature could not be verified")
+    software_version = _string(payload, "software_version", 64)
+    if not software_version:
+        raise RegistrationError("payload.software_version is required")
+    signed_ts = _int(payload, "ts")
+    if signed_ts is None:
+        raise RegistrationError("payload.ts is required")
+    now = _now()
+    if abs(int(now.timestamp()) - signed_ts) > REGISTRATION_MAX_CLOCK_SKEW_SECONDS:
+        raise RegistrationError("validator registration timestamp is outside the allowed window")
+    capabilities = _registration_capabilities(payload)
+
+    async with await new_session() as session:
+        existing = (
+            await session.execute(
+                sa.select(validators_t).where(validators_t.c.signing_wallet == wallet),
+            )
+        ).mappings().first()
+        if existing and existing["account_id"] != account_id:
+            raise RegistrationError("validator signing wallet belongs to another account")
+        if existing and existing["status"] == "revoked":
+            raise RegistrationError("validator registration is revoked")
+        if existing:
+            validator_id = existing["id"]
+            await session.execute(
+                sa.update(validators_t)
+                .where(validators_t.c.id == validator_id)
+                .values(
+                    software_version=software_version,
+                    capabilities=capabilities,
+                    registration_signature=normalized_signature,
+                    last_heartbeat=now,
+                    updated=now,
+                ),
+            )
+            created = False
+        else:
+            validator_id = f"val_{uuid4().hex}"
+            await session.execute(
+                sa.insert(validators_t).values(
+                    id=validator_id,
+                    account_id=account_id,
+                    signing_wallet=wallet,
+                    software_version=software_version,
+                    capabilities=capabilities,
+                    registration_signature=normalized_signature,
+                    status="active",
+                    last_heartbeat=now,
+                    created=now,
+                    updated=now,
+                ),
+            )
+            created = True
+        await session.commit()
+    return {
+        "validator_id": validator_id,
+        "signing_wallet": wallet,
+        "software_version": software_version,
+        "capabilities": capabilities,
+        "status": "active",
+        "created": created,
+        "last_heartbeat": now.isoformat(),
+        "economic_effect": "none",
+    }
+
+
+async def active_validator(*, account_id, signing_wallet: str | None) -> dict[str, Any]:
+    wallet = (signing_wallet or "").strip().lower()
+    if not wallet:
+        raise RegistrationError("validator account must have a linked wallet")
+    async with await new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(validators_t).where(
+                    validators_t.c.account_id == account_id,
+                    validators_t.c.signing_wallet == wallet,
+                    validators_t.c.status == "active",
+                ),
+            )
+        ).mappings().first()
+    if not row:
+        raise RegistrationError("active validator registration required")
+    return dict(row)
+
+
+async def heartbeat_validator(
+    *,
+    account_id,
+    signing_wallet: str | None,
+    software_version: str,
+    capabilities: list[str],
+) -> dict[str, Any]:
+    validator = await active_validator(account_id=account_id, signing_wallet=signing_wallet)
+    if not software_version or len(software_version) > 64:
+        raise RegistrationError("software_version is invalid")
+    normalized_capabilities = _registration_capabilities({"capabilities": capabilities})
+    now = _now()
+    async with await new_session() as session:
+        await session.execute(
+            sa.update(validators_t)
+            .where(validators_t.c.id == validator["id"], validators_t.c.status == "active")
+            .values(
+                software_version=software_version,
+                capabilities=normalized_capabilities,
+                last_heartbeat=now,
+                updated=now,
+            ),
+        )
+        await session.commit()
+    return {
+        "validator_id": validator["id"],
+        "status": "active",
+        "last_heartbeat": now.isoformat(),
+        "economic_effect": "none",
+    }
 
 
 def _make_text_challenge(round_index: int) -> dict[str, Any]:
@@ -308,6 +477,7 @@ async def _finalize_due_assignments(session) -> None:
 async def issue_assignments(
     *,
     account_id,
+    validator_id: str,
     validator_wallet: str | None,
     active_workers: list[dict[str, Any]],
     limit: int = 5,
@@ -337,6 +507,7 @@ async def issue_assignments(
                 sa.select(assignments_t)
                 .where(
                     assignments_t.c.account_id == account_id,
+                    assignments_t.c.validator_id == validator_id,
                     assignments_t.c.quorum_status == "pending",
                     assignments_t.c.expires >= now,
                 )
@@ -368,6 +539,7 @@ async def issue_assignments(
             values = {
                 "id": assignment_id,
                 "account_id": account_id,
+                "validator_id": validator_id,
                 "validator_wallet": wallet,
                 "grid_nonce": grid_nonce,
                 "target_worker_id": worker_id,
@@ -471,6 +643,9 @@ def _normalize(payload: dict[str, Any], signature: str | None) -> dict[str, Any]
         raise AttestationError("authoritative evidence requires payload.grid_nonce")
     if wants_authority and not _string(payload, "evidence_hash", 64):
         raise AttestationError("authoritative evidence requires payload.evidence_hash")
+    signature_status = _signature_status(payload, sig)
+    if wants_authority and signature_status != "verified":
+        raise AttestationError("authoritative evidence requires a verified validator signature")
 
     return {
         "attestation_hash": _attestation_hash(payload, sig),
@@ -491,12 +666,18 @@ def _normalize(payload: dict[str, Any], signature: str | None) -> dict[str, Any]
         "latency_ms": _int(payload, "latency_ms"),
         "epoch": _string(payload, "epoch", 64),
         "signature": sig,
-        "signature_status": _signature_status(payload, sig),
+        "signature_status": signature_status,
         "payload": payload,
     }
 
 
-async def _verify_assignment_in_session(session, *, account_id, row: dict[str, Any]) -> dict[str, Any]:
+async def _verify_assignment_in_session(
+    session,
+    *,
+    account_id,
+    validator_id: str,
+    row: dict[str, Any],
+) -> dict[str, Any]:
     assignment_id = row.get("assignment_id")
     grid_nonce = row.get("grid_nonce")
     assignment = (
@@ -508,6 +689,21 @@ async def _verify_assignment_in_session(session, *, account_id, row: dict[str, A
         raise AttestationError("assignment_id is not a Grid-issued assignment")
     if assignment["account_id"] != account_id:
         raise AttestationError("assignment does not belong to this validator account")
+    if assignment["validator_id"] != validator_id:
+        raise AttestationError("assignment does not belong to this registered validator")
+    validator = (
+        await session.execute(
+            sa.select(validators_t).where(
+                validators_t.c.id == validator_id,
+                validators_t.c.account_id == account_id,
+                validators_t.c.status == "active",
+            ),
+        )
+    ).mappings().first()
+    if not validator:
+        raise AttestationError("active validator registration required")
+    if row.get("validator_wallet") != validator["signing_wallet"]:
+        raise AttestationError("attestation wallet does not match validator registration")
     if assignment["grid_nonce"] != grid_nonce:
         raise AttestationError("grid_nonce does not match assignment")
     if assignment["expires"] and _aware(assignment["expires"]) < _now():
@@ -581,6 +777,7 @@ async def _update_quorum_in_session(session, assignment_id: str) -> str:
 async def record_attestation(
     *,
     account_id,
+    validator_id: str | None = None,
     payload: dict[str, Any],
     signature: str | None = None,
 ) -> dict[str, Any]:
@@ -596,7 +793,41 @@ async def record_attestation(
 
     async with await new_session() as session:
         if row["authority"] == "authoritative":
-            await _verify_assignment_in_session(session, account_id=account_id, row=row)
+            if not validator_id:
+                raise AttestationError("active validator registration required")
+            await _verify_assignment_in_session(
+                session,
+                account_id=account_id,
+                validator_id=validator_id,
+                row=row,
+            )
+            row["validator_id"] = validator_id
+            existing_for_validator = (
+                await session.execute(
+                    sa.select(
+                        attestations_t.c.id,
+                        attestations_t.c.attestation_hash,
+                        attestations_t.c.quorum_status,
+                    ).where(
+                        attestations_t.c.assignment_id == row["assignment_id"],
+                        attestations_t.c.validator_id == validator_id,
+                    ),
+                )
+            ).first()
+            if existing_for_validator:
+                if existing_for_validator[1] != row["attestation_hash"]:
+                    raise AttestationError(
+                        "validator already submitted an authoritative attestation for this assignment"
+                    )
+                return {
+                    "status": "duplicate",
+                    "id": existing_for_validator[0],
+                    "attestation_hash": row["attestation_hash"],
+                    "signature_status": row["signature_status"],
+                    "authority": row["authority"],
+                    "assignment_id": row["assignment_id"],
+                    "quorum_status": existing_for_validator[2],
+                }
         try:
             result = await session.execute(sa.insert(attestations_t).values(**row))
             attestation_id = result.inserted_primary_key[0] if result.inserted_primary_key else None
@@ -612,6 +843,19 @@ async def record_attestation(
                     ).where(attestations_t.c.attestation_hash == row["attestation_hash"])
                 )
             ).first()
+            if not existing and row.get("assignment_id") and row.get("validator_id"):
+                conflicting = (
+                    await session.execute(
+                        sa.select(attestations_t.c.id).where(
+                            attestations_t.c.assignment_id == row["assignment_id"],
+                            attestations_t.c.validator_id == row["validator_id"],
+                        ),
+                    )
+                ).first()
+                if conflicting:
+                    raise AttestationError(
+                        "validator already submitted an authoritative attestation for this assignment"
+                    )
             attestation_id = existing[0] if existing else None
             row["assignment_id"] = existing[1] if existing else row.get("assignment_id")
             row["authority"] = existing[2] if existing else row.get("authority")
@@ -744,7 +988,12 @@ async def scorecards(
     }
 
 
-async def probe_assignment(*, account_id, assignment_id: str) -> dict[str, Any]:
+async def probe_assignment(
+    *,
+    account_id,
+    validator_id: str,
+    assignment_id: str,
+) -> dict[str, Any]:
     """Run a stored assignment against exactly its target worker.
 
     This queues a hard-targeted validator probe job and waits for the worker
@@ -763,6 +1012,8 @@ async def probe_assignment(*, account_id, assignment_id: str) -> dict[str, Any]:
             raise AssignmentError("assignment not found")
         if row["account_id"] != account_id:
             raise AssignmentError("assignment does not belong to this validator account")
+        if row["validator_id"] != validator_id:
+            raise AssignmentError("assignment does not belong to this registered validator")
         if row["expires"] and _aware(row["expires"]) < _now():
             raise AssignmentError("assignment has expired")
         if row["modality"] != "text":
@@ -797,24 +1048,14 @@ async def probe_assignment(*, account_id, assignment_id: str) -> dict[str, Any]:
         await session.commit()
 
     started = _now()
-    try:
-        await job_queue.submit_job(
-            job_id,
-            payload,
-            [row["model"]],
-            job_type="text",
-            preferred_worker=row["target_worker_name"],
-            hard_target_worker=row["target_worker_name"],
-        )
-    except TypeError:
-        # Tests or old monkeypatches may not yet accept the new keyword.
-        await job_queue.submit_job(
-            job_id,
-            payload,
-            [row["model"]],
-            job_type="text",
-            preferred_worker=row["target_worker_name"],
-        )
+    await job_queue.submit_job(
+        job_id,
+        payload,
+        [row["model"]],
+        job_type="text",
+        preferred_worker=row["target_worker_name"],
+        hard_target_worker=row["target_worker_name"],
+    )
 
     chunks: list[str] = []
     full_text = ""

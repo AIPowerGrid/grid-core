@@ -42,11 +42,13 @@ content sanitization, and reward settlement.
   manager/Console pairing in Redis. The manager creates the final API key and
   poll secret locally; Core stores only their hashes, installs only
   `worker.connect`, and removes the key expiry only after manager ACK.
-- **Validation evidence:** `validators.py` issues validator assignments, verifies
-  assignment-bound attestations, computes non-economic quorum state, and builds
-  aggregate scorecards. Authoritative evidence must match the Grid-issued
-  assignment id, nonce, and hard-targeted probe evidence hash. It must not route
-  production jobs, reward, slash, or write worker ledger rows.
+- **Validation evidence:** `validators.py` verifies linked-wallet validator
+  registration, binds assignments to registered nodes, verifies signed
+  assignment evidence, tracks non-economic workflow states, and builds aggregate
+  scorecards. Authoritative evidence must match the registered wallet,
+  Grid-issued assignment id/nonce, and hard-targeted probe evidence hash. These
+  states are not independent-validator quorum and must not route production jobs,
+  reward, slash, or write worker ledger rows.
 - **Model/media governance:** `recipes.py`, `recipe_import.py`, `styles.py`,
   `loras.py`, `model_registry.py`.
 - **Safety:** `sanitizer.py` - **secrets redactor only** (strips API keys/PGP from prompts).
@@ -190,6 +192,10 @@ content sanitization, and reward settlement.
   coherent: malformed validator wallet strings are rejected, signed evidence
   requires a claimed wallet, and stored validator wallets are normalized
   lowercase.
+- A validator registration wallet must be a verified wallet on the key's
+  canonical account. One registered validator may submit at most one
+  authoritative attestation per assignment. Shared-challenge quorum remains a
+  separate future protocol.
 
 ## Work Guidance
 

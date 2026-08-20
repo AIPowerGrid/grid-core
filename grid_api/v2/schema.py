@@ -646,6 +646,28 @@ epochs = sa.Table(
 # only Grid-issued assignment ids + nonces can produce assignment-bound
 # attestations. Quorum/status fields are intentionally off-chain and
 # non-economic until dispute/reward contracts exist.
+validators = sa.Table(
+    "grid_validators",
+    metadata,
+    sa.Column("id", sa.String(96), primary_key=True),
+    sa.Column(
+        "account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("signing_wallet", sa.String(42), nullable=False, unique=True, index=True),
+    sa.Column("software_version", sa.String(64), nullable=False),
+    sa.Column("capabilities", PortableJSON, nullable=False, default=list),
+    sa.Column("registration_signature", sa.String(132), nullable=False),
+    sa.Column("status", sa.String(16), nullable=False, default="active", index=True),
+    sa.Column("last_heartbeat", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.UniqueConstraint("account_id", "signing_wallet", name="uq_grid_validators_account_wallet"),
+)
+
 validator_assignments = sa.Table(
     "grid_validator_assignments",
     metadata,
@@ -658,6 +680,13 @@ validator_assignments = sa.Table(
         index=True,
     ),
     sa.Column("validator_wallet", sa.String(42), nullable=True, index=True),
+    sa.Column(
+        "validator_id",
+        sa.String(96),
+        sa.ForeignKey("grid_validators.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    ),
     sa.Column("grid_nonce", sa.String(128), nullable=False, unique=True),
     sa.Column("target_worker_id", sa.String(64), nullable=False, index=True),
     sa.Column("target_worker_name", sa.String(120), nullable=False, index=True),
@@ -710,6 +739,13 @@ validator_attestations = sa.Table(
     ),
     sa.Column("validator_wallet", sa.String(42), nullable=True, index=True),
     sa.Column(
+        "validator_id",
+        sa.String(96),
+        sa.ForeignKey("grid_validators.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    ),
+    sa.Column(
         "assignment_id",
         sa.String(96),
         sa.ForeignKey("grid_validator_assignments.id", ondelete="SET NULL"),
@@ -739,6 +775,11 @@ validator_attestations = sa.Table(
     sa.Column("signature_status", sa.String(32), nullable=False, default="unsigned"),
     sa.Column("payload", PortableJSON, nullable=False, default=dict),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+    sa.UniqueConstraint(
+        "assignment_id",
+        "validator_id",
+        name="uq_grid_validator_attestations_assignment_validator",
+    ),
 )
 
 

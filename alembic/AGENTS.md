@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current head: `0018`
+- `versions/` - ordered migration revisions. Current head: `0020`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -19,7 +19,9 @@ production database match the Grid-owned schema contracts without relying on
   reservation-time price snapshots; `0016` reconciles early production
   constraint drift for ledger idempotency and validator evidence; `0017` adds
   immutable Base deposit receipts committed with purchased-credit movements;
-  `0018` records x402 reservation provenance and on-chain settlement receipts).
+  `0018` records x402 reservation provenance and on-chain settlement receipts;
+  `0019` adds service SIWE domain binding; `0020` adds registered validator
+  identities and binds assignments/attestations to them).
 
 ## Local Contracts
 
@@ -32,6 +34,9 @@ production database match the Grid-owned schema contracts without relying on
 
 - Every schema change in `grid_api/v2/schema.py` requires a matching Alembic
   revision, including constraints and indexes.
+- Deploy `0020` before validator registration code. Older evidence remains
+  readable because its new `validator_id` is nullable; all newly authoritative
+  evidence must be registration-bound in application code.
 - Migrations must be idempotent only where Alembic expects them to be; do not
   hide failed DDL with broad exception swallowing.
 - Economic constraints matter: unique `grid_ledger.job_id`, non-null credit refs
