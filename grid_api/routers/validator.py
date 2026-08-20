@@ -43,6 +43,10 @@ def _capabilities_payload() -> dict[str, Any]:
             "epoch_roots": False,
         },
         "targeted_probe_enabled": True,
+        "probe_policy": {
+            "max_attempts": validators_svc.PROBE_MAX_ATTEMPTS,
+            "lease_seconds": validators_svc.PROBE_LEASE_SECONDS,
+        },
         "authority_model": {
             "preview": "registered non-assignment evidence; visible but non-authoritative",
             "authoritative": "requires Grid-issued assignment_id + grid_nonce + probe evidence hash",
@@ -297,8 +301,20 @@ async def validator_probe(
             assignment_id=assignment_id,
         )
     except validators_svc.AssignmentError as exc:
-        status = 404 if "not found" in str(exc) else 400
-        raise HTTPException(status_code=status, detail=str(exc))
+        message = str(exc)
+        if "not found" in message:
+            status = 404
+        elif "expired" in message:
+            status = 410
+        elif (
+            "already" in message
+            or "retry limit" in message
+            or "not claimable" in message
+        ):
+            status = 409
+        else:
+            status = 400
+        raise HTTPException(status_code=status, detail=message)
     if result.get("status") == "error":
         return JSONResponse(result, status_code=int(result.get("code") or 502))
     return result

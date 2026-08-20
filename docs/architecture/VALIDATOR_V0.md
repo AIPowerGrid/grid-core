@@ -71,9 +71,11 @@ IDs, validator identities, private challenge policies, or reference outputs.
 
 Alembic `0020` creates `grid_validators`, adds nullable registration attribution
 to existing assignments and attestations, and enforces one attestation per
-assignment/validator. Apply the migration before deploying registration-aware
-Core code. Existing legacy evidence may remain unbound and must never be
-upgraded to authoritative by inference.
+assignment/validator. Alembic `0021` adds atomic probe attempt counters and
+reclaimable leases, preventing concurrent replay from dispatching duplicate
+free inference. Apply both migrations before deploying registration-aware Core
+code. Existing legacy evidence may remain unbound and must never be upgraded to
+authoritative by inference.
 
 ## Next Authority Gate
 

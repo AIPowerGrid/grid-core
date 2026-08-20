@@ -39,6 +39,11 @@ MAX_PAYLOAD_BYTES = 64 * 1024
 ASSIGNMENT_TTL_SECONDS = int(os.getenv("VALIDATOR_ASSIGNMENT_TTL_SECONDS", "900") or 900)
 PROBE_TIMEOUT_SECONDS = int(os.getenv("VALIDATOR_PROBE_TIMEOUT_SECONDS", "180") or 180)
 PROBE_LATENCY_BUDGET_SECONDS = int(os.getenv("VALIDATOR_PROBE_LATENCY_BUDGET_SECONDS", "30") or 30)
+PROBE_MAX_ATTEMPTS = max(1, int(os.getenv("VALIDATOR_PROBE_MAX_ATTEMPTS", "2") or 2))
+PROBE_LEASE_SECONDS = max(
+    PROBE_TIMEOUT_SECONDS + 30,
+    int(os.getenv("VALIDATOR_PROBE_LEASE_SECONDS", "240") or 240),
+)
 QUORUM_MIN = max(1, int(os.getenv("VALIDATOR_QUORUM_MIN", "1") or 1))
 # Canary answers are short, but reasoning models (gpt-oss/qwen3/Gemma) spend
 # tokens "thinking" before the final answer. A tight cap (was 32) gets fully
@@ -431,6 +436,7 @@ def _assignment_to_dict(
         "quorum_status": row["quorum_status"],
         "quorum_outcome": row["quorum_outcome"],
         "probe_status": row["probe_status"],
+        "probe_attempts": int(row["probe_attempts"] or 0),
         "probe_job_id": row["probe_job_id"],
         "created": row["created"].isoformat() if row["created"] else None,
         "expires": row["expires"].isoformat() if row["expires"] else None,
@@ -555,6 +561,8 @@ async def issue_assignments(
                 "quorum_outcome": None,
                 "probe_job_id": None,
                 "probe_status": "not_started",
+                "probe_attempts": 0,
+                "probe_lease_expires": None,
                 "created": now,
                 "expires": expires,
                 "probed": None,
@@ -1002,60 +1010,55 @@ async def probe_assignment(
     """
     from . import job_queue, token_stream
 
-    async with await new_session() as session:
-        row = (
-            await session.execute(
-                sa.select(assignments_t).where(assignments_t.c.id == assignment_id)
-            )
-        ).mappings().first()
-        if not row:
-            raise AssignmentError("assignment not found")
-        if row["account_id"] != account_id:
-            raise AssignmentError("assignment does not belong to this validator account")
-        if row["validator_id"] != validator_id:
-            raise AssignmentError("assignment does not belong to this registered validator")
-        if row["expires"] and _aware(row["expires"]) < _now():
-            raise AssignmentError("assignment has expired")
-        if row["modality"] != "text":
-            raise AssignmentError("only text probes are enabled in this rollout")
-
-        challenge = row["challenge"] or {}
-        prompt = str(challenge.get("prompt") or "")
-        if not prompt:
-            raise AssignmentError("assignment has no prompt")
-        job_id = f"validator:{assignment_id}:{uuid4().hex}"
-        payload = {
-            "request": {
-                "model": row["model"],
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": int(challenge.get("max_tokens") or 32),
-                "temperature": float(challenge.get("temperature") or 0),
-                "stream": True,
-            },
-            "api_format": "openai-chat",
-            "prompt": prompt,
-            "max_length": int(challenge.get("max_tokens") or 32),
+    row, job_id = await _claim_probe_lease(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment_id,
+    )
+    challenge = row["challenge"] or {}
+    prompt = str(challenge.get("prompt") or "")
+    payload = {
+        "request": {
+            "model": row["model"],
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": int(challenge.get("max_tokens") or 32),
             "temperature": float(challenge.get("temperature") or 0),
-            "_validator_probe": True,
-            "_validator_assignment_id": assignment_id,
-            "_validator_grid_nonce": row["grid_nonce"],
-        }
-        await session.execute(
-            sa.update(assignments_t)
-            .where(assignments_t.c.id == assignment_id)
-            .values(probe_job_id=job_id, probe_status="running", probed=_now())
-        )
-        await session.commit()
+            "stream": True,
+        },
+        "api_format": "openai-chat",
+        "prompt": prompt,
+        "max_length": int(challenge.get("max_tokens") or 32),
+        "temperature": float(challenge.get("temperature") or 0),
+        "_validator_probe": True,
+        "_validator_assignment_id": assignment_id,
+        "_validator_grid_nonce": row["grid_nonce"],
+    }
 
     started = _now()
-    await job_queue.submit_job(
-        job_id,
-        payload,
-        [row["model"]],
-        job_type="text",
-        preferred_worker=row["target_worker_name"],
-        hard_target_worker=row["target_worker_name"],
-    )
+    try:
+        await job_queue.submit_job(
+            job_id,
+            payload,
+            [row["model"]],
+            job_type="text",
+            preferred_worker=row["target_worker_name"],
+            hard_target_worker=row["target_worker_name"],
+        )
+    except Exception:
+        await _mark_probe(job_id, "failed")
+        logger.error(
+            "validator probe dispatch failed assignment=%s job=%s",
+            assignment_id,
+            job_id,
+            exc_info=True,
+        )
+        return {
+            "status": "error",
+            "assignment_id": assignment_id,
+            "job_id": job_id,
+            "message": "probe dispatch failed",
+            "code": 503,
+        }
 
     chunks: list[str] = []
     full_text = ""
@@ -1140,6 +1143,75 @@ async def probe_assignment(
     }
 
 
+async def _claim_probe_lease(
+    *,
+    account_id,
+    validator_id: str,
+    assignment_id: str,
+) -> tuple[dict[str, Any], str]:
+    """Atomically claim one bounded probe attempt for an assignment."""
+    now = _now()
+    lease_expires = now + timedelta(seconds=PROBE_LEASE_SECONDS)
+    job_id = f"validator:{assignment_id}:{uuid4().hex}"
+    retryable = assignments_t.c.probe_status.in_(("not_started", "failed", "timeout"))
+    stale_running = sa.and_(
+        assignments_t.c.probe_status == "running",
+        sa.or_(
+            assignments_t.c.probe_lease_expires.is_(None),
+            assignments_t.c.probe_lease_expires <= now,
+        ),
+    )
+
+    async with await new_session() as session:
+        claimed = await session.execute(
+            sa.update(assignments_t)
+            .where(
+                assignments_t.c.id == assignment_id,
+                assignments_t.c.account_id == account_id,
+                assignments_t.c.validator_id == validator_id,
+                assignments_t.c.expires >= now,
+                assignments_t.c.probe_attempts < PROBE_MAX_ATTEMPTS,
+                sa.or_(retryable, stale_running),
+            )
+            .values(
+                probe_job_id=job_id,
+                probe_status="running",
+                probe_attempts=assignments_t.c.probe_attempts + 1,
+                probe_lease_expires=lease_expires,
+                probed=now,
+            )
+        )
+        await session.commit()
+        row = (
+            await session.execute(
+                sa.select(assignments_t).where(assignments_t.c.id == assignment_id)
+            )
+        ).mappings().first()
+
+    if not row:
+        raise AssignmentError("assignment not found")
+    if row["account_id"] != account_id or row["validator_id"] != validator_id:
+        raise AssignmentError("assignment not found")
+    if claimed.rowcount == 1:
+        challenge = row["challenge"] or {}
+        if row["modality"] != "text":
+            await _mark_probe(job_id, "failed")
+            raise AssignmentError("only text probes are enabled in this rollout")
+        if not str(challenge.get("prompt") or ""):
+            await _mark_probe(job_id, "failed")
+            raise AssignmentError("assignment has no prompt")
+        return dict(row), job_id
+    if row["expires"] and _aware(row["expires"]) < now:
+        raise AssignmentError("assignment has expired")
+    if row["probe_status"] == "completed":
+        raise AssignmentError("assignment probe already completed")
+    if row["probe_status"] == "running":
+        raise AssignmentError("assignment probe already in progress")
+    if int(row["probe_attempts"] or 0) >= PROBE_MAX_ATTEMPTS:
+        raise AssignmentError("assignment probe retry limit reached")
+    raise AssignmentError("assignment probe is not claimable")
+
+
 async def _mark_probe(
     job_id: str,
     status: str,
@@ -1152,7 +1224,10 @@ async def _mark_probe(
 ) -> None:
     try:
         async with await new_session() as session:
-            values: dict[str, Any] = {"probe_status": status}
+            values: dict[str, Any] = {
+                "probe_status": status,
+                "probe_lease_expires": None,
+            }
             if prompt_hash is not None:
                 values["probe_prompt_hash"] = prompt_hash
             if response_hash is not None:

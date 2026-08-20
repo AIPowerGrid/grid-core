@@ -45,7 +45,8 @@ bounded service clients plus their delegation audit events.
   (NULL → grid defaults); SELECTed on the HOT auth path — their migrations
   (0009) must run before code that reads them.
 - `grid_validator_assignments` gates authoritative evidence with Grid-issued
-  assignment ids, nonces, and hard-targeted probe evidence hashes.
+  assignment ids, nonces, and hard-targeted probe evidence hashes. Its attempt
+  counter and lease deadline enforce one bounded active probe per assignment.
   `grid_validator_attestations` stores both preview and authoritative evidence.
   Scorecards may aggregate them for
   operator/console visibility, but they must not be treated as economic truth

@@ -43,6 +43,9 @@ executes an immutable release selected through `/home/aipg/current`.
 - `GRID_SIWE_ALLOWED_DOMAINS` is the exact frontend authority allowlist for
   wallet-login challenges. Keep `GRID_LEGACY_SIWE_VERIFY_ENABLED=0`; it is an
   emergency client-migration switch, not a permanent compatibility mode.
+- Validator probe leases must exceed the worker-response timeout and keep a
+  small bounded retry budget. Do not make targeted validation an unlimited
+  free-inference path.
 - If you rename Base/contract env vars, update `docs/`, `grid_api/services/*`,
   and any SDK examples in the same change.
 
