@@ -6,7 +6,8 @@ SQLAlchemy metadata for Grid-owned v2 tables: accounts, API keys, workers, jobs,
 completion ledger, prepaid credits, credit ledger, reservations, canonical
 identities/account aliases, promotional campaigns/grants, settlement
 epochs, per-asset revenue pots (`grid_revenue`), multi-asset payout legs
-(`grid_payout_legs`), validator assignments/attestation evidence rows, and
+(`grid_payout_legs`), registered validator identities plus assignment/
+attestation evidence rows, and
 bounded service clients plus their delegation audit events.
 
 ## Ownership
@@ -49,6 +50,11 @@ bounded service clients plus their delegation audit events.
   Scorecards may aggregate them for
   operator/console visibility, but they must not be treated as economic truth
   until reward/dispute rules are live.
+- `grid_validators` binds one normalized signing wallet to one canonical account
+  and records capabilities, version, and heartbeat. Assignment and attestation
+  `validator_id` foreign keys preserve attribution; the unique
+  `(assignment_id, validator_id)` constraint prevents duplicate authoritative
+  votes by one node.
 - Account IDs are UUIDs. Quota identities such as `v2:<uuid>` are not DB foreign
   keys and must not be passed to credit ledger functions.
 - New columns need explicit migrations, tests, and backfill/default strategy for

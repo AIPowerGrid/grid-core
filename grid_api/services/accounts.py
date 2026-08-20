@@ -30,10 +30,21 @@ from ..v2.schema import workers as workers_table
 logger = logging.getLogger("grid_api.accounts")
 
 API_KEY_PREFIX = "grid_"
-SESSION_SCOPES = ["account.read", "account.manage", "inference.submit"]
+SESSION_SCOPES = [
+    "account.read",
+    "account.manage",
+    "inference.submit",
+    "validator.read",
+]
 INFERENCE_SCOPES = ["account.read", "inference.submit"]
 SERVICE_SCOPES = ["account.read", "inference.submit", "identity.exchange", "identity.assert"]
 DIRECT_SERVICE_INFERENCE_SCOPE = "inference.service_submit"
+VALIDATOR_SCOPES = [
+    "validator.assignments",
+    "validator.probe",
+    "validator.attest",
+    "validator.read",
+]
 
 
 def service_scopes(*, allow_direct_inference: bool = False) -> list[str]:

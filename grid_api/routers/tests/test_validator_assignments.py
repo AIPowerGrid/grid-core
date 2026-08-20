@@ -2,25 +2,63 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 import uuid
+import time
 
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from eth_account import Account
+from eth_account.messages import encode_defunct
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from grid_api import database
+from grid_api import auth, database
 from grid_api.ratelimit import limiter
 from grid_api.routers import validator as validator_router
 from grid_api.services import validators as validators_svc
 from grid_api.v2.schema import (
     metadata as v2_metadata,
+    accounts as accounts_t,
     validator_assignments as assignments_t,
     validator_attestations as attestations_t,
+    validators as validators_t,
     workers as workers_t,
 )
+
+
+TEST_PRIVATE_KEY = "0x" + "01" * 32
+TEST_WALLET = Account.from_key(TEST_PRIVATE_KEY).address.lower()
+
+
+def _sign(payload):
+    return Account.sign_message(
+        encode_defunct(text=validators_svc._canonical(payload)),
+        private_key=TEST_PRIVATE_KEY,
+    ).signature.hex()
+
+
+async def _register(account_id):
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.insert(accounts_t).values(id=account_id, wallet=TEST_WALLET, flags={}),
+        )
+        await session.commit()
+    payload = {
+        "registration_schema": "aipg.validator.registration.v1",
+        "validator": TEST_WALLET,
+        "software_version": "0.1.0-test",
+        "capabilities": ["text.basic.v1"],
+        "ts": int(time.time()),
+    }
+    registered = await validators_svc.register_validator(
+        account_id=account_id,
+        account_wallet=TEST_WALLET,
+        payload=payload,
+        signature=_sign(payload),
+    )
+    return registered["validator_id"]
 
 
 @pytest_asyncio.fixture
@@ -43,7 +81,7 @@ async def db():
 
 def _payload(**overrides):
     data = {
-        "validator": "0x1111111111111111111111111111111111111111",
+        "validator": TEST_WALLET,
         "assignment_source": "validator_v0",
         "assignment_id": "validator-v0:local",
         "grid_nonce": "",
@@ -63,10 +101,12 @@ def _payload(**overrides):
 
 
 async def _assignment(account_id, *, verdict="healthy"):
+    validator_id = await _register(account_id)
     worker_id = str(uuid.uuid4())
     issued = await validators_svc.issue_assignments(
         account_id=account_id,
-        validator_wallet="0x1111111111111111111111111111111111111111",
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
         active_workers=[{
             "worker_id": worker_id,
             "name": "rig-1",
@@ -103,7 +143,7 @@ async def _assignment(account_id, *, verdict="healthy"):
         evidence_hash=evidence_hash,
         verdict=verdict,
     )
-    return assignment, payload
+    return validator_id, assignment, payload
 
 
 @pytest.mark.asyncio
@@ -127,28 +167,136 @@ async def test_preview_attestation_does_not_affect_authoritative_scorecards(db):
 
 
 @pytest.mark.asyncio
+async def test_registration_is_wallet_bound_signed_and_idempotent(db):
+    account_id = uuid.uuid4()
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.insert(accounts_t).values(id=account_id, wallet=TEST_WALLET, flags={}),
+        )
+        await session.commit()
+    payload = {
+        "registration_schema": "aipg.validator.registration.v1",
+        "validator": TEST_WALLET,
+        "software_version": "0.1.0-preview",
+        "capabilities": ["text.basic.v1"],
+        "ts": int(time.time()),
+    }
+
+    first = await validators_svc.register_validator(
+        account_id=account_id,
+        account_wallet=TEST_WALLET,
+        payload=payload,
+        signature=_sign(payload),
+    )
+    second = await validators_svc.register_validator(
+        account_id=account_id,
+        account_wallet=TEST_WALLET,
+        payload=payload,
+        signature=_sign(payload),
+    )
+
+    assert first["created"] is True
+    assert second["created"] is False
+    assert second["validator_id"] == first["validator_id"]
+    async with await database.new_session() as session:
+        count = await session.scalar(sa.select(sa.func.count()).select_from(validators_t))
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_registration_rejects_unlinked_wallet_unsigned_and_stale(db):
+    account_id = uuid.uuid4()
+    payload = {
+        "registration_schema": "aipg.validator.registration.v1",
+        "validator": TEST_WALLET,
+        "software_version": "0.1.0-preview",
+        "capabilities": ["text.basic.v1"],
+        "ts": int(time.time()),
+    }
+    with pytest.raises(validators_svc.RegistrationError, match="linked wallet"):
+        await validators_svc.register_validator(
+            account_id=account_id,
+            account_wallet=None,
+            payload=payload,
+            signature=_sign(payload),
+        )
+    with pytest.raises(validators_svc.RegistrationError, match="requires a wallet signature"):
+        await validators_svc.register_validator(
+            account_id=account_id,
+            account_wallet=TEST_WALLET,
+            payload=payload,
+            signature=None,
+        )
+    stale = {**payload, "ts": 1}
+    with pytest.raises(validators_svc.RegistrationError, match="outside the allowed window"):
+        await validators_svc.register_validator(
+            account_id=account_id,
+            account_wallet=TEST_WALLET,
+            payload=stale,
+            signature=_sign(stale),
+        )
+
+
+@pytest.mark.asyncio
+async def test_validator_key_has_only_validator_scopes(db, monkeypatch):
+    monkeypatch.setenv("GRID_SALT", "validator-test-salt")
+    monkeypatch.setattr(auth, "_API_KEY_SALT", None)
+    account_id = uuid.uuid4()
+    async with await database.new_session() as session:
+        await session.execute(sa.insert(accounts_t).values(id=account_id, flags={}))
+        await session.commit()
+
+    key = await validator_router.accounts_svc.issue_key(
+        account_id,
+        label="validator",
+        scopes=validator_router.accounts_svc.VALIDATOR_SCOPES,
+        key_kind="validator",
+    )
+    resolved = await validator_router.accounts_svc.resolve_api_key(key)
+
+    assert resolved["key_kind"] == "validator"
+    assert resolved["scopes"] == validator_router.accounts_svc.VALIDATOR_SCOPES
+    assert "inference.submit" not in resolved["scopes"]
+
+
+@pytest.mark.asyncio
 async def test_authoritative_attestation_requires_grid_assignment_and_nonce(db):
     account_id = uuid.uuid4()
-    assignment, payload = await _assignment(account_id)
+    validator_id, assignment, payload = await _assignment(account_id)
+
+    with pytest.raises(validators_svc.AttestationError, match="verified validator signature"):
+        await validators_svc.record_attestation(
+            account_id=account_id,
+            validator_id=validator_id,
+            payload=payload,
+            signature=None,
+        )
 
     bad = dict(payload)
     bad["grid_nonce"] = "wrong"
     with pytest.raises(validators_svc.AttestationError, match="grid_nonce"):
-        await validators_svc.record_attestation(account_id=account_id, payload=bad, signature=None)
+        await validators_svc.record_attestation(
+            account_id=account_id,
+            validator_id=validator_id,
+            payload=bad,
+            signature=_sign(bad),
+        )
 
     wrong_evidence = dict(payload)
     wrong_evidence["evidence_hash"] = "d" * 64
     with pytest.raises(validators_svc.AttestationError, match="evidence_hash"):
         await validators_svc.record_attestation(
             account_id=account_id,
+            validator_id=validator_id,
             payload=wrong_evidence,
-            signature=None,
+            signature=_sign(wrong_evidence),
         )
 
     stored = await validators_svc.record_attestation(
         account_id=account_id,
+        validator_id=validator_id,
         payload=payload,
-        signature=None,
+        signature=_sign(payload),
     )
     assert stored["authority"] == "authoritative"
     assert stored["assignment_id"] == assignment["assignment_id"]
@@ -161,7 +309,8 @@ async def test_authoritative_attestation_requires_grid_assignment_and_nonce(db):
 
     next_work = await validators_svc.issue_assignments(
         account_id=account_id,
-        validator_wallet=None,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
         active_workers=[{
             "worker_id": assignment["target_worker_id"],
             "name": assignment["target_worker_name"],
@@ -174,30 +323,31 @@ async def test_authoritative_attestation_requires_grid_assignment_and_nonce(db):
 
 
 @pytest.mark.asyncio
-async def test_conflicting_authoritative_attestations_mark_assignment_disputed(db):
+async def test_one_authoritative_attestation_per_registered_validator(db):
     account_id = uuid.uuid4()
-    assignment, payload = await _assignment(account_id, verdict="healthy")
-    await validators_svc.record_attestation(account_id=account_id, payload=payload, signature=None)
+    validator_id, assignment, payload = await _assignment(account_id, verdict="healthy")
+    await validators_svc.record_attestation(
+        account_id=account_id,
+        validator_id=validator_id,
+        payload=payload,
+        signature=_sign(payload),
+    )
 
     conflict = dict(payload)
     conflict["verdict"] = "failed"
-    stored = await validators_svc.record_attestation(
-        account_id=account_id,
-        payload=conflict,
-        signature=None,
-    )
-
-    assert stored["quorum_status"] == "disputed"
-    health = await validators_svc.assignment_health(account_id=account_id)
-    assert health["quorum"]["disputed"] == 1
-    assert health["recent"][0]["assignment_id"] == assignment["assignment_id"]
-    assert "grid_nonce" not in health["recent"][0]
-    assert "challenge" not in health["recent"][0]
+    with pytest.raises(validators_svc.AttestationError, match="already submitted"):
+        await validators_svc.record_attestation(
+            account_id=account_id,
+            validator_id=validator_id,
+            payload=conflict,
+            signature=_sign(conflict),
+        )
 
 
 @pytest.mark.asyncio
 async def test_issue_assignments_excludes_validator_owned_workers(db):
     account_id = uuid.uuid4()
+    validator_id = await _register(account_id)
     own_worker_id = uuid.uuid4()
     other_worker_id = uuid.uuid4()
     async with await database.new_session() as session:
@@ -215,7 +365,8 @@ async def test_issue_assignments_excludes_validator_owned_workers(db):
 
     issued = await validators_svc.issue_assignments(
         account_id=account_id,
-        validator_wallet=None,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
         active_workers=[
             {
                 "worker_id": str(own_worker_id),
@@ -251,26 +402,33 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["economic_effect"] == "none"
     assert body["features"]["assignments"] is True
     assert body["features"]["targeted_probe"] is True
-    assert body["features"]["quorum"] is True
+    assert body["features"]["quorum"] is False
     assert body["features"]["validator_rewards"] is False
     assert (
         body["authority_model"]["authoritative"]
         == "requires Grid-issued assignment_id + grid_nonce + probe evidence hash"
     )
+    assert "not implemented" in body["authority_model"]["real_quorum"]
 
 
 def test_probe_route_returns_upstream_probe_error(monkeypatch):
     account_id = uuid.uuid4()
 
-    async def fake_auth(_key):
-        return {"source": "v2", "account_id": account_id, "wallet": None}
+    async def fake_auth(_key, *, required_scope):
+        assert required_scope == "validator.probe"
+        return {"source": "v2", "account_id": account_id, "wallet": TEST_WALLET}
+
+    async def fake_active(**_kwargs):
+        return {"id": "val_test"}
 
     async def fake_probe(**kwargs):
         assert kwargs["account_id"] == account_id
+        assert kwargs["validator_id"] == "val_test"
         assert kwargs["assignment_id"] == "asg_dead"
         return {"status": "error", "code": 503, "message": "target unavailable"}
 
     monkeypatch.setattr(validator_router.accounts_svc, "authenticate", fake_auth)
+    monkeypatch.setattr(validator_router.validators_svc, "active_validator", fake_active)
     monkeypatch.setattr(validator_router.validators_svc, "probe_assignment", fake_probe)
 
     app = FastAPI()

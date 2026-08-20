@@ -67,7 +67,8 @@ transport, accounts, stats, health/metrics.
   handle, timing, den, prompt/result hashes + signed flag — NEVER content,
   NEVER customer wallet/account).
 - `validator.py` - validator assignment-bound evidence surface:
-  `GET /v1/validator/capabilities`, `GET /v1/validator/assignments`,
+  `GET /v1/validator/capabilities`, signed linked-wallet registration/status/
+  heartbeat, `GET /v1/validator/assignments`,
   `POST /v1/validator/probe/{assignment_id}`,
   `POST /v1/validator/attest`, `GET /v1/validator/workers`,
   `GET /v1/validator/scorecards`, and
@@ -110,6 +111,11 @@ transport, accounts, stats, health/metrics.
 - Validator endpoints are evidence-only until the validator role, rewards,
   and dispute process are wired. Do not let `failed` attestations affect worker
   strikes/slashing from this router.
+- Validator work routes require an active `grid_validators` registration bound
+  to the API-key account's linked wallet. Dedicated validator keys have exactly
+  `validator.assignments`, `validator.probe`, `validator.attest`, and
+  `validator.read`; never broaden them to inference or account-management
+  authority.
 - Assignment-bound evidence must require a Grid-issued `assignment_id`,
   `grid_nonce`, and matching hard-targeted probe evidence hash before it is
   marked authoritative. Preview evidence may be stored, but must stay labeled
@@ -118,6 +124,9 @@ transport, accounts, stats, health/metrics.
   nonces, signatures, account IDs, or validator identities from scorecard routes.
 - Targeted validator probes must be hard-targeted to the assigned worker and
   must not bill users, pay den, write worker ledger rows, or strike workers.
+- Missing validator registration/assignment/probe support must fail closed.
+  Ordinary chat inference and worker inventory are never fallback targeting
+  paths.
 - Generation routes accept Core-issued `X-Grid-User-Token` delegation from a
   service key. Legacy `X-Grid-User-Assertion` is app-local only and cannot claim
   Google or wallet identity. Account management needs a recent Core-verified
