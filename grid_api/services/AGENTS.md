@@ -59,6 +59,12 @@ content sanitization, and reward settlement.
   `text.basic.v1` nodes receive only echo/arithmetic. Expected answers
   and Core's private verdict are not returned to nodes. The path remains non-economic and
   must not route production jobs, reward, slash, or write worker ledger rows.
+  Non-economic does not mean resource-free: Core permits at most one new text
+  group per worker/model per configured interval (one hour by default), stores
+  the challenge once on the shared group, and hydrates validator-specific
+  assignments at the API boundary. Finalized assignment/group machinery is
+  pruned after the configured retention window; signed attestations remain the
+  durable evidence record.
   New probes stop at assignment expiry; already-completed probes may deliver
   only during the bounded attestation grace window.
   Aggregate health may expose bounded counts, agreement/dispute rates,

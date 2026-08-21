@@ -831,6 +831,22 @@ async def test_assignment_groups_require_matching_validator_scorer_capability(db
     assert rich_assignment["capability"] == "text.structured.v1"
     assert rich_assignment["canary_kind"] == "json.object"
 
+    # The per-worker cadence is deliberate. Age the first capability group so
+    # this test can exercise the separate legacy-capability group.
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(probe_groups_t)
+            .where(probe_groups_t.c.id == rich_assignment["probe_group_id"])
+            .values(
+                created=validators_svc._now()
+                - timedelta(
+                    seconds=validators_svc.get_settings().validator_text_group_min_interval_seconds
+                    + 1
+                )
+            )
+        )
+        await session.commit()
+
     legacy_key = "0x" + f"{31:064x}"
     legacy_wallet = Account.from_key(legacy_key).address.lower()
     legacy_account = uuid.uuid4()
@@ -930,6 +946,142 @@ async def test_32k_context_assignment_requires_target_worker_headroom(db):
     assert issued["count"] == 1
     assert issued["assignments"][0]["canary_kind"] == "context.retrieve.32k"
     assert issued["assignments"][0]["scoring_policy_id"] == "text.generated.v6"
+
+    assignment = issued["assignments"][0]
+    async with await database.new_session() as session:
+        stored_assignment = (
+            await session.execute(
+                sa.select(assignments_t.c.challenge).where(
+                    assignments_t.c.id == assignment["assignment_id"]
+                )
+            )
+        ).scalar_one()
+        stored_group = (
+            await session.execute(
+                sa.select(probe_groups_t.c.challenge).where(
+                    probe_groups_t.c.id == assignment["probe_group_id"]
+                )
+            )
+        ).scalar_one()
+    assert stored_assignment == {}
+    assert stored_group["prompt"] == assignment["challenge"]["prompt"]
+
+    reloaded = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=wallet,
+        active_workers=[worker],
+        limit=1,
+    )
+    assert reloaded["assignments"][0]["challenge"] == assignment["challenge"]
+
+
+@pytest.mark.asyncio
+async def test_text_group_cadence_blocks_immediate_replacement(db):
+    private_key = "0x" + f"{34:064x}"
+    wallet = Account.from_key(private_key).address.lower()
+    account_id = uuid.uuid4()
+    validator_id = await _register(
+        account_id,
+        private_key,
+        capabilities=["text.context.32k.v1"],
+    )
+    worker = {
+        "worker_id": str(uuid.uuid4()),
+        "name": "rig-context-cadence",
+        "models": ["qwen3-27b"],
+        "job_types": ["text"],
+        "max_context_length": 65_536,
+    }
+    first = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=wallet,
+        active_workers=[worker],
+        limit=1,
+    )
+    assignment = first["assignments"][0]
+    now = validators_svc._now()
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(assignments_t)
+            .where(assignments_t.c.id == assignment["assignment_id"])
+            .values(status="finalized", quorum_status="finalized", finalized=now)
+        )
+        await session.execute(
+            sa.update(probe_groups_t)
+            .where(probe_groups_t.c.id == assignment["probe_group_id"])
+            .values(status="finalized", quorum_status="finalized", finalized=now)
+        )
+        await session.commit()
+
+    blocked = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=wallet,
+        active_workers=[worker],
+        limit=1,
+    )
+    assert blocked["count"] == 0
+
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(probe_groups_t)
+            .where(probe_groups_t.c.id == assignment["probe_group_id"])
+            .values(
+                created=now
+                - timedelta(
+                    seconds=validators_svc.get_settings().validator_text_group_min_interval_seconds
+                    + 1
+                )
+            )
+        )
+        await session.commit()
+    replacement = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=wallet,
+        active_workers=[worker],
+        limit=1,
+    )
+    assert replacement["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_prune_removes_finalized_machinery_but_keeps_signed_evidence(db):
+    account_id = uuid.uuid4()
+    validator_id, assignment, payload = await _assignment(account_id)
+    await validators_svc.record_attestation(
+        account_id=account_id,
+        validator_id=validator_id,
+        payload=payload,
+        signature=_sign(payload),
+    )
+    old = validators_svc._now() - timedelta(days=2)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(assignments_t)
+            .where(assignments_t.c.id == assignment["assignment_id"])
+            .values(status="finalized", quorum_status="finalized", finalized=old)
+        )
+        await session.execute(
+            sa.update(probe_groups_t)
+            .where(probe_groups_t.c.id == assignment["probe_group_id"])
+            .values(status="finalized", quorum_status="finalized", finalized=old)
+        )
+        await session.commit()
+
+    deleted = await validators_svc.prune_validator_operational_history(
+        older_than_days=1
+    )
+    assert deleted == {"assignments": 1, "probe_groups": 1}
+    async with await database.new_session() as session:
+        assert await session.scalar(sa.select(sa.func.count()).select_from(assignments_t)) == 0
+        assert await session.scalar(sa.select(sa.func.count()).select_from(probe_groups_t)) == 0
+        evidence = (
+            await session.execute(sa.select(attestations_t.c.payload))
+        ).scalar_one()
+    assert evidence["evidence_hash"] == payload["evidence_hash"]
 
 
 @pytest.mark.asyncio
