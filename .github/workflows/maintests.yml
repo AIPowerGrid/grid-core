@@ -81,9 +81,18 @@ jobs:
           AIPG_RESTORE_RUN_AS_CURRENT_USER: '1'
         run: |
           alembic upgrade 0019
+          PGPASSWORD="$POSTGRES_PASS" psql \
+            --host=127.0.0.1 \
+            --username="$POSTGRES_USER" \
+            --dbname=grid_test \
+            --command='CREATE SCHEMA backup_excluded; CREATE TABLE backup_excluded.must_not_ship(id integer);'
           backup_dir="$RUNNER_TEMP/aipg-postgres-backup"
           AIPG_BACKUP_DIR="$backup_dir" scripts/backup_postgres.sh
           backup="$(find "$backup_dir" -maxdepth 1 -name 'grid-postgres-*.dump' -print -quit)"
+          if pg_restore --list "$backup" | grep -q 'backup_excluded'; then
+            echo 'backup unexpectedly contains a non-Grid schema' >&2
+            exit 1
+          fi
           AIPG_RESTORE_BACKUP="$backup" \
             AIPG_RESTORE_CANDIDATE="$GITHUB_WORKSPACE" \
             AIPG_RESTORE_PYTHON="$(command -v python)" \

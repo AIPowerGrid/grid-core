@@ -81,7 +81,9 @@ sudo bash -c "set -a; source /etc/aipg/grid.env; set +a; \
   '$RELEASE/scripts/prove_postgres_restore.sh'"
 ```
 
-The proof verifies the checksum, restores into a generated
+The backup is intentionally scoped to the Grid-owned `public` schema; legacy
+and extension-owned schemas such as `cron` are not application state and are
+excluded. The proof verifies the checksum, restores into a generated
 `aipg_restore_proof_*` database, upgrades with the candidate, runs
 `alembic check`, compares current revision to the candidate head, and drops only
 that generated database. Review the output before enabling the timer with
