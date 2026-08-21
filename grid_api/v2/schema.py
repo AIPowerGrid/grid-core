@@ -82,8 +82,9 @@ accounts = sa.Table(
 
 
 # Authentication identities are credentials attached to an account, never the
-# account itself. subject_hash is sha256(kind + ":" + canonical subject), so
-# OAuth provider subjects and emails are not exposed in operational queries.
+# account itself. New subject hashes are keyed BLAKE2b digests of the kind and
+# canonical subject; runtime lookup also accepts the pre-2026 unkeyed SHA-256
+# form and lazily upgrades it after the identity is proved again.
 account_identities = sa.Table(
     "grid_account_identities",
     metadata,

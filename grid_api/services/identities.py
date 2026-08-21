@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
+from ..auth import _get_api_key_salt
 from ..database import new_session
 from ..v2.schema import (
     account_aliases,
@@ -48,9 +49,36 @@ def canonical_subject(kind: str, subject: str) -> str:
     return value
 
 
+def _normalized_kind(kind: str) -> str:
+    normalized = (kind or "").strip().lower()
+    if normalized not in {"wallet", "google", "github", "email", "app"}:
+        raise ValueError("unsupported or empty identity")
+    return normalized
+
+
+def legacy_subject_hash(kind: str, subject: str) -> str:
+    """Return the pre-v2 unkeyed digest for lookup migration only."""
+    normalized_kind = _normalized_kind(kind)
+    canonical = canonical_subject(normalized_kind, subject)
+    return hashlib.sha256(f"{normalized_kind}:{canonical}".encode()).hexdigest()
+
+
 def subject_hash(kind: str, subject: str) -> str:
-    canonical = canonical_subject(kind, subject)
-    return hashlib.sha256(f"{kind}:{canonical}".encode()).hexdigest()
+    """Return the server-keyed canonical identity lookup digest."""
+    normalized_kind = _normalized_kind(kind)
+    canonical = canonical_subject(normalized_kind, subject)
+    return hashlib.blake2b(
+        f"{normalized_kind}:{canonical}".encode("utf-8"),
+        key=_get_api_key_salt().encode("utf-8"),
+        digest_size=32,
+        person=b"aipg-ident-v1",
+    ).hexdigest()
+
+
+def _subject_hash_candidates(kind: str, subject: str) -> tuple[str, ...]:
+    current = subject_hash(kind, subject)
+    legacy = legacy_subject_hash(kind, subject)
+    return (current,) if current == legacy else (current, legacy)
 
 
 async def canonical_account_id(account_id, *, session=None) -> UUID:
@@ -104,17 +132,62 @@ async def account_family_ids(account_id, *, session=None) -> set[UUID]:
             await session.close()
 
 
+async def _canonical_owners(session, account_ids) -> set[UUID]:
+    owners: set[UUID] = set()
+    for account_id in account_ids:
+        owners.add(await canonical_account_id(account_id, session=session))
+    return owners
+
+
 async def resolve_identity(kind: str, subject: str) -> UUID | None:
+    kind = _normalized_kind(kind)
     digest = subject_hash(kind, subject)
+    candidates = _subject_hash_candidates(kind, subject)
     async with await new_session() as session:
-        owner = await session.scalar(
-            sa.select(account_identities.c.account_id).where(
-                account_identities.c.kind == kind,
-                account_identities.c.subject_hash == digest,
-                account_identities.c.verified_at.is_not(None),
+        rows = (
+            await session.execute(
+                sa.select(
+                    account_identities.c.id,
+                    account_identities.c.account_id,
+                    account_identities.c.subject_hash,
+                ).where(
+                    account_identities.c.kind == kind,
+                    account_identities.c.subject_hash.in_(candidates),
+                    account_identities.c.verified_at.is_not(None),
+                ).order_by(
+                    sa.case((account_identities.c.subject_hash == digest, 0), else_=1),
+                ).with_for_update()
             )
-        )
-        return await canonical_account_id(owner, session=session) if owner else None
+        ).all()
+        if not rows:
+            return None
+        owners = await _canonical_owners(session, (row[1] for row in rows))
+        if len(owners) != 1:
+            raise RuntimeError("identity hash variants resolve to multiple accounts")
+        owner = next(iter(owners))
+        row = rows[0]
+        if row[2] != digest:
+            try:
+                await session.execute(
+                    sa.update(account_identities)
+                    .where(account_identities.c.id == row[0])
+                    .values(subject_hash=digest, last_used=_now())
+                )
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                current_owner = await session.scalar(
+                    sa.select(account_identities.c.account_id).where(
+                        account_identities.c.kind == kind,
+                        account_identities.c.subject_hash == digest,
+                        account_identities.c.verified_at.is_not(None),
+                    )
+                )
+                if not current_owner:
+                    raise RuntimeError("identity hash migration conflicted without an owner")
+                if await canonical_account_id(current_owner, session=session) != owner:
+                    raise RuntimeError("identity hash migration resolved to multiple accounts")
+        return owner
 
 
 async def list_identities(account_id) -> list[dict]:
@@ -161,7 +234,7 @@ async def verified_wallet_addresses(account_id) -> list[str]:
             len(wallet) == 42
             and wallet.startswith("0x")
             and all(char in "0123456789abcdef" for char in wallet[2:])
-            and subject_hash("wallet", wallet) == row["subject_hash"]
+            and row["subject_hash"] in _subject_hash_candidates("wallet", wallet)
             and wallet not in wallets
         ):
             wallets.append(wallet)
@@ -173,25 +246,48 @@ async def attach_identity(account_id, kind: str, subject: str, *, display_hint: 
                           ref: str | None = None) -> dict:
     """Attach a newly proved identity, or report the other owning account."""
     aid = await canonical_account_id(account_id)
+    kind = _normalized_kind(kind)
     canonical = canonical_subject(kind, subject)
     digest = subject_hash(kind, canonical)
+    candidates = _subject_hash_candidates(kind, canonical)
     now = _now()
     ref = ref or f"identity-link:{kind}:{digest}:{aid}"
     async with await new_session() as session:
-        existing = (await session.execute(
+        existing_rows = (await session.execute(
             sa.select(account_identities.c.id, account_identities.c.account_id)
-            .where(account_identities.c.kind == kind, account_identities.c.subject_hash == digest)
+            .where(
+                account_identities.c.kind == kind,
+                account_identities.c.subject_hash.in_(candidates),
+            )
+            .order_by(sa.case((account_identities.c.subject_hash == digest, 0), else_=1))
             .with_for_update()
-        )).first()
-        if existing:
-            owner = await canonical_account_id(existing[1], session=session)
+        )).all()
+        if existing_rows:
+            owners = await _canonical_owners(session, (row[1] for row in existing_rows))
+            if len(owners) != 1:
+                raise RuntimeError("identity hash variants resolve to multiple accounts")
+            owner = next(iter(owners))
             if owner != aid:
                 return {"status": "conflict", "account_id": str(owner), "subject_hash": digest}
-            await session.execute(
-                sa.update(account_identities).where(account_identities.c.id == existing[0])
-                .values(last_used=now, verified_at=now)
-            )
-            await session.commit()
+            existing = existing_rows[0]
+            try:
+                await session.execute(
+                    sa.update(account_identities).where(account_identities.c.id == existing[0])
+                    .values(subject_hash=digest, last_used=now, verified_at=now)
+                )
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                current_owner = await session.scalar(
+                    sa.select(account_identities.c.account_id).where(
+                        account_identities.c.kind == kind,
+                        account_identities.c.subject_hash == digest,
+                    )
+                )
+                if not current_owner:
+                    raise RuntimeError("identity hash migration conflicted without an owner")
+                if await canonical_account_id(current_owner, session=session) != aid:
+                    raise RuntimeError("identity hash migration resolved to multiple accounts")
             return {"status": "already", "account_id": str(aid), "subject_hash": digest}
 
         if make_primary:
@@ -208,12 +304,19 @@ async def attach_identity(account_id, kind: str, subject: str, *, display_hint: 
             ))
         except IntegrityError:
             await session.rollback()
-            owner = await session.scalar(sa.select(account_identities.c.account_id).where(
-                account_identities.c.kind == kind,
-                account_identities.c.subject_hash == digest,
-            ))
-            if owner:
-                owner = await canonical_account_id(owner, session=session)
+            owner_rows = (
+                await session.execute(
+                    sa.select(account_identities.c.account_id).where(
+                        account_identities.c.kind == kind,
+                        account_identities.c.subject_hash.in_(candidates),
+                    ).order_by(sa.case((account_identities.c.subject_hash == digest, 0), else_=1))
+                )
+            ).scalars().all()
+            if owner_rows:
+                owners = await _canonical_owners(session, owner_rows)
+                if len(owners) != 1:
+                    raise RuntimeError("identity hash variants resolve to multiple accounts")
+                owner = next(iter(owners))
                 return {"status": "already" if owner == aid else "conflict",
                         "account_id": str(owner), "subject_hash": digest}
             raise
