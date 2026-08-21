@@ -76,10 +76,10 @@ passfile="$(mktemp /var/tmp/aipg-restore-pgpass.XXXXXX)"
 admin_passfile=""
 
 cleanup() {
-    rm -f -- "$passfile"
-    if [[ -n "$admin_passfile" ]]; then
-        rm -f -- "$admin_passfile"
-    fi
+    local original_status=$?
+    local drop_status=0
+    trap - EXIT
+    set +e
     if [[ "$scratch_created" -eq 1 && "$KEEP_SCRATCH" -eq 0 ]]; then
         if [[ -n "$ADMIN_USER" ]]; then
             PGPASSFILE="$admin_passfile" dropdb \
@@ -90,14 +90,24 @@ cleanup() {
                 --if-exists \
                 --force \
                 "$scratch" >/dev/null
+            drop_status=$?
         else
             runuser -u postgres -- dropdb \
                 --port="$port" \
                 --if-exists \
                 --force \
                 "$scratch" >/dev/null
+            drop_status=$?
         fi
     fi
+    rm -f -- "$passfile"
+    if [[ -n "$admin_passfile" ]]; then
+        rm -f -- "$admin_passfile"
+    fi
+    if [[ "$original_status" -eq 0 && "$drop_status" -ne 0 ]]; then
+        exit "$drop_status"
+    fi
+    exit "$original_status"
 }
 trap cleanup EXIT
 
