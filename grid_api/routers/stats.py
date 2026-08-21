@@ -21,6 +21,7 @@ from ..database import new_session
 from ..redis_client import get_redis
 from ..v2.schema import ledger as ledger_table
 from ..v2.schema import payouts as payouts_table
+from .health import build_commit
 
 logger = logging.getLogger("grid_api.stats")
 
@@ -294,6 +295,149 @@ async def status_models():
         logger.warning("Could not expand recipe-backed model status: %s", e)
     out.sort(key=lambda item: (-item["count"], item["name"].lower()))
     return out
+
+
+@router.get("/v1/status/network")
+async def status_network():
+    """Public, privacy-safe operational status for the whole Grid.
+
+    This is a current-state view, not an incident-history system. Component
+    failures are returned as redacted incidents while independent capacity and
+    decentralization limitations remain explicit advisories.
+    """
+    from ..services import credits, validators
+
+    generated = datetime.now(timezone.utc)
+    incidents: list[dict] = []
+
+    redis_ok = False
+    try:
+        await get_redis().ping()
+        redis_ok = True
+    except Exception:
+        incidents.append({
+            "code": "redis_unavailable",
+            "component": "core",
+            "severity": "critical",
+            "summary": "Coordinator state storage is unavailable.",
+        })
+
+    try:
+        workers = await _active_workers()
+    except Exception:
+        workers = []
+        incidents.append({
+            "code": "worker_registry_unavailable",
+            "component": "workers",
+            "severity": "critical",
+            "summary": "Live worker inventory is unavailable.",
+        })
+
+    try:
+        models = await status_models()
+    except Exception:
+        models = []
+        incidents.append({
+            "code": "model_status_unavailable",
+            "component": "models",
+            "severity": "major",
+            "summary": "Model capacity telemetry is unavailable.",
+        })
+
+    try:
+        validator_health = await validators.public_health(since_hours=24)
+    except Exception:
+        validator_health = None
+        incidents.append({
+            "code": "validator_status_unavailable",
+            "component": "validators",
+            "severity": "minor",
+            "summary": "Validator preview telemetry is unavailable.",
+        })
+
+    payout_totals = None
+    try:
+        p = payouts_table
+        async with await new_session() as session:
+            payout_row = (
+                await session.execute(
+                    sa.select(
+                        sa.func.coalesce(sa.func.sum(p.c.aipg_amount), 0).label("aipg"),
+                        sa.func.count().label("payouts"),
+                        sa.func.count(sa.distinct(p.c.address)).label("workers"),
+                        sa.func.max(p.c.paid).label("last_paid"),
+                    ).where(p.c.status.in_(("sent", "confirmed")))
+                )
+            ).mappings().one()
+        payout_totals = {
+            "aipg_paid": round(float(payout_row["aipg"] or 0), 4),
+            "payouts": int(payout_row["payouts"] or 0),
+            "workers_paid": int(payout_row["workers"] or 0),
+            "last_paid": (
+                payout_row["last_paid"].isoformat() if payout_row["last_paid"] else None
+            ),
+        }
+    except Exception:
+        incidents.append({
+            "code": "payout_status_unavailable",
+            "component": "payouts",
+            "severity": "minor",
+            "summary": "Public payout totals are unavailable.",
+        })
+
+    model_capacity = [
+        {
+            "name": item["name"],
+            "type": item["type"],
+            "workers": int(item["count"]),
+            "capabilities": item.get("capabilities", []),
+        }
+        for item in models
+    ]
+    below_target = [item["name"] for item in model_capacity if item["workers"] < 3]
+    advisories: list[dict] = []
+    if below_target:
+        advisories.append({
+            "code": "limited_model_redundancy",
+            "severity": "warning",
+            "summary": "Some online models have fewer than three serving workers.",
+            "affected_models": below_target,
+        })
+    if not validator_health or not validator_health["independence_proven"]:
+        advisories.append({
+            "code": "validator_independence_unproven",
+            "severity": "warning",
+            "summary": "Validator preview operators are not yet independently verified.",
+        })
+
+    return {
+        "schema": "aipg.network.status.v1",
+        "generated_at": generated.isoformat(),
+        "status": "operational" if not incidents else "degraded",
+        "build_commit": build_commit(),
+        "core": {"api": "operational", "redis": redis_ok},
+        "capacity": {
+            "workers_online": len(workers),
+            "models_online": len(model_capacity),
+            "redundancy_target": 3,
+            "models_below_target": below_target,
+            "models": model_capacity,
+        },
+        "validators": validator_health,
+        "payouts": payout_totals,
+        "charging": {
+            "mode": credits.charging_mode(),
+            "global": credits.charging_mode() == "on",
+        },
+        "incidents": incidents,
+        "incident_history_available": False,
+        "advisories": advisories,
+        "architecture": {
+            "coordinator_federated": False,
+            "validator_economic_effect": "none",
+            "staking_required": False,
+        },
+    }
 
 
 @router.get("/v1/status/routing")

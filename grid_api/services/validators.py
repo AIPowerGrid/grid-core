@@ -872,6 +872,76 @@ async def _network_health_in_session(session, *, since_hours: int) -> dict[str, 
     }
 
 
+async def public_health(*, since_hours: int = 24) -> dict[str, Any]:
+    """Return redacted validator-network aggregates for public status.
+
+    This deliberately omits assignments, wallets, account IDs, validator IDs,
+    worker names, nonces, signatures, prompts, and evidence. Registration is
+    never presented as proof that operators are independent.
+    """
+    safe_since = max(1, min(int(since_hours), 24 * 90))
+    cutoff = _now() - timedelta(hours=safe_since)
+    heartbeat_cutoff = _now() - timedelta(seconds=VALIDATOR_HEARTBEAT_FRESH_SECONDS)
+    async with await new_session() as session:
+        validator_row = (
+            await session.execute(
+                sa.select(
+                    sa.func.count().filter(validators_t.c.status == "active").label("active"),
+                    sa.func.count()
+                    .filter(
+                        validators_t.c.status == "active",
+                        validators_t.c.last_heartbeat >= heartbeat_cutoff,
+                    )
+                    .label("fresh"),
+                )
+            )
+        ).mappings().one()
+        participating = int(
+            await session.scalar(
+                sa.select(sa.func.count(sa.distinct(attestations_t.c.validator_id))).where(
+                    attestations_t.c.authority == "authoritative",
+                    attestations_t.c.validator_id.isnot(None),
+                    attestations_t.c.created >= cutoff,
+                )
+            )
+            or 0
+        )
+        quorum_rows = (
+            await session.execute(
+                sa.select(
+                    probe_groups_t.c.quorum_status,
+                    sa.func.count().label("count"),
+                )
+                .where(probe_groups_t.c.created >= cutoff)
+                .group_by(probe_groups_t.c.quorum_status)
+            )
+        ).mappings().all()
+        network = await _network_health_in_session(session, since_hours=safe_since)
+
+    quorum = {str(row["quorum_status"]): int(row["count"]) for row in quorum_rows}
+    return {
+        "window_hours": safe_since,
+        "registered_active": int(validator_row["active"] or 0),
+        "heartbeat_fresh": int(validator_row["fresh"] or 0),
+        "participating": participating,
+        "verified_independent": network["operator_independence"]["verified"],
+        "independence_proven": network["operator_independence"]["proven"],
+        "quorum": {
+            "pending": quorum.get("pending", 0),
+            "accepted": quorum.get("accepted", 0),
+            "disputed": quorum.get("disputed", 0),
+            "finalized": quorum.get("finalized", 0),
+        },
+        "assignments_completed": network["assignments_completed"],
+        "authoritative_votes": network["authoritative_votes"],
+        "agreement_rate": network["agreement_rate"],
+        "disputed_rate": network["disputed_rate"],
+        "coverage": network["coverage"],
+        "software_versions": network["software_versions"],
+        "economic_effect": "none",
+    }
+
+
 async def assignment_health(
     *,
     account_id=None,

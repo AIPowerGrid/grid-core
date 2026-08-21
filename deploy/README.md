@@ -47,6 +47,12 @@ sudo -H -u aipg "$RELEASE/.venv/bin/pip" install -r "$RELEASE/requirements-grid.
 sudo -H -u aipg "$RELEASE/.venv/bin/pip" check
 ```
 
+Leave `GRID_BUILD_COMMIT` empty for the managed detached checkout above, which
+self-reports its immutable `HEAD`. Set it to the reviewed full SHA only for a
+gitless image or source archive. `/health` and `/v1/status/network` must report
+that exact SHA after cutover; a missing or mismatched value fails the
+deployment-recording check.
+
 Back up the Grid-owned PostgreSQL schema and prove every pending migration on a
 restored scratch database before applying it to production. Source
 `/etc/aipg/grid.env` only in a root/operator shell and never print its values.
@@ -84,6 +90,7 @@ certificate path.
 systemctl status aipg-gridapi --no-pager
 journalctl -u aipg-gridapi -n 200 --no-pager
 curl -fsS http://127.0.0.1:7010/health
+curl -fsS http://127.0.0.1:7010/v1/status/network
 curl -fsS http://127.0.0.1:7010/v1/models
 curl -fsS http://127.0.0.1:7010/v1/validator/capabilities
 curl -s -o /dev/null -w '%{http_code}\n' \
@@ -94,7 +101,8 @@ test "$(curl -sS -o /dev/null -w '%{http_code}' https://api.aipowergrid.io/v2/st
 
 The unauthenticated validator-assignment request should return `401`. Also smoke
 one authenticated non-money request through the public hostname and inspect
-worker reconnects before declaring the deploy healthy.
+worker reconnects before declaring the deploy healthy. Verify `build_commit`
+from both health endpoints equals the reviewed release SHA.
 
 ## Money-path controls
 

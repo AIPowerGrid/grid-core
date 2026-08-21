@@ -29,6 +29,8 @@ executes an immutable release selected through `/home/aipg/current`.
 - Existing-host deployments install the versioned Nginx site from the selected
   release, run `nginx -t`, and reload Nginx. Do not let the live site drift from
   `nginx/aipg-api.conf`.
+- `/health` and `/v1/status/network` must report the reviewed immutable commit;
+  `GRID_BUILD_COMMIT`, when set, must be the full 40-character release SHA.
 - Secrets belong in `/etc/aipg/grid.env` with restrictive permissions, never in
   git, command argv, or logs.
 - Deployment scripts may be destructive on fresh VMs. Do not run them locally

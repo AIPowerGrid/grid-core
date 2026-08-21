@@ -65,7 +65,9 @@ transport, accounts, stats, health/metrics.
   model stats, wallet earnings, `GET /v1/payouts/public` (aggregate payout
   transparency), `GET /v1/jobs/recent` (PUBLIC redacted job feed: model, worker
   handle, timing, den, prompt/result hashes + signed flag — NEVER content,
-  NEVER customer wallet/account).
+  NEVER customer wallet/account), and `GET /v1/status/network` (public,
+  privacy-safe worker/model capacity, validator aggregates, charging mode,
+  payout totals, current component incidents, and decentralization advisories).
 - `validator.py` - validator assignment-bound evidence surface:
   `GET /v1/validator/capabilities`, signed linked-wallet registration/status/
   heartbeat, `GET /v1/validator/assignments`,
@@ -80,7 +82,8 @@ transport, accounts, stats, health/metrics.
   `since_hours` window; never relabel registered validators as independently
   operated validators.
 - `styles.py` - `GET /v1/styles` for curated creative presets.
-- `health.py` - `GET /health`.
+- `health.py` - `GET /health`, including the immutable full release commit when
+  the runtime can prove it from `GRID_BUILD_COMMIT` or a detached checkout.
 - `metrics.py` - `GET /metrics` Prometheus exposition.
 - `tests/` - router-level tests, including billing/settlement behavior.
 
