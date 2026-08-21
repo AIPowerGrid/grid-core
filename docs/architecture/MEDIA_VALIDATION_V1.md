@@ -148,13 +148,16 @@ Each candidate/reference output is returned as a bounded witness:
   "url": "https://approved-media-origin/...",
   "sha256": "Core-computed digest",
   "bytes": 123456,
-  "content_type": "image/webp"
+  "content_type": "image/webp",
+  "latency_ms": 1842
 }
 ```
 
 The evidence hash commits the ordered witness list plus assignment id, group id,
 nonce, target, model, modality, capability, and challenge hash. URLs are transport
-locations, not identities; the byte digest is the output identity.
+locations, not identities; the byte digest is the output identity. `latency_ms`
+is measured by Core across accepted dispatch through terminal output, never
+copied from worker-reported metrics, and is required for the candidate witness.
 
 ## Reference Selection
 
