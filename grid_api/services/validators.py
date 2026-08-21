@@ -376,6 +376,7 @@ _TEXT_CHALLENGE_KINDS = (
     "json.object",
     "context.retrieve",
     "context.retrieve.16k",
+    "context.retrieve.32k",
     "logic.steps",
     "tool.call",
     "tool.chain",
@@ -388,6 +389,7 @@ _TEXT_CHALLENGE_CAPABILITIES = {
     "json.object": "text.structured.v1",
     "context.retrieve": "text.context.4k.v1",
     "context.retrieve.16k": "text.context.16k.v1",
+    "context.retrieve.32k": "text.context.32k.v1",
     "logic.steps": "text.reasoning.multistep.v1",
     "tool.call": "text.tool_call.v1",
     "tool.chain": "text.tool_chain.v1",
@@ -401,6 +403,7 @@ _TEXT_CHALLENGE_CAPABILITIES = {
 _TEXT_CAPABILITY_MIN_WORKER_CONTEXT = {
     "text.context.4k.v1": 8_192,
     "text.context.16k.v1": 32_768,
+    "text.context.32k.v1": 65_536,
 }
 
 
@@ -734,8 +737,16 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         )
         kind = "json.object"
         capability = "text.structured.v1"
-    elif selected in {"context.retrieve", "context.retrieve.16k"}:
-        record_count = 400 if selected == "context.retrieve.16k" else 100
+    elif selected in {
+        "context.retrieve",
+        "context.retrieve.16k",
+        "context.retrieve.32k",
+    }:
+        record_count = {
+            "context.retrieve": 100,
+            "context.retrieve.16k": 400,
+            "context.retrieve.32k": 800,
+        }[selected]
         target_index = secrets.randbelow(record_count)
         records: list[str] = []
         target_key = ""
@@ -756,11 +767,11 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
             + "\n".join(records)
         )
         kind = selected
-        capability = (
-            "text.context.16k.v1"
-            if selected == "context.retrieve.16k"
-            else "text.context.4k.v1"
-        )
+        capability = {
+            "context.retrieve": "text.context.4k.v1",
+            "context.retrieve.16k": "text.context.16k.v1",
+            "context.retrieve.32k": "text.context.32k.v1",
+        }[selected]
     elif selected == "logic.steps":
         value = secrets.randbelow(18) + 3
         start = value
@@ -1001,7 +1012,13 @@ def _normalized_text_answer(
         return _normalized_tool_chain(tool_chain)
     if not answer:
         return None
-    if kind in ("echo", "context.retrieve", "context.retrieve.16k", "stop.sequence"):
+    if kind in (
+        "echo",
+        "context.retrieve",
+        "context.retrieve.16k",
+        "context.retrieve.32k",
+        "stop.sequence",
+    ):
         candidate = _strip_wrapping_quotes(answer)
         return candidate if candidate and not re.search(r"\s", candidate) else None
     if kind == "json.object":
