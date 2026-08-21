@@ -20,11 +20,11 @@ to a **grid account** and call the grid; the grid prices, meters, debits, and
 enforces limits. One USD balance per account, spendable everywhere; funded by
 many rails (Stripe, USDC/ETH/AIPG on Base, x402).
 
-**Charging is currently OFF** (`GRID_CHARGING_MODE=off`): the metering path runs
-in **dry-run** — it computes and logs what it *would* charge but never debits or
-blocks. `allowlist` is the mandatory first live stage; `on` is the broad
-rollout. The old `GRID_CHARGING_ENABLED` boolean is only a compatibility
-fallback.
+**Production is currently in a narrow allowlisted canary**, not globally live:
+`GRID_CHARGING_MODE=allowlist` selects one canonical account and one exact model,
+while `GRID_CHARGING_ENABLED=0` remains the inactive compatibility fallback.
+Requests outside that account/model intersection remain dry-run. `on` is the
+broad rollout and is not authorized.
 
 ---
 
@@ -189,11 +189,11 @@ on). These are hard gates, not suggestions:
   proofs, price approval, funding UX, and the allowlisted canary in
   `deploy/DEMAND_BILLING_RUNBOOK.md` are complete.
 
-#### Immutable dark-deployment record (updated 2026-07-30)
+#### Immutable deployment record (updated 2026-08-21)
 
 | Surface | Source commit | Production evidence |
 | --- | --- | --- |
-| Core | `8095fd03fd14f68fb96541d11db47709c1cdf1ac` | `/home/aipg/current` resolves to `/home/aipg/releases/grid-core-8095fd03`. PostgreSQL and the candidate are both at Alembic head `0019`, and `alembic check` reports no new operations. The running process reports `GRID_CHARGING_MODE=off`, both free-credit spend gates disabled, USDC deposits enabled, and AIPG/ETH/x402 funding disabled. Public `/health` and `/v1/models` return `200`, unauthenticated validator assignments return `401`, the retired `/v2/status/heartbeat` returns `410`, all five workers reconnected, and the payout timer retained its pre-deploy enabled/active state. The pre-deploy public-schema backup is `/var/backups/aipg-grid/pre-8095fd03-public-20260730T161919Z.dump` with SHA-256 `1f1927377f97b627384de1040fcaa17d3a129d42fd9756d640ab8874dc03317e`. |
+| Core | `20d576694e4bf04c56c1b51683c7c3d6b1dba5ef` | `/home/aipg/current` resolves to `/home/aipg/releases/grid-core-20d57669`; PostgreSQL remains at Alembic `0019`. The running process reports `GRID_CHARGING_MODE=allowlist`, one selected account, no selected service principal, one selected model (`z-image-turbo`), both free-value spend gates disabled, x402 disabled, and the legacy charging boolean disabled. Public `/health` returns `200` with five workers and seven advertised model IDs. Candidate-only `/v1/status/network` returns `404`, proving the validator/network-status release is not deployed. Purchased-credit reconciliation reports no negative accounts, no balance/ledger drift, no held or stale reservations, and no invalid reservation pocket split. Two Base USDC receipts credited `$0.02` to the canary account. |
 | Console | `abf0fd824e2dd76e47af7fc0fa6334df2a9f5531` | Vercel production deployment `dpl_5Rq1UL8Nq4LumheQPKkuZR7P1TzV` is Ready and owns `console.aipowergrid.io`. The funding page renders only Core-enabled launch assets, so USDC is the sole visible funding rail. Its authenticated view reports the same `$0.0049` purchased balance as Chat and Music; the public `/payouts` page and `/api/payouts/public` both return `200`. |
 | Chat | `e50687907d760f715ca1fb5cfa0a6a2e1a3921aa` | Backend, background, and web containers use matching `grid-e5068790` images from `/home/aipg/releases/aipg-chat-e50687907d`; public API health and the signed-in footer both report `e5068790`. |
 | Art | `5c9bc5c4286a0813a802843a720ec88ad400d060` | The active release resolves to `/opt/aipg-gallery-releases/gallery-5c9bc5c4`; 77 frontend tests, Go tests, `go vet`, the production-config frontend and Go builds, and the production dependency audit passed. Public Studio, Director, and model routes return `200`; unauthenticated credit/job calls return `401`; retired Art audio routes return `404`. Director now displays only Core-owned balance/quote data, links `402` recovery to Console funding, and preserves server-observed Core receipt IDs for first frames and segment renders. Every protected Grid call still fails closed unless Core's exchanged canonical `account_id` matches the signed Gallery session account. |
@@ -203,11 +203,35 @@ This table records source provenance, not authorization to enable charging.
 Core remains the sole charging-mode authority; frontend deployments cannot
 turn billing on.
 
-**Remaining launch order:** prove one Google/wallet-linked canonical account
-and balance across Console, Chat, Art, Music, and direct API use → prove
-reserve/settle/release invariants for every supported modality → run one funded
-account/service/model allowlisted canary → reconcile all receipts and ledgers →
-hold the canary for 24 hours → expand cohorts gradually.
+Current source verification on 2026-08-21 is stronger than the deployed
+candidate but is not production evidence: Core main passes 89 focused identity,
+credit, reservation, pricing, and canary-audit tests (7 real-Postgres tests
+skipped in that local run); Art passes 90 frontend tests, the complete Go suite,
+its production build, and nine Playwright journeys; Music passes lint,
+typecheck, production build, and its canonical-account quote/auth smoke; Console
+passes lint, formatting, production build, and its account-mismatch smoke; Chat
+passes 18 focused delegated-identity tests. These results prove the checked-in
+contracts, not a live cross-product canary.
+
+The production canary has three successful, durable settlements on the selected
+canonical account: delegated Chat text, delegated Art Krea image, and delegated
+Art Z-Image. Each has a completion row plus prompt/result commitments, and the
+purchased ledger reconciles exactly. This is **partial evidence only**. It does
+not cover Music, video, Responses, Anthropic Messages, streaming disconnect,
+forced failure/refund, pre-queue `402`, duplicate terminal delivery, a second
+internal account, an external account, or the required 24-hour observation
+window. The remaining purchased balance is below the selected model's current
+minimum charge, so no additional paid canary should run before deliberate
+funding approval.
+
+**Remaining launch order:** capture the required live Google and wallet parity
+receipts across Console, Chat, Art, Music, and direct API use → deliberately
+fund the canary → expand the exact-model allowlist only far enough to exercise
+text formats, image/image-to-image, Music, and video → prove success,
+failure/refund, disconnect, `402`, retry, and duplicate-terminal behavior → run
+the read-only canary reconciler over every recorded job → hold the unchanged
+cohort for 24 hours → add internal accounts → add selected external accounts →
+consider global charging as a separate approval.
 
 The most security-sensitive remaining integration is frontend identity
 delegation: Core must verify global Google/SIWE proof itself, while service
