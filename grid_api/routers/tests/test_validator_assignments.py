@@ -809,6 +809,46 @@ async def test_assignment_groups_require_matching_validator_scorer_capability(db
 
 
 @pytest.mark.asyncio
+async def test_16k_context_assignment_requires_target_worker_headroom(db):
+    private_key = "0x" + f"{32:064x}"
+    wallet = Account.from_key(private_key).address.lower()
+    account_id = uuid.uuid4()
+    validator_id = await _register(
+        account_id,
+        private_key,
+        capabilities=["text.context.16k.v1"],
+    )
+    worker = {
+        "worker_id": str(uuid.uuid4()),
+        "name": "rig-context",
+        "models": ["qwen3-27b"],
+        "job_types": ["text"],
+        "max_context_length": 16_384,
+    }
+
+    blocked = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=wallet,
+        active_workers=[worker],
+        limit=1,
+    )
+    assert blocked["count"] == 0
+
+    worker["max_context_length"] = 32_768
+    issued = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=wallet,
+        active_workers=[worker],
+        limit=1,
+    )
+    assert issued["count"] == 1
+    assert issued["assignments"][0]["canary_kind"] == "context.retrieve.16k"
+    assert issued["assignments"][0]["scoring_policy_id"] == "text.generated.v6"
+
+
+@pytest.mark.asyncio
 async def test_completed_probe_can_deliver_during_attestation_grace(db):
     account_id = uuid.uuid4()
     validator_id, assignment, payload = await _assignment(account_id, verdict="healthy")

@@ -26,8 +26,9 @@ At this snapshot:
 - reviewed Core main is schema-complete through `0024`, but is not deployed;
 - `/v1/status/network` returns `404` in production, while the public `/status`
   page is deployed in an honest feed-unavailable state;
-- the live model status lists nine serving entries across text, image, video,
-  and audio, each with one worker;
+- live Core health reports five connected workers and seven available model IDs
+  across text, image, video, and audio; production does not yet expose the
+  candidate's privacy-safe per-model redundancy feed;
 - validator capabilities in production are the older assignment-bound preview,
   not the source-ready shared-quorum contract;
 - validator rewards, validator stake, worker penalties from validator evidence,
@@ -157,11 +158,11 @@ hides text-worker onboarding.
 
 ### 16. Three independent workers per flagship model - External
 
-The current public status reports one serving worker for every advertised
-model entry. The target is three independently operated workers per flagship
-model, requiring at least two additional operators for each currently
-single-worker capability. This is the largest availability and decentralization
-gap.
+Live Core reports five connected workers and seven available model IDs but does
+not expose per-model redundancy until the candidate status endpoint deploys.
+The latest verified inventory had one serving worker per advertised entry. The
+target remains three independently operated workers per flagship model. This is
+the largest availability and decentralization gap.
 
 ### 17. Hardware-aware operator recommendation - Implemented
 
@@ -181,12 +182,13 @@ benchmark, payout forecast, or fixed earnings promise.
 ### 19. Rich text validation - Partial
 
 Implemented randomized lanes cover exact instruction, arithmetic, strict JSON,
-context retrieval, multistep logic, one function call, a two-stage tool chain,
-stop-sequence compliance, and gross output-budget compliance using an
-independent model-agnostic token counter with cross-tokenizer tolerance. Hidden
-code execution, larger long-context tiers, longer tool chains, and streaming
-integrity remain open; exact native-tokenizer equivalence is intentionally not
-claimed.
+calibrated 4K and 16K context retrieval, multistep logic, one function call, a
+two-stage tool chain, stop-sequence compliance, and gross output-budget
+compliance using an independent model-agnostic token counter with
+cross-tokenizer tolerance. Context tiers require conservative worker-advertised
+headroom. Hidden code execution, 32K+ long-context tiers, longer tool chains,
+and streaming integrity remain open; exact native-tokenizer equivalence is
+intentionally not claimed.
 
 ### 20. Private deterministic image validation - Ready dark
 

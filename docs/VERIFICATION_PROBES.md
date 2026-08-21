@@ -124,15 +124,19 @@ Core requires three matching votes from five distinct registered validator
 accounts over one probe group. It records quorum state (`pending`, `accepted`,
 `disputed`, `finalized`),
 but the whole preview surface has `economic_effect: none`: no routing, reward,
-strike, slash, credit, or payout effect. Text assignments are the only live lane
-in this rollout; image/video validator lanes are future work.
+strike, slash, credit, or payout effect. Text and feature-gated image assignment
+paths exist in the candidate; the video scorer is dark in the node and Core
+does not issue video assignments.
 
 Text challenge families are selected cryptographically rather than from worker
 ordering. Current candidate families are exact instruction, generated
-arithmetic, strict JSON, context retrieval, generated multistep logic, and an
-exact single-function call plus a two-stage tool-call chain with randomized
-names and arguments. Tool-call evidence commits the witnessed text plus
-structured calls; Core and the node normalize each call independently. The
+arithmetic, strict JSON, calibrated 4K/16K context retrieval, generated
+multistep logic, and an exact single-function call plus a two-stage tool-call
+chain with randomized names and arguments. Tool-call evidence commits the
+witnessed text plus structured calls; Core and the node normalize each call
+independently. The context lanes require conservative target-worker context
+headroom so tokenizer differences cannot turn an advertised limit into a false
+failure. The
 second stage is hard-targeted to the same worker and receives the first tool
 result through the ordinary OpenAI message contract. Longer chains remain
 future work.
@@ -169,10 +173,11 @@ Deploy notes / learnings:
 
 ### Follow-ups (known, not yet done)
 1. **Grader hardening** — add hidden code execution, longer tool-call chains,
-   larger context tiers, and token-budget/transport compliance. Keep judge models a
+   32K+ context tiers, and streaming-integrity checks. Keep judge models a
    supporting signal rather than an objective authority.
-2. **Media/video validator lanes** — keep text-only evidence live until media/video
-   assignment generation, reference comparison, and scoring are designed.
+2. **Media/video validator lanes** — image and video fidelity contracts exist in
+   the dark candidate, but remain economically inert; Core still issues no video
+   assignments until a real-workload canary proves the reference path.
 3. **Economic gates** — do not attach routing, validator rewards, worker strikes, or
    slashing until assignment targeting, nonce-bound evidence, quorum, and dispute
    flows have been proven under load.
