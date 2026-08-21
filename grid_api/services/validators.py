@@ -12,6 +12,7 @@ rows.
 from __future__ import annotations
 
 import asyncio
+import ast
 import hashlib
 import json
 import logging
@@ -378,6 +379,7 @@ _TEXT_CHALLENGE_KINDS = (
     "context.retrieve.16k",
     "context.retrieve.32k",
     "logic.steps",
+    "code.function",
     "tool.call",
     "tool.chain",
     "stop.sequence",
@@ -391,6 +393,7 @@ _TEXT_CHALLENGE_CAPABILITIES = {
     "context.retrieve.16k": "text.context.16k.v1",
     "context.retrieve.32k": "text.context.32k.v1",
     "logic.steps": "text.reasoning.multistep.v1",
+    "code.function": "text.code.v1",
     "tool.call": "text.tool_call.v1",
     "tool.chain": "text.tool_chain.v1",
     "stop.sequence": "text.stop_sequence.v1",
@@ -818,6 +821,31 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         )
         kind = "logic.steps"
         capability = "text.reasoning.multistep.v1"
+    elif selected == "code.function":
+        function_name = f"transform_{secrets.token_hex(4)}"
+        multiplier = secrets.randbelow(8) + 2
+        offset = secrets.randbelow(41) - 20
+        modulus = secrets.randbelow(81) + 17
+        adjustment = secrets.randbelow(9) + 1
+        test_inputs: list[int] = []
+        while len(test_inputs) < 7:
+            value = secrets.randbelow(201) - 100
+            if value not in test_inputs:
+                test_inputs.append(value)
+        outputs = [
+            ((value * multiplier + offset) % modulus) - adjustment
+            for value in test_inputs
+        ]
+        expected = _canonical(outputs)
+        prompt = (
+            f"Write one Python function named {function_name} that accepts exactly one "
+            "integer argument named x. It must multiply x by "
+            f"{multiplier}, add {offset}, take the result modulo {modulus} using Python "
+            f"integer semantics, then subtract {adjustment}. Return only the function "
+            "definition with no markdown, imports, calls, annotations, or explanation."
+        )
+        kind = "code.function"
+        capability = "text.code.v1"
     elif selected == "tool.call":
         function_name = f"record_{secrets.token_hex(4)}"
         number_field = f"count_{secrets.token_hex(3)}"
@@ -955,6 +983,9 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         challenge["steps"] = steps
     if selected == "stop.sequence":
         challenge["stop"] = stop
+    if selected == "code.function":
+        challenge["function_name"] = function_name
+        challenge["test_inputs"] = test_inputs
     return challenge
 
 
@@ -1017,6 +1048,90 @@ def _normalized_tool_chain(tool_chain: Any) -> str | None:
             return None
         normalized.append(json.loads(call))
     return _canonical(normalized)
+
+
+_CODE_BINARY_OPERATORS = {
+    ast.Add: lambda left, right: left + right,
+    ast.Sub: lambda left, right: left - right,
+    ast.Mult: lambda left, right: left * right,
+    ast.FloorDiv: lambda left, right: left // right,
+    ast.Mod: lambda left, right: left % right,
+}
+_CODE_VALUE_LIMIT = 10**12
+
+
+def _evaluate_code_expression(node: ast.AST, x: int) -> int:
+    if isinstance(node, ast.Name) and node.id == "x":
+        return x
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        if abs(node.value) > 1_000_000:
+            raise ValueError("integer literal is out of bounds")
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _evaluate_code_expression(node.operand, x)
+        result = value if isinstance(node.op, ast.UAdd) else -value
+    elif isinstance(node, ast.BinOp) and type(node.op) in _CODE_BINARY_OPERATORS:
+        left = _evaluate_code_expression(node.left, x)
+        right = _evaluate_code_expression(node.right, x)
+        if isinstance(node.op, (ast.FloorDiv, ast.Mod)) and right == 0:
+            raise ValueError("division by zero")
+        result = _CODE_BINARY_OPERATORS[type(node.op)](left, right)
+    else:
+        raise ValueError("unsupported code expression")
+    if abs(result) > _CODE_VALUE_LIMIT:
+        raise ValueError("code result is out of bounds")
+    return result
+
+
+def _normalized_code_answer(challenge: dict[str, Any], text: str) -> str | None:
+    """Interpret a tiny arithmetic Python subset; never execute worker code."""
+    answer = _strip_think(text)
+    if not answer or len(answer.encode("utf-8")) > 4_096:
+        return None
+    function_name = challenge.get("function_name")
+    test_inputs = challenge.get("test_inputs")
+    if (
+        not isinstance(function_name, str)
+        or not re.fullmatch(r"transform_[0-9a-f]{8}", function_name)
+        or not isinstance(test_inputs, list)
+        or not 3 <= len(test_inputs) <= 16
+        or any(type(value) is not int or abs(value) > 1_000_000 for value in test_inputs)
+    ):
+        return None
+    try:
+        tree = ast.parse(answer, mode="exec")
+    except (SyntaxError, TypeError, ValueError):
+        return None
+    if len(list(ast.walk(tree))) > 64 or len(tree.body) != 1:
+        return None
+    function = tree.body[0]
+    if not isinstance(function, ast.FunctionDef) or function.name != function_name:
+        return None
+    args = function.args
+    if (
+        function.decorator_list
+        or function.returns is not None
+        or args.posonlyargs
+        or len(args.args) != 1
+        or args.args[0].arg != "x"
+        or args.args[0].annotation is not None
+        or args.vararg is not None
+        or args.kwonlyargs
+        or args.kwarg is not None
+        or args.defaults
+        or args.kw_defaults
+        or len(function.body) != 1
+        or not isinstance(function.body[0], ast.Return)
+    ):
+        return None
+    try:
+        outputs = [
+            _evaluate_code_expression(function.body[0].value, value)
+            for value in test_inputs
+        ]
+    except (ArithmeticError, TypeError, ValueError):
+        return None
+    return _canonical(outputs)
 
 
 def _normalized_text_answer(
@@ -1105,6 +1220,8 @@ def _score_text_challenge(
             reasoning_text,
             finish_reason,
         )
+    elif kind == "code.function":
+        candidate = _normalized_code_answer(challenge, text)
     else:
         candidate = _normalized_text_answer(kind, text, tool_calls, tool_chain)
     if candidate is None:
@@ -1156,7 +1273,8 @@ def _assignment_to_dict(
             if row["modality"] in {"image", "video"}
             else (
                 "kind", "prompt", "expected_hash", "max_tokens", "temperature",
-                "tools", "tool_choice", "steps", "stop",
+                "tools", "tool_choice", "steps", "stop", "function_name",
+                "test_inputs",
             )
         )
         out["challenge"] = {key: challenge[key] for key in keys if key in challenge}
@@ -1492,7 +1610,7 @@ async def issue_assignments(
                     "modality": "text",
                     "capability": challenge["capability"],
                     "canary_kind": challenge["kind"],
-                    "scoring_policy_id": "text.generated.v6",
+                    "scoring_policy_id": "text.generated.v7",
                     "challenge": challenge,
                     "challenge_hash": _hash_obj({
                         "group_id": group_id,
