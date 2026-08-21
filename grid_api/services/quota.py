@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from ..redis_client import get_redis
+from ..safe_logging import error_type, opaque_id
 
 logger = logging.getLogger("grid_api.quota")
 
@@ -85,7 +86,11 @@ async def has_paid_access(user: dict) -> bool:
 
         return await credits.has_credit(user)
     except Exception as exc:
-        logger.warning("paid quota lookup failed for account %s: %s", user.get("account_id"), exc)
+        logger.warning(
+            "paid quota lookup failed account=%s error_type=%s",
+            opaque_id(user.get("account_id")),
+            error_type(exc),
+        )
         return False
 
 
@@ -112,9 +117,13 @@ async def check_and_consume(user: dict) -> None:
         if count == 1:
             # First request today — set the key to expire at day's end.
             await r.expire(key, _seconds_until_utc_midnight())
-    except Exception as e:
+    except Exception as exc:
         # Fail open: never block legitimate traffic on a quota-store outage.
-        logger.warning(f"quota check failed open for user {user_id}: {e}")
+        logger.warning(
+            "quota check failed open user=%s error_type=%s",
+            opaque_id(user_id),
+            error_type(exc),
+        )
         return
 
     if count > FREE_DAILY_LIMIT:

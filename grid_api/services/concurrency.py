@@ -15,6 +15,8 @@ from a crash expires) and a floor-at-zero on release."""
 
 import logging
 
+from ..safe_logging import error_type, opaque_id
+
 logger = logging.getLogger("grid_api.concurrency")
 
 _PREFIX = "grid:inflight:"
@@ -41,8 +43,13 @@ async def acquire(account_id, kind: str, limit: int) -> bool:
             await r.decr(key)
             return False
         return True
-    except Exception as e:
-        logger.debug("inflight acquire failed (fail-open) account=%s kind=%s: %s", account_id, kind, e)
+    except Exception as exc:
+        logger.debug(
+            "inflight acquire failed (fail-open) account=%s kind=%s error_type=%s",
+            opaque_id(account_id),
+            kind,
+            error_type(exc),
+        )
         return True
 
 
@@ -57,5 +64,10 @@ async def release(account_id, kind: str) -> None:
         key = _key(kind, account_id)
         if await r.decr(key) < 0:
             await r.set(key, 0)
-    except Exception as e:
-        logger.debug("inflight release failed account=%s kind=%s: %s", account_id, kind, e)
+    except Exception as exc:
+        logger.debug(
+            "inflight release failed account=%s kind=%s error_type=%s",
+            opaque_id(account_id),
+            kind,
+            error_type(exc),
+        )

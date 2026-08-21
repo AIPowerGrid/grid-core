@@ -25,6 +25,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from ..database import new_session
+from ..safe_logging import error_type, opaque_id
 from ..v2.schema import validator_assignments as assignments_t
 from ..v2.schema import validator_attestations as attestations_t
 from ..v2.schema import validators as validators_t
@@ -876,11 +877,11 @@ async def record_attestation(
     logger.info(
         "validator attestation %s account=%s authority=%s verdict=%s model=%s assignment=%s",
         status,
-        account_id,
+        opaque_id(account_id),
         row["authority"],
         row["verdict"],
         row["model"] or "-",
-        row.get("assignment_id") or "-",
+        opaque_id(row.get("assignment_id")),
     )
     return {
         "status": status,
@@ -1044,13 +1045,13 @@ async def probe_assignment(
             preferred_worker=row["target_worker_name"],
             hard_target_worker=row["target_worker_name"],
         )
-    except Exception:
+    except Exception as exc:
         await _mark_probe(job_id, "failed")
         logger.error(
-            "validator probe dispatch failed assignment=%s job=%s",
-            assignment_id,
-            job_id,
-            exc_info=True,
+            "validator probe dispatch failed assignment=%s job=%s error_type=%s",
+            opaque_id(assignment_id),
+            opaque_id(job_id),
+            error_type(exc),
         )
         return {
             "status": "error",
@@ -1092,9 +1093,14 @@ async def probe_assignment(
                 "message": "probe timed out",
                 "code": 504,
             }
-    except Exception:
+    except Exception as exc:
         await _mark_probe(job_id, "failed")
-        logger.error("validator probe failed assignment=%s job=%s", assignment_id, job_id, exc_info=True)
+        logger.error(
+            "validator probe failed assignment=%s job=%s error_type=%s",
+            opaque_id(assignment_id),
+            opaque_id(job_id),
+            error_type(exc),
+        )
         raise
 
     evidence = {
@@ -1244,5 +1250,10 @@ async def _mark_probe(
                 .values(**values)
             )
             await session.commit()
-    except Exception:
-        logger.warning("failed to mark validator probe %s as %s", job_id, status, exc_info=True)
+    except Exception as exc:
+        logger.warning(
+            "failed to mark validator probe job=%s status=%s error_type=%s",
+            opaque_id(job_id),
+            status,
+            error_type(exc),
+        )

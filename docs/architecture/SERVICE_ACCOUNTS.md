@@ -78,8 +78,13 @@ fail-closed and idempotently by job reference.
 Rotate one service without affecting the others:
 
 ```bash
-.venv/bin/python scripts/rotate_service_key.py --id aipg-art
+.venv/bin/python scripts/rotate_service_key.py \
+  --id aipg-art \
+  --output /secure/operator-only/aipg-art.key
 ```
+
+The output file is created with mode `0600` and must not already exist. The
+tool prints only its path, never the replacement credential.
 
 To add wallet proof to an existing service, preview the complete replacement
 policy first. Then repeat it with the exact digest printed by that preview:

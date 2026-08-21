@@ -10,7 +10,9 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 
 - `routers/` - HTTP + WS endpoints. Owned in its own AGENTS.md.
 - `services/` - business logic (dispatch, economy, safety, settlement). Owned in its own AGENTS.md.
-- `database.py` / `auth.py` / `ratelimit.py` / `format.py` - shared infrastructure (this doc).
+- `database.py` / `auth.py` / `safe_logging.py` / `ratelimit.py` / `format.py` -
+  shared infrastructure (this doc). `safe_logging.py` owns keyed opaque
+  identifiers and bounded exception metadata for operational logs.
 - `v2/` - grid-owned SQLAlchemy schema. Owned in its own AGENTS.md.
 - `models/` - Pydantic request/response models for OpenAI-compatible requests
   and worker structures.
@@ -47,6 +49,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - Every router needs a contract test. Existing coverage is strongest in services
   and billing helper paths; route/worker interop remains the risky seam.
 - Errors: structured envelope; no bare `except:`.
+- Logs must not contain raw account, wallet, job, identity, credential, or
+  payment identifiers, nor exception messages that may embed request or SQL
+  values. Use `safe_logging.opaque_id` for correlation and
+  `safe_logging.error_type` for failure classification.
 - Preserve faithful passthrough behavior unless the endpoint contract explicitly
   says the Grid mutates shape for metering, sanitizing, or media abstraction.
 
