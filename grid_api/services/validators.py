@@ -367,13 +367,57 @@ async def heartbeat_validator(
     }
 
 
-def _make_text_challenge(round_index: int) -> dict[str, Any]:
-    if round_index % 2 == 0:
+_TEXT_CHALLENGE_KINDS = (
+    "echo",
+    "math",
+    "json.object",
+    "context.retrieve",
+    "logic.steps",
+)
+_TEXT_CHALLENGE_CAPABILITIES = {
+    "echo": "text.instruction.v1",
+    "math": "text.reasoning.v1",
+    "json.object": "text.structured.v1",
+    "context.retrieve": "text.context.4k.v1",
+    "logic.steps": "text.reasoning.multistep.v1",
+}
+
+
+def _supported_text_challenges(capabilities: list[str] | None) -> tuple[tuple[str, ...], set[str]]:
+    registered = {str(value) for value in (capabilities or [])}
+    supported_capabilities = set(registered)
+    # Compatibility for pre-v0.1 nodes. They implemented only exact echo and
+    # generated arithmetic under the coarse text.basic.v1 label.
+    if "text.basic.v1" in registered:
+        supported_capabilities.update({"text.instruction.v1", "text.reasoning.v1"})
+    if {"text.instruction.v1", "text.reasoning.v1"}.issubset(registered):
+        supported_capabilities.add("text.basic.v1")
+    kinds = tuple(
+        kind
+        for kind in _TEXT_CHALLENGE_KINDS
+        if _TEXT_CHALLENGE_CAPABILITIES[kind] in supported_capabilities
+    )
+    return kinds, supported_capabilities
+
+
+def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
+    """Create one private, randomized text challenge.
+
+    The assignment carries only a one-way expected-answer commitment. The
+    optional kind is for deterministic tests; production chooses with
+    cryptographic randomness so worker order cannot fingerprint a family.
+    """
+    selected = kind or secrets.choice(_TEXT_CHALLENGE_KINDS)
+    if selected not in _TEXT_CHALLENGE_KINDS:
+        raise ValueError("unsupported text challenge kind")
+
+    if selected == "echo":
         token = secrets.token_hex(8).upper()
         prompt = f"Reply with exactly this token and nothing else: {token}"
         expected = token
         kind = "echo"
-    else:
+        capability = "text.instruction.v1"
+    elif selected == "math":
         a = secrets.randbelow(80) + 11
         b = secrets.randbelow(80) + 11
         if secrets.randbelow(2):
@@ -384,13 +428,79 @@ def _make_text_challenge(round_index: int) -> dict[str, Any]:
             prompt = f"What is {a} * {b}? Reply with only the number."
             expected = str(a * b)
             kind = "math.mul"
+        capability = "text.reasoning.v1"
+    elif selected == "json.object":
+        key_number = f"count_{secrets.token_hex(3)}"
+        key_token = f"token_{secrets.token_hex(3)}"
+        key_flag = f"ready_{secrets.token_hex(3)}"
+        expected_obj = {
+            key_number: secrets.randbelow(9000) + 1000,
+            key_token: secrets.token_hex(6).upper(),
+            key_flag: bool(secrets.randbelow(2)),
+        }
+        expected = _canonical(expected_obj)
+        prompt = (
+            "Return exactly one valid JSON object and no markdown or explanation. "
+            f"Set {key_number!r} to {expected_obj[key_number]}, "
+            f"{key_token!r} to {expected_obj[key_token]!r}, and "
+            f"{key_flag!r} to {str(expected_obj[key_flag]).lower()}."
+        )
+        kind = "json.object"
+        capability = "text.structured.v1"
+    elif selected == "context.retrieve":
+        record_count = 180
+        target_index = secrets.randbelow(record_count)
+        records: list[str] = []
+        target_key = ""
+        expected = ""
+        for index in range(record_count):
+            key = secrets.token_hex(5).upper()
+            value = secrets.token_hex(8).upper()
+            filler = secrets.token_hex(12).upper()
+            records.append(
+                f"record={index:03d} key={key} value={value} checksum={filler}"
+            )
+            if index == target_index:
+                target_key = key
+                expected = value
+        prompt = (
+            "Read the record set below. Find the record whose key exactly equals "
+            f"{target_key}. Reply with only that record's value.\n\n"
+            + "\n".join(records)
+        )
+        kind = "context.retrieve"
+        capability = "text.context.4k.v1"
+    else:
+        value = secrets.randbelow(18) + 3
+        start = value
+        operations: list[str] = []
+        for _ in range(4):
+            operand = secrets.randbelow(7) + 2
+            operation = secrets.randbelow(3)
+            if operation == 0:
+                value += operand
+                operations.append(f"add {operand}")
+            elif operation == 1:
+                value -= operand
+                operations.append(f"subtract {operand}")
+            else:
+                value *= operand
+                operations.append(f"multiply by {operand}")
+        expected = str(value)
+        prompt = (
+            f"Start with {start}. In order, "
+            + ", then ".join(operations)
+            + ". Reply with only the final integer."
+        )
+        kind = "logic.steps"
+        capability = "text.reasoning.multistep.v1"
     return {
         "kind": kind,
         "prompt": prompt,
-        "expected": expected,
         "expected_hash": _hash_text(expected),
         "max_tokens": PROBE_MAX_TOKENS,
         "temperature": 0,
+        "capability": capability,
     }
 
 
@@ -417,24 +527,33 @@ def _strip_wrapping_quotes(text: str) -> str:
     return answer
 
 
-def _contains_expected(answer: str, expected: str) -> bool:
-    if re.fullmatch(r"-?\d+", expected):
-        return re.search(rf"(?<![a-z0-9-]){re.escape(expected)}(?![a-z0-9])", answer) is not None
-    return expected.lower() in answer.lower()
+def _normalized_text_answer(kind: str, text: str) -> str | None:
+    answer = _strip_think(text)
+    if not answer:
+        return None
+    if kind in ("echo", "context.retrieve"):
+        candidate = _strip_wrapping_quotes(answer)
+        return candidate if candidate and not re.search(r"\s", candidate) else None
+    if kind == "json.object":
+        try:
+            parsed = json.loads(answer)
+        except (TypeError, ValueError):
+            return None
+        return _canonical(parsed) if isinstance(parsed, dict) else None
+    if kind.startswith("math.") or kind == "logic.steps":
+        numbers = re.findall(r"(?<![a-z0-9-])-?\d+(?![a-z0-9])", answer.lower())
+        return numbers[0] if len(numbers) == 1 else None
+    return None
 
 
 def _score_text_challenge(challenge: dict[str, Any], text: str, latency_ms: int) -> str:
-    expected = str(challenge.get("expected") or challenge.get("expect") or "")
-    if not expected:
+    expected_hash = str(challenge.get("expected_hash") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
         return "failed"
-    answer = _strip_think(text)
-    if not answer:
+    candidate = _normalized_text_answer(str(challenge.get("kind") or ""), text)
+    if candidate is None:
         return "failed"
-    if challenge.get("kind") == "echo":
-        correct = _strip_wrapping_quotes(answer).lower() == expected.lower()
-    else:
-        correct = _contains_expected(answer.lower(), expected.lower())
-    if not correct:
+    if not secrets.compare_digest(_hash_text(candidate), expected_hash):
         return "failed"
     if latency_ms > PROBE_LATENCY_BUDGET_SECONDS * 1000:
         return "slow"
@@ -590,11 +709,20 @@ async def issue_assignments(
     async with await new_session() as session:
         # Serialize concurrent polls from the same registered validator. The DB
         # uniqueness guard remains the final protection on group membership.
-        await session.execute(
-            sa.select(validators_t.c.id)
-            .where(validators_t.c.id == validator_id)
-            .with_for_update()
+        validator_row = (
+            await session.execute(
+                sa.select(validators_t.c.id, validators_t.c.capabilities)
+                .where(validators_t.c.id == validator_id)
+                .with_for_update()
+            )
+        ).mappings().first()
+        if not validator_row:
+            raise AssignmentError("active validator registration required")
+        challenge_kinds, supported_capabilities = _supported_text_challenges(
+            validator_row["capabilities"]
         )
+        if not challenge_kinds:
+            raise AssignmentError("validator has no supported text challenge capability")
         await _finalize_due_assignments(session)
 
         own_worker_rows = (
@@ -666,6 +794,8 @@ async def issue_assignments(
             group = None
             unfilled_group_exists = False
             for candidate in candidate_groups:
+                if candidate["capability"] not in supported_capabilities:
+                    continue
                 assigned_count = int(
                     await session.scalar(
                         sa.select(sa.func.count())
@@ -695,7 +825,7 @@ async def issue_assignments(
                 continue
 
             if group is None:
-                challenge = _make_text_challenge(len(rows))
+                challenge = _make_text_challenge(secrets.choice(challenge_kinds))
                 group_id = f"prg_{uuid4().hex}"
                 group_values = {
                     "id": group_id,
@@ -703,9 +833,9 @@ async def issue_assignments(
                     "target_worker_name": worker_name,
                     "model": model,
                     "modality": "text",
-                    "capability": "text.basic.v1",
+                    "capability": challenge["capability"],
                     "canary_kind": challenge["kind"],
-                    "scoring_policy_id": "text.basic.generated.v2",
+                    "scoring_policy_id": "text.generated.v3",
                     "challenge": challenge,
                     "challenge_hash": _hash_obj({
                         "group_id": group_id,
@@ -1711,7 +1841,10 @@ async def _claim_probe_lease(
     """Atomically claim one bounded probe attempt for an assignment."""
     now = _now()
     lease_expires = now + timedelta(seconds=PROBE_LEASE_SECONDS)
-    job_id = f"validator:{assignment_id}:{uuid4().hex}"
+    # Worker-visible job IDs use the ordinary opaque UUID shape. Assignment
+    # attribution stays in Core; a marker here would let workers special-case
+    # validation before producing output.
+    job_id = str(uuid4())
     retryable = assignments_t.c.probe_status.in_(("not_started", "failed", "timeout"))
     stale_running = sa.and_(
         assignments_t.c.probe_status == "running",

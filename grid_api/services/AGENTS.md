@@ -46,8 +46,12 @@ content sanitization, and reward settlement.
 - **Validation evidence:** `validators.py` verifies one linked-wallet validator
   registration per canonical account, builds shared probe groups, binds one
   assignment and authoritative vote per registered validator/group, and
-  aggregates a conservative 3-of-5 preview quorum. Expected answers and Core's
-  private verdict are not returned to nodes. The path remains non-economic and
+  aggregates a conservative 3-of-5 preview quorum. Text groups use randomized
+  exact-instruction, arithmetic, strict-JSON, context-retrieval, and multistep
+  logic families; worker order must not determine the family. Group allocation
+  must match the validator's advertised scorer capability; legacy
+  `text.basic.v1` nodes receive only echo/arithmetic. Expected answers
+  and Core's private verdict are not returned to nodes. The path remains non-economic and
   must not route production jobs, reward, slash, or write worker ledger rows.
   New probes stop at assignment expiry; already-completed probes may deliver
   only during the bounded attestation grace window.

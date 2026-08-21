@@ -132,6 +132,8 @@ transport, accounts, stats, health/metrics.
   nonces, signatures, account IDs, or validator identities from scorecard routes.
 - Targeted validator probes must be hard-targeted to the assigned worker and
   must not bill users, pay den, write worker ledger rows, or strike workers.
+  Worker-visible job IDs and payloads must not reveal validator markers,
+  assignment/group IDs, or Grid nonces; evidence binding stays inside Core.
 - Missing validator registration/assignment/probe support must fail closed.
   Ordinary chat inference and worker inventory are never fallback targeting
   paths.

@@ -1065,12 +1065,17 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
     """
     job_id = job["job_id"]
     payload = job["payload"]
+    worker_payload = {
+        key: value
+        for key, value in payload.items()
+        if not key.startswith("_validator_")
+    }
     await ws.send_json(
         {
             "type": "job",
             "id": job_id,
             "model": selected_model,
-            "payload": payload,
+            "payload": worker_payload,
         },
     )
 
