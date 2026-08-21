@@ -39,7 +39,8 @@ owning AGENTS.md and any affected parent Child DOX Index.
 - `.github/workflows/secret-scan.yml`, `.gitleaks.toml`, and
   `.gitleaksignore` enforce checksum-verified tracked-tree and full reachable
   history scanning on pushes and pull requests. Historical exceptions are
-  exact reviewed fingerprints, never broad path/rule exclusions.
+  exact reviewed fingerprints, never broad path/rule exclusions; CI also proves
+  that an example-labelled synthetic private key is rejected.
 
 ## Local Contracts
 
