@@ -2,7 +2,9 @@
 
 **Status:** accepted design; deterministic image assignment, hard-targeted
 three-worker execution, immutable Core witness hashing, and validator scoring
-are implemented dark. No production gate is enabled. Video remains design-only.
+are implemented dark. The validator repo also has dark video contract/fidelity
+scoring, but Core video assignment generation and targeted execution remain
+disabled. No production gate is enabled.
 
 This document defines the trust boundary for assignment-bound image and video
 validation. It deliberately does not enable production media assignments,

@@ -21,7 +21,8 @@ validation, worker incentives, and trust boundaries.
   economic gates.
 - `MEDIA_VALIDATION_V1.md` - accepted fail-closed image/video validation design:
   private challenges, cached bond eligibility, rotating references, Core object
-  hashing, validator fetch defenses, modality scoring, and rollout gates.
+  hashing, validator fetch defenses, dark validator-side modality scoring, and
+  rollout gates. Core video issuance/execution remains disabled.
 - `DECENTRALIZATION_ROADMAP.md` - accepted sequence from independently proven
   validator quorum through Base evidence/reward contracts and signed-event
   trusted-partner Core federation.
