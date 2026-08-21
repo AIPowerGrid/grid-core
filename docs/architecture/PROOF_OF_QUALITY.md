@@ -1,8 +1,10 @@
 # Proof of Quality — measuring intelligence, not trusting quants
 
-> Centralized APIs ask you to *trust* the model behind the endpoint. The grid
-> *proves* it. Every model is continuously benchmarked for real intelligence —
-> measured capability, not a precision label.
+> Centralized APIs ask you to trust the model behind the endpoint. The Grid is
+> building a public evidence layer that measures delivered capability instead
+> of trusting a precision label. The current validator preview records
+> non-economic evidence; it is not yet a proof system with routing or slashing
+> authority.
 
 **Brand name:** *Proof of Intelligence.* **Technical name:** Proof of Quality (PoQ).
 
@@ -21,49 +23,57 @@ levels.
 
 ## How it works
 
-**Validator nodes** (see the validator role) periodically and unpredictably send
-**probe batteries** to every worker+model and score the responses
-programmatically. The score drives routing, reputation, and — with a stake at
-risk — slashing.
+**Validator nodes** periodically consume private Core-issued assignments, send
+hard-targeted probes to a worker+model, score the witnessed response
+programmatically, and sign evidence. The current shared 3-of-5 preview stores
+scorecards only. Future reviewed policy may use finalized evidence for routing,
+reputation, and objective-fraud disputes.
 
-### The probe batteries (auto-gradeable, quant-sensitive)
+### Probe batteries (objective and capability-gated)
 
 Chosen because they degrade *sharply* under bad quantization while staying cheap
 to grade by machine:
 
-| Probe | What it catches | Grading |
+| Probe | Status | Grading |
 | --- | --- | --- |
-| **Structured generation** — render a chess FEN to SVG, emit JSON to a schema, write code that compiles | spatial/structural collapse (the first thing low quants lose) | does it parse / compile / match expected? |
-| **Reasoning** — math & logic with verifiable answers | degraded reasoning under quant | exact-match on the answer |
-| **Needle-in-haystack** — bury a fact at depth N, ask for it | also **verifies the claimed context length** is real | did it retrieve the needle? |
-| **Instruction following** — strict output format | quant-induced format drift | regex / structural check |
-| **Perplexity on reference text** | continuous low-level degradation signal | numeric threshold vs the reference model |
+| Exact instruction and generated arithmetic | implemented candidate | committed exact answer |
+| Strict JSON object | implemented candidate | JSON-only parse plus canonical commitment |
+| Needle-in-haystack at the 4K tier | implemented candidate | committed exact retrieval |
+| Generated multistep integer logic | implemented candidate | unambiguous numeric answer |
+| Single and two-stage tool calling | implemented candidate | exact structured calls and committed transcript |
+| Randomized stop-sequence handling | implemented candidate | exact pre-stop output |
+| Hidden code tests and richer schemas | planned | sandboxed compile/test policy, not Core execution |
+| Larger context tiers and token-budget honesty | planned | tokenizer-aware versioned policy |
+| Perplexity/reference-model signal | research only | supporting metric, never sole authority |
 
-The SVG-chess / structured-output class is the sharpest tell: a heavily
-quantized model produces confident garbage that a parser rejects instantly.
+Structured output and tool use are useful quant-sensitive signals because their
+contracts are machine-checkable. They still sample behavior; they do not prove
+an exact model family or parameter count.
 
 ### Ungameable by construction
 
 A static benchmark is trivially cheated (cache the answers). So:
 
-- **Probes are mixed into real traffic** — a worker can't tell a paying request
-  from a test.
+- **Worker-visible transport looks ordinary** — validator markers, assignment
+  ids, group ids, and nonces are stripped before dispatch, and worker-visible
+  job ids use ordinary UUIDs. This raises the cost of fingerprinting but does
+  not make probes literally indistinguishable from paid traffic.
 - **Procedurally generated** — random chess positions, random needle facts,
   random seeds — plus a large, rotating probe bank. Nothing to pre-cache.
 - **Validator-signed, random cadence** — unpredictable timing and origin.
 
-### Scoring → reputation → economics
+### Scoring -> reputation -> economics
 
-- Each **worker+model** carries a rolling **quality score** and a measured tier
-  (effective context length, structured-output pass rate, reasoning accuracy).
-- Routing **prefers high scorers**; persistent failers are **downranked, then
-  evicted**.
-- The teeth: this is where PoQ meets **worker bonding/slashing**. A worker stakes
-  AIPG to serve; serve measured garbage and the stake is **slashed**. Quality is
-  not a request — it's collateralized. *(This is the real, load-bearing AIPG
-  utility: skin-in-the-game on delivered intelligence.)*
-- The measured tier is **surfaced to users and agents** — you pick a capability
-  tier, not a quant you have to trust.
+- **Now:** Core records assignment-bound evidence and separates probe completion,
+  accepted evidence, worker pass, quorum, dispute, and finalization. No routing,
+  reward, strike, payout, bond, or slashing path reads it as authority.
+- **Next:** prove five or more independently operated validators and publish
+  measured worker/model scorecards with explicit sample sizes and policy ids.
+- **Later:** reviewed routing may prefer finalized high scorers. Objective fraud
+  may enter a dispute process backed by cooldown-protected worker bonds. A
+  subjective quality judgment must never slash automatically.
+- **User-facing target:** agents choose a measured capability tier with recent
+  evidence rather than trusting a worker's quantization claim.
 
 ### Hardware identification
 
@@ -77,21 +87,30 @@ against measured performance.
 
 ## Why it matters
 
-- **For users/agents:** continuously-verified quality is something **no
-  centralized API offers** — they ask for trust; we publish measurements.
+- **For users/agents:** independently reproducible measurements can make the
+  delivered service easier to audit than a private model label.
 - **For the network:** makes quantization a non-issue — heterogeneous hardware
   and quants are fine as long as they *pass*. Maximizes usable supply without
   sacrificing quality.
-- **For the token:** PoQ is the mechanism that makes the AIPG stake meaningful —
-  collateral against measured intelligence, enforced by slashing.
+- **For the token:** future cooldown-protected bonds can collateralize objective
+  service contracts after dispute and enforcement paths are audited.
 
 ## Status & where it lives
 
-- **Validator role** (the prober/scorer) — to build; see roadmap.
-- **Bonding/slashing** (the economic teeth) — in progress.
-- **Telemetry already captured** per job (t/s, TTFT, latency, per-model) feeds
-  the performance-fingerprint side today; the probe battery + scoring is the new
-  build.
+- **Validator role** — candidate Core and validator implementations include
+  wallet-bound registration, dedicated scopes, private assignments,
+  hard-targeted text probes, independent scoring, signed durable delivery, and
+  preview 3-of-5 groups. The matching Core release is not production-live.
+- **Text methods** — exact instruction, arithmetic, strict JSON, context
+  retrieval, multistep logic, single and two-stage tool calls, and randomized
+  stop-sequence compliance are implemented as evidence-only policies.
+- **Image/video** — design accepted, implementation gated. See
+  `MEDIA_VALIDATION_V1.md`.
+- **Bonding/slashing** — contract work exists, but cooldown-backed deployment,
+  background bond sync, dispute review, and enforcement are not live validator
+  authorities.
+- **Telemetry** per job (throughput, TTFT, latency, model) exists as a supporting
+  signal. It is not cryptographic hardware proof.
 
 *Related: the validator-node role; worker bonding/slashing on the Grid
 WorkerRegistry; per-model telemetry in `/v1/status/models`; GRID_ECONOMICS.md

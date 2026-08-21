@@ -8,7 +8,7 @@ for humans and agents.
 ## Ownership
 
 - `architecture/` - strategic design: demand-side economics, Proof of Quality,
-  billing audit brief.
+  text/media validation, and billing audit brief.
 - `architecture-migration/` - Flask-to-FastAPI/Redis-stream/worker migration
   planning.
 - `BLOCKCHAIN_INTEGRATION.md` - legacy/on-chain integration guide.
