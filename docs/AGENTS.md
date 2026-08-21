@@ -19,6 +19,9 @@ for humans and agents.
 - `architecture/DECENTRALIZATION_ROADMAP.md` - accepted post-preview Base
   validator and trusted-partner Core federation phases, event contract, and
   go-live gates.
+- `architecture/NETWORK_READINESS.md` - current implementation and rollout
+  status for validator, worker-growth, economics, blockchain, and operations
+  requirements.
 
 ## Local Contracts
 
