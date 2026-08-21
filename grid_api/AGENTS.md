@@ -18,8 +18,8 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   and worker structures.
 - `abis/` / `_abi.py` - local contract ABI loaders used by background sync.
 - `main.py` - lifecycle: DB/Redis init, stale-job reclaimer, reservation and
-  billing invariant monitors, operator alerts, recipe sync, router registration,
-  and root health metadata.
+  billing invariant monitors, validator operational-history pruning, operator
+  alerts, recipe sync, router registration, and root health metadata.
 
 ## Local Contracts
 

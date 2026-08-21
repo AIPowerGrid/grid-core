@@ -64,6 +64,12 @@ class GridSettings(BaseSettings):
     validator_media_minimum_quality_pass_rate: float = 0.95
     validator_media_max_output_bytes: int = 25 * 1024 * 1024
     validator_media_probe_timeout_seconds: int = 600
+    # Bound economically inert preview work and its operational DB footprint.
+    # A completed quorum must not immediately manufacture another free probe
+    # group for the same worker/model.
+    validator_text_group_min_interval_seconds: int = 3600
+    validator_history_retention_days: int = 90
+    validator_history_sweep_seconds: int = 21600
 
     # Best-effort operator alerts. The webhook is a production secret and must
     # never be committed, logged, or returned by an API.

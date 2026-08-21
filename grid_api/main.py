@@ -104,6 +104,34 @@ async def _reservation_sweeper():
         await asyncio.sleep(interval)
 
 
+async def _validator_history_sweeper():
+    """Bound finalized validator assignment/group storage.
+
+    Signed attestations remain append-only; only the operational rows that held
+    leases and private challenges are removed after the public health window.
+    """
+    from .config import get_settings
+    from .safe_logging import error_type
+    from .services.validators import prune_validator_operational_history
+
+    interval = max(3600, get_settings().validator_history_sweep_seconds)
+    while True:
+        try:
+            deleted = await prune_validator_operational_history()
+            if deleted["assignments"] or deleted["probe_groups"]:
+                logger.info(
+                    "Pruned finalized validator rows assignments=%d probe_groups=%d",
+                    deleted["assignments"],
+                    deleted["probe_groups"],
+                )
+        except Exception as exc:
+            logger.error(
+                "Validator history sweeper error_type=%s",
+                error_type(exc),
+            )
+        await asyncio.sleep(interval)
+
+
 async def _recipe_sync_loop():
     """Background task: refresh approved recipes from on-chain RecipeVault.
     No-ops until RECIPEVAULT_ADDRESS/BASE_RPC_URL are set; curated local recipes
@@ -201,6 +229,7 @@ async def lifespan(app: FastAPI):
     _styles.load_local_styles(os.path.join(_base, "styles"))
     recipe_sync = asyncio.create_task(_recipe_sync_loop())
     sweeper = asyncio.create_task(_reservation_sweeper())
+    validator_history_sweeper = asyncio.create_task(_validator_history_sweeper())
     billing_monitor = asyncio.create_task(_billing_monitor())
     # Verification probes ("validator zero") — dormant unless GRID_PROBE_ENABLED;
     # even ON it only records evidence (no reward/slash). See VERIFICATION_PROBES.md.
@@ -225,6 +254,7 @@ async def lifespan(app: FastAPI):
     reclaimer.cancel()
     recipe_sync.cancel()
     sweeper.cancel()
+    validator_history_sweeper.cancel()
     billing_monitor.cancel()
     prober.cancel()
     await close_p2p()  # Shutdown P2P

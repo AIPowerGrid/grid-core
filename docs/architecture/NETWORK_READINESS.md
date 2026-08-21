@@ -110,8 +110,11 @@ testing**, not decentralized validation.
 
 ### 8. Shared probe groups - Ready
 
-Core source persists one immutable challenge group, distinct assignments,
-independent attestations, and pending/accepted/disputed/finalized states.
+Core source persists one immutable challenge copy per group, distinct
+validator assignments, independent attestations, and
+pending/accepted/disputed/finalized states. New text groups are rate-bounded per
+worker/model, and finalized operational rows are retention-bounded while signed
+evidence remains durable.
 Production still runs the older Core.
 
 ### 9. Distinct registered 3-of-5 quorum - Ready

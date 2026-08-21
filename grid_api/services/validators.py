@@ -451,6 +451,28 @@ def _worker_supports_text_capability(capability: str, worker: dict[str, Any]) ->
     return max_context >= _TEXT_CAPABILITY_MIN_WORKER_CONTEXT.get(capability, 0)
 
 
+async def _text_group_cooldown_active(
+    session,
+    *,
+    worker_id: str,
+    model: str,
+    now: datetime,
+) -> bool:
+    """Keep preview validation from becoming an unlimited free-work route."""
+    interval = max(
+        300,
+        int(get_settings().validator_text_group_min_interval_seconds),
+    )
+    latest = await session.scalar(
+        sa.select(sa.func.max(probe_groups_t.c.created)).where(
+            probe_groups_t.c.target_worker_id == worker_id,
+            probe_groups_t.c.model == model,
+            probe_groups_t.c.modality == "text",
+        )
+    )
+    return bool(latest and _aware(latest) >= now - timedelta(seconds=interval))
+
+
 def media_validation_policy() -> dict[str, Any]:
     """Return the fail-closed assignment gate without exposing private state."""
     settings = get_settings()
@@ -1141,6 +1163,31 @@ def _assignment_to_dict(
     return out
 
 
+async def _hydrate_assignment_challenges(session, rows) -> list[dict[str, Any]]:
+    """Resolve grouped assignments from the probe group's single challenge copy."""
+    hydrated = [dict(row) for row in rows]
+    group_ids = {
+        str(row["probe_group_id"])
+        for row in hydrated
+        if row.get("probe_group_id") and not (row.get("challenge") or {})
+    }
+    if not group_ids:
+        return hydrated
+    group_rows = (
+        await session.execute(
+            sa.select(probe_groups_t.c.id, probe_groups_t.c.challenge).where(
+                probe_groups_t.c.id.in_(group_ids)
+            )
+        )
+    ).mappings().all()
+    challenges = {str(row["id"]): row["challenge"] or {} for row in group_rows}
+    for row in hydrated:
+        group_id = row.get("probe_group_id")
+        if group_id and not (row.get("challenge") or {}):
+            row["challenge"] = challenges.get(str(group_id), {})
+    return hydrated
+
+
 async def _finalize_due_assignments(session) -> None:
     now = _now()
     group_deadline = now - timedelta(seconds=ATTESTATION_GRACE_SECONDS)
@@ -1230,6 +1277,38 @@ async def _finalize_due_assignments(session) -> None:
         )
 
 
+async def prune_validator_operational_history(
+    *,
+    older_than_days: int | None = None,
+) -> dict[str, int]:
+    """Prune finalized assignment/group machinery, never signed evidence."""
+    configured = get_settings().validator_history_retention_days
+    retention_days = max(1, int(older_than_days or configured))
+    cutoff = _now() - timedelta(days=retention_days)
+    async with await new_session() as session:
+        deleted_assignments = await session.execute(
+            sa.delete(assignments_t).where(
+                assignments_t.c.finalized.isnot(None),
+                assignments_t.c.finalized < cutoff,
+            )
+        )
+        remaining_assignments = sa.select(assignments_t.c.id).where(
+            assignments_t.c.probe_group_id == probe_groups_t.c.id
+        )
+        deleted_groups = await session.execute(
+            sa.delete(probe_groups_t).where(
+                probe_groups_t.c.finalized.isnot(None),
+                probe_groups_t.c.finalized < cutoff,
+                ~sa.exists(remaining_assignments),
+            )
+        )
+        await session.commit()
+    return {
+        "assignments": max(0, int(deleted_assignments.rowcount or 0)),
+        "probe_groups": max(0, int(deleted_groups.rowcount or 0)),
+    }
+
+
 async def issue_assignments(
     *,
     account_id,
@@ -1305,6 +1384,7 @@ async def issue_assignments(
                 .limit(safe_limit)
             )
         ).mappings().all()
+        existing = await _hydrate_assignment_challenges(session, existing)
         existing_keys = {(r["target_worker_id"], r["model"]) for r in existing}
         rows = list(existing)
 
@@ -1395,6 +1475,13 @@ async def issue_assignments(
                 continue
 
             if group is None:
+                if await _text_group_cooldown_active(
+                    session,
+                    worker_id=worker_id,
+                    model=model,
+                    now=now,
+                ):
+                    continue
                 challenge = _make_text_challenge(secrets.choice(eligible_challenge_kinds))
                 group_id = f"prg_{uuid4().hex}"
                 group_values = {
@@ -1458,7 +1545,9 @@ async def issue_assignments(
                 "probed": None,
                 "finalized": None,
             }
-            await session.execute(sa.insert(assignments_t).values(**values))
+            await session.execute(
+                sa.insert(assignments_t).values(**{**values, "challenge": {}})
+            )
             rows.append(values)
             existing_keys.add((worker_id, model))
 
@@ -1531,6 +1620,7 @@ async def _issue_image_assignments(
                 ).order_by(assignments_t.c.created.asc()).limit(limit)
             )
         ).mappings().all()
+        existing = await _hydrate_assignment_challenges(session, existing)
         rows = list(existing)
         existing_keys = {(str(row["target_worker_id"]), row["model"]) for row in existing}
 
@@ -1687,7 +1777,9 @@ async def _issue_image_assignments(
                     "probed": None,
                     "finalized": None,
                 }
-                await session.execute(sa.insert(assignments_t).values(**values))
+                await session.execute(
+                    sa.insert(assignments_t).values(**{**values, "challenge": {}})
+                )
                 rows.append(values)
                 existing_keys.add(key)
 
@@ -1758,6 +1850,7 @@ async def _issue_video_assignments(
                 ).order_by(assignments_t.c.created.asc()).limit(limit)
             )
         ).mappings().all()
+        existing = await _hydrate_assignment_challenges(session, existing)
         rows = list(existing)
         existing_keys = {(str(row["target_worker_id"]), row["model"]) for row in existing}
 
@@ -1889,7 +1982,9 @@ async def _issue_video_assignments(
                     "probed": None,
                     "finalized": None,
                 }
-                await session.execute(sa.insert(assignments_t).values(**values))
+                await session.execute(
+                    sa.insert(assignments_t).values(**{**values, "challenge": {}})
+                )
                 rows.append(values)
                 existing_keys.add(key)
 
@@ -3894,11 +3989,22 @@ async def _claim_probe_lease(
             )
         )
         await session.commit()
-        row = (
+        selected = (
             await session.execute(
-                sa.select(assignments_t).where(assignments_t.c.id == assignment_id)
+                sa.select(
+                    assignments_t,
+                    probe_groups_t.c.challenge.label("group_challenge"),
+                )
+                .outerjoin(
+                    probe_groups_t,
+                    probe_groups_t.c.id == assignments_t.c.probe_group_id,
+                )
+                .where(assignments_t.c.id == assignment_id)
             )
         ).mappings().first()
+        row = dict(selected) if selected else None
+        if row and not (row.get("challenge") or {}) and row.get("probe_group_id"):
+            row["challenge"] = row.get("group_challenge") or {}
 
     if not row:
         raise AssignmentError("assignment not found")

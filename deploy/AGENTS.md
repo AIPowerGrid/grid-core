@@ -55,6 +55,12 @@ executes an immutable release selected through `/home/aipg/current`.
 - Validator probe leases must exceed the worker-response timeout and keep a
   small bounded retry budget. Do not make targeted validation an unlimited
   free-inference path.
+- `VALIDATOR_TEXT_GROUP_MIN_INTERVAL_SECONDS` limits creation of real text
+  workloads per worker/model (default one hour; Core enforces a five-minute
+  floor). `VALIDATOR_HISTORY_RETENTION_DAYS` and
+  `VALIDATOR_HISTORY_SWEEP_SECONDS` bound finalized assignment/group machinery;
+  signed attestations are preserved. Keep `env.template`, `config.py`, and the
+  validator runbook aligned when changing these controls.
 - Apply Alembic `0024` before code that issues media assignments; it adds the
   group execution lease and shared frozen-witness columns read by that path.
 - `VALIDATOR_MEDIA_PROBE_ENABLED` is not a standalone launch switch. Keep it off

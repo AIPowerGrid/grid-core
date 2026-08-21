@@ -25,6 +25,7 @@ from grid_api.services import validators as validators_svc
 from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import metadata as v2_metadata
 from grid_api.v2.schema import validator_assignments as assignments_t
+from grid_api.v2.schema import validator_attestations as attestations_t
 from grid_api.v2.schema import validator_probe_groups as probe_groups_t
 from grid_api.v2.schema import validator_reference_workers as references_t
 from grid_api.v2.schema import validators as validators_t
@@ -448,6 +449,80 @@ async def test_concurrent_validators_join_one_shared_probe_group(pg):
     async with await database.new_session() as session:
         assert await session.scalar(sa.select(sa.func.count()).select_from(probe_groups_t)) == 1
         assert await session.scalar(sa.select(sa.func.count()).select_from(assignments_t)) == 5
+
+
+@pytest.mark.asyncio
+async def test_postgres_prune_preserves_evidence_and_clears_retired_links(pg):
+    account_id, validator_id, wallet, _private_key = (await _seed_validators(1))[0]
+    issued = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=wallet,
+        active_workers=_workers(),
+        limit=1,
+    )
+    assignment = issued["assignments"][0]
+    evidence_hash = "a" * 64
+    evidence_payload = {
+        "assignment_id": assignment["assignment_id"],
+        "probe_group_id": assignment["probe_group_id"],
+        "evidence_hash": evidence_hash,
+    }
+    old = validators_svc._now() - timedelta(days=2)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.insert(attestations_t).values(
+                attestation_hash="b" * 64,
+                account_id=account_id,
+                validator_id=validator_id,
+                validator_wallet=wallet,
+                assignment_id=assignment["assignment_id"],
+                probe_group_id=assignment["probe_group_id"],
+                grid_nonce=assignment["grid_nonce"],
+                evidence_hash=evidence_hash,
+                authority="authoritative",
+                quorum_status="finalized",
+                worker_id=assignment["target_worker_id"],
+                model=assignment["model"],
+                modality="text",
+                capability=assignment["capability"],
+                canary_kind=assignment["canary_kind"],
+                verdict="healthy",
+                signature="0x" + "11" * 65,
+                signature_status="verified",
+                payload=evidence_payload,
+                created=old,
+            )
+        )
+        await session.execute(
+            sa.update(assignments_t)
+            .where(assignments_t.c.id == assignment["assignment_id"])
+            .values(status="finalized", quorum_status="finalized", finalized=old)
+        )
+        await session.execute(
+            sa.update(probe_groups_t)
+            .where(probe_groups_t.c.id == assignment["probe_group_id"])
+            .values(status="finalized", quorum_status="finalized", finalized=old)
+        )
+        await session.commit()
+
+    deleted = await validators_svc.prune_validator_operational_history(
+        older_than_days=1,
+    )
+    assert deleted == {"assignments": 1, "probe_groups": 1}
+    async with await database.new_session() as session:
+        evidence = (
+            await session.execute(
+                sa.select(
+                    attestations_t.c.assignment_id,
+                    attestations_t.c.probe_group_id,
+                    attestations_t.c.payload,
+                )
+            )
+        ).mappings().one()
+    assert evidence["assignment_id"] is None
+    assert evidence["probe_group_id"] is None
+    assert evidence["payload"] == evidence_payload
 
 
 @pytest.mark.asyncio
