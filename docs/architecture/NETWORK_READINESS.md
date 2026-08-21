@@ -242,7 +242,14 @@ operators do not exist. No permanent trusted worker is accepted as the oracle.
 The safe rollout machinery exists and production remains a narrow account/model
 allowlist with global charging off and free spendable value off. All-media,
 text, audio, internal-account, selected-external, and global stages require
-reconciliation evidence before expansion.
+reconciliation evidence before expansion. The current account has three
+settled canary jobs (delegated Chat text plus Krea and Z-Image through Art), no
+held or stale reservations, no negative balance, and no purchased-ledger drift.
+That proves only a partial canary: Music, video, raw Responses/Messages,
+disconnect, forced failure/refund, pre-queue `402`, retry/duplicate terminal,
+and the 24-hour unchanged-cohort window remain unproven. The remaining canary
+balance is below the currently selected model's minimum charge; further real
+work requires deliberate funding approval.
 
 ### 25. One canonical account and balance - Implemented
 
@@ -250,7 +257,10 @@ Core owns canonical identity links, aliases, three credit pockets, and bounded
 service delegation. Focused Core, Chat, Art, Music, and Console tests prove
 delegated tokens and reject account mismatches. Google and wallet proof can
 merge without rewriting historical ledgers. Every auth change still requires a
-cross-product live canary because partial deployments have caused outages.
+cross-product live canary because partial deployments have caused outages. The
+required live four-surface Google run and separate wallet run have not yet been
+captured as one retained, `no-store` receipt set, so code-level completion must
+not be mistaken for production-parity evidence.
 
 ### 26. Explicit owner-worker reward policy - Open, payout-backlog
 
