@@ -379,7 +379,14 @@ archive, upstream-merge, and superseded WIP branches remain archaeology rather
 than production candidates. The local `aipg-oss-release` toolkit is not a Git
 repository; its corrected scanner template and generated staging snapshots are
 therefore nondurable until that toolkit is either tracked or regenerated from a
-reviewed source.
+reviewed source. Local deprecation/DOX commits also remain in
+`aipg-horde-api`, `grid-rewards-sentry`, and the retired `grid-sdk`, whose
+AIPowerGrid remotes now return repository-not-found, plus
+`grid-discord-image-bot`, whose remote is archived read-only. The image bot
+also retains pre-existing TypeScript failures and high-severity dependency
+advisories. None is a current network component or merge candidate; do not
+restore those remotes or revive the code merely to eliminate a local ahead
+count.
 
 ### 31. Branch protection - Partial
 
