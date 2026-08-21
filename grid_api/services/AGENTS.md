@@ -47,8 +47,8 @@ content sanitization, and reward settlement.
   registration per canonical account, builds shared probe groups, binds one
   assignment and authoritative vote per registered validator/group, and
   aggregates a conservative 3-of-5 preview quorum. Text groups use randomized
-  exact-instruction, arithmetic, strict-JSON, context-retrieval, and multistep
-  logic families; worker order must not determine the family. Group allocation
+  exact-instruction, arithmetic, strict-JSON, context-retrieval, multistep
+  logic, and exact function-call families; worker order must not determine the family. Group allocation
   must match the validator's advertised scorer capability; legacy
   `text.basic.v1` nodes receive only echo/arithmetic. Expected answers
   and Core's private verdict are not returned to nodes. The path remains non-economic and

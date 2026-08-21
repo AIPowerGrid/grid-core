@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 import asyncio
+import json
 import uuid
 import time
 from datetime import timedelta
@@ -898,6 +899,71 @@ async def test_probe_dispatch_failure_releases_lease_for_retry(db, monkeypatch):
     assert row["probe_status"] == "failed"
     assert row["probe_lease_expires"] is None
     assert row["probe_attempts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_tool_call_probe_forwards_schema_and_commits_witnessed_call(db, monkeypatch):
+    from grid_api.services import job_queue, token_stream
+
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, capabilities=["text.tool_call.v1"])
+    issued = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=[{
+            "worker_id": str(uuid.uuid4()), "name": "rig-tool",
+            "models": ["qwen3-27b"], "job_types": ["text"],
+        }],
+        limit=1,
+    )
+    assignment = issued["assignments"][0]
+    challenge = assignment["challenge"]
+    function = challenge["tools"][0]["function"]
+    number_field, token_field = list(function["parameters"]["properties"])
+    prompt = challenge["prompt"]
+    expected_number = int(prompt.split(f"{number_field!r} to ", 1)[1].split(" and ", 1)[0])
+    expected_token = prompt.split(f"{token_field!r} to '", 1)[1].split("'", 1)[0]
+    tool_calls = [{
+        "id": "call_witnessed", "type": "function",
+        "function": {
+            "name": function["name"],
+            "arguments": json.dumps({number_field: expected_number, token_field: expected_token}),
+        },
+    }]
+    submitted = {}
+
+    async def capture_submit(job_id, payload, models, **kwargs):
+        submitted.update(job_id=job_id, payload=payload, models=models, kwargs=kwargs)
+
+    async def completed_events(*_args, **_kwargs):
+        yield {
+            "text": token_stream.DONE_SENTINEL, "full_text": "", "tool_calls": tool_calls,
+            "finish_reason": "tool_calls", "usage": {"completion_tokens": 12},
+            "grid": {"worker": "rig-tool"},
+        }
+
+    monkeypatch.setattr(job_queue, "submit_job", capture_submit)
+    monkeypatch.setattr(token_stream, "subscribe_tokens", completed_events)
+    result = await validators_svc.probe_assignment(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+
+    assert result["status"] == "completed"
+    assert result["tool_calls"] == tool_calls
+    assert result["finish_reason"] == "tool_calls"
+    assert submitted["payload"]["request"]["tools"] == challenge["tools"]
+    assert submitted["payload"]["request"]["tool_choice"] == challenge["tool_choice"]
+    assert submitted["kwargs"]["hard_target_worker"] == "rig-tool"
+    async with await database.new_session() as session:
+        row = (await session.execute(
+            sa.select(assignments_t).where(assignments_t.c.id == assignment["assignment_id"])
+        )).mappings().one()
+    assert row["probe_status"] == "completed"
+    assert row["probe_verdict"] == "healthy"
+    assert row["probe_response_hash"] == result["response_hash"]
 
 
 def test_validator_capabilities_expose_assignment_gates():
