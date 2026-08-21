@@ -22,15 +22,15 @@ production rollout, and a registered node does not prove independent control.
 
 At this snapshot:
 
-- production Core runs immutable commit `20d57669` with Alembic `0019`;
-- reviewed Core main is schema-complete through `0024`, but is not deployed;
-- `/v1/status/network` returns `404` in production, while the public `/status`
-  page is deployed in an honest feed-unavailable state;
-- live Core health reports five connected workers and seven available model IDs
-  across text, image, video, and audio; production does not yet expose the
-  candidate's privacy-safe per-model redundancy feed;
-- validator capabilities in production are the older assignment-bound preview,
-  not the source-ready shared-quorum contract;
+- production Core runs immutable commit `0d850e73` with Alembic `0024`;
+- `/v1/status/network` is live and reports five connected workers, nine online
+  model entries, and every model below the three-worker redundancy target;
+- shared-quorum text validation is live in `shared_quorum_preview` mode;
+- three active first-party validators on commit `16e05327` completed two fresh
+  3-of-5 groups with three distinct verified signatures and evidence
+  commitments per group;
+- those validators share one operator and hypervisor, so verified independent
+  operator count remains zero;
 - validator rewards, validator stake, worker penalties from validator evidence,
   and Core federation are off;
 - charging remains a narrow allowlist canary rather than global; and
@@ -49,7 +49,8 @@ extension state, and a schema-scoped archive collided with the scratch
 database's default `public` schema. Candidate commits `290c0375` and `c73864ee`
 scope archives to the Grid-owned schema, explicitly reset only the generated
 scratch schema, and make the PostgreSQL 16 restore proof a pull-request gate.
-The backup timer remains disabled and no off-host backup system exists. A
+The hardened `aipg-postgres-backup.timer` is enabled and active; its first
+unattended scheduled run remains pending, and no off-host backup system exists. A
 separate PostgreSQL rehearsal upgraded `0019` to
 `0024` with 100,000 synthetic legacy assignments and 110,000 synthetic legacy
 attestations in place, preserved every row, completed locally in 0.66 seconds,
@@ -57,72 +58,57 @@ and passed `alembic check` with no schema drift. That synthetic rehearsal proves
 the migration data shape and constraints; production restoration is evidenced
 separately above, while production migration lock duration remains unmeasured.
 
-## Approval-Ready Merge Sequence
+## Completed Rollout Evidence
 
-All pull requests listed here were mergeable with green hosted checks at the
-evidence snapshot. Recheck the exact head and required statuses immediately
-before each merge; a green ancestor or paired branch does not prove a changed
-head.
+Core PR 21 and its security/documentation prerequisites are merged. The exact
+Core release `0d850e73` was deployed immutably, migrated through `0024`, and
+smoked with charging still restricted to the existing allowlist. Validator PRs
+2-6 are merged through `16e05327`; no release tag, binary, or container image
+was published.
 
-1. Nine history/security foundations are merged on protected default branches:
-   Core PR 22 (`471e849a`), text-worker PR 15 (`c03f7d19`), media-worker PR 14
-   (`1423e440`), contracts PR 4 (`69c48b86`), Python SDK PR 2 (`d6073054`),
-   JavaScript SDK PR 2 (`6e07bfd6`), Console PR 16 (`ad39a7db`), website PR 5
-   (`300c69e1`), and documentation PR 3 (`6d241e7a`). Their post-merge checks
-   and hosting builds must remain green. Validator PR 3 (`17ce7357`) is the
-   remaining foundation and still requires the configured independent approval.
-2. Contracts PR 3 is merged at `8899348a` after contracts PR 4. This enables
-   deployable-contract Slither policy and tested source changes only; it does
-   not authorize a Diamond cut or any Base transaction.
-3. Land validator release PR 2 (`4b226ad6`) after validator PR 3, then
-   validator capability PR 4 (`81b66390`). Both require independent review.
-   Do not create a tag or publish binaries until Core is rolled out, a live
-   authenticated canary passes, and macOS/Windows signing evidence is present.
-4. Land website rollout PR 4 (`5a08d50`) only after website PR 5 and explicit
-   production approval. Its release-policy and browser tests are green, but a
-   main merge deploys the public worker/validator onboarding surface.
-5. Core validator PR 21 has a runtime-proven candidate at `c73864ee` and a
-   readiness-document-only descendant at `3c3eeed9`, both after Core PR 22. Its
-   supervised production snapshot plus scratch restore has passed. Land the
-   exact final green head only after a signed-in account/validator acceptance
-   pass and explicit deployment approval. Merge is not proof that production
-   moved from `20d57669` or Alembic `0019`.
+Three separately keyed first-party nodes then completed two fresh shared text
+groups. Each group had three assignments, three distinct validators, three
+distinct Grid nonces, three completed probes, three evidence commitments, and
+three verified authoritative signatures. One echo group reached `accepted /
+healthy`; one tool-chain group reached `accepted / failed`. The latter is a
+worker/capability result to investigate, not a validator transport failure.
 
-After each paired merge, refresh the dependent PR against the new default
-branch and rerun every required status. Contract code, release artifacts,
-production migrations, charging changes, and Base transactions remain separate
-approval events.
+Credit, reservation, den-event, payout, and worker-ledger row counts were
+unchanged across the probes. A direct join from every fresh probe job id to
+`grid_ledger.job_id` returned zero rows. Validator economics, staking, routing
+effects, strikes, and slashing remain disabled.
 
 ## Immediate Validator Preview
 
-### 1. Dedicated validator API scopes - Ready
+### 1. Dedicated validator API scopes - Implemented/live
 
 Core defines and enforces `validator.assignments`, `validator.probe`,
 `validator.attest`, and `validator.read`. Console validator-purpose keys request
 that bounded set. Evidence: `services/accounts.py`, `routers/validator.py`, and
-validator route tests. Remaining gate: deploy the matching Core and smoke a
-fresh purpose-bound key.
+validator route tests. Three production keys carrying exactly those scopes
+registered and completed assignment-bound work on 2026-08-21.
 
-### 2. Verified account-bound signing identity - Ready
+### 2. Verified account-bound signing identity - Implemented/live
 
 Registration and authoritative evidence recover an EIP-191 signing wallet and
 bind it to the authenticated canonical account. Assignment id, group id, nonce,
-and evidence commitment are signature inputs. Remaining gate: production
-registration plus negative tests against an unrelated linked wallet.
+and evidence commitment are signature inputs. Three separate production
+accounts and signing wallets submitted six verified authoritative votes.
 
-### 3. Fail-closed targeted probing - Ready
+### 3. Fail-closed targeted probing - Implemented/live
 
 Authoritative probing requires a Grid-issued assignment and passes an exact
 `hard_target_worker`; missing assignment, registration, target, or capability
 support produces no probe. There is no public-inference compatibility fallback.
-Remaining gate: production hard-target smoke against a controlled worker.
+Production hard-target smoke completed against both online text workers. Probe
+job IDs did not enter the worker ledger or any demand/supply money table.
 
-### 4. Validator registration and heartbeat - Ready
+### 4. Validator registration and heartbeat - Implemented/live
 
 Core stores validator id, signing wallet, account, software version,
 capabilities, status, and heartbeat. Account and wallet uniqueness prevent
-identity multiplication inside one canonical account. Remaining gate:
-production migration `0020+` and live registration/heartbeat proof.
+identity multiplication inside one canonical account. Production reports three
+active heartbeat-fresh registrations.
 
 ### 5. `grid-validator v0.1.0-preview` - Ready, unpublished
 
@@ -131,42 +117,45 @@ checksum-verifying installer, SPDX SBOM, and GitHub provenance workflows exist.
 Fresh build-only GitHub runs and an independent clean-download verification of
 the complete 85-package SPDX/checksum payload have passed. No tag, GitHub
 Release, or registry image has been published. Publication remains gated on
-the Core rollout and authenticated canary.
+platform signing, protected release approval, and clean-download verification;
+the Core rollout and authenticated canary are complete.
 
 ### 6. Validator onboarding - Implemented
 
 The public `/validate` page release-gates incomplete assets and independently
 requires the live Core `shared_quorum_preview`, 3-of-5, scoped, non-economic
-capability contract. A complete GitHub Release cannot unlock downloads against
-the older production Core. The page links scoped key creation, documents health
+capability contract. A complete GitHub Release is still required to unlock
+downloads. The page links scoped key creation, documents health
 commands, and says there are no rewards, stake, slashing, or routing effects.
 The Console has registration/scorecard surfaces. Downloads remain closed.
 
 ### 7. Five to ten independent preview operators - External
 
 `PREVIEW_COHORT.md` defines safe enrollment and a 72-hour qualification run;
-the website recruits the cohort. No evidence currently proves five independent
-operators. Until that exists, public language must remain **distributed
-testing**, not decentralized validation.
+the website recruits the cohort. Three first-party nodes prove deployment and
+quorum mechanics but count as one operator. No evidence currently proves five
+independent operators. Until that exists, public language must remain
+**distributed testing**, not decentralized validation.
 
 ## Real Quorum
 
-### 8. Shared probe groups - Ready
+### 8. Shared probe groups - Implemented/live
 
 Core source persists one immutable challenge copy per group, distinct
 validator assignments, independent attestations, and
 pending/accepted/disputed/finalized states. New text groups are rate-bounded per
 worker/model, and finalized operational rows are retention-bounded while signed
-evidence remains durable.
-Production still runs the older Core.
+evidence remains durable. Two fresh production groups reached `accepted` with
+unanimous three-validator evidence on 2026-08-21.
 
-### 9. Distinct registered 3-of-5 quorum - Ready
+### 9. Distinct registered 3-of-5 quorum - Implemented, pilot-proven
 
 Aggregation counts distinct registered validator ids, targets five, and accepts
 at threshold three. Operator independence is a separate false-by-default field;
-registration count does not claim independent control.
+registration count does not claim independent control. The live pilot proved
+three distinct identities and nonces, not three independent operators.
 
-### 10. One authoritative vote per validator/group - Ready
+### 10. One authoritative vote per validator/group - Implemented/live
 
 Migration `0022` and `schema.py` enforce unique
 `(probe_group_id, validator_id)` membership for assignments and attestations.
@@ -179,18 +168,20 @@ The node persists signed envelopes locally before submission, replays pending
 evidence before new work, and removes it only after Core acceptance. Production
 chaos behavior remains unproven.
 
-### 12. Separate workflow states - Implemented
+### 12. Separate workflow states - Implemented/live
 
 Core and Console distinguish probe execution, accepted evidence, worker
 verdict, quorum outcome, and finalization. The Console renders preview-only
-language. Production data will remain empty until rollout and operators exist.
+language. Production now contains accepted evidence while economic effects
+remain disabled.
 
-### 13. Aggregate validator health - Ready
+### 13. Aggregate validator health - Implemented/live
 
 Core source reports registered, heartbeat-fresh, participating, and verified
 independent counts; assignment stages; agreement/dispute rates; coverage;
 quorum states; and bounded software cohorts. The public network status embeds
-the privacy-safe subset. Production endpoint rollout is pending.
+the privacy-safe subset and currently reports three active/fresh/participating
+validators, zero verified independent operators, and two accepted groups.
 
 ## Worker Growth
 
@@ -377,16 +368,14 @@ credentials, hot queue state, and inference routing stay off-chain.
 
 ### 30. Consolidate important work on main branches - Partial
 
-Production checkouts are clean, but reviewed release, validator, history-scan,
-contract-analysis, website, documentation, and SDK candidates still live on
-open branches. They are intentionally not merged wholesale: several default
-branches deploy or publish, validator changes require an independent approval,
-and Core rollout still requires the supervised backup/restore proof. Dated
-archive, upstream-merge, and superseded WIP branches remain archaeology rather
-than production candidates. The local `aipg-oss-release` toolkit is not a Git
-repository; its corrected scanner template and generated staging snapshots are
-therefore nondurable until that toolkit is either tracked or regenerated from a
-reviewed source. Local deprecation/DOX commits also remain in
+The Core and validator rollout candidates described above are merged to their
+protected default branches, and production runs those exact reviewed commits.
+This does not establish that every side branch in the wider workspace is
+obsolete: dated archive, upstream-merge, and superseded WIP branches remain
+archaeology rather than production candidates. The local `aipg-oss-release`
+toolkit is not a Git repository; its scanner template and generated staging
+snapshots are therefore nondurable until that toolkit is either tracked or
+regenerated from a reviewed source. Local deprecation/DOX commits also remain in
 `aipg-horde-api`, `grid-rewards-sentry`, and the retired `grid-sdk`, whose
 AIPowerGrid remotes now return repository-not-found, plus
 `grid-discord-image-bot`, whose remote is archived read-only. The image bot
@@ -441,17 +430,17 @@ runs Linux and Windows manager packaging on every change, and requires their
 stable aggregate release gate. Validator `master` now requires one approving review,
 stale-review dismissal, admin enforcement, strict CI, linear history, resolved
 conversations, no force-push/deletion, and the exact four-platform payload check.
-Validator PR 2 adds a commit/tag/version-bound release manifest and blocks
-publication until verified macOS Developer ID/notarization and Windows
-Authenticode state is recorded; it remains unmerged pending independent review.
+Validator PR 2 merged as `ffbc7db8`; it adds a commit/tag/version-bound release
+manifest and blocks publication until verified macOS Developer ID/notarization
+and Windows Authenticode state is recorded.
 Core production
 dependencies now resolve into a reviewed Python 3.12/Linux lock with exact
 versions and package hashes; Docker, host bootstrap, and CI install that lock
 with `--require-hashes` from binary wheels only, the Core image base is
 digest-pinned, and release construction does not upgrade pip. CI regenerates
 the lock and runs `pip-audit` before tests. Core source also exposes a build
-commit in the candidate status API and deploys immutable releases, but
-production still predates that candidate. GitHub immutable releases were
+commit in the status API and deploys immutable releases. Production reports the
+exact deployed commit `0d850e73`. GitHub immutable releases were
 enabled on 2026-08-21 for `grid-validator`, `grid-media-worker`, and
 `grid-inference-worker`; their future published GitHub release tags and assets
 cannot be replaced, and corrections require a new version. This setting does
@@ -467,13 +456,13 @@ preserves and tests the declared Node 18 floor by pinning a compatible Vitest
 major. These changes remain unmerged, and implementation of the standard in
 every repository remains periodic work.
 
-### 33. Public network status - Ready, endpoint rollout pending
+### 33. Public network status - Implemented/live
 
 Core source exposes privacy-safe worker/model redundancy, validator health,
 payout totals, charging posture, incidents, advisories, build commit, and
 architecture maturity. The public `/status` page is deployed and tested at
-desktop/mobile widths. It currently shows feed unavailable because production
-Core returns `404`; it will populate after the approved Core rollout.
+desktop/mobile widths. Production `/v1/status/network` returns the live
+privacy-safe feed at build `0d850e73`.
 
 ### 34. Trusted-partner Core federation - Deferred design
 
@@ -483,7 +472,7 @@ failover, and later multi-authority ordering. No federation code is live. Begin
 only after validator quorum, event replay, and economic-state invariants are
 proven.
 
-### 35. Verified database backup and restore - Production proof complete
+### 35. Verified database backup and restore - Partial/live
 
 Core source creates locked PostgreSQL custom-format dumps, verifies archive
 structure, binds one SHA-256 manifest to the exact dump, refuses overwrite,
@@ -495,28 +484,27 @@ and `check` agreement. Pull-request CI rehearses `0019` backup through `0024`
 restore on PostgreSQL 16 and proves a decoy non-Grid schema is excluded. The
 supervised production proof passed at exact candidate `c73864ee`; the generated
 scratch database was removed. The systemd units pass clean-environment
-verification. Timer enablement remains a separate operational decision, and
-local retention is not off-host disaster recovery.
+verification, and `aipg-postgres-backup.timer` is enabled and active. Its first
+unattended scheduled run and an off-host copy/restore drill remain open. Local
+retention is not off-host disaster recovery.
 
 ## Next Controlled Sequence
 
-1. Complete signed-in account and validator acceptance against the exact Core
-   candidate without enabling economic effects.
-2. Obtain explicit deployment authorization for the exact reviewed Core commit.
-3. Deploy it immutably, migrate through `0024`, and verify build identity,
-   charging flags, payout timer state, workers, model inventory, retired API
-   behavior, shared-quorum capabilities, and unauthenticated validator denial.
-4. Create a dedicated validator key and linked signing wallet, then run one
-   authenticated end-to-end assignment without economic side effects.
-5. Close `grid-validator` issue 1 with verified macOS Developer ID/notarization
+1. Observe the three-node first-party pilot for at least 72 hours, retain
+   assignment/quorum/error metrics, and investigate the unanimous
+   `deepseek-v4-flash-nvfp4` tool-chain failure before changing scoring or worker
+   claims.
+2. Prove the first unattended backup timer run, copy an encrypted snapshot
+   off-host, and perform an off-host restore drill.
+3. Close `grid-validator` issue 1 with verified macOS Developer ID/notarization
    and Windows Authenticode evidence, then publish the versioned validator
    prerelease and Docker image, verify every clean-download checksum/provenance
    artifact, and keep `latest` untouched.
-6. Qualify 5-10 independent validator operators and measure them for 30 days.
-7. Recruit at least two independent serving operators per flagship model while
+4. Qualify 5-10 independent validator operators and measure them for 30 days.
+5. Recruit at least two independent serving operators per flagship model while
    completing the real media-manager qualification evidence.
-8. Expand charging only through reconciled allowlist stages.
-9. Resolve owner-worker exclusion before any intentional no-payout internal
+6. Expand charging only through reconciled allowlist stages.
+7. Resolve owner-worker exclusion before any intentional no-payout internal
    fleet participates in a payout denominator.
 
 Do not collapse these into one launch switch. Each stage has a separate
