@@ -91,7 +91,11 @@ nginx -t
 systemctl reload nginx
 
 echo "── [6/6] verification ──"
-curl --fail --silent --show-error http://127.0.0.1:7010/health >/dev/null
+REPORTED_COMMIT="$(
+    curl --fail --silent --show-error http://127.0.0.1:7010/health |
+        "$RELEASE/.venv/bin/python" -c 'import json,sys; print(json.load(sys.stdin).get("build_commit") or "")'
+)"
+test "$REPORTED_COMMIT" = "${COMMIT,,}"
 curl --fail --silent --show-error http://127.0.0.1:7010/v1/models >/dev/null
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
     -H 'Host: api.aipowergrid.io' http://127.0.0.1/api/v2/status/models)" = "410"

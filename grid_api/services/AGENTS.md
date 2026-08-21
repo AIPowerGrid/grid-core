@@ -54,7 +54,8 @@ content sanitization, and reward settlement.
   Aggregate health may expose bounded counts, agreement/dispute rates,
   worker/model coverage, and software-version cohorts, but never validator
   identities. Independent-operator counts remain zero until externally
-  reviewed; registration count is not independence proof.
+  reviewed; registration count is not independence proof. The public network
+  status surface uses only these redacted aggregates and never assignment rows.
 - **Model/media governance:** `recipes.py`, `recipe_import.py`, `styles.py`,
   `loras.py`, `model_registry.py`.
 - **Safety:** `sanitizer.py` - **secrets redactor only** (strips API keys/PGP from prompts).
