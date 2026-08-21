@@ -271,8 +271,13 @@ workflow matrix changes.
 Key repos have tests, full-history/worktree secret scanning, CodeQL or language
 security checks, dependency monitoring, and SHA-pinned release tooling where
 artifacts exist. Text, media, and validator release pipelines carry checksums,
-SBOM/provenance gates appropriate to their maturity. Core source exposes a
-build commit in the candidate status API and deploys immutable releases, but
+SBOM/provenance gates appropriate to their maturity. Core production
+dependencies now resolve into a reviewed Python 3.12/Linux lock with exact
+versions and package hashes; Docker, host bootstrap, and CI install that lock
+with `--require-hashes` from binary wheels only, the Core image base is
+digest-pinned, and release construction does not upgrade pip. CI regenerates
+the lock and runs `pip-audit` before tests. Core source also exposes a build
+commit in the candidate status API and deploys immutable releases, but
 production still predates that candidate. A complete organization-wide policy
 audit remains periodic work.
 

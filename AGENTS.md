@@ -34,8 +34,8 @@ owning AGENTS.md and any affected parent Child DOX Index.
 - `tests/` - inherited integration tests; `grid_api/**/tests/` owns current unit
   and router tests.
 - Root-owned files include `server.py`, `server_grid_api.py`, `requirements*.txt`,
-  `pyproject.toml`, `Dockerfile`, `docker-compose.yaml`, root READMEs, assets,
-  and one-off utility scripts.
+  `requirements-grid.lock`, `pyproject.toml`, `Dockerfile`,
+  `docker-compose.yaml`, root READMEs, assets, and one-off utility scripts.
 - `.github/workflows/secret-scan.yml` and `.gitleaks.toml` enforce
   checksum-verified secret and operational-infrastructure scanning on pushes
   and pull requests.
@@ -51,6 +51,11 @@ owning AGENTS.md and any affected parent Child DOX Index.
 - Money paths must be fail-closed in live mode, idempotent by durable refs, and
   covered by tests. `GRID_CHARGING_ENABLED=0` is dry-run; do not assume money is
   live just because billing helpers exist.
+- Production Python dependencies resolve from `requirements-grid.txt` into the
+  reviewed, hash-locked Python 3.12/Linux `requirements-grid.lock`. Docker and
+  host deploys consume only matching binary wheels from the lock and do not
+  upgrade pip during release construction; dependency updates must regenerate
+  it and pass the CI lock-drift and `pip-audit` gates.
 - Treat `grid_ledger` and `grid_credit_ledger` as append-only economic records.
   Do not mutate historical ledger rows except via an explicit audited migration.
 - Worker/model claims are untrusted until verified by registry sync, signed
@@ -80,8 +85,9 @@ owning AGENTS.md and any affected parent Child DOX Index.
 ## Verification
 
 - Full Python sanity: `pytest` from `system-core`.
-- Dependency gate: `pip-audit -r requirements-grid.txt`; investigate every skipped
-  non-PyPI dependency separately.
+- Dependency gate:
+  `pip-audit -r requirements-grid.lock --require-hashes --no-deps --disable-pip`;
+  investigate every skipped non-PyPI dependency separately.
 - Grid-focused: `pytest grid_api/`.
 - Service units: `pytest grid_api/services/`.
 - Router billing/settlement coverage: `pytest grid_api/routers/`.

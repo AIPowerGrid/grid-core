@@ -43,9 +43,16 @@ sudo -H -u aipg git -C "$RELEASE" checkout --detach "$COMMIT"
 test "$(sudo -H -u aipg git -C "$RELEASE" rev-parse HEAD)" = "$COMMIT"
 test -z "$(sudo -H -u aipg git -C "$RELEASE" status --porcelain)"
 sudo -H -u aipg python3 -m venv "$RELEASE/.venv"
-sudo -H -u aipg "$RELEASE/.venv/bin/pip" install -r "$RELEASE/requirements-grid.txt"
+sudo -H -u aipg "$RELEASE/.venv/bin/pip" install --require-hashes \
+  --only-binary=:all: \
+  -r "$RELEASE/requirements-grid.lock"
 sudo -H -u aipg "$RELEASE/.venv/bin/pip" check
 ```
+
+`requirements-grid.lock` is the reviewed Python 3.12/Linux resolution of
+`requirements-grid.txt`. Deploy and image builds consume the hash-locked file;
+they accept only matching binary wheels and never resolve floating production
+dependencies or upgrade the installer during a release.
 
 Leave `GRID_BUILD_COMMIT` empty for the managed detached checkout above, which
 self-reports its immutable `HEAD`. Set it to the reviewed full SHA only for a

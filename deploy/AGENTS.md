@@ -33,6 +33,10 @@ executes an immutable release selected through `/home/aipg/current`.
   `GRID_BUILD_COMMIT`, when set, must be the full 40-character release SHA.
 - Secrets belong in `/etc/aipg/grid.env` with restrictive permissions, never in
   git, command argv, or logs.
+- Host and image builds install only binary wheels from
+  `requirements-grid.lock` with `--require-hashes`; production must never
+  resolve floating source requirements, build an sdist, or upgrade pip during
+  a release.
 - Deployment scripts may be destructive on fresh VMs. Do not run them locally
   from an agent without explicit user approval.
 

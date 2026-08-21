@@ -17,5 +17,6 @@
 !styles/**
 !lora_blacklist.json
 !requirements-grid.txt
+!requirements-grid.lock
 !pyproject.toml
 !LICENSE
