@@ -18,6 +18,7 @@ from grid_api.services import validators
         ("context.retrieve", "context.retrieve", "text.context.4k.v1"),
         ("logic.steps", "logic.steps", "text.reasoning.multistep.v1"),
         ("tool.call", "tool.call", "text.tool_call.v1"),
+        ("tool.chain", "tool.chain", "text.tool_chain.v1"),
         ("stop.sequence", "stop.sequence", "text.stop_sequence.v1"),
     ],
 )
@@ -66,6 +67,58 @@ def test_tool_call_scoring_requires_one_exact_call_and_no_text():
         "function": {"name": "record_c", "arguments": '{"count_a":8,"token_b":"A1"}'},
     }]
     assert validators._score_text_challenge(challenge, "", 10, tool_calls=wrong) == "failed"
+
+
+def test_tool_chain_challenge_requires_two_exact_attributed_calls():
+    challenge = validators._make_text_challenge("tool.chain")
+    first_tool = challenge["steps"][0]["tools"][0]["function"]
+    second_tool = challenge["steps"][1]["tools"][0]["function"]
+    lookup_field = next(iter(first_tool["parameters"]["properties"]))
+    lookup_value = challenge["prompt"].split(f"{lookup_field!r} set to '", 1)[1].split("'", 1)[0]
+    result = challenge["steps"][1]["tool_result"]
+    total_field, token_field = second_tool["parameters"]["properties"]
+    chain = [
+        {
+            "text": "",
+            "tool_calls": [{
+                "id": "call_lookup",
+                "type": "function",
+                "function": {
+                    "name": first_tool["name"],
+                    "arguments": json.dumps({lookup_field: lookup_value}),
+                },
+            }],
+        },
+        {
+            "text": "",
+            "tool_calls": [{
+                "id": "call_submit",
+                "type": "function",
+                "function": {
+                    "name": second_tool["name"],
+                    "arguments": json.dumps({
+                        total_field: result["left"] + result["right"],
+                        token_field: result["token"],
+                    }),
+                },
+            }],
+        },
+    ]
+
+    assert validators._score_text_challenge(
+        challenge, "", 10, tool_chain=chain
+    ) == "healthy"
+    assert validators._score_text_challenge(
+        challenge, "", 10, tool_chain=chain[:1]
+    ) == "failed"
+    wrong = json.loads(json.dumps(chain))
+    wrong[1]["tool_calls"][0]["function"]["arguments"] = json.dumps({
+        total_field: result["left"] + result["right"] + 1,
+        token_field: result["token"],
+    })
+    assert validators._score_text_challenge(
+        challenge, "", 10, tool_chain=wrong
+    ) == "failed"
 
 
 def _challenge(kind: str, expected: str) -> dict:
@@ -136,6 +189,13 @@ def test_tool_call_family_requires_its_exact_scorer_capability():
 
     assert kinds == ("tool.call",)
     assert capabilities == {"text.tool_call.v1"}
+
+
+def test_tool_chain_family_requires_its_exact_scorer_capability():
+    kinds, capabilities = validators._supported_text_challenges(["text.tool_chain.v1"])
+
+    assert kinds == ("tool.chain",)
+    assert capabilities == {"text.tool_chain.v1"}
 
 
 def test_stop_sequence_challenge_commits_only_the_pre_stop_output():

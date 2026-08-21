@@ -967,6 +967,94 @@ async def test_tool_call_probe_forwards_schema_and_commits_witnessed_call(db, mo
 
 
 @pytest.mark.asyncio
+async def test_tool_chain_probe_runs_two_hard_targeted_stages_and_commits_transcript(
+    db, monkeypatch
+):
+    from grid_api.services import job_queue, token_stream
+
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, capabilities=["text.tool_chain.v1"])
+    issued = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=[{
+            "worker_id": str(uuid.uuid4()), "name": "rig-chain",
+            "models": ["qwen3-27b"], "job_types": ["text"],
+        }],
+        limit=1,
+    )
+    assignment = issued["assignments"][0]
+    challenge = assignment["challenge"]
+    first_fn = challenge["steps"][0]["tools"][0]["function"]
+    second_fn = challenge["steps"][1]["tools"][0]["function"]
+    lookup_field = next(iter(first_fn["parameters"]["properties"]))
+    lookup_value = challenge["prompt"].split(
+        f"{lookup_field!r} set to '", 1
+    )[1].split("'", 1)[0]
+    tool_result = challenge["steps"][1]["tool_result"]
+    total_field, token_field = second_fn["parameters"]["properties"]
+    first_calls = [{
+        "id": "call_lookup", "type": "function",
+        "function": {
+            "name": first_fn["name"],
+            "arguments": json.dumps({lookup_field: lookup_value}),
+        },
+    }]
+    second_calls = [{
+        "id": "call_submit", "type": "function",
+        "function": {
+            "name": second_fn["name"],
+            "arguments": json.dumps({
+                total_field: tool_result["left"] + tool_result["right"],
+                token_field: tool_result["token"],
+            }),
+        },
+    }]
+    submitted = []
+
+    async def capture_submit(job_id, payload, models, **kwargs):
+        submitted.append({"job_id": job_id, "payload": payload, "models": models, **kwargs})
+
+    async def completed_events(*_args, **_kwargs):
+        calls = first_calls if len(submitted) == 1 else second_calls
+        yield {
+            "text": token_stream.DONE_SENTINEL,
+            "full_text": "",
+            "tool_calls": calls,
+            "finish_reason": "tool_calls",
+            "usage": {"completion_tokens": 12},
+            "grid": {"worker": "rig-chain"},
+        }
+
+    monkeypatch.setattr(job_queue, "submit_job", capture_submit)
+    monkeypatch.setattr(token_stream, "subscribe_tokens", completed_events)
+    result = await validators_svc.probe_assignment(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+
+    assert result["status"] == "completed"
+    assert result["tool_chain"][0]["tool_calls"] == first_calls
+    assert result["tool_chain"][1]["tool_calls"] == second_calls
+    assert len(submitted) == 2
+    assert all(item["hard_target_worker"] == "rig-chain" for item in submitted)
+    assert submitted[0]["payload"]["request"]["tools"] == challenge["steps"][0]["tools"]
+    second_messages = submitted[1]["payload"]["request"]["messages"]
+    assert second_messages[1]["tool_calls"] == first_calls
+    assert json.loads(second_messages[2]["content"]) == tool_result
+    assert submitted[1]["payload"]["request"]["tools"] == challenge["steps"][1]["tools"]
+    async with await database.new_session() as session:
+        row = (await session.execute(
+            sa.select(assignments_t).where(assignments_t.c.id == assignment["assignment_id"])
+        )).mappings().one()
+    assert row["probe_status"] == "completed"
+    assert row["probe_verdict"] == "healthy"
+    assert row["probe_response_hash"] == result["response_hash"]
+
+
+@pytest.mark.asyncio
 async def test_stop_sequence_is_exposed_and_forwarded_to_the_targeted_request(db, monkeypatch):
     from grid_api.services import job_queue
 

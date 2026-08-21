@@ -47,7 +47,7 @@ PROBE_TIMEOUT_SECONDS = int(os.getenv("VALIDATOR_PROBE_TIMEOUT_SECONDS", "180") 
 PROBE_LATENCY_BUDGET_SECONDS = int(os.getenv("VALIDATOR_PROBE_LATENCY_BUDGET_SECONDS", "30") or 30)
 PROBE_MAX_ATTEMPTS = max(1, int(os.getenv("VALIDATOR_PROBE_MAX_ATTEMPTS", "2") or 2))
 PROBE_LEASE_SECONDS = max(
-    PROBE_TIMEOUT_SECONDS + 30,
+    (PROBE_TIMEOUT_SECONDS * 2) + 60,
     int(os.getenv("VALIDATOR_PROBE_LEASE_SECONDS", "240") or 240),
 )
 QUORUM_MIN = max(3, int(os.getenv("VALIDATOR_QUORUM_MIN", "3") or 3))
@@ -374,6 +374,7 @@ _TEXT_CHALLENGE_KINDS = (
     "context.retrieve",
     "logic.steps",
     "tool.call",
+    "tool.chain",
     "stop.sequence",
 )
 _TEXT_CHALLENGE_CAPABILITIES = {
@@ -383,6 +384,7 @@ _TEXT_CHALLENGE_CAPABILITIES = {
     "context.retrieve": "text.context.4k.v1",
     "logic.steps": "text.reasoning.multistep.v1",
     "tool.call": "text.tool_call.v1",
+    "tool.chain": "text.tool_chain.v1",
     "stop.sequence": "text.stop_sequence.v1",
 }
 
@@ -532,6 +534,74 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
             },
         }]
         tool_choice = {"type": "function", "function": {"name": function_name}}
+    elif selected == "tool.chain":
+        lookup_name = f"lookup_{secrets.token_hex(4)}"
+        submit_name = f"submit_{secrets.token_hex(4)}"
+        lookup_field = f"key_{secrets.token_hex(3)}"
+        total_field = f"total_{secrets.token_hex(3)}"
+        token_field = f"token_{secrets.token_hex(3)}"
+        lookup_key = secrets.token_hex(6).upper()
+        left = secrets.randbelow(80) + 11
+        right = secrets.randbelow(80) + 11
+        result_token = secrets.token_hex(6).upper()
+        first_arguments = {lookup_field: lookup_key}
+        tool_result = {"left": left, "right": right, "token": result_token}
+        second_arguments = {total_field: left + right, token_field: result_token}
+        first_expected = _canonical({"name": lookup_name, "arguments": first_arguments})
+        second_expected = _canonical({"name": submit_name, "arguments": second_arguments})
+        expected = _canonical([json.loads(first_expected), json.loads(second_expected)])
+        prompt = (
+            f"Call {lookup_name} exactly once with {lookup_field!r} set to {lookup_key!r}. "
+            f"After the tool result arrives, add its left and right integers, then call "
+            f"{submit_name} exactly once with {total_field!r} set to that sum and "
+            f"{token_field!r} copied exactly from the tool result. Do not answer in text."
+        )
+        lookup_tool = {
+            "type": "function",
+            "function": {
+                "name": lookup_name,
+                "description": "Look up one ephemeral validator record.",
+                "strict": True,
+                "parameters": {
+                    "type": "object",
+                    "properties": {lookup_field: {"type": "string"}},
+                    "required": [lookup_field],
+                    "additionalProperties": False,
+                },
+            },
+        }
+        submit_tool = {
+            "type": "function",
+            "function": {
+                "name": submit_name,
+                "description": "Submit the computed total and returned token.",
+                "strict": True,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        total_field: {"type": "integer"},
+                        token_field: {"type": "string"},
+                    },
+                    "required": [total_field, token_field],
+                    "additionalProperties": False,
+                },
+            },
+        }
+        steps = [
+            {
+                "tools": [lookup_tool],
+                "tool_choice": {"type": "function", "function": {"name": lookup_name}},
+                "expected_hash": _hash_text(first_expected),
+            },
+            {
+                "tool_result": tool_result,
+                "tools": [submit_tool],
+                "tool_choice": {"type": "function", "function": {"name": submit_name}},
+                "expected_hash": _hash_text(second_expected),
+            },
+        ]
+        kind = "tool.chain"
+        capability = "text.tool_chain.v1"
     else:
         expected = secrets.token_hex(6).upper()
         stop = f"<STOP_{secrets.token_hex(5).upper()}>"
@@ -553,6 +623,8 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
     if selected == "tool.call":
         challenge["tools"] = tools
         challenge["tool_choice"] = tool_choice
+    if selected == "tool.chain":
+        challenge["steps"] = steps
     if selected == "stop.sequence":
         challenge["stop"] = stop
     return challenge
@@ -601,12 +673,37 @@ def _normalized_tool_call(tool_calls: Any) -> str | None:
     return _canonical({"name": function["name"], "arguments": arguments})
 
 
-def _normalized_text_answer(kind: str, text: str, tool_calls: Any = None) -> str | None:
+def _normalized_tool_chain(tool_chain: Any) -> str | None:
+    if not isinstance(tool_chain, list) or len(tool_chain) != 2:
+        return None
+    normalized: list[dict[str, Any]] = []
+    for stage in tool_chain:
+        if not isinstance(stage, dict) or _strip_think(str(stage.get("text") or "")):
+            return None
+        calls = stage.get("tool_calls")
+        call = _normalized_tool_call(calls)
+        if call is None:
+            return None
+        raw_call = calls[0]
+        if not isinstance(raw_call.get("id"), str) or not raw_call["id"].strip():
+            return None
+        normalized.append(json.loads(call))
+    return _canonical(normalized)
+
+
+def _normalized_text_answer(
+    kind: str,
+    text: str,
+    tool_calls: Any = None,
+    tool_chain: Any = None,
+) -> str | None:
     answer = _strip_think(text)
     if kind == "tool.call":
         if answer:
             return None
         return _normalized_tool_call(tool_calls)
+    if kind == "tool.chain":
+        return _normalized_tool_chain(tool_chain)
     if not answer:
         return None
     if kind in ("echo", "context.retrieve", "stop.sequence"):
@@ -625,12 +722,19 @@ def _normalized_text_answer(kind: str, text: str, tool_calls: Any = None) -> str
 
 
 def _score_text_challenge(
-    challenge: dict[str, Any], text: str, latency_ms: int, *, tool_calls: Any = None
+    challenge: dict[str, Any],
+    text: str,
+    latency_ms: int,
+    *,
+    tool_calls: Any = None,
+    tool_chain: Any = None,
 ) -> str:
     expected_hash = str(challenge.get("expected_hash") or "")
     if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
         return "failed"
-    candidate = _normalized_text_answer(str(challenge.get("kind") or ""), text, tool_calls)
+    candidate = _normalized_text_answer(
+        str(challenge.get("kind") or ""), text, tool_calls, tool_chain
+    )
     if candidate is None:
         return "failed"
     if not secrets.compare_digest(_hash_text(candidate), expected_hash):
@@ -675,7 +779,7 @@ def _assignment_to_dict(
             key: challenge[key]
             for key in (
                 "kind", "prompt", "expected_hash", "max_tokens", "temperature",
-                "tools", "tool_choice", "stop",
+                "tools", "tool_choice", "steps", "stop",
             )
             if key in challenge
         }
@@ -918,7 +1022,7 @@ async def issue_assignments(
                     "modality": "text",
                     "capability": challenge["capability"],
                     "canary_kind": challenge["kind"],
-                    "scoring_policy_id": "text.generated.v4",
+                    "scoring_policy_id": "text.generated.v5",
                     "challenge": challenge,
                     "challenge_hash": _hash_obj({
                         "group_id": group_id,
@@ -1777,8 +1881,6 @@ async def probe_assignment(
     response. It never reserves credits, writes ledger rows, pays den, strikes,
     or slashes. The caller can use the returned hashes in a signed attestation.
     """
-    from . import job_queue, token_stream
-
     row, job_id = await _claim_probe_lease(
         account_id=account_id,
         validator_id=validator_id,
@@ -1786,101 +1888,113 @@ async def probe_assignment(
     )
     challenge = row["challenge"] or {}
     prompt = str(challenge.get("prompt") or "")
-    payload = {
-        "request": {
-            "model": row["model"],
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": int(challenge.get("max_tokens") or 32),
-            "temperature": float(challenge.get("temperature") or 0),
-            "stream": True,
-        },
-        "api_format": "openai-chat",
-        "prompt": prompt,
-        "max_length": int(challenge.get("max_tokens") or 32),
+    started = _now()
+    kind = str(challenge.get("kind") or "")
+    tool_chain = None
+    request = {
+        "model": row["model"],
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": int(challenge.get("max_tokens") or 32),
         "temperature": float(challenge.get("temperature") or 0),
-        "_validator_probe": True,
-        "_validator_assignment_id": assignment_id,
-        "_validator_probe_group_id": row["probe_group_id"],
-        "_validator_grid_nonce": row["grid_nonce"],
+        "stream": True,
     }
     for key in ("tools", "tool_choice", "stop"):
         if key in challenge:
-            payload["request"][key] = challenge[key]
+            request[key] = challenge[key]
 
-    started = _now()
-    try:
-        await job_queue.submit_job(
-            job_id,
-            payload,
-            [row["model"]],
-            job_type="text",
-            preferred_worker=row["target_worker_name"],
-            hard_target_worker=row["target_worker_name"],
-        )
-    except Exception as exc:
-        await _mark_probe(job_id, "failed")
-        logger.error(
-            "validator probe dispatch failed assignment=%s job=%s error_type=%s",
-            opaque_id(assignment_id),
-            opaque_id(job_id),
-            error_type(exc),
-        )
-        return {
-            "status": "error",
-            "assignment_id": assignment_id,
-            "job_id": job_id,
-            "message": "probe dispatch failed",
-            "code": 503,
+    if kind == "tool.chain":
+        steps = challenge.get("steps")
+        if not isinstance(steps, list) or len(steps) != 2:
+            await _mark_probe(job_id, "failed")
+            raise AssignmentError("tool-chain assignment is malformed")
+        request.update({"tools": steps[0]["tools"], "tool_choice": steps[0]["tool_choice"]})
+
+    stage = await _run_targeted_text_stage(
+        row=row,
+        assignment_id=assignment_id,
+        job_id=job_id,
+        prompt=prompt,
+        request=request,
+    )
+    if stage.get("status") != "completed":
+        await _mark_probe(job_id, str(stage.get("probe_status") or "failed"))
+        return {"assignment_id": assignment_id, "job_id": job_id, **stage}
+
+    full_text = str(stage.get("full_text") or "")
+    tool_calls = stage.get("tool_calls")
+    finish_reason = stage.get("finish_reason")
+    usage = stage.get("usage")
+    grid_meta = stage.get("grid")
+
+    if kind == "tool.chain":
+        first = {
+            "text": full_text,
+            "tool_calls": tool_calls,
+            "finish_reason": finish_reason,
         }
-
-    chunks: list[str] = []
-    full_text = ""
-    grid_meta = None
-    usage = None
-    tool_calls = None
-    finish_reason = None
-    try:
-        async for event in token_stream.subscribe_tokens(job_id, timeout=PROBE_TIMEOUT_SECONDS):
-            if event.get("error"):
-                await _mark_probe(job_id, "failed")
-                return {
-                    "status": "error",
-                    "assignment_id": assignment_id,
-                    "job_id": job_id,
-                    "message": event.get("error", "probe failed"),
-                    "code": event.get("code", 502),
-                }
-            if event.get("text") == token_stream.DONE_SENTINEL:
-                full_text = event.get("full_text") or "".join(chunks)
-                usage = event.get("usage")
-                grid_meta = event.get("grid")
-                tool_calls = event.get("tool_calls")
-                finish_reason = event.get("finish_reason")
-                break
-            chunks.append(token_stream.event_content_text(event))
-        else:
-            await _mark_probe(job_id, "timeout")
-            return {
-                "status": "error",
-                "assignment_id": assignment_id,
-                "job_id": job_id,
-                "message": "probe timed out",
-                "code": 504,
-            }
-    except Exception as exc:
-        await _mark_probe(job_id, "failed")
-        logger.error(
-            "validator probe failed assignment=%s job=%s error_type=%s",
-            opaque_id(assignment_id),
-            opaque_id(job_id),
-            error_type(exc),
+        tool_chain = [first]
+        normalized_first = _normalized_tool_call(tool_calls) if not _strip_think(full_text) else None
+        first_hash = str(challenge["steps"][0].get("expected_hash") or "")
+        first_call = tool_calls[0] if isinstance(tool_calls, list) and len(tool_calls) == 1 else {}
+        call_id = first_call.get("id") if isinstance(first_call, dict) else None
+        first_valid = bool(
+            normalized_first
+            and isinstance(call_id, str)
+            and call_id.strip()
+            and re.fullmatch(r"[0-9a-f]{64}", first_hash)
+            and secrets.compare_digest(_hash_text(normalized_first), first_hash)
         )
-        raise
+        if first_valid:
+            second_step = challenge["steps"][1]
+            second_request = {
+                "model": row["model"],
+                "messages": [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": None, "tool_calls": tool_calls},
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": _canonical(second_step["tool_result"]),
+                    },
+                ],
+                "tools": second_step["tools"],
+                "tool_choice": second_step["tool_choice"],
+                "max_tokens": int(challenge.get("max_tokens") or 32),
+                "temperature": float(challenge.get("temperature") or 0),
+                "stream": True,
+            }
+            second_job_id = str(uuid4())
+            second = await _run_targeted_text_stage(
+                row=row,
+                assignment_id=assignment_id,
+                job_id=second_job_id,
+                prompt=prompt,
+                request=second_request,
+            )
+            if second.get("status") != "completed":
+                await _mark_probe(job_id, str(second.get("probe_status") or "failed"))
+                return {"assignment_id": assignment_id, "job_id": job_id, **second}
+            full_text = str(second.get("full_text") or "")
+            tool_calls = second.get("tool_calls")
+            finish_reason = second.get("finish_reason")
+            usage = second.get("usage")
+            grid_meta = second.get("grid")
+            tool_chain.append({
+                "text": full_text,
+                "tool_calls": tool_calls,
+                "finish_reason": finish_reason,
+            })
 
-    response_commitment = (
-        _canonical({"text": full_text, "tool_calls": tool_calls})
-        if str(challenge.get("kind") or "") == "tool.call"
-        else full_text
+    if kind == "tool.call":
+        response_commitment = _canonical({"text": full_text, "tool_calls": tool_calls})
+    elif kind == "tool.chain":
+        response_commitment = _canonical({"steps": tool_chain})
+    else:
+        response_commitment = full_text
+    prompt_commitment = (
+        _canonical({"prompt": prompt, "steps": challenge.get("steps")})
+        if kind == "tool.chain"
+        else prompt
     )
     evidence = {
         "assignment_id": assignment_id,
@@ -1891,13 +2005,17 @@ async def probe_assignment(
         "modality": row["modality"],
         "capability": row["capability"],
         "canary_kind": row["canary_kind"],
-        "prompt_hash": _hash_text(str((row["challenge"] or {}).get("prompt") or "")),
+        "prompt_hash": _hash_text(prompt_commitment),
         "response_hash": _hash_text(response_commitment),
     }
     evidence["evidence_hash"] = _hash_obj(evidence)
     latency_ms = int((_now() - started).total_seconds() * 1000)
     probe_verdict = _score_text_challenge(
-        row["challenge"] or {}, full_text, latency_ms, tool_calls=tool_calls
+        row["challenge"] or {},
+        full_text,
+        latency_ms,
+        tool_calls=tool_calls,
+        tool_chain=tool_chain,
     )
     await _mark_probe(
         job_id,
@@ -1922,6 +2040,7 @@ async def probe_assignment(
         "canary_kind": row["canary_kind"],
         "output_text": full_text,
         "tool_calls": tool_calls,
+        "tool_chain": tool_chain,
         "finish_reason": finish_reason,
         "usage": usage,
         "grid": grid_meta,
@@ -1929,6 +2048,92 @@ async def probe_assignment(
         **evidence,
         "economic_effect": "none",
     }
+
+
+async def _run_targeted_text_stage(
+    *,
+    row: dict[str, Any],
+    assignment_id: str,
+    job_id: str,
+    prompt: str,
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    """Dispatch and witness one economically inert stage on the assigned worker."""
+    from . import job_queue, token_stream
+
+    payload = {
+        "request": request,
+        "api_format": "openai-chat",
+        "prompt": prompt,
+        "max_length": int(request.get("max_tokens") or 32),
+        "temperature": float(request.get("temperature") or 0),
+        "_validator_probe": True,
+        "_validator_assignment_id": assignment_id,
+        "_validator_probe_group_id": row["probe_group_id"],
+        "_validator_grid_nonce": row["grid_nonce"],
+    }
+    try:
+        await job_queue.submit_job(
+            job_id,
+            payload,
+            [row["model"]],
+            job_type="text",
+            preferred_worker=row["target_worker_name"],
+            hard_target_worker=row["target_worker_name"],
+        )
+    except Exception as exc:
+        logger.error(
+            "validator probe dispatch failed assignment=%s job=%s error_type=%s",
+            opaque_id(assignment_id),
+            opaque_id(job_id),
+            error_type(exc),
+        )
+        return {
+            "status": "error",
+            "probe_status": "failed",
+            "message": "probe dispatch failed",
+            "code": 503,
+        }
+
+    chunks: list[str] = []
+    try:
+        async for event in token_stream.subscribe_tokens(job_id, timeout=PROBE_TIMEOUT_SECONDS):
+            if event.get("error"):
+                return {
+                    "status": "error",
+                    "probe_status": "failed",
+                    "message": event.get("error", "probe failed"),
+                    "code": event.get("code", 502),
+                }
+            if event.get("text") == token_stream.DONE_SENTINEL:
+                return {
+                    "status": "completed",
+                    "full_text": event.get("full_text") or "".join(chunks),
+                    "usage": event.get("usage"),
+                    "grid": event.get("grid"),
+                    "tool_calls": event.get("tool_calls"),
+                    "finish_reason": event.get("finish_reason"),
+                }
+            chunks.append(token_stream.event_content_text(event))
+        return {
+            "status": "error",
+            "probe_status": "timeout",
+            "message": "probe timed out",
+            "code": 504,
+        }
+    except Exception as exc:
+        logger.error(
+            "validator probe failed assignment=%s job=%s error_type=%s",
+            opaque_id(assignment_id),
+            opaque_id(job_id),
+            error_type(exc),
+        )
+        return {
+            "status": "error",
+            "probe_status": "failed",
+            "message": "probe failed",
+            "code": 502,
+        }
 
 
 async def _claim_probe_lease(

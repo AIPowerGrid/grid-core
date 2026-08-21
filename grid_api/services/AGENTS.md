@@ -48,8 +48,10 @@ content sanitization, and reward settlement.
   assignment and authoritative vote per registered validator/group, and
   aggregates a conservative 3-of-5 preview quorum. Text groups use randomized
   exact-instruction, arithmetic, strict-JSON, context-retrieval, multistep
-  logic, exact function-call, and stop-sequence families; worker order must not
-  determine the family. Group allocation
+  logic, exact function-call, two-stage tool-chain, and stop-sequence families;
+  worker order must not determine the family. An accepted target-worker failure
+  becomes economically inert failed evidence; a coordinator dispatch failure
+  remains inconclusive. Group allocation
   must match the validator's advertised scorer capability; legacy
   `text.basic.v1` nodes receive only echo/arithmetic. Expected answers
   and Core's private verdict are not returned to nodes. The path remains non-economic and
