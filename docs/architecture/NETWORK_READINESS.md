@@ -161,14 +161,26 @@ fail closed.
 This does **not** satisfy the production-manager release requirement. Missing
 evidence still includes distinct real minimum/midrange/datacenter benchmark
 reports, an on-chain RecipeVault root, offline profile signing, the exact signed
-active profile, and platform-signing review. Do not replace those with synthetic
-reports or promote the qualification tag to a production download.
+active profile, Windows Authenticode, and supervised Linux/Windows staging.
+Media-worker `main` now records explicit signing state in the final manifest,
+builds both platforms on every change, and requires the stable `Manager release
+gate` in branch protection. Those source and CI controls prevent an unsigned or
+unbuilt candidate from appearing ready; they do not supply the missing hardware
+or signing evidence. Do not replace those with synthetic reports or promote the
+qualification tag to a production download.
 
-### 15. Independent text and media choices on `/run` - Implemented
+### 15. Independent text and media choices on `/run` - Partial, hardened rollout pending
 
-The live page exposes the signed text-worker path independently and presents a
-separate release-gated media-manager path. An unfinished media release no longer
-hides text-worker onboarding.
+The production page presents text and media independently, so an unfinished
+media release does not hide text onboarding. Its current release lookup is not
+yet the authoritative gate: it accepts published asset names without validating
+the complete manifest/checksum contract or platform-signing identities. The
+green website rollout PR adds exact asset-set, digest, size, SBOM, manifest, and
+platform-signing checks; exposes the benchmark-only media qualification tool as
+non-enrolling; and keeps final downloads closed until verified releases exist.
+That PR remains unmerged because website `main` deploys production. Do not call
+this item complete until the reviewed rollout is explicitly approved, deployed,
+and checked against both valid and deliberately incomplete release fixtures.
 
 ### 16. Three independent workers per flagship model - External
 
@@ -325,7 +337,9 @@ review, stale-review dismissal, admin compliance, linear history, resolved
 conversations, and no force-push/deletion. Administrative bypass and zero
 required reviews remain a sole-maintainer tradeoff on the other protected repos,
 so their rules do not prevent an admin from pushing before checks finish. Stale
-status names must be reconciled whenever a workflow matrix changes.
+status names must be reconciled whenever a workflow matrix changes. Media-worker
+`main` now requires a stable final manager-release gate in addition to its test,
+dependency, and secret checks; the gate itself depends on both platform builds.
 
 ### 32. CI, scanning, provenance, and deploy identity - Partial
 
@@ -338,7 +352,9 @@ baseline; validator history reports one retired local-path disclosure. Current
 Core and validator worktrees scan clean. Text, media, and validator release
 pipelines carry checksums, SBOM/provenance gates appropriate to their maturity.
 Text-worker `main` now requires the exact four-platform release-payload assembly
-check on every change. Validator `master` now requires one approving review,
+check on every change. Media-worker `main` records explicit Authenticode state,
+runs Linux and Windows manager packaging on every change, and requires their
+stable aggregate release gate. Validator `master` now requires one approving review,
 stale-review dismissal, admin enforcement, strict CI, linear history, resolved
 conversations, no force-push/deletion, and the exact four-platform payload check.
 Validator PR 2 adds a commit/tag/version-bound release manifest and blocks
