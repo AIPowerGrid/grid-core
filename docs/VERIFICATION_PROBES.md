@@ -127,9 +127,12 @@ in this rollout; image/video validator lanes are future work.
 Text challenge families are selected cryptographically rather than from worker
 ordering. Current candidate families are exact instruction, generated
 arithmetic, strict JSON, context retrieval, generated multistep logic, and an
-exact single-function call with randomized names and arguments. Tool-call
-evidence commits the witnessed text plus structured call; Core and the node
-normalize the call independently. Multi-turn tool chains remain future work.
+exact single-function call plus a two-stage tool-call chain with randomized
+names and arguments. Tool-call evidence commits the witnessed text plus
+structured calls; Core and the node normalize each call independently. The
+second stage is hard-targeted to the same worker and receives the first tool
+result through the ordinary OpenAI message contract. Longer chains remain
+future work.
 The stop-sequence family also verifies that the worker/backend honors one
 randomized OpenAI `stop` value instead of merely following a prompt.
 Group membership is capability-gated; legacy `text.basic.v1` nodes receive only
@@ -162,8 +165,8 @@ Deploy notes / learnings:
   `/home/aipg`.
 
 ### Follow-ups (known, not yet done)
-1. **Grader hardening** — add hidden code execution, tool-call chains, larger
-   context tiers, and parameter/transport compliance. Keep judge models a
+1. **Grader hardening** — add hidden code execution, longer tool-call chains,
+   larger context tiers, and token-budget/transport compliance. Keep judge models a
    supporting signal rather than an objective authority.
 2. **Media/video validator lanes** — keep text-only evidence live until media/video
    assignment generation, reference comparison, and scoring are designed.

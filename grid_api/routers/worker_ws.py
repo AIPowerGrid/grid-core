@@ -1086,7 +1086,25 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
         return True
 
     if gen["failed"]:
-        await token_stream.publish_error(job_id, "Validator probe failed on target worker.", code=502)
+        # A target worker that accepted the job but produced no valid completion
+        # is itself validator evidence. Publish a terminal witness instead of an
+        # HTTP-style transport error so the independent validator can commit and
+        # sign a failed verdict. This remains economically inert.
+        grid_meta = {
+            "worker_id": worker_id,
+            "assignment_id": payload.get("_validator_assignment_id"),
+            "grid_nonce": payload.get("_validator_grid_nonce"),
+            "probe_failed": True,
+            "economic_effect": "none",
+        }
+        await token_stream.publish_done(
+            job_id,
+            "",
+            "",
+            usage=gen.get("usage"),
+            finish_reason="error",
+            grid=grid_meta,
+        )
         await ws.send_json({"type": "ack", "id": job_id, "den": 0})
         return True
 
