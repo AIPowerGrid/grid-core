@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from grid_api.services import validators
+from grid_api.services import den, validators
 
 
 @pytest.mark.parametrize(
@@ -20,6 +20,7 @@ from grid_api.services import validators
         ("tool.call", "tool.call", "text.tool_call.v1"),
         ("tool.chain", "tool.chain", "text.tool_chain.v1"),
         ("stop.sequence", "stop.sequence", "text.stop_sequence.v1"),
+        ("token.limit", "token.limit", "text.token_limit.v1"),
     ],
 )
 def test_generated_challenge_families_hide_expected_answer(family, kind, capability):
@@ -205,6 +206,62 @@ def test_stop_sequence_challenge_commits_only_the_pre_stop_output():
     assert validators._score_text_challenge(challenge, prefix, 10) == "healthy"
     assert validators._score_text_challenge(challenge, prefix + remainder, 10) == "failed"
     assert challenge["stop"] not in prefix
+
+
+def _repeat_to_grid_tokens(token: str, minimum: int) -> str:
+    pieces = []
+    while den.count_tokens(" ".join(pieces)) < minimum:
+        pieces.append(token)
+    return " ".join(pieces)
+
+
+def test_token_limit_scoring_requires_repetition_cutoff_and_bounded_grid_count():
+    token = "repeat_marker"
+    challenge = {
+        "kind": "token.limit",
+        "expected_hash": hashlib.sha256(token.encode()).hexdigest(),
+        "max_tokens": 64,
+    }
+    answer = _repeat_to_grid_tokens(token, 32)
+
+    assert validators._score_text_challenge(
+        challenge, answer, 10, finish_reason="length"
+    ) == "healthy"
+    assert validators._score_text_challenge(
+        challenge, answer, 10, finish_reason="stop"
+    ) == "failed"
+    assert validators._score_text_challenge(
+        challenge, token, 10, finish_reason="length"
+    ) == "failed"
+    assert validators._score_text_challenge(
+        challenge,
+        answer.replace(token, "WRONG", 1),
+        10,
+        finish_reason="length",
+    ) == "failed"
+    oversized = _repeat_to_grid_tokens(token, 100)
+    assert validators._score_text_challenge(
+        challenge, oversized, 10, finish_reason="length"
+    ) == "failed"
+
+
+def test_token_limit_count_includes_reasoning_output():
+    token = "visible_marker"
+    challenge = {
+        "kind": "token.limit",
+        "expected_hash": hashlib.sha256(token.encode()).hexdigest(),
+        "max_tokens": 64,
+    }
+    answer = " ".join([token] * 3)
+    reasoning = _repeat_to_grid_tokens("thought", 30)
+
+    assert validators._score_text_challenge(
+        challenge,
+        answer,
+        10,
+        reasoning_text=reasoning,
+        finish_reason="length",
+    ) == "healthy"
 
 
 def test_modern_basic_scorers_can_finish_legacy_basic_groups():

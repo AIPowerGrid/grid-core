@@ -379,6 +379,7 @@ _TEXT_CHALLENGE_KINDS = (
     "tool.call",
     "tool.chain",
     "stop.sequence",
+    "token.limit",
 )
 _TEXT_CHALLENGE_CAPABILITIES = {
     "echo": "text.instruction.v1",
@@ -389,6 +390,7 @@ _TEXT_CHALLENGE_CAPABILITIES = {
     "tool.call": "text.tool_call.v1",
     "tool.chain": "text.tool_chain.v1",
     "stop.sequence": "text.stop_sequence.v1",
+    "token.limit": "text.token_limit.v1",
 }
 
 
@@ -555,6 +557,7 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
     if selected not in _TEXT_CHALLENGE_KINDS:
         raise ValueError("unsupported text challenge kind")
 
+    challenge_max_tokens = PROBE_MAX_TOKENS
     if selected == "echo":
         token = secrets.token_hex(8).upper()
         prompt = f"Reply with exactly this token and nothing else: {token}"
@@ -740,7 +743,7 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         ]
         kind = "tool.chain"
         capability = "text.tool_chain.v1"
-    else:
+    elif selected == "stop.sequence":
         expected = secrets.token_hex(6).upper()
         stop = f"<STOP_{secrets.token_hex(5).upper()}>"
         suffix = secrets.token_hex(6).upper()
@@ -750,11 +753,21 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         )
         kind = "stop.sequence"
         capability = "text.stop_sequence.v1"
+    else:
+        expected = secrets.token_hex(6).upper()
+        challenge_max_tokens = secrets.randbelow(97) + 160
+        prompt = (
+            f"Repeat exactly {expected} separated only by single spaces. Continue "
+            "repeating it until the generation limit stops you. Do not stop early, "
+            "add punctuation, or output any other visible text."
+        )
+        kind = "token.limit"
+        capability = "text.token_limit.v1"
     challenge = {
         "kind": kind,
         "prompt": prompt,
         "expected_hash": _hash_text(expected),
-        "max_tokens": PROBE_MAX_TOKENS,
+        "max_tokens": challenge_max_tokens,
         "temperature": 0,
         "capability": capability,
     }
@@ -859,6 +872,35 @@ def _normalized_text_answer(
     return None
 
 
+def _normalized_token_limit_answer(
+    challenge: dict[str, Any],
+    text: str,
+    reasoning_text: str,
+    finish_reason: str | None,
+) -> str | None:
+    """Verify gross output-budget compliance without claiming native-token parity."""
+    try:
+        max_tokens = int(challenge.get("max_tokens") or 0)
+    except (TypeError, ValueError):
+        return None
+    if max_tokens < 32 or finish_reason not in {"length", "max_tokens"}:
+        return None
+
+    answer = _strip_think(text)
+    pieces = answer.split()
+    if len(pieces) < 2 or any(piece != pieces[0] for piece in pieces):
+        return None
+
+    from .den import count_tokens
+
+    observed = count_tokens(text) + count_tokens(reasoning_text)
+    minimum = max(1, max_tokens // 2)
+    maximum = ((max_tokens * 5) + 3) // 4 + 8
+    if observed < minimum or observed > maximum:
+        return None
+    return pieces[0]
+
+
 def _score_text_challenge(
     challenge: dict[str, Any],
     text: str,
@@ -866,13 +908,22 @@ def _score_text_challenge(
     *,
     tool_calls: Any = None,
     tool_chain: Any = None,
+    reasoning_text: str = "",
+    finish_reason: str | None = None,
 ) -> str:
     expected_hash = str(challenge.get("expected_hash") or "")
     if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
         return "failed"
-    candidate = _normalized_text_answer(
-        str(challenge.get("kind") or ""), text, tool_calls, tool_chain
-    )
+    kind = str(challenge.get("kind") or "")
+    if kind == "token.limit":
+        candidate = _normalized_token_limit_answer(
+            challenge,
+            text,
+            reasoning_text,
+            finish_reason,
+        )
+    else:
+        candidate = _normalized_text_answer(kind, text, tool_calls, tool_chain)
     if candidate is None:
         return "failed"
     if not secrets.compare_digest(_hash_text(candidate), expected_hash):
@@ -2304,6 +2355,7 @@ async def probe_assignment(
         return {"assignment_id": assignment_id, "job_id": job_id, **stage}
 
     full_text = str(stage.get("full_text") or "")
+    full_reasoning = str(stage.get("full_reasoning") or "")
     tool_calls = stage.get("tool_calls")
     finish_reason = stage.get("finish_reason")
     usage = stage.get("usage")
@@ -2358,6 +2410,7 @@ async def probe_assignment(
                 await _mark_probe(job_id, str(second.get("probe_status") or "failed"))
                 return {"assignment_id": assignment_id, "job_id": job_id, **second}
             full_text = str(second.get("full_text") or "")
+            full_reasoning = str(second.get("full_reasoning") or "")
             tool_calls = second.get("tool_calls")
             finish_reason = second.get("finish_reason")
             usage = second.get("usage")
@@ -2372,6 +2425,12 @@ async def probe_assignment(
         response_commitment = _canonical({"text": full_text, "tool_calls": tool_calls})
     elif kind == "tool.chain":
         response_commitment = _canonical({"steps": tool_chain})
+    elif kind == "token.limit":
+        response_commitment = _canonical({
+            "text": full_text,
+            "reasoning": full_reasoning,
+            "finish_reason": finish_reason,
+        })
     else:
         response_commitment = full_text
     prompt_commitment = (
@@ -2399,6 +2458,8 @@ async def probe_assignment(
         latency_ms,
         tool_calls=tool_calls,
         tool_chain=tool_chain,
+        reasoning_text=full_reasoning,
+        finish_reason=finish_reason,
     )
     await _mark_probe(
         job_id,
@@ -2422,6 +2483,7 @@ async def probe_assignment(
         "capability": row["capability"],
         "canary_kind": row["canary_kind"],
         "output_text": full_text,
+        "reasoning_text": full_reasoning if kind == "token.limit" else None,
         "tool_calls": tool_calls,
         "tool_chain": tool_chain,
         "finish_reason": finish_reason,
@@ -3046,6 +3108,7 @@ async def _run_targeted_text_stage(
                 return {
                     "status": "completed",
                     "full_text": event.get("full_text") or "".join(chunks),
+                    "full_reasoning": event.get("full_reasoning") or "",
                     "usage": event.get("usage"),
                     "grid": event.get("grid"),
                     "tool_calls": event.get("tool_calls"),
