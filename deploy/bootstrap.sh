@@ -44,8 +44,9 @@ test "$(sudo -H -u aipg git -C "$RELEASE" rev-parse HEAD)" = "$COMMIT"
 test -z "$(sudo -H -u aipg git -C "$RELEASE" status --porcelain)"
 
 sudo -H -u aipg python3 -m venv "$RELEASE/.venv"
-sudo -H -u aipg "$RELEASE/.venv/bin/pip" install --quiet --upgrade pip
-sudo -H -u aipg "$RELEASE/.venv/bin/pip" install --quiet -r "$RELEASE/requirements-grid.txt"
+sudo -H -u aipg "$RELEASE/.venv/bin/pip" install --quiet --require-hashes \
+    --only-binary=:all: \
+    -r "$RELEASE/requirements-grid.lock"
 sudo -H -u aipg "$RELEASE/.venv/bin/pip" check
 
 echo "── [3/6] PostgreSQL ──"

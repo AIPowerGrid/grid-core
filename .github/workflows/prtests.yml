@@ -17,6 +17,7 @@ on:
       - 'docker-compose.yaml'
       - 'pyproject.toml'
       - 'requirements*.txt'
+      - 'requirements-grid.lock'
       - '.github/workflows/prtests.yml'
 
 permissions:
@@ -49,9 +50,29 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - run: python -m pip install --upgrade pip wheel setuptools
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: '0.12.5'
+          enable-cache: false
+      - name: Verify production dependency lock
+        run: |
+          uv pip compile requirements-grid.txt \
+            --python-version 3.12 \
+            --python-platform x86_64-manylinux_2_28 \
+            --generate-hashes \
+            --no-emit-index-url \
+            --custom-compile-command 'uv pip compile requirements-grid.txt --python-version 3.12 --python-platform x86_64-manylinux_2_28 --generate-hashes --no-emit-index-url --output-file requirements-grid.lock' \
+            --output-file requirements-grid.lock
+          git diff --exit-code -- requirements-grid.lock
       - name: Install deps
-        run: pip install -r requirements-grid.txt pytest pytest-asyncio
+        run: >-
+          pip install --require-hashes --only-binary=:all:
+          -r requirements-grid.lock && pip install pytest pytest-asyncio
+      - name: Audit production dependencies
+        run: >-
+          uvx --from pip-audit==2.9.0 pip-audit
+          -r requirements-grid.lock --require-hashes --no-deps --disable-pip
       - name: Retired runtime gate
         run: python scripts/check_retired_runtime.py
       - name: Migration and schema parity
