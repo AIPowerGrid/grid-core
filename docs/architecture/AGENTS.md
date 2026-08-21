@@ -17,7 +17,8 @@ validation, worker incentives, and trust boundaries.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only
-  invariants, scorecard privacy rules, and future economic gates.
+  invariants, scorer-capability matching, scorecard privacy rules, and future
+  economic gates.
 - `WORKER_PROFILE_V1.md` - signed worker installation profiles, ACE-Step audio
   data flow, identity/privacy boundaries, and go-live gates.
 - `ACE_STEP_AUDIO_CONTROLS.md` - governed ACE-Step control surface, quality

@@ -51,7 +51,7 @@ def _sign(payload, private_key=TEST_PRIVATE_KEY):
     ).signature.hex()
 
 
-async def _register(account_id, private_key=TEST_PRIVATE_KEY):
+async def _register(account_id, private_key=TEST_PRIVATE_KEY, capabilities=None):
     wallet = Account.from_key(private_key).address.lower()
     async with await database.new_session() as session:
         await session.execute(
@@ -62,7 +62,7 @@ async def _register(account_id, private_key=TEST_PRIVATE_KEY):
         "registration_schema": "aipg.validator.registration.v1",
         "validator": wallet,
         "software_version": "0.1.0-test",
-        "capabilities": ["text.basic.v1"],
+        "capabilities": capabilities or ["text.basic.v1"],
         "ts": int(time.time()),
     }
     registered = await validators_svc.register_validator(
@@ -633,6 +633,56 @@ async def test_three_distinct_registered_validators_accept_shared_probe_group(db
         ).mappings().one()
     assert finalized["quorum_status"] == "finalized"
     assert finalized["quorum_outcome"] == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_assignment_groups_require_matching_validator_scorer_capability(db):
+    worker_id = str(uuid.uuid4())
+    active_workers = [{
+        "worker_id": worker_id,
+        "name": "rig-capabilities",
+        "models": ["qwen3-27b"],
+        "job_types": ["text"],
+    }]
+
+    rich_key = "0x" + f"{30:064x}"
+    rich_wallet = Account.from_key(rich_key).address.lower()
+    rich_account = uuid.uuid4()
+    rich_validator = await _register(
+        rich_account,
+        rich_key,
+        capabilities=["text.structured.v1"],
+    )
+    rich = await validators_svc.issue_assignments(
+        account_id=rich_account,
+        validator_id=rich_validator,
+        validator_wallet=rich_wallet,
+        active_workers=active_workers,
+        limit=1,
+    )
+    rich_assignment = rich["assignments"][0]
+    assert rich_assignment["capability"] == "text.structured.v1"
+    assert rich_assignment["canary_kind"] == "json.object"
+
+    legacy_key = "0x" + f"{31:064x}"
+    legacy_wallet = Account.from_key(legacy_key).address.lower()
+    legacy_account = uuid.uuid4()
+    legacy_validator = await _register(legacy_account, legacy_key)
+    legacy = await validators_svc.issue_assignments(
+        account_id=legacy_account,
+        validator_id=legacy_validator,
+        validator_wallet=legacy_wallet,
+        active_workers=active_workers,
+        limit=1,
+    )
+    legacy_assignment = legacy["assignments"][0]
+
+    assert legacy_assignment["probe_group_id"] != rich_assignment["probe_group_id"]
+    assert legacy_assignment["capability"] in {
+        "text.instruction.v1",
+        "text.reasoning.v1",
+    }
+    assert legacy_assignment["canary_kind"] in {"echo", "math.add", "math.mul"}
 
 
 @pytest.mark.asyncio

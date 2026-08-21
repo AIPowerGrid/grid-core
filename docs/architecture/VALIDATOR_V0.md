@@ -70,9 +70,23 @@ commitment, never Core's plaintext expected answer. Probe responses reveal the
 committed output and transport hashes, never Core's private verdict. Each node
 scores that output locally before signing.
 
+Candidate text families are randomized exact instruction, generated
+arithmetic, strict JSON object compliance, context retrieval, and generated
+multistep integer logic. The validator registration must advertise the matching
+scorer capability before it can join that probe group. Legacy
+`text.basic.v1` registrations are compatible only with echo/arithmetic. This
+prevents an older binary from turning an unsupported challenge into a false
+worker failure.
+
 The targeted probe is isolated from customer economics: it does not reserve or
 settle demand credits, award den, create a payout ledger completion, or apply a
 worker strike.
+
+Core hard-targets the job internally but sends the worker an ordinary opaque
+UUID and a payload with all validator assignment/group/nonce markers removed.
+Those fields are restored only into the Core-to-validator evidence response
+after completion. Prompt fingerprinting remains an adversarial concern, so V0
+evidence still has no economic authority.
 
 ## Privacy
 

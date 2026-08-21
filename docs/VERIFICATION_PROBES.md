@@ -1,8 +1,10 @@
 # Verification Probes — coordinator canaries → validator consensus
 
-**Status:** Coordinator canaries are live evidence-only. The assignment-bound
-validator preview API is live as of 2026-07-02 (`63adc209`, Alembic `0006`).
-Economic validator consensus, rewards, and slashing are still not live.
+**Status:** Coordinator canaries and the original assignment schema are live
+evidence-only. Registered validators, shared probe groups, targeted assignment
+leases, and distinct-identity 3-of-5 quorum are merged candidates through
+Alembic `0022`, not production-live. Economic validator authority, rewards,
+staking, and slashing are not live.
 
 ## The problem
 
@@ -11,9 +13,9 @@ returned*, and *that it finished*. Nothing verifies any of it. That is fine for 
 network and **unsafe the moment real money flows**: a rational worker operator's best
 move becomes "run the cheapest possible model (or a cache) and pocket the difference."
 Verifiable compute — did the worker honestly run the model it claimed? — is the single
-hardest and most valuable problem in decentralized inference, and today we have no live
-answer. `grid_api/services/enforcement.py` + `VALIDATOR_V0.md` describe evidence with
-no teeth; nothing populates it.
+hardest and most valuable problem in decentralized inference. Coordinator
+canaries provide a centralized evidence signal today; the shared-quorum preview
+builds a distributed evidence path, still with no economic teeth.
 
 ## The plan: one scoring engine, two trust models, in sequence
 
@@ -21,11 +23,11 @@ We verify the same *fact* two ways, in order:
 
 | | Phase 1 — coordinator canaries (now) | Phase 2 — validator consensus (later) |
 |---|---|---|
-| Who measures | the coordinator (already trusted) | independent **staked** validator nodes |
-| Trust model | centralized spot-check | decentralized, quorum |
-| Economic weight | **none** (evidence only) | reward / slash |
-| New assumptions | none | staking, quorum, dispute, slashing |
-| Ships | today, dark | a quarter of work |
+| Who measures | the coordinator (already trusted) | registered validators, then independently operated bonded validators |
+| Trust model | centralized spot-check | preview: distinct signed identities; future: independent quorum + disputes |
+| Economic weight | **none** (evidence only) | preview: **none**; future: accepted-evidence reward / objective-fraud slash |
+| New assumptions | none | preview: signed assignment binding; future: operator independence, bonding, disputes |
+| Ships | live evidence-only | candidate preview through `0022`; economic phase deferred |
 
 **Build order rationale:** we ARE a centralized coordinator today; a coordinator that
 spot-checks its own workers is coherent and needs nothing new. A validator network that
@@ -122,6 +124,13 @@ but the whole preview surface has `economic_effect: none`: no routing, reward,
 strike, slash, credit, or payout effect. Text assignments are the only live lane
 in this rollout; image/video validator lanes are future work.
 
+Text challenge families are selected cryptographically rather than from worker
+ordering. Current candidate families are exact instruction, generated
+arithmetic, strict JSON, context retrieval, and generated multistep logic.
+Group membership is capability-gated; legacy `text.basic.v1` nodes receive only
+echo/arithmetic. Each validator normalizes the output and checks the one-way
+expected-answer commitment locally instead of signing Core's private verdict.
+
 ## Deployment status (2026-08-20)
 
 Coordinator-run probes remain live and evidence-only. Registered-validator
@@ -148,8 +157,9 @@ Deploy notes / learnings:
   `/home/aipg`.
 
 ### Follow-ups (known, not yet done)
-1. **Grader hardening** — add semantic grading / a judge model for open-ended canaries;
-   current bank is deterministic factual (arithmetic, capitals) only.
+1. **Grader hardening** — add hidden code execution, tool-call chains, larger
+   context tiers, and parameter/transport compliance. Keep judge models a
+   supporting signal rather than an objective authority.
 2. **Media/video validator lanes** — keep text-only evidence live until media/video
    assignment generation, reference comparison, and scoring are designed.
 3. **Economic gates** — do not attach routing, validator rewards, worker strikes, or
@@ -188,8 +198,9 @@ detectors, both blocked on infrastructure we don't have yet:
 
 ## Future gates before verdicts get teeth (do NOT skip)
 
-1. **Signed attestations** — EIP-4361/712 so an attestation is attributable and
-   non-repudiable (coordinator can start signing before validators exist).
+1. **Signed attestations** — registered preview nodes already use EIP-191 over a
+   canonical assignment payload. Any future contract-verifiable EIP-712 domain
+   must preserve assignment, nonce, group, and evidence-hash binding.
 2. **Model-swap detection beyond canaries** — canaries catch a broken/garbage worker; a
    *smart* cheater runs a smaller model that still answers "17+5". Catching that needs
    logprob/perplexity fingerprinting or challenge-response a small model can't fake, and/or
@@ -202,7 +213,7 @@ detectors, both blocked on infrastructure we don't have yet:
 
 ## Honest external story
 
-"Verification starts coordinator-run and progressively decentralizes to staked validators,
+"Verification starts coordinator-run and progressively decentralizes to bonded validators,
 on a data path built for it from day one." Stronger than either "we're decentralized"
-(false today) or "we have no verification" (also true today). See `GRID_ECONOMICS.md`,
+(false today) or "we have no verification" (also false today). See `GRID_ECONOMICS.md`,
 `VALIDATOR_V0.md`, `validator-rewards-design`.
