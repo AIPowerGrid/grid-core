@@ -18,7 +18,8 @@ content sanitization, and reward settlement.
   from credit value), `pricing.py`, `ledger.py` (incl. `content_hash` — real
   sha256 of witnessed output or NULL, never sha256("")), `den.py` (den
   accounting), `accounts.py` (scoped keys and payout preference),
-  `identities.py` (verified identities, aliases, and value-conserving merges),
+  `identities.py` (verified identities, keyed subject lookups, aliases, and
+  value-conserving merges),
   `user_tokens.py` (Core-issued short-lived sessions), `service_auth.py`
   (bounded service clients + proof exchange), `wallet_proofs.py` (EOA and
   deployed EIP-1271 personal-sign verification on Base), `service_limits.py` (fail-closed
@@ -118,6 +119,10 @@ content sanitization, and reward settlement.
 - Account merges require proof of both sides, refuse active holds, revoke source
   keys, preserve accrued payout reachability, and move purchased balance through
   paired append-only ledger entries.
+- Identity subjects use a server-keyed, domain-separated digest. Runtime lookup
+  accepts the historical unkeyed SHA-256 form only to preserve existing logins
+  and atomically upgrades a proved legacy row. Never remove that dual-read path
+  until production has evidence that no legacy identity rows remain.
 - Deposit senders must match a verified wallet identity on the canonical
   account. Never accept a client-supplied funding address without checking its
   verified identity hash. A transaction or receipt that the configured RPC has

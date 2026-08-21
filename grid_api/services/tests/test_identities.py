@@ -91,6 +91,121 @@ def test_oauth_subjects_are_provider_specific_and_legacy_prefix_normalized():
     assert identities.subject_hash("google", "google_123") == identities.subject_hash("google", "123")
     assert identities.subject_hash("github", "github_123") == identities.subject_hash("github", "123")
     assert identities.subject_hash("google", "123") != identities.subject_hash("github", "123")
+    assert identities.subject_hash("google", "123") != identities.legacy_subject_hash("google", "123")
+
+
+@pytest.mark.asyncio
+async def test_resolve_legacy_identity_upgrades_to_keyed_hash(db):
+    account_id = await _account()
+    subject = "legacy-google-subject"
+    legacy = identities.legacy_subject_hash("google", subject)
+    current = identities.subject_hash("google", subject)
+    now = datetime.now(timezone.utc)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.insert(account_identities).values(
+                id=uuid4(),
+                account_id=account_id,
+                kind="google",
+                subject_hash=legacy,
+                display_hint="Google account",
+                metadata={"source": "legacy"},
+                verified_at=now,
+                is_primary=True,
+                created=now,
+            )
+        )
+        await session.commit()
+
+    assert await identities.resolve_identity("google", subject) == account_id
+
+    async with await database.new_session() as session:
+        stored = await session.scalar(
+            sa.select(account_identities.c.subject_hash).where(
+                account_identities.c.account_id == account_id,
+                account_identities.c.kind == "google",
+            )
+        )
+    assert stored == current
+
+
+@pytest.mark.asyncio
+async def test_attach_legacy_identity_upgrades_without_creating_duplicate(db):
+    account_id = await _account()
+    wallet = "0x" + "ab" * 20
+    legacy = identities.legacy_subject_hash("wallet", wallet)
+    now = datetime.now(timezone.utc)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.insert(account_identities).values(
+                id=uuid4(),
+                account_id=account_id,
+                kind="wallet",
+                subject_hash=legacy,
+                display_hint=wallet,
+                metadata={"source": "legacy"},
+                verified_at=now,
+                is_primary=True,
+                created=now,
+            )
+        )
+        await session.commit()
+
+    result = await identities.attach_identity(account_id, "wallet", wallet)
+
+    assert result["status"] == "already"
+    async with await database.new_session() as session:
+        rows = (
+            await session.execute(
+                sa.select(account_identities.c.subject_hash).where(
+                    account_identities.c.account_id == account_id,
+                    account_identities.c.kind == "wallet",
+                )
+            )
+        ).scalars().all()
+    assert rows == [identities.subject_hash("wallet", wallet)]
+
+
+@pytest.mark.asyncio
+async def test_conflicting_legacy_and_keyed_identity_owners_fail_closed(db):
+    legacy_owner = await _account()
+    keyed_owner = await _account()
+    subject = "conflicting-google-subject"
+    now = datetime.now(timezone.utc)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.insert(account_identities),
+            [
+                {
+                    "id": uuid4(),
+                    "account_id": legacy_owner,
+                    "kind": "google",
+                    "subject_hash": identities.legacy_subject_hash("google", subject),
+                    "display_hint": "Legacy Google",
+                    "metadata": {},
+                    "verified_at": now,
+                    "is_primary": True,
+                    "created": now,
+                },
+                {
+                    "id": uuid4(),
+                    "account_id": keyed_owner,
+                    "kind": "google",
+                    "subject_hash": identities.subject_hash("google", subject),
+                    "display_hint": "Keyed Google",
+                    "metadata": {},
+                    "verified_at": now,
+                    "is_primary": True,
+                    "created": now,
+                },
+            ],
+        )
+        await session.commit()
+
+    with pytest.raises(RuntimeError, match="multiple accounts"):
+        await identities.resolve_identity("google", subject)
+    with pytest.raises(RuntimeError, match="multiple accounts"):
+        await identities.attach_identity(legacy_owner, "google", subject)
 
 
 @pytest.mark.asyncio
