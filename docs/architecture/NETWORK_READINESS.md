@@ -34,7 +34,9 @@ At this snapshot:
 - validator rewards, validator stake, worker penalties from validator evidence,
   and Core federation are off;
 - charging remains a narrow allowlist canary rather than global; and
-- no public validator binary release or qualifying media-manager release exists.
+- no public validator binary release or production-capable media-manager
+  release exists. A benchmark-only media-manager qualification prerelease is
+  public, but it cannot enroll with the Grid or advertise capabilities.
 
 Read-only host verification on 2026-08-21 confirmed the immutable release and
 database revision above and found no scheduled database backup or off-host
@@ -148,12 +150,19 @@ the privacy-safe subset. Production endpoint rollout is pending.
 
 ### 14. Public media-worker manager release - External/Partial
 
-Manager packaging and fresh standalone Linux/Windows qualification builds pass,
-but the release trust contract correctly blocks publication. Missing evidence
-includes distinct real minimum/midrange/datacenter benchmark reports, an
-on-chain RecipeVault root, offline profile signing, the exact signed active
-profile, and platform-signing review. Do not replace those with synthetic
-reports or an unsigned draft profile.
+The immutable `manager-qualification-v0.1.0-preview.1` prerelease now publishes
+standalone Linux and Windows benchmark tools, `SHA256SUMS`, an SPDX SBOM, a
+machine-readable restriction manifest, and GitHub build-provenance attestations.
+An independent clean download verified every checksum, manifest gate, and
+attestation. The bundled profile is deliberately unsigned: the tool can install
+and benchmark locally, but Core enrollment and capability advertisement both
+fail closed.
+
+This does **not** satisfy the production-manager release requirement. Missing
+evidence still includes distinct real minimum/midrange/datacenter benchmark
+reports, an on-chain RecipeVault root, offline profile signing, the exact signed
+active profile, and platform-signing review. Do not replace those with synthetic
+reports or promote the qualification tag to a production download.
 
 ### 15. Independent text and media choices on `/run` - Implemented
 
