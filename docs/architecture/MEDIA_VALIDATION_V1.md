@@ -1,6 +1,7 @@
 # Media Validation V1
 
-**Status:** accepted design; not implemented or production-live.
+**Status:** accepted design; schema/selector foundation implemented dark, not
+assignment-wired or production-live.
 
 This document defines the trust boundary for assignment-bound image and video
 validation. It deliberately does not enable media assignments, reference-worker
@@ -78,7 +79,7 @@ background finalized-block sync and a durable cache.
 
 ### Reference eligibility
 
-Core needs a `grid_validator_reference_workers` record keyed by
+Core has a dark `grid_validator_reference_workers` record keyed by
 `(worker_id, model, modality)`. It carries:
 
 - worker, account, and payout-wallet attribution;
@@ -93,6 +94,10 @@ configured Base chain, reviewed registry address and runtime code, finalized
 block, minimum bond, active status, and non-slashed status. A stale, missing, or
 ambiguous bond snapshot removes the worker from selection without affecting
 ordinary production routing.
+
+Migration `0023` and `services/validator_references.py` implement the durable
+record and fail-closed identity/freshness/rotation selector. No assignment or
+dispatch path calls it yet.
 
 The currently deployed WorkerRegistry does not yet provide the reviewed
 cooldown-backed bond contract required by this design. Until that facet and its

@@ -339,6 +339,83 @@ workers = sa.Table(
 )
 
 
+# Bond and quality snapshots used only to select rotating media-validation
+# references. Rows are written by a future finalized-block background sync and
+# are never worker self-report. The table remains empty until the reviewed,
+# cooldown-backed WorkerRegistry is deployed and verified.
+validator_reference_workers = sa.Table(
+    "grid_validator_reference_workers",
+    metadata,
+    sa.Column(
+        "worker_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_workers.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column("model", sa.String(255), primary_key=True),
+    sa.Column("modality", sa.String(16), primary_key=True),
+    sa.Column(
+        "account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("payout_wallet", sa.String(42), nullable=False, index=True),
+    sa.Column("status", sa.String(16), nullable=False, default="paused", index=True),
+    sa.Column("status_reason", sa.String(255), nullable=False),
+    sa.Column("bond_contract", sa.String(42), nullable=True),
+    sa.Column("bond_chain_id", sa.BigInteger, nullable=True),
+    sa.Column("bond_finalized_block", sa.BigInteger, nullable=True),
+    sa.Column("bond_amount_raw", sa.Numeric(78, 0), nullable=True),
+    sa.Column("bond_active", sa.Boolean, nullable=False, default=False),
+    sa.Column("bond_slashed", sa.Boolean, nullable=False, default=False),
+    sa.Column("bond_verifier_version", sa.String(64), nullable=True),
+    sa.Column("bond_verified_at", sa.DateTime(timezone=True), nullable=True, index=True),
+    sa.Column("quality_window_start", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("quality_window_end", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("quality_pass_rate", sa.Float, nullable=True),
+    sa.Column("quality_reviewed_at", sa.DateTime(timezone=True), nullable=True, index=True),
+    sa.Column("last_selected", sa.DateTime(timezone=True), nullable=True, index=True),
+    sa.Column("selection_count", sa.BigInteger, nullable=False, default=0),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.CheckConstraint(
+        "modality IN ('image', 'video')",
+        name="ck_grid_validator_reference_workers_modality",
+    ),
+    sa.CheckConstraint(
+        "status IN ('active', 'paused', 'revoked')",
+        name="ck_grid_validator_reference_workers_status",
+    ),
+    sa.CheckConstraint(
+        "quality_pass_rate IS NULL OR (quality_pass_rate >= 0 AND quality_pass_rate <= 1)",
+        name="ck_grid_validator_reference_workers_quality_pass_rate",
+    ),
+    sa.CheckConstraint(
+        "selection_count >= 0",
+        name="ck_grid_validator_reference_workers_selection_count",
+    ),
+    sa.CheckConstraint(
+        "bond_chain_id IS NULL OR bond_chain_id > 0",
+        name="ck_grid_validator_reference_workers_chain_id",
+    ),
+    sa.CheckConstraint(
+        "bond_finalized_block IS NULL OR bond_finalized_block >= 0",
+        name="ck_grid_validator_reference_workers_finalized_block",
+    ),
+    sa.CheckConstraint(
+        "bond_amount_raw IS NULL OR bond_amount_raw >= 0",
+        name="ck_grid_validator_reference_workers_bond_amount",
+    ),
+    sa.CheckConstraint(
+        "quality_window_start IS NULL OR quality_window_end IS NULL "
+        "OR quality_window_end >= quality_window_start",
+        name="ck_grid_validator_reference_workers_quality_window",
+    ),
+)
+
+
 # ── Jobs (cache) ─────────────────────────────────────────────────────────
 # Hot dispatch state for all job types. Rows are prunable once finished —
 # the ledger carries the durable record. status: queued → dispatched →
