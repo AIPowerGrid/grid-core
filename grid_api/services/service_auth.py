@@ -18,6 +18,7 @@ import sqlalchemy as sa
 from fastapi import HTTPException
 
 from ..database import new_session
+from ..safe_logging import error_type, opaque_id
 from ..v2.schema import service_clients, service_events
 from . import user_tokens
 
@@ -186,15 +187,15 @@ async def record_event(
                 ),
             )
             await session.commit()
-    except Exception:
+    except Exception as exc:
         # Authentication must not fail because audit telemetry was duplicated or
         # temporarily unavailable. Auth decisions themselves remain fail-closed.
         logger.warning(
-            "service event write failed service=%s event=%s ref=%s",
-            service_id,
+            "service event write failed service=%s event=%s ref=%s error_type=%s",
+            opaque_id(service_id),
             event_type,
-            ref,
-            exc_info=True,
+            opaque_id(ref),
+            error_type(exc),
         )
 
 

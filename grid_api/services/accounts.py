@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..auth import hash_api_key
 from ..database import new_session
+from ..safe_logging import error_type, opaque_id
 from ..v2.schema import account_identities as identities_table
 from ..v2.schema import accounts as accounts_table
 from ..v2.schema import api_keys as api_keys_table
@@ -156,8 +157,8 @@ async def resolve_api_key(plain_key: str) -> dict | None:
                     sa.update(accounts_table).where(accounts_table.c.id == canonical_id).values(last_active=datetime.now(timezone.utc)),
                 )
                 await session.commit()
-            except Exception:
-                logger.debug("last_used stamp failed", exc_info=True)
+            except Exception as exc:
+                logger.debug("last_used stamp failed error_type=%s", error_type(exc))
 
             return {
                 "source": "v2",
@@ -480,9 +481,17 @@ async def create_account(
 
             await promotions.ensure_builtin_campaign()
             await promotions.grant_once(account_id)
-        except Exception:
-            logger.warning("Welcome grant failed for account %s", account_id, exc_info=True)
-    logger.info(f"Account created: {account_id} (wallet={wallet or '-'})")
+        except Exception as exc:
+            logger.warning(
+                "welcome grant failed account=%s error_type=%s",
+                opaque_id(account_id),
+                error_type(exc),
+            )
+    logger.info(
+        "account created account=%s wallet_attached=%s",
+        opaque_id(account_id),
+        bool(wallet),
+    )
     from . import alerts
 
     provider = (
@@ -940,12 +949,14 @@ async def adopt_service_client(
     return {"id": sid, "account_id": str(aid), "name": name}
 
 
-async def rotate_service_key(service_id: str) -> str:
+async def rotate_service_key(service_id: str, *, replacement_key: str | None = None) -> str:
     """Atomically revoke a service's old keys and preserve their authority."""
     from .service_auth import normalize_service_id
 
     sid = normalize_service_id(service_id)
-    plain = generate_api_key()
+    plain = replacement_key or generate_api_key()
+    if not plain.startswith(API_KEY_PREFIX) or len(plain) < 32:
+        raise ValueError("replacement service key is malformed")
     now = datetime.now(timezone.utc)
     async with await new_session() as session:
         client = (
@@ -1051,7 +1062,11 @@ async def set_payout_wallet(account_id, address: str | None) -> str | None:
             sa.update(accounts_table).where(accounts_table.c.id == account_id).values(payout_wallet=value),
         )
         await session.commit()
-    logger.info(f"payout_wallet set: account={account_id} -> {value or '(cleared)'}")
+    logger.info(
+        "payout wallet updated account=%s configured=%s",
+        opaque_id(account_id),
+        bool(value),
+    )
     return value
 
 
@@ -1083,5 +1098,9 @@ async def set_payout_preference(account_id, *, asset=None, aipg_bps=None) -> dic
             sa.update(accounts_table).where(accounts_table.c.id == account_id).values(**vals),
         )
         await session.commit()
-    logger.info(f"payout preference set: account={account_id} -> {vals}")
+    logger.info(
+        "payout preference updated account=%s fields=%s",
+        opaque_id(account_id),
+        sorted(vals),
+    )
     return vals

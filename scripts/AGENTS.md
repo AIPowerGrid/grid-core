@@ -21,8 +21,9 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - `adopt_service_account.py` - transactionally promotes exactly one existing
   labeled API key into a bounded service principal without rotating its key or
   moving its account balance.
-- `rotate_service_key.py` - atomically revokes a service's old keys and prints
-  one replacement key exactly once.
+- `rotate_service_key.py` - atomically revokes a service's old keys and writes
+  one replacement key to a caller-selected, newly created `0600` file. It never
+  prints key material to stdout.
 - `configure_service_identity.py` - preview-first, digest-bound update of an
   existing service's allowed proof providers, Google audiences, and exact SIWE
   authorities.
@@ -61,6 +62,10 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - Existing-service identity policy changes use
   `configure_service_identity.py`: run without `--apply`, inspect the complete
   policy, then apply with that preview's exact `current_digest`.
+- Service-key rotation requires a new `--output` path on protected local
+  storage. The tool writes and fsyncs the replacement before committing the
+  rotation, removes the file if the database operation fails, and refuses to
+  overwrite an existing file.
 - Put reusable logic in the owning service package and test it there.
 - Invoke Python operator tools through the selected release's `.venv/bin/python`;
   their env-based shebang assumes an already activated virtual environment.

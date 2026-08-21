@@ -802,6 +802,32 @@ async def test_bounded_direct_service_scope_survives_rotation(db):
 
 
 @pytest.mark.asyncio
+async def test_service_rotation_accepts_operator_prepared_key(db):
+    service, old_key = await accounts.create_service_client("prepared-key", "Prepared Key")
+    prepared = accounts.generate_api_key()
+
+    replacement = await accounts.rotate_service_key(
+        service["id"],
+        replacement_key=prepared,
+    )
+
+    assert replacement == prepared
+    with pytest.raises(HTTPException):
+        await accounts.authenticate(old_key)
+    assert (await accounts.authenticate(prepared))["service_id"] == service["id"]
+
+
+@pytest.mark.asyncio
+async def test_service_rotation_rejects_malformed_prepared_key_before_revocation(db):
+    service, old_key = await accounts.create_service_client("bad-prepared-key", "Bad Prepared Key")
+
+    with pytest.raises(ValueError, match="malformed"):
+        await accounts.rotate_service_key(service["id"], replacement_key="not-a-grid-key")
+
+    assert (await accounts.authenticate(old_key))["service_id"] == service["id"]
+
+
+@pytest.mark.asyncio
 async def test_direct_service_inference_requires_bounded_policy(db):
     with pytest.raises(ValueError, match="per-request and daily ceilings"):
         await accounts.create_service_client(

@@ -38,6 +38,7 @@ import sqlalchemy as sa
 
 from ..database import new_session
 from ..redis_client import get_redis
+from ..safe_logging import error_type, opaque_id
 from ..v2.schema import account_identities, accounts
 
 logger = logging.getLogger("grid_api.free_credits")
@@ -112,8 +113,11 @@ async def daily_cap_micro(account_id, wallet: str | None) -> int:
             bal = await holdings.aipg_balance_raw(wallet)
             if bal >= FREE_HOLDER_MIN_AIPG * (10 ** holdings.AIPG_DECIMALS):
                 cap += FREE_HOLDER_BONUS_MICRO
-        except Exception:
-            logger.debug("holder-bonus read failed; verified base only", exc_info=True)
+        except Exception as exc:
+            logger.debug(
+                "holder-bonus read failed; verified base only error_type=%s",
+                error_type(exc),
+            )
     return cap
 
 
@@ -185,8 +189,12 @@ async def consume(account_id, wallet: str | None, want_micro: int, ref: str) -> 
             cap, int(want_micro), ttl, ttl + 3600,
         )
         return int(taken or 0)
-    except Exception as e:
-        logger.warning("free_credits consume failed (charging paid instead) account=%s: %s", account_id, e)
+    except Exception as exc:
+        logger.warning(
+            "free credits consume failed (charging paid instead) account=%s error_type=%s",
+            opaque_id(account_id),
+            error_type(exc),
+        )
         return 0
 
 
@@ -228,6 +236,11 @@ async def release(account_id, ref: str, keep_micro: int = 0) -> int:
             max(int(keep_micro), 0), _secs_to_midnight() + 3600,
         )
         return int(released or 0)
-    except Exception as e:
-        logger.warning("free_credits release failed account=%s ref=%s: %s", account_id, ref, e)
+    except Exception as exc:
+        logger.warning(
+            "free credits release failed account=%s ref=%s error_type=%s",
+            opaque_id(account_id),
+            opaque_id(ref),
+            error_type(exc),
+        )
         return 0

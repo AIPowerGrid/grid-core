@@ -23,6 +23,8 @@ import time
 
 import httpx
 
+from ..safe_logging import error_type, opaque_id
+
 logger = logging.getLogger("grid_api.holdings")
 
 BASE_RPC = os.getenv("GRID_BASE_RPC", "https://mainnet.base.org").strip()
@@ -71,8 +73,12 @@ async def aipg_balance_raw(wallet: str) -> int:
         data = "0x70a08231" + w[2:].rjust(64, "0")  # balanceOf(address)
         res = await _eth_call(AIPG_TOKEN, data)
         bal = int(res, 16) if res and res != "0x" else 0
-    except Exception as e:
-        logger.warning("aipg_balance read failed for %s: %s", w, e)
+    except Exception as exc:
+        logger.warning(
+            "aipg balance read failed wallet=%s error_type=%s",
+            opaque_id(w),
+            error_type(exc),
+        )
         return hit[1] if hit else 0
     _bal_cache[w] = (now + _BAL_TTL, bal)
     return bal

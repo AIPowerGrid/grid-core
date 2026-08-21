@@ -32,6 +32,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from ..database import new_session
+from ..safe_logging import error_type, opaque_id
 from ..v2.schema import credit_ledger as ledger_t
 from ..v2.schema import credits as credits_t
 from ..v2.schema import ledger as grid_ledger_t
@@ -168,8 +169,11 @@ async def holder_discount_bps(*, wallet: str | None = None, account_id=None) -> 
         if bal < HOLDER_MIN_AIPG * (10 ** holdings.AIPG_DECIMALS):
             return 0
         return max(0, min(HOLDER_DISCOUNT_BPS, 10_000))
-    except Exception:
-        logger.warning("holder-discount read failed; charging full price", exc_info=True)
+    except Exception as exc:
+        logger.warning(
+            "holder-discount read failed; charging full price error_type=%s",
+            error_type(exc),
+        )
         return 0
 
 
@@ -431,16 +435,24 @@ async def _promo_first(account_id, cost: int, ref: str) -> int:
         return 0
     try:
         return await promotions.consume(account_id, cost, ref=ref)
-    except Exception:
-        logger.warning("promotion consume failed; falling through to daily/paid", exc_info=True)
+    except Exception as exc:
+        logger.warning(
+            "promotion consume failed; falling through to daily/paid error_type=%s",
+            error_type(exc),
+        )
         return 0
 
 
 async def _promo_release(account_id, ref: str, keep_micro: int = 0) -> int:
     try:
         return await promotions.release(account_id, ref, keep_micro=keep_micro)
-    except Exception:
-        logger.error("promotion release failed account=%s ref=%s", account_id, ref, exc_info=True)
+    except Exception as exc:
+        logger.error(
+            "promotion release failed account=%s ref=%s error_type=%s",
+            opaque_id(account_id),
+            opaque_id(ref),
+            error_type(exc),
+        )
         return 0
 
 
@@ -548,7 +560,7 @@ async def charge_request(user: dict, model: str, prompt_tokens: int, completion_
         logger.info(
             "[charge:dry] account=%s model=%s in=%d out=%d would_charge=%d micro-USD "
             "(promo=%d free=%d paid=%d, $%.4f)",
-            aid, model, prompt_tokens, completion_tokens, cost, from_promo, from_free,
+            opaque_id(aid), model, prompt_tokens, completion_tokens, cost, from_promo, from_free,
             cost - from_promo - from_free, cost / 1_000_000,
         )
         return {"status": "dry_run", "charged": 0, "would_charge": cost,
@@ -566,7 +578,7 @@ async def charge_request(user: dict, model: str, prompt_tokens: int, completion_
         await _promo_release(aid, str(job_id))
         await free_credits.release(aid, str(job_id))
         logger.warning("account=%s insufficient credit for %d micro-USD (model=%s, free-applied=%d)",
-                       aid, remainder, model, from_free)
+                       opaque_id(aid), remainder, model, from_free)
         _economic_alert(
             "insufficient_credit",
             "warning",
@@ -661,7 +673,11 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
                 if reserved is not None:
                     return {"ok": True, "reserved": reserved, "status": "already"}
                 await service_limits.release(user.get("service_id"), ref)
-                logger.error("reservation debit exists without reservation row job=%s account=%s", job_id, aid)
+                logger.error(
+                    "reservation debit exists without reservation row job=%s account=%s",
+                    opaque_id(job_id),
+                    opaque_id(aid),
+                )
                 _economic_alert(
                     "reservation_inconsistent",
                     "critical",
@@ -678,7 +694,7 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
                 await free_credits.release(aid, ref)  # give back the free we just took
                 await service_limits.release(user.get("service_id"), ref)
                 logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD (free=%d): insufficient",
-                            aid, model, cost, from_free)
+                            opaque_id(aid), model, cost, from_free)
                 _economic_alert(
                     "insufficient_credit",
                     "warning",
@@ -701,7 +717,11 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
                 reserved = await _reservation_reserved_micro(job_id)
                 if reserved is not None:
                     return {"ok": True, "reserved": reserved, "status": "already"}
-                logger.error("reservation insert conflicted without readable row job=%s account=%s", job_id, aid)
+                logger.error(
+                    "reservation insert conflicted without readable row job=%s account=%s",
+                    opaque_id(job_id),
+                    opaque_id(aid),
+                )
                 await _promo_release(aid, ref)
                 await free_credits.release(aid, ref)
                 await service_limits.release(user.get("service_id"), ref)
@@ -715,9 +735,14 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
                 )
                 return {"ok": False, "reserved": 0, "status": "reservation_failed",
                         "reason": "billing reservation failed"}
-            except Exception:
+            except Exception as exc:
                 await s.rollback()
-                logger.error("reservation insert failed job=%s account=%s", job_id, aid, exc_info=True)
+                logger.error(
+                    "reservation insert failed job=%s account=%s error_type=%s",
+                    opaque_id(job_id),
+                    opaque_id(aid),
+                    error_type(exc),
+                )
                 await _promo_release(aid, ref)
                 await free_credits.release(aid, ref)
                 await service_limits.release(user.get("service_id"), ref)
@@ -746,7 +771,7 @@ async def authorize_request(user: dict, model: str, prompt_tokens: int, max_toke
     await free_credits.release(aid, ref)
     await service_limits.release(user.get("service_id"), ref)
     logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD (free=%d): insufficient",
-                aid, model, cost, from_free)
+                opaque_id(aid), model, cost, from_free)
     return {"ok": False, "reserved": 0, "status": "insufficient",
             "reason": "insufficient credits"}
 
@@ -876,9 +901,13 @@ async def authorize_x402_request(
                 "status": "conflict",
                 "reason": "x402 request id conflicts with another payment",
             }
-        except Exception:
+        except Exception as exc:
             await session.rollback()
-            logger.exception("x402 reservation failed job=%s", job_id)
+            logger.error(
+                "x402 reservation failed job=%s error_type=%s",
+                opaque_id(job_id),
+                error_type(exc),
+            )
             return {
                 "ok": False,
                 "reserved": 0,
@@ -935,7 +964,7 @@ async def reconcile(user: dict, model: str, prompt_tokens: int, completion_token
             extra = await debit(aid, -diff, reason="reconcile:extra", ref=f"{job_id}:extra", model=model)
             if extra != "ok":
                 logger.warning("reconcile under-collected account=%s job=%s by %d micro-USD (%s)",
-                               aid, job_id, -diff, extra)
+                               opaque_id(aid), opaque_id(job_id), -diff, extra)
                 _economic_alert(
                     "settlement_under_collected",
                     "critical",
@@ -945,8 +974,13 @@ async def reconcile(user: dict, model: str, prompt_tokens: int, completion_token
                     model=model,
                     shortfall_micro=-diff,
                 )
-    except Exception:
-        logger.error("reconcile failed account=%s job=%s (refund may be owed)", aid, job_id, exc_info=True)
+    except Exception as exc:
+        logger.error(
+            "reconcile failed account=%s job=%s error_type=%s (refund may be owed)",
+            opaque_id(aid),
+            opaque_id(job_id),
+            error_type(exc),
+        )
         _economic_alert(
             "reconcile_failed",
             "critical",
@@ -1032,7 +1066,11 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                 if reserved is not None:
                     return {"ok": True, "reserved": reserved, "status": "already"}
                 await service_limits.release((user or {}).get("service_id"), ref)
-                logger.error("media reserve debit exists without reservation row job=%s account=%s", job_id, account_id)
+                logger.error(
+                    "media reserve debit exists without reservation row job=%s account=%s",
+                    opaque_id(job_id),
+                    opaque_id(account_id),
+                )
                 _economic_alert(
                     "reservation_inconsistent",
                     "critical",
@@ -1050,7 +1088,7 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                 await free_credits.release(account_id, ref)
                 await service_limits.release((user or {}).get("service_id"), ref)
                 logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD (free=%d): insufficient",
-                            account_id, model, cost, from_free)
+                            opaque_id(account_id), model, cost, from_free)
                 _economic_alert(
                     "insufficient_credit",
                     "warning",
@@ -1085,9 +1123,14 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                 )
                 return {"ok": False, "reserved": 0, "status": "reservation_failed",
                         "reason": "billing reservation failed"}
-            except Exception:
+            except Exception as exc:
                 await s.rollback()
-                logger.error("media reservation insert failed job=%s account=%s", job_id, account_id, exc_info=True)
+                logger.error(
+                    "media reservation insert failed job=%s account=%s error_type=%s",
+                    opaque_id(job_id),
+                    opaque_id(account_id),
+                    error_type(exc),
+                )
                 await _promo_release(account_id, ref)
                 await free_credits.release(account_id, ref)
                 await service_limits.release((user or {}).get("service_id"), ref)
@@ -1117,7 +1160,7 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
     await free_credits.release(account_id, ref)
     await service_limits.release((user or {}).get("service_id"), ref)
     logger.info("[charge:402] account=%s model=%s reserve=%d micro-USD (free=%d): insufficient",
-                account_id, model, cost, from_free)
+                opaque_id(account_id), model, cost, from_free)
     return {"ok": False, "reserved": 0, "status": "insufficient", "reason": "insufficient credits"}
 
 
@@ -1135,8 +1178,13 @@ async def refund_reservation(account_id, reserved_micro: int, job_id) -> None:
         paid_portion = max(int(reserved_micro) - promo_held - int(freed or 0), 0)
         if paid_portion > 0:
             await credit(account_id, paid_portion, reason="refund:media", ref=f"{job_id}:refund")
-    except Exception:
-        logger.error("media refund failed account=%s job=%s (refund owed)", account_id, job_id, exc_info=True)
+    except Exception as exc:
+        logger.error(
+            "media refund failed account=%s job=%s error_type=%s (refund owed)",
+            opaque_id(account_id),
+            opaque_id(job_id),
+            error_type(exc),
+        )
         _economic_alert(
             "media_refund_failed",
             "critical",
@@ -1170,8 +1218,12 @@ async def open_reservation(job_id, account_id, model: str, reserved_micro: int, 
                 await s.commit()
             except IntegrityError:
                 await s.rollback()  # already opened (retry/requeue) — keep the original
-    except Exception:
-        logger.error("open_reservation failed job=%s (settlement context missing)", job_id, exc_info=True)
+    except Exception as exc:
+        logger.error(
+            "open_reservation failed job=%s error_type=%s (settlement context missing)",
+            opaque_id(job_id),
+            error_type(exc),
+        )
         _economic_alert(
             "reservation_open_failed",
             "critical",
@@ -1267,7 +1319,7 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
                         extra_ok = await _try_extra_debit_in_session(s, paid_account_id, -paid_diff, f"{job_id}:extra", model)
                         if not extra_ok:
                             logger.warning("settle under-collected account=%s job=%s by %d micro-USD (insufficient)",
-                                           aid, job_id, -paid_diff)
+                                           opaque_id(aid), opaque_id(job_id), -paid_diff)
                             _economic_alert(
                                 "settlement_under_collected",
                                 "critical",
@@ -1284,8 +1336,12 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
             await _promo_release(promo_restore[0], str(job_id), keep_micro=promo_restore[1])
         if service_reconcile is not None:
             await service_limits.reconcile(service_reconcile[0], str(job_id), service_reconcile[1])
-    except Exception:
-        logger.error("settle_job failed job=%s (refund may be owed)", job_id, exc_info=True)
+    except Exception as exc:
+        logger.error(
+            "settle_job failed job=%s error_type=%s (refund may be owed)",
+            opaque_id(job_id),
+            error_type(exc),
+        )
         _economic_alert(
             "settlement_failed",
             "critical",
@@ -1323,8 +1379,12 @@ async def settle_exact(job_id) -> None:
                 promo_finalize = (row[0], int(row[1] or 0))
         if promo_finalize:
             await _promo_release(promo_finalize[0], str(job_id), keep_micro=promo_finalize[1])
-    except Exception:
-        logger.error("settle_exact failed job=%s", job_id, exc_info=True)
+    except Exception as exc:
+        logger.error(
+            "settle_exact failed job=%s error_type=%s",
+            opaque_id(job_id),
+            error_type(exc),
+        )
         _economic_alert(
             "settlement_failed",
             "critical",
@@ -1459,7 +1519,7 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
                     ok = await _try_extra_debit_in_session(s, paid_account_id, -paid_diff, f"{job_id}:extra", model)
                     if not ok:
                         logger.warning("settle under-collected account=%s job=%s by %d micro-USD (insufficient)",
-                                       aid, job_id, -paid_diff)
+                                       opaque_id(aid), opaque_id(job_id), -paid_diff)
                         _economic_alert(
                             "settlement_under_collected",
                             "critical",
@@ -1478,8 +1538,12 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
                 await _promo_release(aid, job_id, keep_micro=promo_restore)
             await service_limits.reconcile(row[9], job_id, service_keep)
             return "settled"
-    except Exception:
-        logger.error("record_and_settle failed job=%s (terminal not committed; retryable)", job_id, exc_info=True)
+    except Exception as exc:
+        logger.error(
+            "record_and_settle failed job=%s error_type=%s (terminal not committed; retryable)",
+            opaque_id(job_id),
+            error_type(exc),
+        )
         _economic_alert(
             "atomic_terminal_failed",
             "critical",

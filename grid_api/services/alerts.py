@@ -12,7 +12,6 @@ signatures, and raw exceptions are intentionally unsupported.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import re
 import secrets
@@ -24,6 +23,7 @@ from urllib.parse import urlparse
 import httpx
 
 from ..config import get_settings
+from ..safe_logging import opaque_id
 
 logger = logging.getLogger("grid_api.alerts")
 
@@ -57,13 +57,6 @@ _COLORS = {
     "critical": 0xE5484D,
     "success": 0x30A46C,
 }
-
-
-def opaque_id(value) -> str:
-    """Stable short identifier safe for operator correlation."""
-    if value in (None, ""):
-        return "-"
-    return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:12]
 
 
 def _safe_text(value, *, limit: int = 240) -> str:
@@ -209,7 +202,7 @@ async def _claim_distributed(key: str, ttl_seconds: int):
         from ..redis_client import get_redis
 
         redis = get_redis()
-        redis_key = f"grid:alerts:dedupe:{hashlib.sha256(key.encode()).hexdigest()}"
+        redis_key = f"grid:alerts:dedupe:{opaque_id(key)}"
         token = secrets.token_hex(16)
         claimed = await redis.set(redis_key, token, ex=ttl_seconds, nx=True)
         return (redis, redis_key, token) if claimed else None
@@ -230,7 +223,7 @@ async def _release_distributed(claim) -> None:
             token,
         )
     except Exception:
-        logger.debug("Could not release failed Discord alert dedupe claim", exc_info=True)
+        logger.debug("Could not release failed Discord alert dedupe claim")
 
 
 async def _run(url: str) -> None:
