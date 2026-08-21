@@ -44,7 +44,8 @@ def _seed_drawthings():
             "engine": "drawthings",
             "vars": {"prompt": "prompt", "seed": "seed", "steps": "steps"},
             "clamps": {"steps": [1, 30]},
-            "deterministic": True, "requiredModels": ["sdxl"], "jobType": "image",
+            "deterministic": True, "modelDigest": "a" * 64,
+            "requiredModels": ["sdxl"], "jobType": "image",
         },
         "prompt": "", "seed": 0, "steps": 20, "model": "sdxl_base",
     }
@@ -72,6 +73,7 @@ def test_drawthings_flat_engine():
     assert s["seed"] == 5
     assert s["steps"] == 25                      # in-range, passes the gate unchanged
     assert s["model"] == "sdxl_base"             # untouched
+    assert out["model_digest"] == "a" * 64
     print("ok: drawthings FLAT-spec substitution (engine-neutral)")
 
 

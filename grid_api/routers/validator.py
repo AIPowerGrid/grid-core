@@ -24,6 +24,7 @@ router = APIRouter()
 
 
 def _capabilities_payload() -> dict[str, Any]:
+    media_policy = validators_svc.media_validation_policy()
     return {
         "validator_api_version": "v1-preview",
         "mode": "shared_quorum_preview",
@@ -38,11 +39,21 @@ def _capabilities_payload() -> dict[str, Any]:
             "worker_scorecards": True,
             "assignment_health": True,
             "quorum": True,
+            "image_fidelity": media_policy["enabled"],
+            "video_validation": False,
             "validator_rewards": False,
             "staking_required": False,
             "epoch_roots": False,
         },
         "targeted_probe_enabled": True,
+        "media_validation": {
+            "image": {
+                "enabled": media_policy["enabled"],
+                "capability": media_policy["capability"],
+                "economic_effect": "none",
+            },
+            "video": {"enabled": False, "economic_effect": "none"},
+        },
         "probe_policy": {
             "max_attempts": validators_svc.PROBE_MAX_ATTEMPTS,
             "lease_seconds": validators_svc.PROBE_LEASE_SECONDS,
@@ -267,7 +278,7 @@ async def validator_assignments(
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
     limit: int = Query(5, ge=1, le=25),
-    modality: str = Query("text", pattern="^(text)$"),
+    modality: str = Query("text", pattern="^(text|image)$"),
 ):
     """Return Grid-issued assignments for this validator account.
 

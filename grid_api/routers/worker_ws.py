@@ -106,6 +106,23 @@ def _receipt_signers(worker_info: dict) -> list[str]:
     return [signer] if signer else [worker_info.get("wallet_address", "")]
 
 
+def _is_assignment_bound_validator_job(job: dict) -> bool:
+    """Require Core-only routing metadata before bypassing normal economics."""
+    payload = job.get("payload") or {}
+    if payload.get("_validator_probe") is not True or not job.get("hard_target_worker"):
+        return False
+    required = (
+        payload.get("_validator_assignment_id"),
+        payload.get("_validator_probe_group_id"),
+        payload.get("_validator_grid_nonce"),
+    )
+    if not all(isinstance(value, str) and value for value in required):
+        return False
+    if job.get("job_type") == "image":
+        return payload.get("_validator_role") in {"candidate", "reference"}
+    return job.get("job_type", "text") == "text"
+
+
 def _media_result_commitment(job_type: str, payload: dict, outputs: list[dict]):
     output_hashes = [item.get("sha256") or item["key"] for item in outputs]
     if job_type == "audio":
@@ -734,13 +751,21 @@ async def worker_websocket(ws: WebSocket):
                 # ── Media path (image/video/audio/3D) ──
                 if job.get("job_type", "text") != "text":
                     async with job_queue.maintain_job_claim(job):
-                        ok = await _handle_media_job(
-                            ws,
-                            job,
-                            selected_model,
-                            worker_id,
-                            worker_info,
-                        )
+                        if _is_assignment_bound_validator_job(job):
+                            ok = await _handle_validator_media_probe(
+                                ws,
+                                job,
+                                selected_model,
+                                worker_id,
+                            )
+                        else:
+                            ok = await _handle_media_job(
+                                ws,
+                                job,
+                                selected_model,
+                                worker_id,
+                                worker_info,
+                            )
                     if ok:
                         await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
                     current_job = None
@@ -759,7 +784,7 @@ async def worker_websocket(ws: WebSocket):
                     continue
 
                 # ── Text path ──
-                if job["payload"].get("_validator_probe"):
+                if _is_assignment_bound_validator_job(job):
                     ok = await _handle_validator_probe(ws, job, selected_model, worker_id, worker_info)
                     if ok:
                         await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
@@ -1005,7 +1030,7 @@ async def worker_websocket(ws: WebSocket):
             # client's channel and the held reservation carries over). Only when the
             # requeue gives up (dead-lettered) is this terminal → error + release.
             job_id = current_job["job_id"]
-            is_validator_probe = bool(current_job.get("payload", {}).get("_validator_probe"))
+            is_validator_probe = _is_assignment_bound_validator_job(current_job)
             if not is_validator_probe:
                 record_job_failed()
             new_id = await job_queue.requeue_job(
@@ -1126,6 +1151,98 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
     )
     await ws.send_json({"type": "ack", "id": job_id, "den": 0})
     return True
+
+
+async def _handle_validator_media_probe(
+    ws: WebSocket,
+    job: dict,
+    selected_model: str,
+    worker_id: str,
+) -> bool:
+    """Collect one immutable, economically inert image-validation witness."""
+    import time as _time
+
+    job_id = job["job_id"]
+    payload = job["payload"]
+    if job.get("job_type") != "image":
+        await token_stream.publish_error(job_id, "Unsupported validator media modality.")
+        await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+        return True
+    worker_payload = {
+        key: value for key, value in payload.items() if not key.startswith("_validator_")
+    }
+    try:
+        slots = storage.presign_outputs(job_id, 1, "webp", job_type="image")
+    except Exception:
+        logger.error("validator media presign failed")
+        await token_stream.publish_error(job_id, "Validator storage unavailable.")
+        await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+        return True
+
+    await ws.send_json(
+        {
+            "type": "job",
+            "id": job_id,
+            "job_type": "image",
+            "model": selected_model,
+            "payload": worker_payload,
+            "upload": [
+                {
+                    "put_url": slots[0]["put_url"],
+                    "key": slots[0]["key"],
+                    "content_type": slots[0]["content_type"],
+                }
+            ],
+        }
+    )
+    started = _time.monotonic()
+    while True:
+        msg = await asyncio.wait_for(
+            ws.receive_json(),
+            timeout=get_settings().validator_media_probe_timeout_seconds,
+        )
+        msg_type = msg.get("type")
+        if msg_type in {"progress", "pong"}:
+            continue
+        if msg_type == "error":
+            await token_stream.publish_error(job_id, "Target worker did not produce a witness.")
+            await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+            return True
+        if msg_type != "done":
+            continue
+        try:
+            _validated_media_results(msg.get("results"), 1)
+            frozen = await asyncio.to_thread(
+                storage.freeze_validator_output,
+                slots[0],
+                witness_key=f"validator/{job_id}/0.webp",
+                max_bytes=get_settings().validator_media_max_output_bytes,
+            )
+        except Exception:
+            logger.error("validator media output could not be frozen")
+            await token_stream.publish_error(job_id, "Validator output verification failed.")
+            await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+            return True
+
+        witness = {
+            "role": str(payload.get("_validator_role") or ""),
+            "worker_id": worker_id,
+            **frozen,
+            "latency_ms": int((_time.monotonic() - started) * 1000),
+        }
+        grid_meta = {
+            "worker_id": worker_id,
+            "assignment_id": payload.get("_validator_assignment_id"),
+            "grid_nonce": payload.get("_validator_grid_nonce"),
+            "economic_effect": "none",
+        }
+        await token_stream.publish_done(
+            job_id,
+            json.dumps({"witness": witness}),
+            grid=grid_meta,
+        )
+        await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+        return True
 
 
 async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict) -> bool:

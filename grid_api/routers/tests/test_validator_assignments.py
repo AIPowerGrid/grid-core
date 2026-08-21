@@ -2,35 +2,53 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 import asyncio
+import hashlib
 import json
-import uuid
 import time
-from datetime import timedelta
+import uuid
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from eth_account import Account
 from eth_account.messages import encode_defunct
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from grid_api import auth, database, safe_logging
 from grid_api.ratelimit import limiter
 from grid_api.routers import validator as validator_router
+from grid_api.services import recipes
 from grid_api.services import validators as validators_svc
 from grid_api.v2.schema import (
-    metadata as v2_metadata,
     accounts as accounts_t,
+)
+from grid_api.v2.schema import (
+    metadata as v2_metadata,
+)
+from grid_api.v2.schema import (
     validator_assignments as assignments_t,
+)
+from grid_api.v2.schema import (
     validator_attestations as attestations_t,
+)
+from grid_api.v2.schema import (
     validator_probe_groups as probe_groups_t,
+)
+from grid_api.v2.schema import (
+    validator_reference_workers as references_t,
+)
+from grid_api.v2.schema import (
     validators as validators_t,
+)
+from grid_api.v2.schema import (
     workers as workers_t,
 )
-
 
 TEST_PRIVATE_KEY = "0x" + "01" * 32
 TEST_WALLET = Account.from_key(TEST_PRIVATE_KEY).address.lower()
@@ -177,6 +195,110 @@ async def _fresh_assignment(account_id):
         limit=1,
     )
     return validator_id, issued["assignments"][0]
+
+
+def _media_settings(*, enabled=True):
+    return SimpleNamespace(
+        validator_media_probe_enabled=enabled,
+        validator_media_bond_chain_id=8453,
+        validator_media_bond_contract="0x" + "a" * 40,
+        validator_media_bond_verifier_version="worker-registry-v2",
+        validator_media_minimum_bond_raw=10**18,
+        validator_media_minimum_quality_pass_rate=0.95,
+        validator_media_max_output_bytes=25 * 1024 * 1024,
+        validator_media_probe_timeout_seconds=600,
+    )
+
+
+async def _seed_image_worker(session, index, *, now):
+    account_id = uuid.uuid4()
+    worker_id = uuid.uuid4()
+    wallet = f"0x{index:040x}"
+    await session.execute(sa.insert(accounts_t).values(id=account_id, flags={}))
+    await session.execute(
+        sa.insert(workers_t).values(
+            id=worker_id,
+            account_id=account_id,
+            name=f"image-rig-{index}",
+            type="image",
+            wallet=wallet,
+            models=["deterministic-checkpoint"],
+            capabilities={},
+            maintenance=False,
+            first_seen=now - timedelta(days=1),
+            last_seen=now,
+            jobs_completed=20,
+            den_earned=0,
+        )
+    )
+    return worker_id, account_id, wallet
+
+
+async def _seed_image_reference(session, worker, *, now):
+    worker_id, account_id, wallet = worker
+    await session.execute(
+        sa.insert(references_t).values(
+            worker_id=worker_id,
+            model="Deterministic Image",
+            modality="image",
+            account_id=account_id,
+            payout_wallet=wallet,
+            status="active",
+            status_reason="test fixture",
+            bond_contract="0x" + "a" * 40,
+            bond_chain_id=8453,
+            bond_finalized_block=123,
+            bond_amount_raw=Decimal(10**18),
+            bond_active=True,
+            bond_slashed=False,
+            bond_verifier_version="worker-registry-v2",
+            bond_verified_at=now,
+            quality_window_start=now - timedelta(days=1),
+            quality_window_end=now,
+            quality_pass_rate=0.99,
+            quality_reviewed_at=now,
+            selection_count=0,
+            created=now,
+            updated=now,
+        )
+    )
+
+
+def _register_image_recipe(*, deterministic=True, recipe_id=42):
+    recipes._BY_ROOT.clear()
+    recipes._BY_ID.clear()
+    recipes._BY_NAME.clear()
+    recipes._BY_MODEL.clear()
+    return recipes.register_recipe(
+        "0x" + "b" * 64,
+        "deterministic-image-test",
+        {
+            "_grid": {
+                "engine": "comfyui",
+                "modelName": "Deterministic Image",
+                "jobType": "image",
+                "deterministic": deterministic,
+                "modelDigest": "c" * 64,
+                "requiredModels": ["deterministic-checkpoint"],
+                "vars": {
+                    "prompt": "1.inputs.text",
+                    "seed": "2.inputs.seed",
+                    "width": "3.inputs.width",
+                    "height": "3.inputs.height",
+                    "steps": "2.inputs.steps",
+                },
+                "clamps": {
+                    "width": [512, 1024],
+                    "height": [512, 1024],
+                    "steps": [4, 30],
+                },
+            },
+            "1": {"inputs": {"text": ""}},
+            "2": {"inputs": {"seed": 0, "steps": 12}},
+            "3": {"inputs": {"width": 512, "height": 512}},
+        },
+        recipe_id=recipe_id,
+    )
 
 
 @pytest.mark.asyncio
@@ -1113,6 +1235,284 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["quorum_policy"]["threshold"] == 3
     assert body["quorum_policy"]["target_validators"] == 5
     assert body["quorum_policy"]["operator_independence_proven"] is False
+    assert body["features"]["image_fidelity"] is False
+    assert body["features"]["video_validation"] is False
+    assert body["media_validation"]["image"]["economic_effect"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_image_assignment_gate_is_fail_closed(db, monkeypatch):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, capabilities=["image.fidelity.v1"])
+    monkeypatch.setattr(validators_svc, "get_settings", lambda: _media_settings(enabled=False))
+
+    with pytest.raises(validators_svc.AssignmentError, match="not enabled"):
+        await validators_svc.issue_assignments(
+            account_id=account_id,
+            validator_id=validator_id,
+            validator_wallet=TEST_WALLET,
+            active_workers=[],
+            limit=1,
+            modality="image",
+        )
+
+
+@pytest.mark.asyncio
+async def test_image_assignment_requires_governed_recipe_and_bonded_references(db, monkeypatch):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, capabilities=["image.fidelity.v1"])
+    monkeypatch.setattr(validators_svc, "get_settings", lambda: _media_settings())
+    now = datetime.now(UTC)
+    async with await database.new_session() as session:
+        candidate = await _seed_image_worker(session, 11, now=now)
+        refs = [
+            await _seed_image_worker(session, 12, now=now),
+            await _seed_image_worker(session, 13, now=now),
+        ]
+        for reference in refs:
+            await _seed_image_reference(session, reference, now=now)
+        await session.commit()
+    active = [
+        {
+            "worker_id": str(worker[0]),
+            "name": f"image-rig-{index}",
+            "models": ["deterministic-checkpoint"],
+            "job_types": ["image"],
+        }
+        for worker, index in zip([candidate, *refs], (11, 12, 13), strict=True)
+    ]
+
+    _register_image_recipe(deterministic=False)
+    blocked = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=active,
+        limit=1,
+        modality="image",
+    )
+    assert blocked["assignments"] == []
+
+    _register_image_recipe()
+    issued = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=active,
+        limit=1,
+        modality="image",
+    )
+
+    assignment = issued["assignments"][0]
+    challenge = assignment["challenge"]
+    assert assignment["target_worker_id"] == str(candidate[0])
+    assert assignment["capability"] == "image.fidelity.v1"
+    assert challenge["schema"] == "aipg.validator.media.challenge.v1"
+    assert challenge["recipe_id"] == 42
+    assert challenge["model_digest"] == "c" * 64
+    assert challenge["parameters"]["width"] == 512
+    assert challenge["parameters"]["height"] == 512
+    assert set(challenge["reference_worker_ids"]) == {str(refs[0][0]), str(refs[1][0])}
+    assert issued["economic_effect"] == "none"
+
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(probe_groups_t)
+            .where(probe_groups_t.c.id == assignment["probe_group_id"])
+            .values(
+                probe_job_id="abandoned-image-probe",
+                probe_status="running",
+                probe_attempts=1,
+                probe_lease_expires=now - timedelta(seconds=1),
+            )
+        )
+        await session.commit()
+
+    from grid_api.services import job_queue, token_stream
+
+    worker_ids_by_name = {
+        f"image-rig-{index}": str(worker[0])
+        for worker, index in zip([candidate, *refs], (11, 12, 13), strict=True)
+    }
+    submitted = {}
+
+    async def capture_submit(stage_job_id, payload, models, **kwargs):
+        submitted[stage_job_id] = {"payload": payload, "models": models, **kwargs}
+
+    async def completed_events(stage_job_id, **_kwargs):
+        item = submitted[stage_job_id]
+        payload = item["payload"]
+        worker_id = worker_ids_by_name[item["hard_target_worker"]]
+        witness = {
+            "role": payload["_validator_role"],
+            "worker_id": worker_id,
+            "url": f"https://media.example/validator/{stage_job_id}/0.webp",
+            "sha256": hashlib.sha256(worker_id.encode()).hexdigest(),
+            "bytes": 123,
+            "content_type": "image/webp",
+            "latency_ms": 100,
+        }
+        yield {
+            "text": token_stream.DONE_SENTINEL,
+            "full_text": json.dumps({"witness": witness}),
+            "grid": {
+                "worker_id": worker_id,
+                "assignment_id": assignment["assignment_id"],
+                "grid_nonce": assignment["grid_nonce"],
+                "economic_effect": "none",
+            },
+        }
+
+    monkeypatch.setattr(job_queue, "submit_job", capture_submit)
+    monkeypatch.setattr(token_stream, "subscribe_tokens", completed_events)
+    result = await validators_svc.probe_assignment(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+
+    assert result["status"] == "completed"
+    assert [item["role"] for item in result["witnesses"]] == [
+        "candidate", "reference", "reference",
+    ]
+    assert {item["worker_id"] for item in result["witnesses"]} == {
+        str(candidate[0]), str(refs[0][0]), str(refs[1][0]),
+    }
+    assert len(submitted) == 3
+    assert {item["hard_target_worker"] for item in submitted.values()} == {
+        "image-rig-11", "image-rig-12", "image-rig-13",
+    }
+    assert all(item["models"] == ["deterministic-checkpoint"] for item in submitted.values())
+    assert result["prompt_hash"] == validators_svc._hash_text(
+        validators_svc._canonical(challenge)
+    )
+    async with await database.new_session() as session:
+        stored = (
+            await session.execute(
+                sa.select(assignments_t).where(
+                    assignments_t.c.id == assignment["assignment_id"]
+                )
+            )
+        ).mappings().one()
+        stored_group = (
+            await session.execute(
+                sa.select(probe_groups_t).where(
+                    probe_groups_t.c.id == assignment["probe_group_id"]
+                )
+            )
+        ).mappings().one()
+    assert stored["probe_status"] == "completed"
+    assert stored["probe_verdict"] == "witnessed"
+    assert stored_group["probe_status"] == "completed"
+    assert stored_group["probe_attempts"] == 2
+    assert stored_group["probe_witness_hash"] == validators_svc._hash_obj(
+        {"witnesses": result["witnesses"]}
+    )
+
+    second_key = "0x" + "02" * 32
+    second_account = uuid.uuid4()
+    second_validator = await _register(
+        second_account,
+        private_key=second_key,
+        capabilities=["image.fidelity.v1"],
+    )
+    second_wallet = Account.from_key(second_key).address.lower()
+    second_issued = await validators_svc.issue_assignments(
+        account_id=second_account,
+        validator_id=second_validator,
+        validator_wallet=second_wallet,
+        active_workers=active,
+        limit=1,
+        modality="image",
+    )
+    second_assignment = second_issued["assignments"][0]
+    assert second_assignment["probe_group_id"] == assignment["probe_group_id"]
+    reused = await validators_svc.probe_assignment(
+        account_id=second_account,
+        validator_id=second_validator,
+        assignment_id=second_assignment["assignment_id"],
+    )
+    assert reused["status"] == "completed"
+    assert reused["witnesses"] == result["witnesses"]
+    assert len(submitted) == 3
+
+    attestation = _payload(
+        assignment_source="grid",
+        assignment_id=assignment["assignment_id"],
+        probe_group_id=assignment["probe_group_id"],
+        grid_nonce=assignment["grid_nonce"],
+        worker_id=assignment["target_worker_id"],
+        model=assignment["model"],
+        modality="image",
+        capability="image.fidelity.v1",
+        canary_kind="image.fidelity",
+        evidence_hash=result["evidence_hash"],
+        verdict="healthy",
+    )
+    accepted = await validators_svc.record_attestation(
+        account_id=account_id,
+        validator_id=validator_id,
+        payload=attestation,
+        signature=_sign(attestation),
+    )
+    assert accepted["authority"] == "authoritative"
+
+
+def test_media_group_witness_commitment_fails_closed(monkeypatch):
+    monkeypatch.setattr(validators_svc, "get_settings", lambda: _media_settings())
+    candidate = str(uuid.uuid4())
+    references = [str(uuid.uuid4()), str(uuid.uuid4())]
+    challenge = {"reference_worker_ids": references, "seed": 7}
+    row = {
+        "probe_group_id": "prg-test",
+        "target_worker_id": candidate,
+        "model": "deterministic-checkpoint",
+        "modality": "image",
+        "capability": "image.fidelity.v1",
+        "canary_kind": "image.fidelity",
+        "challenge": challenge,
+    }
+    witnesses = [
+        {
+            "role": role,
+            "worker_id": worker_id,
+            "url": f"https://media.example/validator/{index}.webp",
+            "sha256": f"{index + 1}" * 64,
+            "bytes": 123,
+            "content_type": "image/webp",
+            "latency_ms": 100,
+        }
+        for index, (role, worker_id) in enumerate(
+            [("candidate", candidate), ("reference", references[0]), ("reference", references[1])]
+        )
+    ]
+    group = {
+        "id": row["probe_group_id"],
+        "target_worker_id": candidate,
+        "model": row["model"],
+        "modality": row["modality"],
+        "capability": row["capability"],
+        "canary_kind": row["canary_kind"],
+        "challenge": challenge,
+        "challenge_hash": validators_svc._hash_obj({
+            "group_id": row["probe_group_id"],
+            "worker_id": candidate,
+            "model": row["model"],
+            "challenge": challenge,
+        }),
+        "probe_witnesses": witnesses,
+        "probe_witness_hash": validators_svc._hash_obj({"witnesses": witnesses}),
+    }
+    validators_svc._verify_media_group_binding(row, group)
+    assert validators_svc._verified_media_group_witnesses(row, group) == witnesses
+
+    group["probe_witnesses"][0]["url"] = "https://media.example/tampered.webp"
+    with pytest.raises(validators_svc.AssignmentError, match="commitment"):
+        validators_svc._verified_media_group_witnesses(row, group)
+
+    group["challenge"] = {**challenge, "seed": 8}
+    with pytest.raises(validators_svc.AssignmentError, match="does not match"):
+        validators_svc._verify_media_group_binding(row, group)
 
 
 def test_probe_route_returns_upstream_probe_error(monkeypatch):

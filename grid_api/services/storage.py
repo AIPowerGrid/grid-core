@@ -9,6 +9,7 @@ client gets the public URL. Presigning is pure local crypto (no network
 round-trip), so calling boto3's sync API inline is safe in async handlers.
 """
 
+import hashlib
 import logging
 import os
 from functools import lru_cache
@@ -135,3 +136,64 @@ def uploaded_outputs_present(
         if content_type != str(slot["content_type"]).lower():
             return False
     return True
+
+
+def freeze_validator_output(
+    slot: dict,
+    *,
+    witness_key: str,
+    max_bytes: int,
+) -> dict:
+    """Freeze one worker upload into a Core-only witness object and hash it.
+
+    The worker can write only ``slot['key']``. Core copies that object to a key
+    for which no PUT URL was issued, then hashes the frozen copy. This closes
+    the post-hash overwrite race and makes the returned URL a stable transport
+    location for independent validators.
+    """
+    if not witness_key.startswith("validator/") or ".." in witness_key:
+        raise ValueError("validator witness key is invalid")
+    if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes <= 0:
+        raise ValueError("max_bytes must be positive")
+    source_key = str(slot.get("key") or "")
+    expected_type = str(slot.get("content_type") or "").lower()
+    if not source_key or expected_type not in CONTENT_TYPES.values():
+        raise ValueError("upload slot is invalid")
+
+    client = _client()
+    bucket = media_bucket()
+    metadata = client.head_object(Bucket=bucket, Key=source_key)
+    length = metadata.get("ContentLength")
+    actual_type = str(metadata.get("ContentType") or "").split(";", 1)[0].strip().lower()
+    if (
+        not isinstance(length, int)
+        or isinstance(length, bool)
+        or length <= 0
+        or length > max_bytes
+        or actual_type != expected_type
+    ):
+        raise ValueError("validator output is outside its declared bounds")
+
+    client.copy_object(
+        Bucket=bucket,
+        Key=witness_key,
+        CopySource={"Bucket": bucket, "Key": source_key},
+        ContentType=expected_type,
+        MetadataDirective="REPLACE",
+    )
+    frozen = client.get_object(Bucket=bucket, Key=witness_key)
+    body = frozen["Body"].read(max_bytes + 1)
+    frozen_type = str(frozen.get("ContentType") or "").split(";", 1)[0].strip().lower()
+    if len(body) != length or len(body) > max_bytes or frozen_type != expected_type:
+        raise ValueError("frozen validator output does not match its source")
+
+    # The source is no longer evidence and its presigned URL may remain valid.
+    # Deleting it prevents accidental consumers from treating it as canonical.
+    client.delete_object(Bucket=bucket, Key=source_key)
+    return {
+        "key": witness_key,
+        "url": f"{public_media_base()}/{witness_key}",
+        "sha256": hashlib.sha256(body).hexdigest(),
+        "bytes": len(body),
+        "content_type": expected_type,
+    }

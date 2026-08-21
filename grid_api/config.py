@@ -50,6 +50,18 @@ class GridSettings(BaseSettings):
     )
     worker_enrollment_ttl_seconds: int = 900
 
+    # Assignment-bound media validation. This stays dark until every field is
+    # explicitly configured against a reviewed, deployed WorkerRegistry and a
+    # fresh finalized-block/quality sync has populated the reference pool.
+    validator_media_probe_enabled: bool = False
+    validator_media_bond_chain_id: int = 8453
+    validator_media_bond_contract: str = ""
+    validator_media_bond_verifier_version: str = ""
+    validator_media_minimum_bond_raw: int = 0
+    validator_media_minimum_quality_pass_rate: float = 0.95
+    validator_media_max_output_bytes: int = 25 * 1024 * 1024
+    validator_media_probe_timeout_seconds: int = 600
+
     # Best-effort operator alerts. The webhook is a production secret and must
     # never be committed, logged, or returned by an API.
     grid_alert_discord_webhook: SecretStr | None = None

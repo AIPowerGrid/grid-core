@@ -1,12 +1,15 @@
 # Media Validation V1
 
-**Status:** accepted design; schema/selector foundation implemented dark, not
-assignment-wired or production-live.
+**Status:** accepted design; deterministic image assignment, hard-targeted
+three-worker execution, immutable Core witness hashing, and validator scoring
+are implemented dark. No production gate is enabled. Video remains design-only.
 
 This document defines the trust boundary for assignment-bound image and video
-validation. It deliberately does not enable media assignments, reference-worker
-routing, worker penalties, validator rewards, or slashing. Core must continue to
-reject non-text validator assignments until every rollout gate below is proven.
+validation. It deliberately does not enable production media assignments,
+worker penalties, validator rewards, or slashing. Core exposes the image route
+but fails closed unless every operator, recipe, bond, and reference-pool gate is
+explicitly configured. The current recipe catalog is non-deterministic and the
+current eligible reference pool is empty, so the live behavior remains text-only.
 
 ## Objective
 
@@ -23,8 +26,10 @@ non-deterministic model, GPU ownership, or operator independence by itself.
 1. Core generates the prompt, seed, canonical recipe identity, and parameters
    with cryptographic randomness. The public validator binary contains no live
    prompt bank, seed schedule, golden output, or answer key.
-2. One probe group stores one immutable challenge and one immutable reference
-   selection. Every assigned validator witnesses that same group.
+2. One probe group stores one immutable challenge, one immutable reference
+   selection, and one frozen three-output witness set. Candidate and references
+   execute once per group; every assigned validator independently fetches and
+   scores those same bytes.
 3. Candidate and references execute the exact same canonical media contract.
    A checkpoint name alone is not a contract: model digest, recipe root,
    sampler, scheduler, steps, dimensions, seed, and temporal parameters are
@@ -96,12 +101,20 @@ ambiguous bond snapshot removes the worker from selection without affecting
 ordinary production routing.
 
 Migration `0023` and `services/validator_references.py` implement the durable
-record and fail-closed identity/freshness/rotation selector. No assignment or
-dispatch path calls it yet.
+record and fail-closed identity/freshness/rotation selector. The dark image
+assignment path calls it in the same transaction that persists the immutable
+probe group. Insufficient or ambiguous references produce no assignment.
 
 The currently deployed WorkerRegistry does not yet provide the reviewed
 cooldown-backed bond contract required by this design. Until that facet and its
 sync are deployed and verified, the eligible reference pool is empty.
+
+Migration `0024` adds the group execution lease, bounded attempt counter,
+frozen witness JSON, full-witness commitment, and completion timestamp. This
+prevents a five-validator quorum from multiplying one three-worker challenge
+into fifteen GPU generations. A fresh lease has one executor; concurrent
+validators wait for its committed result, and a stale lease can be reclaimed
+within the same bounded retry budget.
 
 ### Media challenge
 
@@ -185,6 +198,18 @@ protocol with opaque UUID job ids and hard target affinity. Validator markers,
 group ids, nonces, and reference roles are stripped before a worker sees the
 payload. Jobs use dedicated validator upload prefixes and short retention.
 
+The three GPU jobs run once per probe group, not once per validator assignment.
+Core commits the complete ordered witness record, including transport URLs,
+before releasing it. Each assignment then derives its own nonce-bound evidence
+hash from that shared record; validators still fetch, hash, decode, and score
+independently.
+
+The worker initially uploads to an ordinary UUID-scoped slot. Core then copies
+the object to a `validator/` key for which the worker never received a PUT URL,
+fetches that frozen copy, computes SHA-256, and deletes the mutable source. The
+validator URL points only to the frozen copy. A worker-reported digest is
+required as transport hygiene but never becomes the witness digest.
+
 The validator-media terminal handler must:
 
 - presign exactly one bounded output slot per execution;
@@ -250,9 +275,21 @@ capability, or coordinator/storage failure must be inconclusive. This distinctio
 prevents infrastructure faults or a bad oracle set from becoming a worker
 penalty.
 
+## Runtime Gate
+
+`VALIDATOR_MEDIA_PROBE_ENABLED=0` is the master default. Enabling it is still
+insufficient: Core also requires a valid chain id, reviewed bond-contract
+address, verifier version, positive minimum bond, bounded quality threshold,
+positive object-size/timeout limits, a registered validator advertising
+`image.fidelity.v1`, an on-chain RecipeVault recipe id, deterministic metadata,
+a 32-byte `modelDigest`, exact prompt/seed/width/height controls, and two fresh
+independent references. Any missing condition yields no media assignment.
+
+Video is not accepted by the assignment API in this rollout.
+
 ## Rollout Gates
 
-All gates are required before Core accepts `modality=image|video` assignments:
+All gates are required before an operator enables production image assignments:
 
 - reviewed cooldown-backed WorkerRegistry facet deployed and code-verified;
 - background bond sync with finalized-block, chain-id, code-address, freshness,

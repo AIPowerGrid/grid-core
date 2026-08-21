@@ -66,7 +66,14 @@ content sanitization, and reward settlement.
   `validator_references.py` owns the dark media reference selector: fresh
   finalized bond + quality snapshots, online workers, distinct accounts and
   payout wallets, row-locked recent-use rotation, and fail-closed insufficiency.
-  It is not yet called by assignment or dispatch paths.
+  The default-off deterministic image lane calls it transactionally, runs one
+  candidate plus two fixed references exactly once per shared probe group
+  through hard-targeted ordinary UUID jobs, freezes worker uploads under
+  Core-only R2 keys, and returns one response-committed set of Core-computed
+  SHA-256 witnesses to every validator assignment. It requires an on-chain
+  recipe id, deterministic metadata,
+  governed model digest, explicit bond policy, and `image.fidelity.v1` validator
+  capability. Video remains disabled. Both lanes remain non-economic.
 - **Model/media governance:** `recipes.py`, `recipe_import.py`, `styles.py`,
   `loras.py`, `model_registry.py`.
 - **Safety:** `sanitizer.py` - **secrets redactor only** (strips API keys/PGP from prompts).
@@ -225,6 +232,11 @@ content sanitization, and reward settlement.
 - Targeted validator probes use an atomic, bounded assignment lease. Concurrent
   calls cannot dispatch duplicate free inference; expired leases are
   reclaimable, and late results cannot overwrite the current attempt.
+- Validator media uploads are mutable transport only. Core must copy each
+  accepted upload to a key for which no worker PUT URL exists, hash that frozen
+  object itself, and delete the source before exposing a witness. Media probes
+  must never call credit, ledger, den, strike, payout, metrics, or bond mutation
+  paths.
 
 ## Work Guidance
 

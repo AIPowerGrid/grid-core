@@ -42,6 +42,10 @@ class Recipe:
     clamps: dict[str, list]          # numeric input name -> [lo, hi]
     enums: dict[str, list] = field(default_factory=dict)  # input name -> allowed values (reject off-list)
     deterministic: bool = False
+    # Digest of the governed model-weight contract used for deterministic
+    # validation. A checkpoint filename is not an identity and cannot unlock
+    # fidelity probes. Empty for ordinary/non-deterministic recipes.
+    model_digest: str = ""
     required_models: list[str] = field(default_factory=list)
     job_type: str = "image"          # image | video
     model_name: str = ""             # advertised model this recipe serves (≥1 recipe/model)
@@ -75,6 +79,7 @@ def register_recipe(recipe_root: str, name: str, workflow: dict, *,
         clamps=dict(meta.get("clamps") or {}),
         enums=dict(meta.get("enums") or {}),
         deterministic=bool(meta.get("deterministic", False)),
+        model_digest=str(meta.get("modelDigest") or "").lower(),
         required_models=list(meta.get("requiredModels") or []),
         job_type=str(meta.get("jobType") or "image"),
         model_name=str(meta.get("modelName") or name),
@@ -392,6 +397,7 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
         "engine": r.engine,
         "job_type": r.job_type,
         "deterministic": r.deterministic,
+        "model_digest": r.model_digest,
         "seed": inputs["seed"],
         "required_models": r.required_models,
         "lora_inject": r.lora_inject,   # worker splices LoraLoader nodes here (if loras requested)

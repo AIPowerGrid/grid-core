@@ -48,6 +48,12 @@ executes an immutable release selected through `/home/aipg/current`.
 - Validator probe leases must exceed the worker-response timeout and keep a
   small bounded retry budget. Do not make targeted validation an unlimited
   free-inference path.
+- Apply Alembic `0024` before code that issues media assignments; it adds the
+  group execution lease and shared frozen-witness columns read by that path.
+- `VALIDATOR_MEDIA_PROBE_ENABLED` is not a standalone launch switch. Keep it off
+  until the reviewed bond contract/verifier/minimum, finalized reference sync,
+  governed deterministic recipe/model digest, independent operators, immutable
+  R2 witness retention, and supervised preview gates are all proven.
 - If you rename Base/contract env vars, update `docs/`, `grid_api/services/*`,
   and any SDK examples in the same change.
 
