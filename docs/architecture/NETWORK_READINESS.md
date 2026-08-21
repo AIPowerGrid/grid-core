@@ -221,13 +221,13 @@ benchmark, payout forecast, or fixed earnings promise.
 
 Implemented randomized lanes cover exact instruction, arithmetic, strict JSON,
 calibrated 4K, 16K, and 32K context retrieval, multistep logic, one function
-call, a
-two-stage tool chain, stop-sequence compliance, and gross output-budget
-compliance using an independent model-agnostic token counter with
-cross-tokenizer tolerance. Context tiers require conservative worker-advertised
-headroom. Hidden code execution, 64K+ long-context tiers, longer tool chains,
-and streaming integrity remain open; exact native-tokenizer equivalence is
-intentionally not claimed.
+call, a two-stage tool chain, stop-sequence compliance, gross output-budget
+compliance, and Python function synthesis checked against assignment-only hidden
+inputs. The code lane never executes worker code: Core and each validator parse
+one bounded function AST and independently interpret only integer arithmetic.
+Context tiers require conservative worker-advertised headroom. Richer code and
+logic tiers, 64K+ long-context tiers, longer tool chains, and streaming integrity
+remain open; exact native-tokenizer equivalence is intentionally not claimed.
 
 ### 20. Private deterministic image validation - Ready dark
 

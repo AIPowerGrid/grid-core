@@ -3,6 +3,7 @@
 
 import hashlib
 import json
+import re
 
 import pytest
 
@@ -19,6 +20,7 @@ from grid_api.services import den, validators
         ("context.retrieve.16k", "context.retrieve.16k", "text.context.16k.v1"),
         ("context.retrieve.32k", "context.retrieve.32k", "text.context.32k.v1"),
         ("logic.steps", "logic.steps", "text.reasoning.multistep.v1"),
+        ("code.function", "code.function", "text.code.v1"),
         ("tool.call", "tool.call", "text.tool_call.v1"),
         ("tool.chain", "tool.chain", "text.tool_chain.v1"),
         ("stop.sequence", "stop.sequence", "text.stop_sequence.v1"),
@@ -182,6 +184,45 @@ def test_multistep_scoring_rejects_ambiguous_numeric_answers():
     assert validators._score_text_challenge(challenge, "420", 10) == "failed"
 
 
+def test_code_challenge_uses_hidden_tests_without_executing_worker_code():
+    challenge = validators._make_text_challenge("code.function")
+    match = re.search(
+        r"multiply x by (\d+), add (-?\d+), take the result modulo (\d+).*subtract (\d+)",
+        challenge["prompt"],
+    )
+    assert match is not None
+    multiplier, offset, modulus, adjustment = map(int, match.groups())
+    function_name = challenge["function_name"]
+    correct = (
+        f"def {function_name}(x):\n"
+        f"    return (({multiplier} * x + {offset}) % {modulus}) - {adjustment}"
+    )
+
+    assert challenge["test_inputs"]
+    assert repr(challenge["test_inputs"]) not in challenge["prompt"]
+    assert validators._score_text_challenge(challenge, correct, 10) == "healthy"
+    assert validators._score_text_challenge(
+        challenge,
+        correct.replace(f"- {adjustment}", f"- {adjustment + 1}"),
+        10,
+    ) == "failed"
+    assert validators._score_text_challenge(
+        challenge,
+        f"import os\n{correct}",
+        10,
+    ) == "failed"
+    assert validators._score_text_challenge(
+        challenge,
+        f"def {function_name}(x):\n    return __import__('os').system('id')",
+        10,
+    ) == "failed"
+    assert validators._score_text_challenge(
+        challenge,
+        f"```python\n{correct}\n```",
+        10,
+    ) == "failed"
+
+
 def test_correct_answer_over_latency_budget_is_slow(monkeypatch):
     monkeypatch.setattr(validators, "PROBE_LATENCY_BUDGET_SECONDS", 1)
     challenge = _challenge("echo", "ABCDEF12")
@@ -263,6 +304,13 @@ def test_tool_call_family_requires_its_exact_scorer_capability():
 
     assert kinds == ("tool.call",)
     assert capabilities == {"text.tool_call.v1"}
+
+
+def test_code_family_requires_its_exact_scorer_capability():
+    kinds, capabilities = validators._supported_text_challenges(["text.code.v1"])
+
+    assert kinds == ("code.function",)
+    assert capabilities == {"text.code.v1"}
 
 
 def test_tool_chain_family_requires_its_exact_scorer_capability():

@@ -48,8 +48,11 @@ content sanitization, and reward settlement.
   assignment and authoritative vote per registered validator/group, and
   aggregates a conservative 3-of-5 preview quorum. Text groups use randomized
   exact-instruction, arithmetic, strict-JSON, calibrated 4K/16K/32K
-  context-retrieval, multistep logic, exact function-call, two-stage tool-chain,
-  stop-sequence, and gross token-limit families. Token-limit scoring uses
+  context-retrieval, multistep logic, restricted-AST Python function synthesis,
+  exact function-call, two-stage tool-chain, stop-sequence, and gross token-limit
+  families. The code scorer interprets only one bounded arithmetic return
+  expression against assignment-only hidden inputs; it must never `exec`,
+  import, call, or otherwise run worker-supplied code. Token-limit scoring uses
   Grid-side `o200k_base` counting over visible plus reasoning output, a
   length-style finish, and a documented cross-tokenizer tolerance;
   worker order must not determine the family. An accepted target-worker failure

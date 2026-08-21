@@ -4,6 +4,7 @@
 import asyncio
 import hashlib
 import json
+import re
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -905,7 +906,7 @@ async def test_16k_context_assignment_requires_target_worker_headroom(db):
     )
     assert issued["count"] == 1
     assert issued["assignments"][0]["canary_kind"] == "context.retrieve.16k"
-    assert issued["assignments"][0]["scoring_policy_id"] == "text.generated.v6"
+    assert issued["assignments"][0]["scoring_policy_id"] == "text.generated.v7"
 
 
 @pytest.mark.asyncio
@@ -945,7 +946,7 @@ async def test_32k_context_assignment_requires_target_worker_headroom(db):
     )
     assert issued["count"] == 1
     assert issued["assignments"][0]["canary_kind"] == "context.retrieve.32k"
-    assert issued["assignments"][0]["scoring_policy_id"] == "text.generated.v6"
+    assert issued["assignments"][0]["scoring_policy_id"] == "text.generated.v7"
 
     assignment = issued["assignments"][0]
     async with await database.new_session() as session:
@@ -1485,6 +1486,69 @@ async def test_stop_sequence_is_exposed_and_forwarded_to_the_targeted_request(db
     assert result["status"] == "error"
     assert assignment["challenge"]["stop"]
     assert submitted["request"]["stop"] == assignment["challenge"]["stop"]
+
+
+@pytest.mark.asyncio
+async def test_code_probe_forwards_only_prompt_and_scores_hidden_tests(db, monkeypatch):
+    from grid_api.services import job_queue, token_stream
+
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, capabilities=["text.code.v1"])
+    issued = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=[{
+            "worker_id": str(uuid.uuid4()), "name": "rig-code",
+            "models": ["qwen3-27b"], "job_types": ["text"],
+        }],
+        limit=1,
+    )
+    assignment = issued["assignments"][0]
+    challenge = assignment["challenge"]
+    match = re.search(
+        r"multiply x by (\d+), add (-?\d+), take the result modulo (\d+).*subtract (\d+)",
+        challenge["prompt"],
+    )
+    assert match is not None
+    multiplier, offset, modulus, adjustment = map(int, match.groups())
+    output_text = (
+        f"def {challenge['function_name']}(x):\n"
+        f"    return ((x * {multiplier} + {offset}) % {modulus}) - {adjustment}"
+    )
+    submitted = {}
+
+    async def capture_submit(job_id, payload, models, **kwargs):
+        submitted.update(job_id=job_id, payload=payload, models=models, kwargs=kwargs)
+
+    async def completed_events(*_args, **_kwargs):
+        yield {
+            "text": token_stream.DONE_SENTINEL,
+            "full_text": output_text,
+            "finish_reason": "stop",
+            "usage": {"completion_tokens": 32},
+            "grid": {"worker": "rig-code"},
+        }
+
+    monkeypatch.setattr(job_queue, "submit_job", capture_submit)
+    monkeypatch.setattr(token_stream, "subscribe_tokens", completed_events)
+    result = await validators_svc.probe_assignment(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+
+    assert result["status"] == "completed"
+    assert result["canary_kind"] == "code.function"
+    assert submitted["payload"]["request"]["messages"][-1]["content"] == challenge["prompt"]
+    assert "test_inputs" not in json.dumps(submitted["payload"])
+    assert submitted["kwargs"]["hard_target_worker"] == "rig-code"
+    async with await database.new_session() as session:
+        row = (await session.execute(
+            sa.select(assignments_t).where(assignments_t.c.id == assignment["assignment_id"])
+        )).mappings().one()
+    assert row["probe_status"] == "completed"
+    assert row["probe_verdict"] == "healthy"
 
 
 @pytest.mark.asyncio
