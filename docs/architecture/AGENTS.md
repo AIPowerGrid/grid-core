@@ -26,7 +26,7 @@ validation, worker incentives, and trust boundaries.
 - `DECENTRALIZATION_ROADMAP.md` - accepted sequence from independently proven
   validator quorum through Base evidence/reward contracts and signed-event
   trusted-partner Core federation.
-- `NETWORK_READINESS.md` - evidence-linked status ledger for the 34 network
+- `NETWORK_READINESS.md` - evidence-linked status ledger for the 35 network
   backlog items; keeps source, production, public-release, and external-operator
   proof distinct.
 - `WORKER_PROFILE_V1.md` - signed worker installation profiles, ACE-Step audio
