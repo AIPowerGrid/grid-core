@@ -16,7 +16,7 @@ from eth_account.messages import encode_defunct
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from grid_api import auth, database
+from grid_api import auth, database, safe_logging
 from grid_api.ratelimit import limiter
 from grid_api.routers import validator as validator_router
 from grid_api.services import validators as validators_svc
@@ -25,6 +25,7 @@ from grid_api.v2.schema import (
     accounts as accounts_t,
     validator_assignments as assignments_t,
     validator_attestations as attestations_t,
+    validator_probe_groups as probe_groups_t,
     validators as validators_t,
     workers as workers_t,
 )
@@ -34,31 +35,41 @@ TEST_PRIVATE_KEY = "0x" + "01" * 32
 TEST_WALLET = Account.from_key(TEST_PRIVATE_KEY).address.lower()
 
 
-def _sign(payload):
+@pytest.fixture(autouse=True)
+def _isolated_logging_salt(monkeypatch):
+    monkeypatch.setenv("GRID_SALT", "validator-router-test-only-salt")
+    monkeypatch.setattr(auth, "_API_KEY_SALT", None)
+    safe_logging._log_key.cache_clear()
+    yield
+    safe_logging._log_key.cache_clear()
+
+
+def _sign(payload, private_key=TEST_PRIVATE_KEY):
     return Account.sign_message(
         encode_defunct(text=validators_svc._canonical(payload)),
-        private_key=TEST_PRIVATE_KEY,
+        private_key=private_key,
     ).signature.hex()
 
 
-async def _register(account_id):
+async def _register(account_id, private_key=TEST_PRIVATE_KEY):
+    wallet = Account.from_key(private_key).address.lower()
     async with await database.new_session() as session:
         await session.execute(
-            sa.insert(accounts_t).values(id=account_id, wallet=TEST_WALLET, flags={}),
+            sa.insert(accounts_t).values(id=account_id, wallet=wallet, flags={}),
         )
         await session.commit()
     payload = {
         "registration_schema": "aipg.validator.registration.v1",
-        "validator": TEST_WALLET,
+        "validator": wallet,
         "software_version": "0.1.0-test",
         "capabilities": ["text.basic.v1"],
         "ts": int(time.time()),
     }
     registered = await validators_svc.register_validator(
         account_id=account_id,
-        account_wallet=TEST_WALLET,
+        account_wallet=wallet,
         payload=payload,
-        signature=_sign(payload),
+        signature=_sign(payload, private_key),
     )
     return registered["validator_id"]
 
@@ -136,6 +147,7 @@ async def _assignment(account_id, *, verdict="healthy"):
     payload = _payload(
         assignment_source="grid",
         assignment_id=assignment["assignment_id"],
+        probe_group_id=assignment["probe_group_id"],
         grid_nonce=assignment["grid_nonce"],
         worker_id=assignment["target_worker_id"],
         model=assignment["model"],
@@ -221,6 +233,36 @@ async def test_registration_is_wallet_bound_signed_and_idempotent(db):
     async with await database.new_session() as session:
         count = await session.scalar(sa.select(sa.func.count()).select_from(validators_t))
     assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_registration_rejects_second_wallet_for_same_account(db):
+    account_id = uuid.uuid4()
+    await _register(account_id, "0x" + f"{7:064x}")
+    replacement_key = "0x" + f"{8:064x}"
+    replacement_wallet = Account.from_key(replacement_key).address.lower()
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(accounts_t)
+            .where(accounts_t.c.id == account_id)
+            .values(wallet=replacement_wallet)
+        )
+        await session.commit()
+    payload = {
+        "registration_schema": "aipg.validator.registration.v1",
+        "validator": replacement_wallet,
+        "software_version": "0.1.0-test",
+        "capabilities": ["text.basic.v1"],
+        "ts": int(time.time()),
+    }
+
+    with pytest.raises(validators_svc.RegistrationError, match="different signing wallet"):
+        await validators_svc.register_validator(
+            account_id=account_id,
+            account_wallet=replacement_wallet,
+            payload=payload,
+            signature=_sign(payload, replacement_key),
+        )
 
 
 @pytest.mark.asyncio
@@ -320,11 +362,11 @@ async def test_authoritative_attestation_requires_grid_assignment_and_nonce(db):
     )
     assert stored["authority"] == "authoritative"
     assert stored["assignment_id"] == assignment["assignment_id"]
-    assert stored["quorum_status"] == "accepted"
+    assert stored["quorum_status"] == "pending"
 
     authoritative = await validators_svc.scorecards(authority="authoritative")
     assert authoritative["items"][0]["authority"] == "authoritative"
-    assert authoritative["items"][0]["quorum_status"] == "accepted"
+    assert authoritative["items"][0]["quorum_status"] == "pending"
     assert authoritative["items"][0]["worker_id"] == assignment["target_worker_id"]
 
     next_work = await validators_svc.issue_assignments(
@@ -339,21 +381,65 @@ async def test_authoritative_attestation_requires_grid_assignment_and_nonce(db):
         }],
         limit=1,
     )
-    assert next_work["assignments"][0]["assignment_id"] != assignment["assignment_id"]
+    assert next_work["assignments"] == []
 
 
 @pytest.mark.asyncio
 async def test_validator_disagreement_marks_assignment_disputed(db):
-    account_id = uuid.uuid4()
-    validator_id, assignment, payload = await _assignment(account_id, verdict="healthy")
-    independent_verdict = {**payload, "verdict": "failed", "score": 0.0}
-
-    stored = await validators_svc.record_attestation(
-        account_id=account_id,
-        validator_id=validator_id,
-        payload=independent_verdict,
-        signature=_sign(independent_verdict),
-    )
+    worker_id = str(uuid.uuid4())
+    active_workers = [{
+        "worker_id": worker_id,
+        "name": "rig-shared",
+        "models": ["qwen3-27b"],
+        "job_types": ["text"],
+    }]
+    records = []
+    for key_int, verdict in ((2, "healthy"), (3, "failed")):
+        private_key = "0x" + f"{key_int:064x}"
+        wallet = Account.from_key(private_key).address.lower()
+        account_id = uuid.uuid4()
+        validator_id = await _register(account_id, private_key)
+        issued = await validators_svc.issue_assignments(
+            account_id=account_id,
+            validator_id=validator_id,
+            validator_wallet=wallet,
+            active_workers=active_workers,
+            limit=1,
+        )
+        assignment = issued["assignments"][0]
+        evidence_hash = f"{key_int}" * 64
+        async with await database.new_session() as session:
+            await session.execute(
+                sa.update(assignments_t)
+                .where(assignments_t.c.id == assignment["assignment_id"])
+                .values(
+                    probe_status="completed",
+                    probe_evidence_hash=evidence_hash,
+                    probe_verdict="healthy",
+                )
+            )
+            await session.commit()
+        payload = _payload(
+            validator=wallet,
+            assignment_source="grid",
+            assignment_id=assignment["assignment_id"],
+            probe_group_id=assignment["probe_group_id"],
+            grid_nonce=assignment["grid_nonce"],
+            worker_id=worker_id,
+            model=assignment["model"],
+            modality=assignment["modality"],
+            capability=assignment["capability"],
+            canary_kind=assignment["canary_kind"],
+            evidence_hash=evidence_hash,
+            verdict=verdict,
+        )
+        stored = await validators_svc.record_attestation(
+            account_id=account_id,
+            validator_id=validator_id,
+            payload=payload,
+            signature=_sign(payload, private_key),
+        )
+        records.append((assignment, stored))
 
     assert stored["authority"] == "authoritative"
     assert stored["quorum_status"] == "disputed"
@@ -361,10 +447,10 @@ async def test_validator_disagreement_marks_assignment_disputed(db):
         row = (
             await session.execute(
                 sa.select(
-                    assignments_t.c.status,
-                    assignments_t.c.quorum_status,
-                    assignments_t.c.quorum_outcome,
-                ).where(assignments_t.c.id == assignment["assignment_id"])
+                    probe_groups_t.c.status,
+                    probe_groups_t.c.quorum_status,
+                    probe_groups_t.c.quorum_outcome,
+                ).where(probe_groups_t.c.id == records[0][0]["probe_group_id"])
             )
         ).mappings().one()
     assert row == {
@@ -372,6 +458,191 @@ async def test_validator_disagreement_marks_assignment_disputed(db):
         "quorum_status": "disputed",
         "quorum_outcome": "disputed",
     }
+
+
+@pytest.mark.asyncio
+async def test_three_distinct_registered_validators_accept_shared_probe_group(db):
+    worker_id = str(uuid.uuid4())
+    active_workers = [{
+        "worker_id": worker_id,
+        "name": "rig-quorum",
+        "models": ["qwen3-27b"],
+        "job_types": ["text"],
+    }]
+    group_ids = set()
+    statuses = []
+    for key_int in (4, 5, 6):
+        private_key = "0x" + f"{key_int:064x}"
+        wallet = Account.from_key(private_key).address.lower()
+        account_id = uuid.uuid4()
+        validator_id = await _register(account_id, private_key)
+        issued = await validators_svc.issue_assignments(
+            account_id=account_id,
+            validator_id=validator_id,
+            validator_wallet=wallet,
+            active_workers=active_workers,
+            limit=1,
+        )
+        assignment = issued["assignments"][0]
+        assert "expected" not in assignment["challenge"]
+        assert assignment["challenge"]["expected_hash"]
+        group_ids.add(assignment["probe_group_id"])
+        evidence_hash = f"{key_int}" * 64
+        async with await database.new_session() as session:
+            await session.execute(
+                sa.update(assignments_t)
+                .where(assignments_t.c.id == assignment["assignment_id"])
+                .values(
+                    probe_status="completed",
+                    probe_evidence_hash=evidence_hash,
+                    probe_verdict="healthy",
+                )
+            )
+            await session.commit()
+        payload = _payload(
+            validator=wallet,
+            assignment_source="grid",
+            assignment_id=assignment["assignment_id"],
+            probe_group_id=assignment["probe_group_id"],
+            grid_nonce=assignment["grid_nonce"],
+            worker_id=worker_id,
+            model=assignment["model"],
+            modality=assignment["modality"],
+            capability=assignment["capability"],
+            canary_kind=assignment["canary_kind"],
+            evidence_hash=evidence_hash,
+            verdict="healthy",
+        )
+        stored = await validators_svc.record_attestation(
+            account_id=account_id,
+            validator_id=validator_id,
+            payload=payload,
+            signature=_sign(payload, private_key),
+        )
+        statuses.append(stored["quorum_status"])
+
+    assert group_ids == {assignment["probe_group_id"]}
+    assert statuses == ["pending", "pending", "accepted"]
+    async with await database.new_session() as session:
+        group = (
+            await session.execute(
+                sa.select(probe_groups_t).where(probe_groups_t.c.id == assignment["probe_group_id"])
+            )
+        ).mappings().one()
+        votes = await session.scalar(
+            sa.select(sa.func.count()).select_from(attestations_t).where(
+                attestations_t.c.probe_group_id == assignment["probe_group_id"]
+            )
+        )
+    assert group["quorum_status"] == "accepted"
+    assert group["quorum_outcome"] == "healthy"
+    assert votes == 3
+    health = await validators_svc.assignment_health()
+    assert health["stages"] == {
+        "probes_completed": 3,
+        "authoritative_evidence_accepted": 3,
+        "workers_passed": 1,
+        "quorum_reached": 1,
+        "groups_finalized": 0,
+    }
+    assert health["validators"]["active"] == 3
+    assert health["validators"]["heartbeat_fresh"] == 3
+    assert health["validators"]["participating_24h"] == 3
+
+    dissent_key = "0x" + f"{9:064x}"
+    dissent_wallet = Account.from_key(dissent_key).address.lower()
+    dissent_account = uuid.uuid4()
+    dissent_validator = await _register(dissent_account, dissent_key)
+    dissent_assignment = (
+        await validators_svc.issue_assignments(
+            account_id=dissent_account,
+            validator_id=dissent_validator,
+            validator_wallet=dissent_wallet,
+            active_workers=active_workers,
+            limit=1,
+        )
+    )["assignments"][0]
+    dissent_evidence = "9" * 64
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(assignments_t)
+            .where(assignments_t.c.id == dissent_assignment["assignment_id"])
+            .values(
+                probe_status="completed",
+                probe_evidence_hash=dissent_evidence,
+                probe_verdict="failed",
+            )
+        )
+        await session.commit()
+    dissent_payload = _payload(
+        validator=dissent_wallet,
+        assignment_source="grid",
+        assignment_id=dissent_assignment["assignment_id"],
+        probe_group_id=dissent_assignment["probe_group_id"],
+        grid_nonce=dissent_assignment["grid_nonce"],
+        worker_id=worker_id,
+        model=dissent_assignment["model"],
+        modality=dissent_assignment["modality"],
+        capability=dissent_assignment["capability"],
+        canary_kind=dissent_assignment["canary_kind"],
+        evidence_hash=dissent_evidence,
+        verdict="failed",
+    )
+    disputed = await validators_svc.record_attestation(
+        account_id=dissent_account,
+        validator_id=dissent_validator,
+        payload=dissent_payload,
+        signature=_sign(dissent_payload, dissent_key),
+    )
+    assert disputed["quorum_status"] == "disputed"
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(probe_groups_t)
+            .where(probe_groups_t.c.id == dissent_assignment["probe_group_id"])
+            .values(
+                expires=validators_svc._now()
+                - timedelta(seconds=validators_svc.ATTESTATION_GRACE_SECONDS + 1)
+            )
+        )
+        await validators_svc._finalize_due_assignments(session)
+        await session.commit()
+        finalized = (
+            await session.execute(
+                sa.select(probe_groups_t).where(
+                    probe_groups_t.c.id == dissent_assignment["probe_group_id"]
+                )
+            )
+        ).mappings().one()
+    assert finalized["quorum_status"] == "finalized"
+    assert finalized["quorum_outcome"] == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_completed_probe_can_deliver_during_attestation_grace(db):
+    account_id = uuid.uuid4()
+    validator_id, assignment, payload = await _assignment(account_id, verdict="healthy")
+    async with await database.new_session() as session:
+        expired = validators_svc._now() - timedelta(seconds=1)
+        await session.execute(
+            sa.update(assignments_t)
+            .where(assignments_t.c.id == assignment["assignment_id"])
+            .values(expires=expired)
+        )
+        await session.execute(
+            sa.update(probe_groups_t)
+            .where(probe_groups_t.c.id == assignment["probe_group_id"])
+            .values(expires=expired)
+        )
+        await session.commit()
+
+    stored = await validators_svc.record_attestation(
+        account_id=account_id,
+        validator_id=validator_id,
+        payload=payload,
+        signature=_sign(payload),
+    )
+    assert stored["status"] == "accepted"
+    assert stored["quorum_status"] == "pending"
 
 
 @pytest.mark.asyncio
@@ -574,7 +845,7 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["economic_effect"] == "none"
     assert body["features"]["assignments"] is True
     assert body["features"]["targeted_probe"] is True
-    assert body["features"]["quorum"] is False
+    assert body["features"]["quorum"] is True
     assert body["features"]["validator_rewards"] is False
     assert body["probe_policy"]["max_attempts"] >= 1
     assert body["probe_policy"]["lease_seconds"] > validators_svc.PROBE_TIMEOUT_SECONDS
@@ -582,7 +853,9 @@ def test_validator_capabilities_expose_assignment_gates():
         body["authority_model"]["authoritative"]
         == "requires Grid-issued assignment_id + grid_nonce + probe evidence hash"
     )
-    assert "not implemented" in body["authority_model"]["real_quorum"]
+    assert body["quorum_policy"]["threshold"] == 3
+    assert body["quorum_policy"]["target_validators"] == 5
+    assert body["quorum_policy"]["operator_independence_proven"] is False
 
 
 def test_probe_route_returns_upstream_probe_error(monkeypatch):

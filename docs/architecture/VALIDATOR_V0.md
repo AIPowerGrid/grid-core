@@ -2,14 +2,17 @@
 
 ## Status
 
-V0 is an evidence-only preview. Core can register validators, issue targeted
-text assignments, verify signed evidence, and expose aggregate scorecards. No
+V0 is an evidence-only preview. Core can register validators, issue shared
+targeted text probe groups, verify signed evidence, aggregate distinct-validator
+3-of-5 quorum, and expose scorecards. No
 validator evidence changes routing, worker health, den, payouts, rewards, bonds,
 credits, strikes, or slashing.
 
-Real multi-validator quorum is not live. Existing assignment state labels track
-one evidence workflow; they do not prove that independent operators evaluated a
-shared challenge.
+The quorum mechanism is implemented but has no economic authority. It proves
+distinct registered Grid accounts signed votes over one shared challenge; it
+does not prove those accounts are independently controlled. Independent
+operators, correlated-control defenses, dispute windows, and adversarial
+operation remain rollout gates.
 
 ## Identity
 
@@ -21,8 +24,8 @@ shared challenge.
 4. Core verifies the signature, timestamp, account/wallet binding, software
    version, and declared capabilities before activating `grid_validators`.
 5. Assignments and authoritative attestations carry the registered
-   `validator_id`; one validator can submit at most one authoritative
-   attestation per assignment.
+   `validator_id` and `probe_group_id`; one canonical account may register one
+   validator, and one validator may submit one authoritative vote per group.
 
 The signing key proves control of the registered evidence identity. It does not
 prove validator stake, independent operation, correct execution, or future
@@ -52,10 +55,20 @@ Authoritative evidence must match all of:
 
 - active registration and registered signing wallet
 - assignment owner (`validator_id` and canonical account)
-- unexpired Grid-issued assignment id and nonce
+- shared probe group and one-vote-per-validator membership
+- Grid-issued assignment id and nonce within the attestation window
 - assigned worker, model, modality, and capability
 - evidence hash returned by the hard-targeted probe
 - valid EIP-191 signature over the canonical payload
+
+New probes stop at assignment expiry. A completed probe may deliver its signed
+attestation during a bounded post-expiry grace window (30 minutes by default),
+so a brief Core or network outage does not silently erase valid evidence.
+
+Assignment responses reveal the prompt and an expected-answer SHA-256
+commitment, never Core's plaintext expected answer. Probe responses reveal the
+committed output and transport hashes, never Core's private verdict. Each node
+scores that output locally before signing.
 
 The targeted probe is isolated from customer economics: it does not reserve or
 settle demand credits, award den, create a payout ledger completion, or apply a
@@ -73,14 +86,16 @@ Alembic `0020` creates `grid_validators`, adds nullable registration attribution
 to existing assignments and attestations, and enforces one attestation per
 assignment/validator. Alembic `0021` adds atomic probe attempt counters and
 reclaimable leases, preventing concurrent replay from dispatching duplicate
-free inference. Apply both migrations before deploying registration-aware Core
+free inference. Alembic `0022` adds shared probe groups, one validator per
+canonical account, and DB-enforced one-assignment/one-attestation membership per
+validator and group. Apply all migrations before deploying shared-quorum Core
 code. Existing legacy evidence may remain unbound and must never be upgraded to
 authoritative by inference.
 
 ## Next Authority Gate
 
-Before evidence can affect routing or rewards, Core needs shared challenge
-groups assigned to multiple independently operated validators, quorum rules,
-self-validation and correlated-operator controls, dispute windows, and replayable
-evidence verification. Slashing requires a separate objective-fraud policy and
-contract review after those controls are proven.
+Before evidence can affect routing or rewards, the network must prove multiple
+independently operated nodes in production, add self-validation and
+correlated-operator controls, define dispute windows, and make evidence
+replayable. Slashing requires a separate objective-fraud policy and contract
+review after those controls are proven.

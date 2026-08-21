@@ -6,8 +6,8 @@ SQLAlchemy metadata for Grid-owned v2 tables: accounts, API keys, workers, jobs,
 completion ledger, prepaid credits, credit ledger, reservations, canonical
 identities/account aliases, promotional campaigns/grants, settlement
 epochs, per-asset revenue pots (`grid_revenue`), multi-asset payout legs
-(`grid_payout_legs`), registered validator identities plus assignment/
-attestation evidence rows, and
+(`grid_payout_legs`), registered validator identities plus shared probe-group/
+assignment/attestation evidence rows, and
 bounded service clients plus their delegation audit events.
 
 ## Ownership
@@ -44,7 +44,9 @@ bounded service clients plus their delegation audit events.
 - `grid_accounts.payout_asset`/`payout_aipg_bps` are worker payout preferences
   (NULL → grid defaults); SELECTed on the HOT auth path — their migrations
   (0009) must run before code that reads them.
-- `grid_validator_assignments` gates authoritative evidence with Grid-issued
+- `grid_validator_probe_groups` is the shared challenge and quorum lifecycle.
+  It targets five distinct registrations and requires three matching votes by
+  default. `grid_validator_assignments` gates authoritative evidence with Grid-issued
   assignment ids, nonces, and hard-targeted probe evidence hashes. Its attempt
   counter and lease deadline enforce one bounded active probe per assignment.
   `grid_validator_attestations` stores both preview and authoritative evidence.
@@ -53,9 +55,9 @@ bounded service clients plus their delegation audit events.
   until reward/dispute rules are live.
 - `grid_validators` binds one normalized signing wallet to one canonical account
   and records capabilities, version, and heartbeat. Assignment and attestation
-  `validator_id` foreign keys preserve attribution; the unique
-  `(assignment_id, validator_id)` constraint prevents duplicate authoritative
-  votes by one node.
+  `validator_id` foreign keys preserve attribution; account uniqueness prevents
+  identity rotation. Group/validator uniqueness on assignments and
+  attestations prevents duplicate membership or votes.
 - Account IDs are UUIDs. Quota identities such as `v2:<uuid>` are not DB foreign
   keys and must not be passed to credit ledger functions.
 - New columns need explicit migrations, tests, and backfill/default strategy for
