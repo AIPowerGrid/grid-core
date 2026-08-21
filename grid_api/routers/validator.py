@@ -26,7 +26,7 @@ router = APIRouter()
 def _capabilities_payload() -> dict[str, Any]:
     return {
         "validator_api_version": "v1-preview",
-        "mode": "assignment_bound_evidence",
+        "mode": "shared_quorum_preview",
         "economic_effect": "none",
         "features": {
             "attest": True,
@@ -37,7 +37,7 @@ def _capabilities_payload() -> dict[str, Any]:
             "targeted_probe": True,
             "worker_scorecards": True,
             "assignment_health": True,
-            "quorum": False,
+            "quorum": True,
             "validator_rewards": False,
             "staking_required": False,
             "epoch_roots": False,
@@ -46,12 +46,25 @@ def _capabilities_payload() -> dict[str, Any]:
         "probe_policy": {
             "max_attempts": validators_svc.PROBE_MAX_ATTEMPTS,
             "lease_seconds": validators_svc.PROBE_LEASE_SECONDS,
+            "attestation_grace_seconds": validators_svc.ATTESTATION_GRACE_SECONDS,
+        },
+        "quorum_policy": {
+            "threshold": validators_svc.QUORUM_MIN,
+            "target_validators": validators_svc.QUORUM_TARGET,
+            "distinct_registered_validators": True,
+            "operator_independence_proven": False,
+            "economic_effect": "none",
         },
         "authority_model": {
             "preview": "registered non-assignment evidence; visible but non-authoritative",
-            "authoritative": "requires Grid-issued assignment_id + grid_nonce + probe evidence hash",
+            "authoritative": (
+                "requires Grid-issued assignment_id + grid_nonce + probe evidence hash"
+            ),
             "assignment_lifecycle": ["pending", "accepted", "disputed", "finalized"],
-            "real_quorum": "not implemented; shared probe groups and distinct-validator thresholds are next",
+            "real_quorum": (
+                "shared probe groups with distinct registered validator votes; "
+                "operator independence remains an external rollout gate"
+            ),
         },
         "endpoints": {
             "registration": {
@@ -114,9 +127,16 @@ def _capabilities_payload() -> dict[str, Any]:
         },
         "notes": [
             "Preview evidence remains non-authoritative.",
-            "Authoritative evidence must match a Grid-issued assignment id, nonce, and probe evidence hash.",
+            (
+                "Authoritative evidence must match a Grid-issued assignment id, "
+                "nonce, and probe evidence hash."
+            ),
             "Failed validator evidence does not directly strike, slash, or alter payouts.",
-            "Preview assignment acceptance is not multi-validator quorum.",
+            "A quorum result requires distinct registered validators over one shared probe group.",
+            (
+                "Registration does not by itself prove independent operation or "
+                "prevent correlated control."
+            ),
             "Validator rewards are intentionally disabled until shared-challenge quorum is proven.",
         ],
     }

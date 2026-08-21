@@ -91,7 +91,7 @@ Mirrors the `GRID_CHARGING_ENABLED=0` and Validator-V0 patterns:
 - Conservative cadence (`GRID_PROBE_INTERVAL`, default 300s), tiny prompts (`max_tokens`
   ~24) so probe load on the GPU pool is negligible even in a 1-worker-per-model pool.
 
-## Assignment-bound validator API (live preview)
+## Shared-quorum validator API (candidate preview)
 
 Public capability discovery is live:
 
@@ -99,11 +99,11 @@ Public capability discovery is live:
 
 The rest require a v2 account API key and are evidence-only:
 
-- `GET /v1/validator/assignments` — issues short-lived text assignments with a
-  Grid nonce and target worker/model.
+- `GET /v1/validator/assignments` — joins a short-lived shared text probe group
+  and issues a validator-specific nonce for the target worker/model.
 - `POST /v1/validator/probe/{assignment_id}` — runs the assignment against the
-  targeted worker path and records the Grid-side prompt/response hashes, verdict,
-  and latency.
+  targeted worker path and records the Grid-side prompt/response hashes, private
+  Core verdict, and latency. The response omits Core's verdict.
 - `POST /v1/validator/attest` — stores preview evidence, or authoritative
   evidence only when it matches the Grid-issued assignment, nonce, and evidence
   hash.
@@ -113,22 +113,26 @@ The rest require a v2 account API key and are evidence-only:
   health.
 - `GET /v1/validator/workers` — current worker inventory for validator discovery.
 
-The core records quorum state (`pending`, `accepted`, `disputed`, `finalized`),
+Core requires three matching votes from five distinct registered validator
+accounts over one probe group. It records quorum state (`pending`, `accepted`,
+`disputed`, `finalized`),
 but the whole preview surface has `economic_effect: none`: no routing, reward,
 strike, slash, credit, or payout effect. Text assignments are the only live lane
 in this rollout; image/video validator lanes are future work.
 
-## Deployment status (2026-07-02)
+## Deployment status (2026-08-20)
 
-**LIVE on prod, ENABLED, evidence-only.** `GRID_PROBE_ENABLED=1`,
-`GRID_PROBE_INTERVAL=300`, `GRID_PROBE_MAX_TOKENS=256` in `/etc/aipg/grid.env`.
-First attestations recorded (pass/fail/inconclusive) in `grid_validator_attestations`.
+Coordinator-run probes remain live and evidence-only. Registered-validator
+assignments, shared probe groups, and 3-of-5 quorum are merged candidates, not
+production authority: production still needs the immutable Core release and
+Alembic migrations through `0022`. Do not publish validator binaries against an
+older Core capability response.
 
 Deploy notes / learnings:
-- **Current prod is reconciled to git.** The July 1 hotpatch/create_all rollout was
-  replaced on 2026-07-02 by deploying `system-core/main` at `63adc209` and running
-  Alembic through `0006`. Prod has `grid_validator_assignments`, assignment fields
-  on `grid_validator_attestations`, and `alembic_version = 0006`.
+- **Historical rollout note.** The July 1 hotpatch/create_all rollout was
+  replaced on 2026-07-02 by deploying `system-core/main` at `63adc209` and
+  running Alembic through `0006`. That was the first assignment schema rollout,
+  not the current shared-quorum deployment state.
 - **Existing prod DB needed a one-time Alembic bridge.** Because early validator
   evidence was created outside Alembic, prod was stamped at `0005` and then upgraded
   to `0006`. Do not repeat that stamp on databases that already have
@@ -189,7 +193,8 @@ detectors, both blocked on infrastructure we don't have yet:
    logprob/perplexity fingerprinting or challenge-response a small model can't fake, and/or
    **redundant cross-worker execution** (same nonce to N workers, compare). Design before
    money depends on it.
-3. **Quorum + dispute** — multiple independent validators must agree; a worker can dispute.
+3. **Operator independence + dispute** — shared 3-of-5 protocol exists, but multiple
+   independently controlled operators and a worker dispute process must be proven.
 4. **Only then** does a verdict gain weight (reward multiplier / strike / slash), funded
    from the platform slice per `validator-rewards-design`.
 

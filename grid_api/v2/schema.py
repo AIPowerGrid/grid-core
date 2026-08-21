@@ -667,13 +667,48 @@ validators = sa.Table(
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
     sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
     sa.UniqueConstraint("signing_wallet", name="uq_grid_validators_signing_wallet"),
+    sa.UniqueConstraint("account_id", name="uq_grid_validators_account_id"),
     sa.UniqueConstraint("account_id", "signing_wallet", name="uq_grid_validators_account_wallet"),
+)
+
+validator_probe_groups = sa.Table(
+    "grid_validator_probe_groups",
+    metadata,
+    sa.Column("id", sa.String(96), primary_key=True),
+    sa.Column("target_worker_id", sa.String(64), nullable=False, index=True),
+    sa.Column("target_worker_name", sa.String(120), nullable=False, index=True),
+    sa.Column("model", sa.String(255), nullable=False, index=True),
+    sa.Column("modality", sa.String(16), nullable=False, default="text"),
+    sa.Column("capability", sa.String(128), nullable=False),
+    sa.Column("canary_kind", sa.String(64), nullable=False),
+    sa.Column("scoring_policy_id", sa.String(128), nullable=False),
+    # The full challenge is Core-private. Assignment responses expose only the
+    # prompt and one-way scoring commitment required for independent scoring.
+    sa.Column("challenge", PortableJSON, nullable=False, default=dict),
+    sa.Column("challenge_hash", sa.String(64), nullable=False, unique=True),
+    sa.Column("status", sa.String(24), nullable=False, default="pending", index=True),
+    sa.Column("quorum_status", sa.String(24), nullable=False, default="pending", index=True),
+    sa.Column("quorum_outcome", sa.String(24), nullable=True),
+    sa.Column("quorum_threshold", sa.Integer, nullable=False, default=3),
+    sa.Column("target_validator_count", sa.Integer, nullable=False, default=5),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+    sa.Column("expires", sa.DateTime(timezone=True), nullable=False, index=True),
+    sa.Column("accepted", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("disputed", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("finalized", sa.DateTime(timezone=True), nullable=True),
 )
 
 validator_assignments = sa.Table(
     "grid_validator_assignments",
     metadata,
     sa.Column("id", sa.String(96), primary_key=True),
+    sa.Column(
+        "probe_group_id",
+        sa.String(96),
+        sa.ForeignKey("grid_validator_probe_groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    ),
     sa.Column(
         "account_id",
         sa.Uuid,
@@ -717,6 +752,11 @@ validator_assignments = sa.Table(
     sa.Column("expires", sa.DateTime(timezone=True), nullable=False, index=True),
     sa.Column("probed", sa.DateTime(timezone=True), nullable=True),
     sa.Column("finalized", sa.DateTime(timezone=True), nullable=True),
+    sa.UniqueConstraint(
+        "probe_group_id",
+        "validator_id",
+        name="uq_grid_validator_assignments_group_validator",
+    ),
 )
 
 # Signed validator reports about probe outcomes. V0 stores these as audit
@@ -756,6 +796,13 @@ validator_attestations = sa.Table(
         nullable=True,
         index=True,
     ),
+    sa.Column(
+        "probe_group_id",
+        sa.String(96),
+        sa.ForeignKey("grid_validator_probe_groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    ),
     sa.Column("grid_nonce", sa.String(128), nullable=True, index=True),
     sa.Column("evidence_hash", sa.String(64), nullable=True, index=True),
     # preview = model-routed/local evidence; authoritative = verified Grid
@@ -783,6 +830,11 @@ validator_attestations = sa.Table(
         "assignment_id",
         "validator_id",
         name="uq_grid_validator_attestations_assignment_validator",
+    ),
+    sa.UniqueConstraint(
+        "probe_group_id",
+        "validator_id",
+        name="uq_grid_validator_attestations_group_validator",
     ),
 )
 

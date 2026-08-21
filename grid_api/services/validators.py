@@ -28,6 +28,7 @@ from ..database import new_session
 from ..safe_logging import error_type, opaque_id
 from ..v2.schema import validator_assignments as assignments_t
 from ..v2.schema import validator_attestations as attestations_t
+from ..v2.schema import validator_probe_groups as probe_groups_t
 from ..v2.schema import validators as validators_t
 from ..v2.schema import workers as workers_t
 
@@ -38,6 +39,10 @@ VERDICT_SCORE = {"healthy": 1.0, "slow": 0.75, "failed": 0.0}
 VALID_AUTHORITY = {"all", "preview", "authoritative"}
 MAX_PAYLOAD_BYTES = 64 * 1024
 ASSIGNMENT_TTL_SECONDS = int(os.getenv("VALIDATOR_ASSIGNMENT_TTL_SECONDS", "900") or 900)
+ATTESTATION_GRACE_SECONDS = max(
+    60,
+    int(os.getenv("VALIDATOR_ATTESTATION_GRACE_SECONDS", "1800") or 1800),
+)
 PROBE_TIMEOUT_SECONDS = int(os.getenv("VALIDATOR_PROBE_TIMEOUT_SECONDS", "180") or 180)
 PROBE_LATENCY_BUDGET_SECONDS = int(os.getenv("VALIDATOR_PROBE_LATENCY_BUDGET_SECONDS", "30") or 30)
 PROBE_MAX_ATTEMPTS = max(1, int(os.getenv("VALIDATOR_PROBE_MAX_ATTEMPTS", "2") or 2))
@@ -45,7 +50,12 @@ PROBE_LEASE_SECONDS = max(
     PROBE_TIMEOUT_SECONDS + 30,
     int(os.getenv("VALIDATOR_PROBE_LEASE_SECONDS", "240") or 240),
 )
-QUORUM_MIN = max(1, int(os.getenv("VALIDATOR_QUORUM_MIN", "1") or 1))
+QUORUM_MIN = max(3, int(os.getenv("VALIDATOR_QUORUM_MIN", "3") or 3))
+QUORUM_TARGET = max(
+    5,
+    QUORUM_MIN,
+    int(os.getenv("VALIDATOR_QUORUM_TARGET", "5") or 5),
+)
 # Canary answers are short, but reasoning models (gpt-oss/qwen3/Gemma) spend
 # tokens "thinking" before the final answer. A tight cap (was 32) gets fully
 # consumed by the reasoning phase → empty answer → probe returns no text →
@@ -54,6 +64,10 @@ PROBE_MAX_TOKENS = max(32, int(os.getenv("VALIDATOR_PROBE_MAX_TOKENS", "512") or
 REGISTRATION_MAX_CLOCK_SKEW_SECONDS = max(
     60,
     int(os.getenv("VALIDATOR_REGISTRATION_MAX_CLOCK_SKEW_SECONDS", "300") or 300),
+)
+VALIDATOR_HEARTBEAT_FRESH_SECONDS = max(
+    60,
+    int(os.getenv("VALIDATOR_HEARTBEAT_FRESH_SECONDS", "900") or 900),
 )
 
 _ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
@@ -245,8 +259,17 @@ async def register_validator(
                 sa.select(validators_t).where(validators_t.c.signing_wallet == wallet),
             )
         ).mappings().first()
+        existing_account = (
+            await session.execute(
+                sa.select(validators_t.c.id, validators_t.c.signing_wallet).where(
+                    validators_t.c.account_id == account_id
+                )
+            )
+        ).mappings().first()
         if existing and existing["account_id"] != account_id:
             raise RegistrationError("validator signing wallet belongs to another account")
+        if existing_account and existing_account["signing_wallet"] != wallet:
+            raise RegistrationError("validator account already has a different signing wallet")
         if existing and existing["status"] == "revoked":
             raise RegistrationError("validator registration is revoked")
         if existing:
@@ -426,6 +449,7 @@ def _assignment_to_dict(
 ) -> dict[str, Any]:
     out = {
         "assignment_id": row["id"],
+        "probe_group_id": row.get("probe_group_id"),
         "target_worker_id": row["target_worker_id"],
         "target_worker_name": row["target_worker_name"],
         "model": row["model"],
@@ -447,12 +471,75 @@ def _assignment_to_dict(
     if include_grid_nonce:
         out["grid_nonce"] = row["grid_nonce"]
     if include_challenge:
-        out["challenge"] = row["challenge"]
+        challenge = row["challenge"] or {}
+        out["challenge"] = {
+            key: challenge[key]
+            for key in ("kind", "prompt", "expected_hash", "max_tokens", "temperature")
+            if key in challenge
+        }
     return out
 
 
 async def _finalize_due_assignments(session) -> None:
     now = _now()
+    group_deadline = now - timedelta(seconds=ATTESTATION_GRACE_SECONDS)
+    groups = (
+        await session.execute(
+            sa.select(probe_groups_t).where(
+                probe_groups_t.c.expires < group_deadline,
+                probe_groups_t.c.quorum_status != "finalized",
+            )
+        )
+    ).mappings().all()
+    for group in groups:
+        votes = (
+            await session.execute(
+                sa.select(attestations_t.c.verdict, sa.func.count().label("count"))
+                .where(
+                    attestations_t.c.probe_group_id == group["id"],
+                    attestations_t.c.authority == "authoritative",
+                    attestations_t.c.validator_id.isnot(None),
+                )
+                .group_by(attestations_t.c.verdict)
+            )
+        ).mappings().all()
+        counts = {row["verdict"]: int(row["count"]) for row in votes}
+        threshold = int(group["quorum_threshold"] or QUORUM_MIN)
+        winners = [verdict for verdict, count in counts.items() if count >= threshold]
+        if len(winners) == 1:
+            outcome = winners[0]
+        elif len(counts) > 1:
+            outcome = "disputed"
+        else:
+            outcome = "insufficient_evidence"
+        await session.execute(
+            sa.update(probe_groups_t)
+            .where(probe_groups_t.c.id == group["id"])
+            .values(
+                status="finalized",
+                quorum_status="finalized",
+                quorum_outcome=outcome,
+                finalized=now,
+            )
+        )
+        await session.execute(
+            sa.update(assignments_t)
+            .where(assignments_t.c.probe_group_id == group["id"])
+            .values(
+                status="finalized",
+                quorum_status="finalized",
+                quorum_outcome=outcome,
+                finalized=now,
+            )
+        )
+        await session.execute(
+            sa.update(attestations_t)
+            .where(attestations_t.c.probe_group_id == group["id"])
+            .values(quorum_status="finalized")
+        )
+
+    # Legacy preview assignments from before shared probe groups still expire,
+    # but they can never be promoted into multi-validator quorum.
     rows = (
         await session.execute(
             sa.select(
@@ -460,6 +547,7 @@ async def _finalize_due_assignments(session) -> None:
                 assignments_t.c.quorum_status,
                 assignments_t.c.quorum_outcome,
             ).where(
+                assignments_t.c.probe_group_id.is_(None),
                 assignments_t.c.expires < now,
                 assignments_t.c.quorum_status != "finalized",
             )
@@ -490,7 +578,7 @@ async def issue_assignments(
     limit: int = 5,
     modality: str = "text",
 ) -> dict[str, Any]:
-    """Return pending assignments for this validator, creating more if needed."""
+    """Return this validator's work from shared, economically inert probe groups."""
     safe_limit = max(1, min(int(limit), 25))
     if modality != "text":
         raise AssignmentError("only text assignments are enabled in this rollout")
@@ -500,6 +588,13 @@ async def issue_assignments(
     wallet = validator_wallet.lower() if validator_wallet and _ADDR_RE.match(validator_wallet) else None
 
     async with await new_session() as session:
+        # Serialize concurrent polls from the same registered validator. The DB
+        # uniqueness guard remains the final protection on group membership.
+        await session.execute(
+            sa.select(validators_t.c.id)
+            .where(validators_t.c.id == validator_id)
+            .with_for_update()
+        )
         await _finalize_due_assignments(session)
 
         own_worker_rows = (
@@ -515,7 +610,8 @@ async def issue_assignments(
                 .where(
                     assignments_t.c.account_id == account_id,
                     assignments_t.c.validator_id == validator_id,
-                    assignments_t.c.quorum_status == "pending",
+                    assignments_t.c.status != "finalized",
+                    assignments_t.c.probe_status != "completed",
                     assignments_t.c.expires >= now,
                 )
                 .order_by(assignments_t.c.created.asc())
@@ -540,11 +636,104 @@ async def issue_assignments(
             model = models[0]
             if (worker_id, model) in existing_keys:
                 continue
-            challenge = _make_text_challenge(len(rows))
+
+            if session.bind and session.bind.dialect.name == "postgresql":
+                lock_key = int.from_bytes(
+                    hashlib.sha256(
+                        f"validator-group:{worker_id}:{model}:{modality}".encode()
+                    ).digest()[:8],
+                    byteorder="big",
+                    signed=True,
+                )
+                await session.execute(
+                    sa.text("SELECT pg_advisory_xact_lock(:lock_key)"),
+                    {"lock_key": lock_key},
+                )
+
+            candidate_groups = (
+                await session.execute(
+                    sa.select(probe_groups_t)
+                    .where(
+                        probe_groups_t.c.target_worker_id == worker_id,
+                        probe_groups_t.c.model == model,
+                        probe_groups_t.c.modality == modality,
+                        probe_groups_t.c.expires >= now,
+                        probe_groups_t.c.quorum_status != "finalized",
+                    )
+                    .order_by(probe_groups_t.c.created.asc())
+                )
+            ).mappings().all()
+            group = None
+            unfilled_group_exists = False
+            for candidate in candidate_groups:
+                assigned_count = int(
+                    await session.scalar(
+                        sa.select(sa.func.count())
+                        .select_from(assignments_t)
+                        .where(assignments_t.c.probe_group_id == candidate["id"])
+                    )
+                    or 0
+                )
+                if assigned_count >= int(candidate["target_validator_count"]):
+                    continue
+                unfilled_group_exists = True
+                already_assigned = await session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(assignments_t)
+                    .where(
+                        assignments_t.c.probe_group_id == candidate["id"],
+                        assignments_t.c.validator_id == validator_id,
+                    )
+                )
+                if not already_assigned:
+                    group = candidate
+                    break
+
+            # Do not let one fast validator manufacture many nominally shared
+            # groups while the current group is still waiting for peers.
+            if group is None and unfilled_group_exists:
+                continue
+
+            if group is None:
+                challenge = _make_text_challenge(len(rows))
+                group_id = f"prg_{uuid4().hex}"
+                group_values = {
+                    "id": group_id,
+                    "target_worker_id": worker_id,
+                    "target_worker_name": worker_name,
+                    "model": model,
+                    "modality": "text",
+                    "capability": "text.basic.v1",
+                    "canary_kind": challenge["kind"],
+                    "scoring_policy_id": "text.basic.generated.v2",
+                    "challenge": challenge,
+                    "challenge_hash": _hash_obj({
+                        "group_id": group_id,
+                        "worker_id": worker_id,
+                        "model": model,
+                        "challenge": challenge,
+                    }),
+                    "status": "pending",
+                    "quorum_status": "pending",
+                    "quorum_outcome": None,
+                    "quorum_threshold": QUORUM_MIN,
+                    "target_validator_count": QUORUM_TARGET,
+                    "created": now,
+                    "expires": expires,
+                    "accepted": None,
+                    "disputed": None,
+                    "finalized": None,
+                }
+                await session.execute(sa.insert(probe_groups_t).values(**group_values))
+                group = group_values
+            else:
+                challenge = group["challenge"] or {}
+
             assignment_id = f"asg_{uuid4().hex}"
             grid_nonce = secrets.token_urlsafe(24)
             values = {
                 "id": assignment_id,
+                "probe_group_id": group["id"],
                 "account_id": account_id,
                 "validator_id": validator_id,
                 "validator_wallet": wallet,
@@ -553,9 +742,9 @@ async def issue_assignments(
                 "target_worker_name": worker_name,
                 "model": model,
                 "modality": "text",
-                "capability": "text.basic.v1",
-                "canary_kind": challenge["kind"],
-                "scoring_policy_id": "text.basic.generated.v1",
+                "capability": group["capability"],
+                "canary_kind": group["canary_kind"],
+                "scoring_policy_id": group["scoring_policy_id"],
                 "challenge": challenge,
                 "status": "pending",
                 "quorum_status": "pending",
@@ -565,7 +754,7 @@ async def issue_assignments(
                 "probe_attempts": 0,
                 "probe_lease_expires": None,
                 "created": now,
-                "expires": expires,
+                "expires": group["expires"],
                 "probed": None,
                 "finalized": None,
             }
@@ -580,21 +769,31 @@ async def issue_assignments(
         "count": min(len(rows), safe_limit),
         "targeted_probe_enabled": True,
         "quorum": await assignment_health(account_id=account_id),
+        "quorum_policy": {
+            "threshold": QUORUM_MIN,
+            "target_validators": QUORUM_TARGET,
+            "distinct_registered_validators": True,
+        },
         "economic_effect": "none",
     }
 
 
 async def assignment_health(*, account_id=None, limit: int = 25) -> dict[str, Any]:
-    """Return assignment/quorum health without exposing raw evidence."""
+    """Return probe, assignment, and real group-quorum health without raw evidence."""
     safe_limit = max(1, min(int(limit), 100))
     async with await new_session() as session:
         await _finalize_due_assignments(session)
         await session.commit()
-        base = sa.select(assignments_t.c.quorum_status, sa.func.count().label("count")).group_by(
-            assignments_t.c.quorum_status
+        group_scope = sa.select(assignments_t.c.probe_group_id).where(
+            assignments_t.c.probe_group_id.isnot(None)
         )
         if account_id is not None:
-            base = base.where(assignments_t.c.account_id == account_id)
+            group_scope = group_scope.where(assignments_t.c.account_id == account_id)
+        base = (
+            sa.select(probe_groups_t.c.quorum_status, sa.func.count().label("count"))
+            .where(probe_groups_t.c.id.in_(group_scope))
+            .group_by(probe_groups_t.c.quorum_status)
+        )
         quorum_counts = {
             row["quorum_status"]: int(row["count"])
             for row in (await session.execute(base)).mappings().all()
@@ -609,13 +808,115 @@ async def assignment_health(*, account_id=None, limit: int = 25) -> dict[str, An
             for row in (await session.execute(probe_q)).mappings().all()
         }
         recent_q = (
-            sa.select(assignments_t)
-            .order_by(assignments_t.c.created.desc())
+            sa.select(probe_groups_t)
+            .where(probe_groups_t.c.id.in_(group_scope))
+            .order_by(probe_groups_t.c.created.desc())
             .limit(safe_limit)
         )
-        if account_id is not None:
-            recent_q = recent_q.where(assignments_t.c.account_id == account_id)
-        recent = (await session.execute(recent_q)).mappings().all()
+        recent_groups = (await session.execute(recent_q)).mappings().all()
+        recent = []
+        for group in recent_groups:
+            assigned = int(
+                await session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(assignments_t)
+                    .where(assignments_t.c.probe_group_id == group["id"])
+                )
+                or 0
+            )
+            attested = int(
+                await session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(attestations_t)
+                    .where(
+                        attestations_t.c.probe_group_id == group["id"],
+                        attestations_t.c.authority == "authoritative",
+                    )
+                )
+                or 0
+            )
+            recent.append({
+                "probe_group_id": group["id"],
+                "target_worker_id": group["target_worker_id"],
+                "model": group["model"],
+                "modality": group["modality"],
+                "capability": group["capability"],
+                "quorum_status": group["quorum_status"],
+                "quorum_outcome": group["quorum_outcome"],
+                "assigned_validators": assigned,
+                "attested_validators": attested,
+                "threshold": int(group["quorum_threshold"]),
+                "target_validators": int(group["target_validator_count"]),
+                "created": group["created"].isoformat() if group["created"] else None,
+                "expires": group["expires"].isoformat() if group["expires"] else None,
+                "finalized": group["finalized"].isoformat() if group["finalized"] else None,
+            })
+        authoritative_evidence = int(
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(attestations_t)
+                .where(
+                    attestations_t.c.probe_group_id.in_(group_scope),
+                    attestations_t.c.authority == "authoritative",
+                )
+            )
+            or 0
+        )
+        worker_passed = int(
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(probe_groups_t)
+                .where(
+                    probe_groups_t.c.id.in_(group_scope),
+                    probe_groups_t.c.quorum_outcome == "healthy",
+                    probe_groups_t.c.quorum_status.in_(("accepted", "finalized")),
+                )
+            )
+            or 0
+        )
+        quorum_reached = int(
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(probe_groups_t)
+                .where(
+                    probe_groups_t.c.id.in_(group_scope),
+                    probe_groups_t.c.quorum_outcome.in_(VALID_VERDICTS),
+                    probe_groups_t.c.quorum_status.in_(("accepted", "finalized")),
+                )
+            )
+            or 0
+        )
+        active_validators = int(
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(validators_t)
+                .where(validators_t.c.status == "active")
+            )
+            or 0
+        )
+        fresh_cutoff = _now() - timedelta(seconds=VALIDATOR_HEARTBEAT_FRESH_SECONDS)
+        fresh_validators = int(
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(validators_t)
+                .where(
+                    validators_t.c.status == "active",
+                    validators_t.c.last_heartbeat >= fresh_cutoff,
+                )
+            )
+            or 0
+        )
+        participating_validators = int(
+            await session.scalar(
+                sa.select(sa.func.count(sa.distinct(attestations_t.c.validator_id)))
+                .where(
+                    attestations_t.c.authority == "authoritative",
+                    attestations_t.c.validator_id.isnot(None),
+                    attestations_t.c.created >= _now() - timedelta(hours=24),
+                )
+            )
+            or 0
+        )
     return {
         "quorum": {
             "pending": quorum_counts.get("pending", 0),
@@ -623,11 +924,27 @@ async def assignment_health(*, account_id=None, limit: int = 25) -> dict[str, An
             "disputed": quorum_counts.get("disputed", 0),
             "finalized": quorum_counts.get("finalized", 0),
         },
+        "quorum_policy": {
+            "threshold": QUORUM_MIN,
+            "target_validators": QUORUM_TARGET,
+            "distinct_registered_validators": True,
+            "operator_independence_proven": False,
+        },
+        "stages": {
+            "probes_completed": probe_counts.get("completed", 0),
+            "authoritative_evidence_accepted": authoritative_evidence,
+            "workers_passed": worker_passed,
+            "quorum_reached": quorum_reached,
+            "groups_finalized": quorum_counts.get("finalized", 0),
+        },
+        "validators": {
+            "active": active_validators,
+            "heartbeat_fresh": fresh_validators,
+            "participating_24h": participating_validators,
+            "heartbeat_fresh_seconds": VALIDATOR_HEARTBEAT_FRESH_SECONDS,
+        },
         "probe": probe_counts,
-        "recent": [
-            _assignment_to_dict(r, include_challenge=False, include_grid_nonce=False)
-            for r in recent
-        ],
+        "recent": recent,
         "economic_effect": "none",
     }
 
@@ -652,6 +969,8 @@ def _normalize(payload: dict[str, Any], signature: str | None) -> dict[str, Any]
         raise AttestationError("authoritative evidence requires payload.grid_nonce")
     if wants_authority and not _string(payload, "evidence_hash", 64):
         raise AttestationError("authoritative evidence requires payload.evidence_hash")
+    if wants_authority and not _string(payload, "probe_group_id", 96):
+        raise AttestationError("authoritative evidence requires payload.probe_group_id")
     signature_status = _signature_status(payload, sig)
     if wants_authority and signature_status != "verified":
         raise AttestationError("authoritative evidence requires a verified validator signature")
@@ -660,6 +979,7 @@ def _normalize(payload: dict[str, Any], signature: str | None) -> dict[str, Any]
         "attestation_hash": _attestation_hash(payload, sig),
         "validator_wallet": validator_wallet,
         "assignment_id": _string(payload, "assignment_id", 96) if wants_authority else None,
+        "probe_group_id": _string(payload, "probe_group_id", 96) if wants_authority else None,
         "grid_nonce": _string(payload, "grid_nonce", 128) if wants_authority else None,
         "evidence_hash": _string(payload, "evidence_hash", 64) if wants_authority else None,
         "authority": "authoritative" if wants_authority else "preview",
@@ -715,8 +1035,16 @@ async def _verify_assignment_in_session(
         raise AttestationError("attestation wallet does not match validator registration")
     if assignment["grid_nonce"] != grid_nonce:
         raise AttestationError("grid_nonce does not match assignment")
-    if assignment["expires"] and _aware(assignment["expires"]) < _now():
-        raise AttestationError("assignment has expired")
+    if not assignment["probe_group_id"]:
+        raise AttestationError("assignment is not part of a shared probe group")
+    if assignment["probe_group_id"] != row.get("probe_group_id"):
+        raise AttestationError("probe_group_id does not match assignment")
+    if assignment["expires"]:
+        attestation_deadline = _aware(assignment["expires"]) + timedelta(
+            seconds=ATTESTATION_GRACE_SECONDS
+        )
+        if attestation_deadline < _now():
+            raise AttestationError("assignment attestation window has expired")
     if assignment["probe_status"] != "completed":
         raise AttestationError("assignment probe has not completed")
     if not assignment["probe_evidence_hash"]:
@@ -740,44 +1068,68 @@ async def _verify_assignment_in_session(
     return assignment
 
 
-async def _update_quorum_in_session(session, assignment_id: str) -> str:
-    assignment = (
+async def _update_quorum_in_session(session, probe_group_id: str) -> str:
+    group = (
         await session.execute(
-            sa.select(assignments_t.c.probe_verdict).where(assignments_t.c.id == assignment_id)
+            sa.select(probe_groups_t).where(probe_groups_t.c.id == probe_group_id)
         )
     ).mappings().first()
-    probe_verdict = assignment["probe_verdict"] if assignment else None
+    if not group:
+        raise AttestationError("probe group is missing")
+    if group["quorum_status"] == "finalized":
+        raise AttestationError("probe group is finalized")
+    if group["expires"]:
+        attestation_deadline = _aware(group["expires"]) + timedelta(
+            seconds=ATTESTATION_GRACE_SECONDS
+        )
+        if attestation_deadline < _now():
+            raise AttestationError("probe group attestation window has expired")
     rows = (
         await session.execute(
             sa.select(attestations_t.c.verdict, sa.func.count().label("count"))
             .where(
-                attestations_t.c.assignment_id == assignment_id,
+                attestations_t.c.probe_group_id == probe_group_id,
                 attestations_t.c.authority == "authoritative",
+                attestations_t.c.validator_id.isnot(None),
             )
             .group_by(attestations_t.c.verdict)
         )
     ).mappings().all()
-    total = sum(int(r["count"]) for r in rows)
-    if total <= 0:
+    counts = {row["verdict"]: int(row["count"]) for row in rows}
+    threshold = int(group["quorum_threshold"] or QUORUM_MIN)
+    winners = [verdict for verdict, count in counts.items() if count >= threshold]
+    now = _now()
+    if not counts:
         status = "pending"
         outcome = None
-    elif probe_verdict and any(r["verdict"] != probe_verdict for r in rows):
+    elif len(counts) > 1:
         status = "disputed"
-        outcome = "disputed"
-    elif total >= QUORUM_MIN:
+        outcome = winners[0] if len(winners) == 1 else "disputed"
+    elif len(winners) == 1:
         status = "accepted"
-        outcome = probe_verdict or rows[0]["verdict"]
+        outcome = winners[0]
     else:
         status = "pending"
         outcome = None
     await session.execute(
+        sa.update(probe_groups_t)
+        .where(probe_groups_t.c.id == probe_group_id)
+        .values(
+            status=status,
+            quorum_status=status,
+            quorum_outcome=outcome,
+            accepted=now if status == "accepted" and not group["accepted"] else group["accepted"],
+            disputed=now if status == "disputed" and not group["disputed"] else group["disputed"],
+        )
+    )
+    await session.execute(
         sa.update(assignments_t)
-        .where(assignments_t.c.id == assignment_id)
+        .where(assignments_t.c.probe_group_id == probe_group_id)
         .values(status=status, quorum_status=status, quorum_outcome=outcome)
     )
     await session.execute(
         sa.update(attestations_t)
-        .where(attestations_t.c.assignment_id == assignment_id)
+        .where(attestations_t.c.probe_group_id == probe_group_id)
         .values(quorum_status=status)
     )
     return status
@@ -811,6 +1163,30 @@ async def record_attestation(
                 row=row,
             )
             row["validator_id"] = validator_id
+            # Lock before inserting the FK-bound vote. Locking after the insert
+            # can deadlock when concurrent transactions upgrade their implicit
+            # FK key-share locks to row-update locks.
+            locked_group = (
+                await session.execute(
+                    sa.select(
+                        probe_groups_t.c.id,
+                        probe_groups_t.c.quorum_status,
+                        probe_groups_t.c.expires,
+                    )
+                    .where(probe_groups_t.c.id == row["probe_group_id"])
+                    .with_for_update()
+                )
+            ).first()
+            if not locked_group:
+                raise AttestationError("probe group is missing")
+            if locked_group[1] == "finalized":
+                raise AttestationError("probe group is finalized")
+            if locked_group[2]:
+                attestation_deadline = _aware(locked_group[2]) + timedelta(
+                    seconds=ATTESTATION_GRACE_SECONDS
+                )
+                if attestation_deadline < _now():
+                    raise AttestationError("probe group attestation window has expired")
             existing_for_validator = (
                 await session.execute(
                     sa.select(
@@ -818,7 +1194,7 @@ async def record_attestation(
                         attestations_t.c.attestation_hash,
                         attestations_t.c.quorum_status,
                     ).where(
-                        attestations_t.c.assignment_id == row["assignment_id"],
+                        attestations_t.c.probe_group_id == row["probe_group_id"],
                         attestations_t.c.validator_id == validator_id,
                     ),
                 )
@@ -826,7 +1202,8 @@ async def record_attestation(
             if existing_for_validator:
                 if existing_for_validator[1] != row["attestation_hash"]:
                     raise AttestationError(
-                        "validator already submitted an authoritative attestation for this assignment"
+                        "validator already submitted an authoritative "
+                        "attestation for this probe group"
                     )
                 return {
                     "status": "duplicate",
@@ -835,6 +1212,7 @@ async def record_attestation(
                     "signature_status": row["signature_status"],
                     "authority": row["authority"],
                     "assignment_id": row["assignment_id"],
+                    "probe_group_id": row["probe_group_id"],
                     "quorum_status": existing_for_validator[2],
                 }
         try:
@@ -852,26 +1230,27 @@ async def record_attestation(
                     ).where(attestations_t.c.attestation_hash == row["attestation_hash"])
                 )
             ).first()
-            if not existing and row.get("assignment_id") and row.get("validator_id"):
+            if not existing and row.get("probe_group_id") and row.get("validator_id"):
                 conflicting = (
                     await session.execute(
                         sa.select(attestations_t.c.id).where(
-                            attestations_t.c.assignment_id == row["assignment_id"],
+                            attestations_t.c.probe_group_id == row["probe_group_id"],
                             attestations_t.c.validator_id == row["validator_id"],
                         ),
                     )
                 ).first()
                 if conflicting:
                     raise AttestationError(
-                        "validator already submitted an authoritative attestation for this assignment"
+                        "validator already submitted an authoritative "
+                        "attestation for this probe group"
                     )
             attestation_id = existing[0] if existing else None
             row["assignment_id"] = existing[1] if existing else row.get("assignment_id")
             row["authority"] = existing[2] if existing else row.get("authority")
             status = "duplicate"
         quorum_status = "preview"
-        if row["authority"] == "authoritative" and row.get("assignment_id"):
-            quorum_status = await _update_quorum_in_session(session, row["assignment_id"])
+        if row["authority"] == "authoritative" and row.get("probe_group_id"):
+            quorum_status = await _update_quorum_in_session(session, row["probe_group_id"])
         await session.commit()
 
     logger.info(
@@ -890,6 +1269,7 @@ async def record_attestation(
         "signature_status": row["signature_status"],
         "authority": row["authority"],
         "assignment_id": row.get("assignment_id"),
+        "probe_group_id": row.get("probe_group_id"),
         "quorum_status": quorum_status,
     }
 
@@ -1032,6 +1412,7 @@ async def probe_assignment(
         "temperature": float(challenge.get("temperature") or 0),
         "_validator_probe": True,
         "_validator_assignment_id": assignment_id,
+        "_validator_probe_group_id": row["probe_group_id"],
         "_validator_grid_nonce": row["grid_nonce"],
     }
 
@@ -1063,7 +1444,6 @@ async def probe_assignment(
 
     chunks: list[str] = []
     full_text = ""
-    full_reasoning = ""
     grid_meta = None
     usage = None
     try:
@@ -1079,7 +1459,6 @@ async def probe_assignment(
                 }
             if event.get("text") == token_stream.DONE_SENTINEL:
                 full_text = event.get("full_text") or "".join(chunks)
-                full_reasoning = event.get("full_reasoning") or ""
                 usage = event.get("usage")
                 grid_meta = event.get("grid")
                 break
@@ -1105,6 +1484,7 @@ async def probe_assignment(
 
     evidence = {
         "assignment_id": assignment_id,
+        "probe_group_id": row["probe_group_id"],
         "grid_nonce": row["grid_nonce"],
         "worker_id": row["target_worker_id"],
         "model": row["model"],
@@ -1129,6 +1509,7 @@ async def probe_assignment(
     return {
         "status": "completed",
         "assignment_id": assignment_id,
+        "probe_group_id": row["probe_group_id"],
         "job_id": job_id,
         "grid_nonce": row["grid_nonce"],
         "target_worker_id": row["target_worker_id"],
@@ -1138,11 +1519,8 @@ async def probe_assignment(
         "capability": row["capability"],
         "canary_kind": row["canary_kind"],
         "output_text": full_text,
-        "output_reasoning": full_reasoning,
         "usage": usage,
         "grid": grid_meta,
-        "probe_verdict": probe_verdict,
-        "probe_score": VERDICT_SCORE[probe_verdict],
         "probe_latency_ms": latency_ms,
         **evidence,
         "economic_effect": "none",

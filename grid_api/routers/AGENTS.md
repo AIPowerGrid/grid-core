@@ -72,8 +72,10 @@ transport, accounts, stats, health/metrics.
   `POST /v1/validator/probe/{assignment_id}`,
   `POST /v1/validator/attest`, `GET /v1/validator/workers`,
   `GET /v1/validator/scorecards`, and
-  `GET /v1/validator/assignments/health`. This enables targeted evidence
-  collection, but still has no routing/reward/slash authority.
+  `GET /v1/validator/assignments/health`. Health separates probe,
+  accepted-evidence, worker-pass, quorum, finalization, and aggregate validator
+  liveness stages. Shared 3-of-5 quorum remains preview-only with no
+  routing/reward/slash authority.
 - `styles.py` - `GET /v1/styles` for curated creative presets.
 - `health.py` - `GET /health`.
 - `metrics.py` - `GET /metrics` Prometheus exposition.
