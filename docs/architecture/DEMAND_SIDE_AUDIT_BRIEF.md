@@ -204,14 +204,15 @@ Core remains the sole charging-mode authority; frontend deployments cannot
 turn billing on.
 
 Current source verification on 2026-08-21 is stronger than the deployed
-candidate but is not production evidence: Core main passes 89 focused identity,
+candidate but is not production evidence: Core main passes 90 focused identity,
 credit, reservation, pricing, and canary-audit tests (7 real-Postgres tests
 skipped in that local run); Art passes 90 frontend tests, the complete Go suite,
 its production build, and nine Playwright journeys; Music passes lint,
 typecheck, production build, and its canonical-account quote/auth smoke; Console
 passes lint, formatting, production build, and its account-mismatch smoke; Chat
-passes 18 focused delegated-identity tests. These results prove the checked-in
-contracts, not a live cross-product canary.
+passes 56 focused permission, wallet-identity, delegation, account, and quote
+tests. These results prove the checked-in contracts, not a live cross-product
+canary.
 
 The production canary has three successful, durable settlements on the selected
 canonical account: delegated Chat text, delegated Art Krea image, and delegated
