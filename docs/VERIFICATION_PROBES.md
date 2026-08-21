@@ -130,6 +130,8 @@ arithmetic, strict JSON, context retrieval, generated multistep logic, and an
 exact single-function call with randomized names and arguments. Tool-call
 evidence commits the witnessed text plus structured call; Core and the node
 normalize the call independently. Multi-turn tool chains remain future work.
+The stop-sequence family also verifies that the worker/backend honors one
+randomized OpenAI `stop` value instead of merely following a prompt.
 Group membership is capability-gated; legacy `text.basic.v1` nodes receive only
 echo/arithmetic. Each validator normalizes the output and checks the one-way
 expected-answer commitment locally instead of signing Core's private verdict.
