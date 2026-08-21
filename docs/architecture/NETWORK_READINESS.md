@@ -265,16 +265,17 @@ and the 24-hour unchanged-cohort window remain unproven. The remaining canary
 balance is below the currently selected model's minimum charge; further real
 work requires deliberate funding approval.
 
-### 25. One canonical account and balance - Implemented
+### 25. One canonical account and balance - Source-complete, live parity pending
 
 Core owns canonical identity links, aliases, three credit pockets, and bounded
 service delegation. Focused Core, Chat, Art, Music, and Console tests prove
 delegated tokens and reject account mismatches. Google and wallet proof can
 merge without rewriting historical ledgers. Every auth change still requires a
 cross-product live canary because partial deployments have caused outages. The
-required live four-surface Google run and separate wallet run have not yet been
-captured as one retained, `no-store` receipt set, so code-level completion must
-not be mistaken for production-parity evidence.
+required live Google run and separate wallet run across Console, Chat, Art,
+Music, and direct API use have not yet been captured as retained, `no-store`
+receipt sets, so code-level completion must not be mistaken for
+production-parity evidence.
 
 ### 26. Explicit owner-worker reward policy - Open, payout-backlog
 
