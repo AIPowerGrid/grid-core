@@ -343,6 +343,38 @@ async def test_authoritative_attestation_requires_grid_assignment_and_nonce(db):
 
 
 @pytest.mark.asyncio
+async def test_validator_disagreement_marks_assignment_disputed(db):
+    account_id = uuid.uuid4()
+    validator_id, assignment, payload = await _assignment(account_id, verdict="healthy")
+    independent_verdict = {**payload, "verdict": "failed", "score": 0.0}
+
+    stored = await validators_svc.record_attestation(
+        account_id=account_id,
+        validator_id=validator_id,
+        payload=independent_verdict,
+        signature=_sign(independent_verdict),
+    )
+
+    assert stored["authority"] == "authoritative"
+    assert stored["quorum_status"] == "disputed"
+    async with await database.new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(
+                    assignments_t.c.status,
+                    assignments_t.c.quorum_status,
+                    assignments_t.c.quorum_outcome,
+                ).where(assignments_t.c.id == assignment["assignment_id"])
+            )
+        ).mappings().one()
+    assert row == {
+        "status": "disputed",
+        "quorum_status": "disputed",
+        "quorum_outcome": "disputed",
+    }
+
+
+@pytest.mark.asyncio
 async def test_one_authoritative_attestation_per_registered_validator(db):
     account_id = uuid.uuid4()
     validator_id, assignment, payload = await _assignment(account_id, verdict="healthy")
