@@ -74,6 +74,9 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - Put reusable logic in the owning service package and test it there.
 - Backup/restore tools must never print database credentials. Restore proof may
   only create or drop its generated `aipg_restore_proof_*` database.
+- A restore proof drops the default `public` schema only after creating and
+  selecting its guarded scratch database, because a schema-scoped archive must
+  recreate that schema. Never generalize this to a caller-supplied database.
 - Backups default to the Grid-owned `public` schema. `AIPG_BACKUP_SCHEMA` may
   select one explicit PostgreSQL identifier for a controlled migration, but a
   backup must never silently absorb unrelated extension schemas such as
@@ -86,6 +89,9 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - Run `bash -n scripts/payout_hourly.sh` for wrapper edits.
 - Run `bash -n scripts/backup_postgres.sh scripts/prove_postgres_restore.sh`
   and exercise both against disposable PostgreSQL before deployment.
+- Pull-request CI must run the PostgreSQL 16 backup/restore proof, including a
+  decoy non-Grid schema that the archive must exclude. A main-only proof is too
+  late to protect a deployment candidate.
 - Run focused settlement tests before changing payout invocation or periods.
 - Run `scripts/run_tests.sh` from an environment with
   `requirements.dev.txt` installed.
