@@ -35,6 +35,13 @@ At this snapshot:
 - charging remains a narrow allowlist canary rather than global; and
 - no public validator binary release or qualifying media-manager release exists.
 
+Read-only host verification on 2026-08-21 confirmed the immutable release and
+database revision above. A separate PostgreSQL rehearsal upgraded `0019` to
+`0024` with 100,000 synthetic legacy assignments and 110,000 synthetic legacy
+attestations in place, preserved every row, completed locally in 0.66 seconds,
+and passed `alembic check` with no schema drift. This proves the migration data
+shape and constraints, not production lock duration or backup restoration.
+
 ## Immediate Validator Preview
 
 ### 1. Dedicated validator API scopes - Ready
@@ -312,7 +319,9 @@ proven.
 
 ## Next Controlled Sequence
 
-1. Back up production and prove restore/migrations on a scratch database.
+1. Back up production and prove a restore; the large synthetic `0019` to
+   `0024` migration rehearsal is complete, but a restored production snapshot
+   has not been exercised.
 2. Obtain explicit deployment authorization for the exact reviewed Core commit.
 3. Deploy it immutably, migrate through `0024`, and verify build identity,
    charging flags, payout timer state, workers, model inventory, retired API
