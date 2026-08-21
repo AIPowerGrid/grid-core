@@ -298,8 +298,13 @@ with `--require-hashes` from binary wheels only, the Core image base is
 digest-pinned, and release construction does not upgrade pip. CI regenerates
 the lock and runs `pip-audit` before tests. Core source also exposes a build
 commit in the candidate status API and deploys immutable releases, but
-production still predates that candidate. A complete organization-wide policy
-audit remains periodic work.
+production still predates that candidate. GitHub immutable releases were
+enabled on 2026-08-21 for `grid-validator`, `grid-media-worker`, and
+`grid-inference-worker`; their future published GitHub release tags and assets
+cannot be replaced, and corrections require a new version. This setting does
+not retroactively protect older releases, qualify draft artifacts, or replace
+container-registry tag policy. A complete organization-wide policy audit
+remains periodic work.
 
 ### 33. Public network status - Ready, endpoint rollout pending
 
