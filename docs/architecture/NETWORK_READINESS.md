@@ -345,11 +345,18 @@ dependency, and secret checks; the gate itself depends on both platform builds.
 
 Key repos have tests, tracked-worktree secret scanning, CodeQL or language
 security checks, dependency monitoring, and SHA-pinned release tooling where
-artifacts exist. Full-history scanning is not yet a clean enforced gate: Core
-history still reports old API-key-shaped values and infrastructure strings that
-require revocation review plus either history repair or an explicit reviewed
-baseline; validator history reports one retired local-path disclosure. Current
-Core and validator worktrees scan clean. Text, media, and validator release
+artifacts exist. A redacted full-history scan of seven critical repositories on
+2026-08-21 classified six distinct historical 22-character API credentials
+across Core, media worker, and contracts. A read-only request to the production
+account endpoint rejected every one with HTTP 401; no active production
+credential was found and no credential value was copied into the audit record.
+The other findings were deterministic local-service fixture values, public
+cryptographic constants/test vectors in a retired paper-wallet bundle,
+documented placeholders, and operational metadata such as retired internal IPs,
+bucket names, and developer paths. Full-history scanning is still not a clean
+enforced gate: those reachable findings require either coordinated history
+repair or exact-fingerprint baselines with rationale and review dates. Current
+protected-branch worktrees scan clean. Text, media, and validator release
 pipelines carry checksums, SBOM/provenance gates appropriate to their maturity.
 Text-worker `main` now requires the exact four-platform release-payload assembly
 check on every change. Media-worker `main` records explicit Authenticode state,
@@ -372,8 +379,11 @@ enabled on 2026-08-21 for `grid-validator`, `grid-media-worker`, and
 `grid-inference-worker`; their future published GitHub release tags and assets
 cannot be replaced, and corrections require a new version. This setting does
 not retroactively protect older releases, qualify draft artifacts, or replace
-container-registry tag policy. A complete organization-wide policy audit
-remains periodic work.
+container-registry tag policy. Documentation PR 3 adds the organization-wide
+requirement for full-history scans, burned-secret rotation before cleanup,
+fingerprint-scoped baselines, signed release manifests/SBOMs, and exact
+deployment SHA/digest records. It remains unmerged, and implementation of that
+standard in every repository remains periodic work.
 
 ### 33. Public network status - Ready, endpoint rollout pending
 
