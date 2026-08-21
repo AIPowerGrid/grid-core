@@ -54,6 +54,9 @@ class GridSettings(BaseSettings):
     # explicitly configured against a reviewed, deployed WorkerRegistry and a
     # fresh finalized-block/quality sync has populated the reference pool.
     validator_media_probe_enabled: bool = False
+    # Objective video container/timing/motion checks are independently gated.
+    # This does not enable reference-based video fidelity scoring.
+    validator_video_probe_enabled: bool = False
     validator_media_bond_chain_id: int = 8453
     validator_media_bond_contract: str = ""
     validator_media_bond_verifier_version: str = ""

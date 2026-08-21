@@ -219,11 +219,14 @@ timestamps, blank/static frames, and latency are checked; and fidelity compares
 per-frame pHashes plus a lightweight motion profile only after two references
 agree. Malformed assignments, unsafe fetches, local decoder timeouts, and
 reference decode failures/disagreement are inconclusive; authenticated
-malformed candidate bytes may fail. Core still issues no video assignments.
-Targeted media execution, immutable witness retention, bonded
-reference operation, real LTX/workflow calibration, prompt/key-event relevance,
-and media-enabled release-binary qualification remain open. No video evidence
-affects routing, rewards, strikes, bonds, or slashing.
+malformed candidate bytes may fail. Core now has a separately gated,
+default-off `video.contract.v1` assignment and hard-targeted MP4 witness path.
+It requires a governed text-to-video recipe with explicit dimensions and timing;
+it uses no references and makes no model-fidelity claim. Real LTX/workflow
+calibration, governed recipe publication, prompt/key-event relevance, and
+media-enabled release-binary qualification remain open. Reference-based
+`video.fidelity.v1` remains disabled. No video evidence affects routing,
+rewards, strikes, bonds, or slashing.
 
 ### 23. Rotating bonded references - Ready dark/External
 

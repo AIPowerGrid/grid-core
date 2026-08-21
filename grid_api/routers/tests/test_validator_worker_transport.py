@@ -246,3 +246,100 @@ async def test_validator_image_probe_freezes_output_without_economic_side_effect
     assert body["witness"]["sha256"] == "b" * 64
     assert body["witness"]["role"] == "candidate"
     assert published[0][1]["grid"]["economic_effect"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_validator_video_probe_freezes_mp4_without_economic_side_effects(monkeypatch):
+    job_id = str(uuid.uuid4())
+    ws = _WebSocket(
+        incoming=[{
+            "type": "done",
+            "results": [{"index": 0, "sha256": "a" * 64, "seed": 9}],
+        }]
+    )
+    job = {
+        "job_id": job_id,
+        "job_type": "video",
+        "hard_target_worker": "video-rig",
+        "payload": {
+            "prompt": "ordinary video prompt",
+            "seed": 9,
+            "n": 1,
+            "ext": "mp4",
+            "recipe_spec": {"1": {"inputs": {"text": "ordinary video prompt"}}},
+            "_validator_probe": True,
+            "_validator_assignment_id": "asg-video",
+            "_validator_probe_group_id": "prg-video",
+            "_validator_grid_nonce": "nonce-video",
+            "_validator_role": "candidate",
+        },
+    }
+    assert worker_ws._is_assignment_bound_validator_job(job)
+    job["payload"]["_validator_role"] = "reference"
+    assert not worker_ws._is_assignment_bound_validator_job(job)
+    job["payload"]["_validator_role"] = "candidate"
+
+    monkeypatch.setattr(
+        worker_ws.storage,
+        "presign_outputs",
+        lambda *_args, **_kwargs: [{
+            "put_url": "https://upload.invalid/signed",
+            "key": f"video/{job_id}/0.mp4",
+            "content_type": "video/mp4",
+        }],
+    )
+    monkeypatch.setattr(
+        worker_ws.storage,
+        "freeze_validator_output",
+        lambda *_args, **_kwargs: {
+            "key": f"validator/{job_id}/0.mp4",
+            "url": f"https://media.example/validator/{job_id}/0.mp4",
+            "sha256": "b" * 64,
+            "bytes": 456,
+            "content_type": "video/mp4",
+        },
+    )
+    monkeypatch.setattr(
+        worker_ws,
+        "get_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "validator_media_max_output_bytes": 1024,
+                "validator_media_probe_timeout_seconds": 600,
+            },
+        )(),
+    )
+    published = []
+
+    async def publish_done(*args, **kwargs):
+        published.append((args, kwargs))
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("validator video probes must never touch economics")
+
+    def forbidden_sync(*_args, **_kwargs):
+        raise AssertionError("validator video probes must never touch metrics")
+
+    monkeypatch.setattr(worker_ws.token_stream, "publish_done", publish_done)
+    monkeypatch.setattr(worker_ws.credits, "record_and_settle", forbidden)
+    monkeypatch.setattr(worker_ws.credits, "release_job", forbidden)
+    monkeypatch.setattr(worker_ws, "record_job_complete", forbidden_sync)
+    monkeypatch.setattr(worker_ws, "record_job_failed", forbidden_sync)
+
+    assert await worker_ws._handle_validator_media_probe(
+        ws,
+        job,
+        "video-checkpoint",
+        "worker-video",
+    )
+
+    dispatched = ws.sent[0]
+    assert dispatched["job_type"] == "video"
+    assert dispatched["upload"][0]["content_type"] == "video/mp4"
+    assert "validator" not in str(dispatched).lower()
+    body = json.loads(published[0][0][1])
+    assert body["witness"]["content_type"] == "video/mp4"
+    assert body["witness"]["role"] == "candidate"
+    assert ws.sent[-1] == {"type": "ack", "id": job_id, "den": 0}

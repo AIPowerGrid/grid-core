@@ -124,9 +124,10 @@ Core requires three matching votes from five distinct registered validator
 accounts over one probe group. It records quorum state (`pending`, `accepted`,
 `disputed`, `finalized`),
 but the whole preview surface has `economic_effect: none`: no routing, reward,
-strike, slash, credit, or payout effect. Text and feature-gated image assignment
-paths exist in the candidate; the video scorer is dark in the node and Core
-does not issue video assignments.
+strike, slash, credit, or payout effect. Text plus feature-gated image-fidelity
+and video-contract assignment paths exist in the candidate. Video remains
+default-off and proves only an objective output contract, not exact model
+fidelity.
 
 Text challenge families are selected cryptographically rather than from worker
 ordering. Current candidate families are exact instruction, generated
@@ -175,9 +176,11 @@ Deploy notes / learnings:
 1. **Grader hardening** — add hidden code execution, longer tool-call chains,
    32K+ context tiers, and streaming-integrity checks. Keep judge models a
    supporting signal rather than an objective authority.
-2. **Media/video validator lanes** — image and video fidelity contracts exist in
-   the dark candidate, but remain economically inert; Core still issues no video
-   assignments until a real-workload canary proves the reference path.
+2. **Media/video validator lanes** — deterministic image fidelity and
+   non-deterministic video contract paths exist in the dark candidate and remain
+   economically inert. Video needs a governed recipe with explicit fps/timing
+   metadata plus a real LTX canary before its independent operator gate is
+   enabled. Reference-based `video.fidelity.v1` remains deferred.
 3. **Economic gates** — do not attach routing, validator rewards, worker strikes, or
    slashing until assignment targeting, nonce-bound evidence, quorum, and dispute
    flows have been proven under load.

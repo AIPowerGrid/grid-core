@@ -76,7 +76,11 @@ content sanitization, and reward settlement.
   SHA-256 witnesses to every validator assignment. It requires an on-chain
   recipe id, deterministic metadata,
   governed model digest, explicit bond policy, and `image.fidelity.v1` validator
-  capability. Video remains disabled. Both lanes remain non-economic.
+  capability. The independent default-off `video.contract.v1` lane accepts only
+  governed text-to-video recipes with explicit prompt/seed/dimensions/timing,
+  hard-targets one candidate, freezes one MP4 witness, and checks objective
+  container/timing/motion properties. It does not claim model fidelity and has
+  no reference workers. Both lanes remain non-economic.
 - **Model/media governance:** `recipes.py`, `recipe_import.py`, `styles.py`,
   `loras.py`, `model_registry.py`.
 - **Safety:** `sanitizer.py` - **secrets redactor only** (strips API keys/PGP from prompts).
