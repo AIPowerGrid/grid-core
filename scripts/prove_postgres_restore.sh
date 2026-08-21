@@ -143,6 +143,13 @@ else
     runuser -u postgres -- createdb --port="$port" --owner="$POSTGRES_USER" "$scratch"
 fi
 scratch_created=1
+psql \
+    --host="$host" \
+    --port="$port" \
+    --username="$POSTGRES_USER" \
+    --dbname="$scratch" \
+    --set=ON_ERROR_STOP=1 \
+    --command='DROP SCHEMA public'
 pg_restore \
     --exit-on-error \
     --no-owner \

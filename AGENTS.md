@@ -91,6 +91,9 @@ owning AGENTS.md and any affected parent Child DOX Index.
   `pip-audit -r requirements-grid.lock --require-hashes --no-deps --disable-pip`;
   investigate every skipped non-PyPI dependency separately.
 - Grid-focused: `pytest grid_api/`.
+- Deployment candidates must pass the PostgreSQL 16 backup/restore proof in
+  pull-request CI; this is part of the required `tests` context, not a
+  post-merge-only check.
 - Service units: `pytest grid_api/services/`.
 - Router billing/settlement coverage: `pytest grid_api/routers/`.
 - Legacy smoke tests live under `tests/` and may skip without external services.
