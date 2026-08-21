@@ -81,13 +81,15 @@ sudo -H -u aipg bash -c \
 
 echo "── [5/6] service + nginx ──"
 install -m 0644 "$RELEASE/deploy/systemd/aipg-gridapi.service" /etc/systemd/system/
+install -m 0644 "$RELEASE/deploy/systemd/aipg-postgres-backup.service" /etc/systemd/system/
+install -m 0644 "$RELEASE/deploy/systemd/aipg-postgres-backup.timer" /etc/systemd/system/
 install -m 0644 "$RELEASE/deploy/nginx/aipg-api.conf" /etc/nginx/sites-available/aipg-api.conf
 ln -sfn /etc/nginx/sites-available/aipg-api.conf /etc/nginx/sites-enabled/aipg-api.conf
 ln -sfn "$RELEASE" /home/aipg/.current.next
 mv -Tf /home/aipg/.current.next /home/aipg/current
 
 systemctl daemon-reload
-systemctl enable --now redis-server postgresql aipg-gridapi
+systemctl enable --now redis-server postgresql aipg-gridapi aipg-postgres-backup.timer
 nginx -t
 systemctl reload nginx
 

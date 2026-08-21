@@ -37,7 +37,12 @@ At this snapshot:
 - no public validator binary release or qualifying media-manager release exists.
 
 Read-only host verification on 2026-08-21 confirmed the immutable release and
-database revision above. A separate PostgreSQL rehearsal upgraded `0019` to
+database revision above and found no scheduled database backup or off-host
+backup system. Core source now includes a locked, checksummed custom-format
+backup, hardened daily systemd timer, and guarded scratch restore/migration
+proof. The complete source path has passed twice against PostgreSQL 16, but the
+timer remains disabled and no production snapshot has been exercised. A
+separate PostgreSQL rehearsal upgraded `0019` to
 `0024` with 100,000 synthetic legacy assignments and 110,000 synthetic legacy
 attestations in place, preserved every row, completed locally in 0.66 seconds,
 and passed `alembic check` with no schema drift. This proves the migration data
@@ -333,11 +338,25 @@ failover, and later multi-authority ordering. No federation code is live. Begin
 only after validator quorum, event replay, and economic-state invariants are
 proven.
 
+### 35. Verified database backup and restore - Ready, production proof pending
+
+Core source creates locked PostgreSQL custom-format dumps, verifies archive
+structure, binds one SHA-256 manifest to the exact dump, refuses overwrite,
+uses root-only storage, and applies bounded local retention. The restore tool
+accepts only local PostgreSQL, creates and drops only a generated
+`aipg_restore_proof_*` database, restores as the application owner, migrates
+with the exact immutable candidate, and requires `alembic current`, `heads`,
+and `check` agreement. CI rehearses `0019` backup through `0024` restore on
+PostgreSQL 16. The systemd units pass clean-environment verification. The
+remaining gate is a supervised production backup plus scratch restore before
+first enablement. Local retention is not off-host disaster recovery.
+
 ## Next Controlled Sequence
 
-1. Back up production and prove a restore; the large synthetic `0019` to
-   `0024` migration rehearsal is complete, but a restored production snapshot
-   has not been exercised.
+1. Run the candidate backup tool against production and prove that exact
+   snapshot in its guarded scratch database. Source-level PostgreSQL 16 backup,
+   restore, `0019` to `0024` migration, schema-parity, and cleanup rehearsals
+   are complete, but a production snapshot has not been exercised.
 2. Obtain explicit deployment authorization for the exact reviewed Core commit.
 3. Deploy it immutably, migrate through `0024`, and verify build identity,
    charging flags, payout timer state, workers, model inventory, retired API

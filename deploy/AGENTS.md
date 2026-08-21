@@ -18,6 +18,9 @@ executes an immutable release selected through `/home/aipg/current`.
 - `systemd/aipg-gridapi.service` - uvicorn Grid API unit.
 - `systemd/aipg-payout.{service,timer}` - custodial payout one-shot and hourly
   scheduler. The service invokes the wrapper from the selected release.
+- `systemd/aipg-postgres-backup.{service,timer}` - hardened root-only daily
+  backup scheduler; existing hosts enable it only after a supervised restore
+  proof.
 
 ## Local Contracts
 
@@ -58,6 +61,9 @@ executes an immutable release selected through `/home/aipg/current`.
   until the reviewed bond contract/verifier/minimum, finalized reference sync,
   governed deterministic recipe/model digest, independent operators, immutable
   R2 witness retention, and supervised preview gates are all proven.
+- Do not enable the backup timer merely because its unit was installed. Run one
+  backup, restore it into the generated scratch database, migrate with the exact
+  candidate release, and inspect the proof first.
 - If you rename Base/contract env vars, update `docs/`, `grid_api/services/*`,
   and any SDK examples in the same change.
 
@@ -65,6 +71,9 @@ executes an immutable release selected through `/home/aipg/current`.
 
 - `nginx -t` on target host after nginx changes.
 - `systemd-analyze verify` on target host when changing units.
+- `systemctl start aipg-postgres-backup.service` followed by
+  `scripts/prove_postgres_restore.sh` on the target host before enabling its
+  timer.
 - Local docs-only safety: `git diff --check`.
 
 ## Child DOX Index

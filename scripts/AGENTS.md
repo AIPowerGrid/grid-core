@@ -32,6 +32,10 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - `verify_demand_canary.py` - read-only reconciliation of one canonical
   account's balance, reservations, purchased-credit refs, and worker ledger
   terminals.
+- `backup_postgres.sh` - root-only custom-format PostgreSQL backup with
+  checksum, archive validation, locking, and bounded local retention.
+- `prove_postgres_restore.sh` - restores one verified backup into a guarded
+  disposable local database and migrates it with an immutable candidate.
 
 ## Local Contracts
 
@@ -67,12 +71,16 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   rotation, removes the file if the database operation fails, and refuses to
   overwrite an existing file.
 - Put reusable logic in the owning service package and test it there.
+- Backup/restore tools must never print database credentials. Restore proof may
+  only create or drop its generated `aipg_restore_proof_*` database.
 - Invoke Python operator tools through the selected release's `.venv/bin/python`;
   their env-based shebang assumes an already activated virtual environment.
 
 ## Verification
 
 - Run `bash -n scripts/payout_hourly.sh` for wrapper edits.
+- Run `bash -n scripts/backup_postgres.sh scripts/prove_postgres_restore.sh`
+  and exercise both against disposable PostgreSQL before deployment.
 - Run focused settlement tests before changing payout invocation or periods.
 - Run `scripts/run_tests.sh` from an environment with
   `requirements.dev.txt` installed.

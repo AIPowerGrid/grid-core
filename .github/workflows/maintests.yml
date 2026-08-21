@@ -76,6 +76,29 @@ jobs:
           -r requirements-grid.lock --require-hashes --no-deps --disable-pip
       - name: Retired runtime gate
         run: python scripts/check_retired_runtime.py
+      - name: Validate operations scripts
+        run: |
+          bash -n scripts/backup_postgres.sh scripts/prove_postgres_restore.sh
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client shellcheck
+          shellcheck -x scripts/backup_postgres.sh scripts/prove_postgres_restore.sh deploy/bootstrap.sh
+      - name: Backup and restored migration proof
+        env:
+          POSTGRES_USER: grid_test
+          POSTGRES_PASS: grid_test
+          POSTGRES_URL: 127.0.0.1:5432/grid_test
+          AIPG_RESTORE_ADMIN_USER: grid_test
+          AIPG_RESTORE_ADMIN_PASS: grid_test
+          AIPG_RESTORE_RUN_AS_CURRENT_USER: '1'
+        run: |
+          alembic upgrade 0019
+          backup_dir="$RUNNER_TEMP/aipg-postgres-backup"
+          AIPG_BACKUP_DIR="$backup_dir" scripts/backup_postgres.sh
+          backup="$(find "$backup_dir" -maxdepth 1 -name 'grid-postgres-*.dump' -print -quit)"
+          AIPG_RESTORE_BACKUP="$backup" \
+            AIPG_RESTORE_CANDIDATE="$GITHUB_WORKSPACE" \
+            AIPG_RESTORE_PYTHON="$(command -v python)" \
+            scripts/prove_postgres_restore.sh
       - name: Migration and schema parity
         run: |
           alembic upgrade head
