@@ -172,11 +172,16 @@ hides text-worker onboarding.
 
 ### 16. Three independent workers per flagship model - External
 
-Live Core reports five connected workers and seven available model IDs but does
-not expose per-model redundancy until the candidate status endpoint deploys.
-The latest verified inventory had one serving worker per advertised entry. The
-target remains three independently operated workers per flagship model. This is
-the largest availability and decentralization gap.
+Live Core `/health` reports five connected workers and seven currently available
+model IDs. The public `/v1/status/models` inventory was checked on 2026-08-21 and
+reported **one serving worker for every one of its nine online entries** across
+text, image, video, and audio. In particular, `gpt-oss-120b` and
+`deepseek-v4-flash-nvfp4` each had one serving worker while the 30-day public
+statistics reported 4,448 and 4,252 jobs respectively. The target remains three
+independently controlled operators per flagship model; several processes,
+wallets, or GPUs under one operator count once. This is the largest current
+availability and decentralization gap. Text cohort evidence is tracked in
+`grid-text-worker` issue 10 and media supply in `grid-media-worker` issue 9.
 
 ### 17. Hardware-aware operator recommendation - Implemented
 
@@ -314,10 +319,12 @@ them wholesale.
 ### 31. Branch protection - Partial
 
 Core, contracts, text worker, media worker, and validator require their current
-CI/security status names. Administrative bypass and zero required reviews
-remain a sole-maintainer tradeoff, so protection does not prevent an admin from
-pushing before checks finish. Stale status names must be reconciled whenever a
-workflow matrix changes.
+CI/security status names. Validator `master` additionally enforces one approving
+review, stale-review dismissal, admin compliance, linear history, resolved
+conversations, and no force-push/deletion. Administrative bypass and zero
+required reviews remain a sole-maintainer tradeoff on the other protected repos,
+so their rules do not prevent an admin from pushing before checks finish. Stale
+status names must be reconciled whenever a workflow matrix changes.
 
 ### 32. CI, scanning, provenance, and deploy identity - Partial
 
@@ -329,6 +336,13 @@ require revocation review plus either history repair or an explicit reviewed
 baseline; validator history reports one retired local-path disclosure. Current
 Core and validator worktrees scan clean. Text, media, and validator release
 pipelines carry checksums, SBOM/provenance gates appropriate to their maturity.
+Text-worker `main` now requires the exact four-platform release-payload assembly
+check on every change. Validator `master` now requires one approving review,
+stale-review dismissal, admin enforcement, strict CI, linear history, resolved
+conversations, no force-push/deletion, and the exact four-platform payload check.
+Validator PR 2 adds a commit/tag/version-bound release manifest and blocks
+publication until verified macOS Developer ID/notarization and Windows
+Authenticode state is recorded; it remains unmerged pending independent review.
 Core production
 dependencies now resolve into a reviewed Python 3.12/Linux lock with exact
 versions and package hashes; Docker, host bootstrap, and CI install that lock
@@ -385,8 +399,10 @@ first enablement. Local retention is not off-host disaster recovery.
    behavior, shared-quorum capabilities, and unauthenticated validator denial.
 4. Create a dedicated validator key and linked signing wallet, then run one
    authenticated end-to-end assignment without economic side effects.
-5. Publish the versioned validator prerelease and Docker image, verify every
-   clean-download checksum/provenance artifact, and keep `latest` untouched.
+5. Close `grid-validator` issue 1 with verified macOS Developer ID/notarization
+   and Windows Authenticode evidence, then publish the versioned validator
+   prerelease and Docker image, verify every clean-download checksum/provenance
+   artifact, and keep `latest` untouched.
 6. Qualify 5-10 independent validator operators and measure them for 30 days.
 7. Recruit at least two independent serving operators per flagship model while
    completing the real media-manager qualification evidence.
