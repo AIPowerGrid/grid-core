@@ -332,13 +332,18 @@ credentials, hot queue state, and inference routing stay off-chain.
 
 ## Operations
 
-### 30. Consolidate important work on main branches - Implemented with archives
+### 30. Consolidate important work on main branches - Partial
 
-Current production repos have clean worktrees synchronized to their upstream
-main/master branches. Remaining side branches are dated archive, upstream-merge,
-or superseded WIP histories; none is a newer production release candidate.
-Preserve them as archaeology until deliberately retired rather than merging
-them wholesale.
+Production checkouts are clean, but reviewed release, validator, history-scan,
+contract-analysis, website, documentation, and SDK candidates still live on
+open branches. They are intentionally not merged wholesale: several default
+branches deploy or publish, validator changes require an independent approval,
+and Core rollout still requires the supervised backup/restore proof. Dated
+archive, upstream-merge, and superseded WIP branches remain archaeology rather
+than production candidates. The local `aipg-oss-release` toolkit is not a Git
+repository; its corrected scanner template and generated staging snapshots are
+therefore nondurable until that toolkit is either tracked or regenerated from a
+reviewed source.
 
 ### 31. Branch protection - Partial
 
@@ -365,14 +370,19 @@ credential was found and no credential value was copied into the audit record.
 The other findings were deterministic local-service fixture values, public
 cryptographic constants/test vectors in a retired paper-wallet bundle,
 documented placeholders, and operational metadata such as retired internal IPs,
-bucket names, and developer paths. Green history-gate PRs now replace broad
+bucket names, and developer paths. History-gate PRs now replace broad
 path, placeholder, address, and test-value allowlists with exact reviewed
 fingerprints or rule-scoped public constants across Core, text worker, media
-worker, validator, frontend, website, and contracts. Every gate scans complete
+worker, validator, frontend, website, contracts, documentation, and both current
+SDKs. Every gate scans complete
 reachable history with a checksum-verified scanner and uses a committed
 synthetic private-key negative control to prove that example labels cannot hide
-a future secret. These gates remain unmerged, so protected defaults are not yet
-uniformly hardened. Current protected-branch worktrees scan clean. Text, media,
+a future secret. The website, documentation, and SDK infrastructure scanners
+also self-test runtime-constructed blocked patterns and distinguish a clean
+no-match from scanner execution failure; this closed a false-green malformed
+regular-expression path discovered during local reproduction. These gates
+remain unmerged, so protected defaults are not yet uniformly hardened. Current
+protected-branch worktrees scan clean. Text, media,
 and validator release pipelines carry checksums, SBOM/provenance gates
 appropriate to their maturity.
 Text-worker `main` now requires the exact four-platform release-payload assembly
@@ -399,8 +409,13 @@ not retroactively protect older releases, qualify draft artifacts, or replace
 container-registry tag policy. Documentation PR 3 adds the organization-wide
 requirement for full-history scans, burned-secret rotation before cleanup,
 fingerprint-scoped baselines, signed release manifests/SBOMs, and exact
-deployment SHA/digest records. It remains unmerged, and implementation of that
-standard in every repository remains periodic work.
+deployment SHA/digest records. It also updates the docs build within Next 15 and
+Nextra 3 to versions with a zero-vulnerability `npm audit` result and a passing
+33-route production build. SDK PR 2 in each current SDK adds the same fail-closed
+history gate; the Python matrix passes 3.9-3.12, while the JavaScript candidate
+preserves and tests the declared Node 18 floor by pinning a compatible Vitest
+major. These changes remain unmerged, and implementation of the standard in
+every repository remains periodic work.
 
 ### 33. Public network status - Ready, endpoint rollout pending
 
