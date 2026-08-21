@@ -38,17 +38,24 @@ At this snapshot:
   release exists. A benchmark-only media-manager qualification prerelease is
   public, but it cannot enroll with the Grid or advertise capabilities.
 
-Read-only host verification on 2026-08-21 confirmed the immutable release and
-database revision above and found no scheduled database backup or off-host
-backup system. Core source now includes a locked, checksummed custom-format
-backup, hardened daily systemd timer, and guarded scratch restore/migration
-proof. The complete source path has passed twice against PostgreSQL 16, but the
-timer remains disabled and no production snapshot has been exercised. A
+Host verification on 2026-08-21 confirmed the immutable release and database
+revision above and found no scheduled database backup or off-host backup
+system. A supervised rehearsal at exact candidate `c73864ee` then created a
+66,866,179-byte checksummed production snapshot, restored it into the guarded
+scratch database, upgraded `0019` through `0024`, passed `alembic current`,
+`heads`, and `check`, and removed the scratch database. The rehearsal first
+exposed two real portability defects: the backup included unrelated `cron`
+extension state, and a schema-scoped archive collided with the scratch
+database's default `public` schema. Candidate commits `290c0375` and `c73864ee`
+scope archives to the Grid-owned schema, explicitly reset only the generated
+scratch schema, and make the PostgreSQL 16 restore proof a pull-request gate.
+The backup timer remains disabled and no off-host backup system exists. A
 separate PostgreSQL rehearsal upgraded `0019` to
 `0024` with 100,000 synthetic legacy assignments and 110,000 synthetic legacy
 attestations in place, preserved every row, completed locally in 0.66 seconds,
-and passed `alembic check` with no schema drift. This proves the migration data
-shape and constraints, not production lock duration or backup restoration.
+and passed `alembic check` with no schema drift. That synthetic rehearsal proves
+the migration data shape and constraints; production restoration is evidenced
+separately above, while production migration lock duration remains unmeasured.
 
 ## Approval-Ready Merge Sequence
 
@@ -57,16 +64,16 @@ evidence snapshot. Recheck the exact head and required statuses immediately
 before each merge; a green ancestor or paired branch does not prove a changed
 head.
 
-1. Land history/security foundations before feature branches: Core PR 22
-   (`e798b440`), text-worker PR 15 (`db8f9424`), media-worker PR 14
-   (`ac05d780`), Console PR 16 (`4edbd952`), contracts PR 4
-   (`a814693a`), website PR 5 (`e3432ea1`), documentation PR 3
-   (`bf1bff22`), Python SDK PR 2 (`890abbe0`), JavaScript SDK PR 2
-   (`2fa540fc`), and validator PR 3 (`17ce7357`). Validator PR 3 still
+1. Six non-deploying history/security foundations are merged and green on
+   protected `main`: Core PR 22 (`471e849a`), text-worker PR 15 (`c03f7d19`),
+   media-worker PR 14 (`1423e440`), contracts PR 4 (`69c48b86`), Python SDK PR
+   2 (`d6073054`), and JavaScript SDK PR 2 (`6e07bfd6`). Remaining foundations
+   are Console PR 16 (`4edbd952`), website PR 5 (`e3432ea1`), documentation PR
+   3 (`bf1bff22`), and validator PR 3 (`17ce7357`). Validator PR 3 still
    requires the configured independent approval. Treat website, Console, and
    documentation default-branch merges as deployment-capable because their
    hosting integrations are outside the source diff.
-2. Land contracts PR 3 (`c8015c2b`) after contracts PR 4. This enables
+2. Land contracts PR 3 (`03dc08b5`) after contracts PR 4. This enables
    deployable-contract Slither policy and tested source changes only; it does
    not authorize a Diamond cut or any Base transaction.
 3. Land validator release PR 2 (`4b226ad6`) after validator PR 3, then
@@ -76,10 +83,11 @@ head.
 4. Land website rollout PR 4 (`01dc7d24`) only after website PR 5 and explicit
    production approval. Its release-policy and browser tests are green, but a
    main merge deploys the public worker/validator onboarding surface.
-5. Land Core validator PR 21 only after Core PR 22, a supervised
-   production snapshot plus scratch restore, a signed-in account/validator
-   acceptance pass, and explicit deployment approval. Merge is not proof that
-   production moved from `20d57669` or Alembic `0019`.
+5. Core validator PR 21 at `c73864ee` is rebased after Core PR 22 and its
+   supervised production snapshot plus scratch restore has passed. Land it
+   only after a signed-in account/validator acceptance pass and explicit
+   deployment approval. Merge is not proof that production moved from
+   `20d57669` or Alembic `0019`.
 
 After each paired merge, refresh the dependent PR against the new default
 branch and rerun every required status. Contract code, release artifacts,
@@ -219,7 +227,7 @@ tag-commit, and platform-signing checks; bounds downloaded manifest and checksum
 files before buffering; caches immutable release evidence for 24 hours; exposes
 the benchmark-only media qualification tool as non-enrolling; and keeps final
 downloads closed until verified releases exist. Its 29 release-gate tests and
-six desktop/mobile browser tests pass, including the real immutable
+eight desktop/mobile browser tests pass, including the real immutable
 qualification release and deliberately incomplete legacy text release. That PR
 remains unmerged because website `main` deploys production. Do not call this
 item complete until the reviewed rollout is explicitly approved, deployed, and
@@ -476,7 +484,7 @@ failover, and later multi-authority ordering. No federation code is live. Begin
 only after validator quorum, event replay, and economic-state invariants are
 proven.
 
-### 35. Verified database backup and restore - Ready, production proof pending
+### 35. Verified database backup and restore - Production proof complete
 
 Core source creates locked PostgreSQL custom-format dumps, verifies archive
 structure, binds one SHA-256 manifest to the exact dump, refuses overwrite,
@@ -484,17 +492,17 @@ uses root-only storage, and applies bounded local retention. The restore tool
 accepts only local PostgreSQL, creates and drops only a generated
 `aipg_restore_proof_*` database, restores as the application owner, migrates
 with the exact immutable candidate, and requires `alembic current`, `heads`,
-and `check` agreement. CI rehearses `0019` backup through `0024` restore on
-PostgreSQL 16. The systemd units pass clean-environment verification. The
-remaining gate is a supervised production backup plus scratch restore before
-first enablement. Local retention is not off-host disaster recovery.
+and `check` agreement. Pull-request CI rehearses `0019` backup through `0024`
+restore on PostgreSQL 16 and proves a decoy non-Grid schema is excluded. The
+supervised production proof passed at exact candidate `c73864ee`; the generated
+scratch database was removed. The systemd units pass clean-environment
+verification. Timer enablement remains a separate operational decision, and
+local retention is not off-host disaster recovery.
 
 ## Next Controlled Sequence
 
-1. Run the candidate backup tool against production and prove that exact
-   snapshot in its guarded scratch database. Source-level PostgreSQL 16 backup,
-   restore, `0019` to `0024` migration, schema-parity, and cleanup rehearsals
-   are complete, but a production snapshot has not been exercised.
+1. Complete signed-in account and validator acceptance against the exact Core
+   candidate without enabling economic effects.
 2. Obtain explicit deployment authorization for the exact reviewed Core commit.
 3. Deploy it immutably, migrate through `0024`, and verify build identity,
    charging flags, payout timer state, workers, model inventory, retired API
