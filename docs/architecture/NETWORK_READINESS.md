@@ -76,7 +76,7 @@ head.
 4. Land website rollout PR 4 (`01dc7d24`) only after website PR 5 and explicit
    production approval. Its release-policy and browser tests are green, but a
    main merge deploys the public worker/validator onboarding surface.
-5. Land Core validator PR 21 (`a8c48ecd`) only after Core PR 22, a supervised
+5. Land Core validator PR 21 only after Core PR 22, a supervised
    production snapshot plus scratch restore, a signed-in account/validator
    acceptance pass, and explicit deployment approval. Merge is not proof that
    production moved from `20d57669` or Alembic `0019`.
