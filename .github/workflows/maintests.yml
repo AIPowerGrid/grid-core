@@ -8,17 +8,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'grid_api/**'
-      - 'alembic/**'
-      - 'deploy/**'
-      - 'scripts/**'
-      - 'Dockerfile'
-      - 'docker-compose.yaml'
-      - 'pyproject.toml'
-      - 'requirements*.txt'
-      - 'requirements-grid.lock'
-      - '.github/workflows/maintests.yml'
   workflow_dispatch:
 
 permissions:
