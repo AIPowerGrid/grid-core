@@ -768,6 +768,15 @@ validator_probe_groups = sa.Table(
     sa.Column("quorum_outcome", sa.String(24), nullable=True),
     sa.Column("quorum_threshold", sa.Integer, nullable=False, default=3),
     sa.Column("target_validator_count", sa.Integer, nullable=False, default=5),
+    # Media groups execute the candidate/reference workload once. Every
+    # assigned validator independently scores this same frozen witness set.
+    sa.Column("probe_job_id", sa.String(96), nullable=True, index=True),
+    sa.Column("probe_status", sa.String(24), nullable=False, default="not_started", index=True),
+    sa.Column("probe_attempts", sa.Integer, nullable=False, default=0),
+    sa.Column("probe_lease_expires", sa.DateTime(timezone=True), nullable=True, index=True),
+    sa.Column("probe_witnesses", PortableJSON, nullable=True),
+    sa.Column("probe_witness_hash", sa.String(64), nullable=True),
+    sa.Column("probe_completed", sa.DateTime(timezone=True), nullable=True),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
     sa.Column("expires", sa.DateTime(timezone=True), nullable=False, index=True),
     sa.Column("accepted", sa.DateTime(timezone=True), nullable=True),

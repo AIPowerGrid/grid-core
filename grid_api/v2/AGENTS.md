@@ -46,6 +46,9 @@ snapshot pool.
   (NULL → grid defaults); SELECTed on the HOT auth path — their migrations
   (0009) must run before code that reads them.
 - `grid_validator_probe_groups` is the shared challenge and quorum lifecycle.
+  Media groups lease exactly one candidate-plus-two-reference execution and
+  persist one response-committed frozen witness set for independent scoring by
+  every assigned validator. Retries are bounded and stale leases reclaimable.
   It targets five distinct registrations and requires three matching votes by
   default. `grid_validator_assignments` gates authoritative evidence with Grid-issued
   assignment ids, nonces, and hard-targeted probe evidence hashes. Its attempt

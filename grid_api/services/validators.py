@@ -11,6 +11,7 @@ rows.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -24,6 +25,7 @@ from uuid import uuid4
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
+from ..config import get_settings
 from ..database import new_session
 from ..safe_logging import error_type, opaque_id
 from ..v2.schema import validator_assignments as assignments_t
@@ -72,6 +74,7 @@ VALIDATOR_HEARTBEAT_FRESH_SECONDS = max(
 
 _ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _SIG_RE = re.compile(r"^(0x)?[0-9a-fA-F]{130}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class AttestationError(ValueError):
@@ -404,6 +407,141 @@ def _supported_text_challenges(capabilities: list[str] | None) -> tuple[tuple[st
         if _TEXT_CHALLENGE_CAPABILITIES[kind] in supported_capabilities
     )
     return kinds, supported_capabilities
+
+
+def media_validation_policy() -> dict[str, Any]:
+    """Return the fail-closed assignment gate without exposing private state."""
+    settings = get_settings()
+    contract = settings.validator_media_bond_contract.strip().lower()
+    verifier = settings.validator_media_bond_verifier_version.strip()
+    reasons: list[str] = []
+    if not settings.validator_media_probe_enabled:
+        reasons.append("operator gate disabled")
+    if not _ADDR_RE.fullmatch(contract):
+        reasons.append("reviewed bond contract not configured")
+    if not verifier:
+        reasons.append("bond verifier version not configured")
+    if settings.validator_media_bond_chain_id <= 0:
+        reasons.append("bond chain id is invalid")
+    if settings.validator_media_minimum_bond_raw <= 0:
+        reasons.append("minimum bond is not configured")
+    if not 0 <= settings.validator_media_minimum_quality_pass_rate <= 1:
+        reasons.append("quality threshold is invalid")
+    if settings.validator_media_max_output_bytes <= 0:
+        reasons.append("media byte limit is invalid")
+    if settings.validator_media_probe_timeout_seconds <= 0:
+        reasons.append("media probe timeout is invalid")
+    return {
+        "enabled": not reasons,
+        "modality": "image",
+        "capability": "image.fidelity.v1",
+        "economic_effect": "none",
+        "reasons": reasons,
+        "chain_id": settings.validator_media_bond_chain_id,
+        "bond_contract": contract,
+        "bond_verifier_version": verifier,
+        "minimum_bond_raw": settings.validator_media_minimum_bond_raw,
+        "minimum_quality_pass_rate": settings.validator_media_minimum_quality_pass_rate,
+        "max_output_bytes": settings.validator_media_max_output_bytes,
+        "probe_timeout_seconds": settings.validator_media_probe_timeout_seconds,
+    }
+
+
+_MEDIA_OBJECTS = (
+    "ceramic teapot", "brass telescope", "origami crane", "glass lighthouse",
+    "wooden airship", "silver hourglass", "clockwork violin", "stone bicycle",
+)
+_MEDIA_SETTINGS = (
+    "inside an overgrown library", "beside a frozen lake", "under a glass dome",
+    "on a stormy coast", "above a field of clouds", "in a moonlit workshop",
+)
+_MEDIA_LIGHTING = (
+    "soft morning light", "hard rim lighting", "warm lantern light",
+    "diffuse overcast light", "high-contrast studio lighting",
+)
+_MEDIA_COMPOSITIONS = (
+    "symmetrical composition", "overhead composition", "wide establishing view",
+    "low-angle close view", "layered foreground and background",
+)
+
+
+def _make_image_prompt() -> str:
+    token = secrets.token_hex(4)
+    return (
+        f"A {_MEDIA_OBJECTS[secrets.randbelow(len(_MEDIA_OBJECTS))]} "
+        f"{_MEDIA_SETTINGS[secrets.randbelow(len(_MEDIA_SETTINGS))]}, "
+        f"{_MEDIA_COMPOSITIONS[secrets.randbelow(len(_MEDIA_COMPOSITIONS))]}, "
+        f"{_MEDIA_LIGHTING[secrets.randbelow(len(_MEDIA_LIGHTING))]}, "
+        f"small engraved mark {token}, highly detailed"
+    )
+
+
+def _probe_number(recipe, name: str, preferred: float) -> int | float:
+    bounds = recipe.clamps.get(name)
+    value = preferred
+    if bounds and len(bounds) == 2:
+        value = max(float(bounds[0]), min(float(bounds[1]), value))
+    return int(value) if name in {"width", "height", "steps"} else value
+
+
+def _image_recipe_for_worker(worker: dict[str, Any]):
+    """Return governed fidelity recipes the connected worker can execute."""
+    from . import recipes
+
+    advertised = {str(value) for value in (worker.get("models") or [])}
+    eligible = []
+    for recipe in recipes.list_recipes():
+        required = set(recipe.required_models or [recipe.model_name])
+        if (
+            recipe.job_type == "image"
+            and recipe.deterministic
+            and recipe.recipe_id is not None
+            and _SHA256_RE.fullmatch(recipe.model_digest)
+            and {"prompt", "seed", "width", "height"}.issubset(recipe.vars)
+            and "image" not in recipe.vars
+            and required.issubset(advertised)
+        ):
+            eligible.append(recipe)
+    return sorted(eligible, key=lambda item: (item.model_name.lower(), item.recipe_root))
+
+
+def _make_image_challenge(recipe, reference_worker_ids: list[str]) -> dict[str, Any]:
+    inputs: dict[str, Any] = {
+        "prompt": _make_image_prompt(),
+        "seed": secrets.randbits(53) or 1,
+        "width": _probe_number(recipe, "width", 512),
+        "height": _probe_number(recipe, "height", 512),
+    }
+    if "steps" in recipe.vars:
+        inputs["steps"] = _probe_number(recipe, "steps", 12)
+    if "cfg" in recipe.vars:
+        inputs["cfg"] = _probe_number(recipe, "cfg", 1.0)
+    for name in ("sampler", "scheduler"):
+        if name in recipe.vars and recipe.enums.get(name):
+            inputs[name] = str(recipe.enums[name][0])
+    parameters = {
+        "width": inputs["width"],
+        "height": inputs["height"],
+        **({"steps": inputs["steps"]} if "steps" in inputs else {}),
+        **({"cfg_scale": inputs["cfg"]} if "cfg" in inputs else {}),
+    }
+    for name in ("sampler", "scheduler"):
+        if name in inputs:
+            parameters[name] = inputs[name]
+    return {
+        "schema": "aipg.validator.media.challenge.v1",
+        "kind": "image.fidelity",
+        "modality": "image",
+        "prompt": inputs["prompt"],
+        "seed": inputs["seed"],
+        "model": recipe.model_name,
+        "model_digest": recipe.model_digest,
+        "recipe_id": recipe.recipe_id,
+        "recipe_root": recipe.recipe_root,
+        "parameters": parameters,
+        "reference_worker_ids": reference_worker_ids,
+        "scoring_policy_id": "image.fidelity.v1",
+    }
 
 
 def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
@@ -775,14 +913,19 @@ def _assignment_to_dict(
         out["grid_nonce"] = row["grid_nonce"]
     if include_challenge:
         challenge = row["challenge"] or {}
-        out["challenge"] = {
-            key: challenge[key]
-            for key in (
+        keys = (
+            (
+                "schema", "kind", "modality", "prompt", "seed", "model",
+                "model_digest", "recipe_id", "recipe_root", "parameters",
+                "reference_worker_ids", "scoring_policy_id",
+            )
+            if row["modality"] == "image"
+            else (
                 "kind", "prompt", "expected_hash", "max_tokens", "temperature",
                 "tools", "tool_choice", "steps", "stop",
             )
-            if key in challenge
-        }
+        )
+        out["challenge"] = {key: challenge[key] for key in keys if key in challenge}
     return out
 
 
@@ -886,8 +1029,16 @@ async def issue_assignments(
 ) -> dict[str, Any]:
     """Return this validator's work from shared, economically inert probe groups."""
     safe_limit = max(1, min(int(limit), 25))
+    if modality == "image":
+        return await _issue_image_assignments(
+            account_id=account_id,
+            validator_id=validator_id,
+            validator_wallet=validator_wallet,
+            active_workers=active_workers,
+            limit=safe_limit,
+        )
     if modality != "text":
-        raise AssignmentError("only text assignments are enabled in this rollout")
+        raise AssignmentError("unsupported validator assignment modality")
 
     now = _now()
     expires = now + timedelta(seconds=ASSIGNMENT_TTL_SECONDS)
@@ -925,6 +1076,7 @@ async def issue_assignments(
                 .where(
                     assignments_t.c.account_id == account_id,
                     assignments_t.c.validator_id == validator_id,
+                    assignments_t.c.modality == "text",
                     assignments_t.c.status != "finalized",
                     assignments_t.c.probe_status != "completed",
                     assignments_t.c.expires >= now,
@@ -1084,6 +1236,235 @@ async def issue_assignments(
     return {
         "assignments": [_assignment_to_dict(r) for r in rows[:safe_limit]],
         "count": min(len(rows), safe_limit),
+        "targeted_probe_enabled": True,
+        "quorum": await assignment_health(account_id=account_id),
+        "quorum_policy": {
+            "threshold": QUORUM_MIN,
+            "target_validators": QUORUM_TARGET,
+            "distinct_registered_validators": True,
+        },
+        "economic_effect": "none",
+    }
+
+
+async def _issue_image_assignments(
+    *,
+    account_id,
+    validator_id: str,
+    validator_wallet: str | None,
+    active_workers: list[dict[str, Any]],
+    limit: int,
+) -> dict[str, Any]:
+    """Allocate deterministic image-fidelity work only when every gate is live."""
+    from . import validator_references
+
+    policy = media_validation_policy()
+    if not policy["enabled"]:
+        raise AssignmentError("image validator assignments are not enabled")
+
+    now = _now()
+    expires = now + timedelta(seconds=ASSIGNMENT_TTL_SECONDS)
+    wallet = validator_wallet.lower() if validator_wallet and _ADDR_RE.match(validator_wallet) else None
+    async with await new_session() as session:
+        validator_row = (
+            await session.execute(
+                sa.select(validators_t.c.id, validators_t.c.capabilities)
+                .where(validators_t.c.id == validator_id)
+                .with_for_update()
+            )
+        ).mappings().first()
+        if not validator_row:
+            raise AssignmentError("active validator registration required")
+        supported = {str(value) for value in (validator_row["capabilities"] or [])}
+        if "image.fidelity.v1" not in supported:
+            raise AssignmentError("validator has no supported image fidelity capability")
+        await _finalize_due_assignments(session)
+
+        own_worker_ids = {
+            str(row[0])
+            for row in (
+                await session.execute(
+                    sa.select(workers_t.c.id).where(workers_t.c.account_id == account_id)
+                )
+            ).all()
+        }
+        existing = (
+            await session.execute(
+                sa.select(assignments_t).where(
+                    assignments_t.c.account_id == account_id,
+                    assignments_t.c.validator_id == validator_id,
+                    assignments_t.c.modality == "image",
+                    assignments_t.c.status != "finalized",
+                    assignments_t.c.probe_status != "completed",
+                    assignments_t.c.expires >= now,
+                ).order_by(assignments_t.c.created.asc()).limit(limit)
+            )
+        ).mappings().all()
+        rows = list(existing)
+        existing_keys = {(str(row["target_worker_id"]), row["model"]) for row in existing}
+
+        for worker in active_workers:
+            if len(rows) >= limit:
+                break
+            worker_id = str(worker.get("worker_id") or worker.get("id") or "")
+            worker_name = str(worker.get("name") or "")
+            if (
+                not worker_id
+                or not worker_name
+                or worker_id in own_worker_ids
+                or "image" not in (worker.get("job_types") or [])
+            ):
+                continue
+            for recipe in _image_recipe_for_worker(worker):
+                if len(rows) >= limit:
+                    break
+                key = (worker_id, recipe.model_name)
+                if key in existing_keys:
+                    continue
+                if session.bind and session.bind.dialect.name == "postgresql":
+                    lock_key = int.from_bytes(
+                        hashlib.sha256(
+                            f"validator-group:{worker_id}:{recipe.model_name}:image".encode()
+                        ).digest()[:8],
+                        byteorder="big",
+                        signed=True,
+                    )
+                    await session.execute(
+                        sa.text("SELECT pg_advisory_xact_lock(:lock_key)"),
+                        {"lock_key": lock_key},
+                    )
+
+                candidate_groups = (
+                    await session.execute(
+                        sa.select(probe_groups_t).where(
+                            probe_groups_t.c.target_worker_id == worker_id,
+                            probe_groups_t.c.model == recipe.model_name,
+                            probe_groups_t.c.modality == "image",
+                            probe_groups_t.c.capability == "image.fidelity.v1",
+                            probe_groups_t.c.expires >= now,
+                            probe_groups_t.c.quorum_status != "finalized",
+                        ).order_by(probe_groups_t.c.created.asc())
+                    )
+                ).mappings().all()
+                group = None
+                unfilled_group_exists = False
+                for candidate in candidate_groups:
+                    assigned_count = int(
+                        await session.scalar(
+                            sa.select(sa.func.count()).select_from(assignments_t).where(
+                                assignments_t.c.probe_group_id == candidate["id"]
+                            )
+                        ) or 0
+                    )
+                    if assigned_count >= int(candidate["target_validator_count"]):
+                        continue
+                    unfilled_group_exists = True
+                    already_assigned = await session.scalar(
+                        sa.select(sa.func.count()).select_from(assignments_t).where(
+                            assignments_t.c.probe_group_id == candidate["id"],
+                            assignments_t.c.validator_id == validator_id,
+                        )
+                    )
+                    if not already_assigned:
+                        group = candidate
+                        break
+                if group is None and unfilled_group_exists:
+                    continue
+
+                if group is None:
+                    required = set(recipe.required_models or [recipe.model_name])
+                    online_ids = [
+                        str(item.get("worker_id") or item.get("id") or "")
+                        for item in active_workers
+                        if "image" in (item.get("job_types") or [])
+                        and required.issubset({str(value) for value in (item.get("models") or [])})
+                    ]
+                    try:
+                        references = await validator_references.select_reference_workers(
+                            session,
+                            model=recipe.model_name,
+                            modality="image",
+                            candidate_worker_id=worker_id,
+                            online_model_worker_ids=online_ids,
+                            expected_chain_id=policy["chain_id"],
+                            expected_bond_contract=policy["bond_contract"],
+                            expected_verifier_version=policy["bond_verifier_version"],
+                            minimum_bond_raw=policy["minimum_bond_raw"],
+                            minimum_quality_pass_rate=policy["minimum_quality_pass_rate"],
+                        )
+                    except validator_references.ReferencePoolUnavailable:
+                        continue
+                    challenge = _make_image_challenge(
+                        recipe,
+                        [str(reference.worker_id) for reference in references],
+                    )
+                    group_id = f"prg_{uuid4().hex}"
+                    group_values = {
+                        "id": group_id,
+                        "target_worker_id": worker_id,
+                        "target_worker_name": worker_name,
+                        "model": recipe.model_name,
+                        "modality": "image",
+                        "capability": "image.fidelity.v1",
+                        "canary_kind": "image.fidelity",
+                        "scoring_policy_id": "image.fidelity.v1",
+                        "challenge": challenge,
+                        "challenge_hash": _hash_obj({
+                            "group_id": group_id,
+                            "worker_id": worker_id,
+                            "model": recipe.model_name,
+                            "challenge": challenge,
+                        }),
+                        "status": "pending",
+                        "quorum_status": "pending",
+                        "quorum_outcome": None,
+                        "quorum_threshold": QUORUM_MIN,
+                        "target_validator_count": QUORUM_TARGET,
+                        "created": now,
+                        "expires": expires,
+                        "accepted": None,
+                        "disputed": None,
+                        "finalized": None,
+                    }
+                    await session.execute(sa.insert(probe_groups_t).values(**group_values))
+                    group = group_values
+                challenge = group["challenge"] or {}
+                values = {
+                    "id": f"asg_{uuid4().hex}",
+                    "probe_group_id": group["id"],
+                    "account_id": account_id,
+                    "validator_id": validator_id,
+                    "validator_wallet": wallet,
+                    "grid_nonce": secrets.token_urlsafe(24),
+                    "target_worker_id": worker_id,
+                    "target_worker_name": worker_name,
+                    "model": recipe.model_name,
+                    "modality": "image",
+                    "capability": "image.fidelity.v1",
+                    "canary_kind": "image.fidelity",
+                    "scoring_policy_id": "image.fidelity.v1",
+                    "challenge": challenge,
+                    "status": "pending",
+                    "quorum_status": "pending",
+                    "quorum_outcome": None,
+                    "probe_job_id": None,
+                    "probe_status": "not_started",
+                    "probe_attempts": 0,
+                    "probe_lease_expires": None,
+                    "created": now,
+                    "expires": group["expires"],
+                    "probed": None,
+                    "finalized": None,
+                }
+                await session.execute(sa.insert(assignments_t).values(**values))
+                rows.append(values)
+                existing_keys.add(key)
+
+        await session.commit()
+
+    return {
+        "assignments": [_assignment_to_dict(row) for row in rows[:limit]],
+        "count": min(len(rows), limit),
         "targeted_probe_enabled": True,
         "quorum": await assignment_health(account_id=account_id),
         "quorum_policy": {
@@ -1886,6 +2267,8 @@ async def probe_assignment(
         validator_id=validator_id,
         assignment_id=assignment_id,
     )
+    if row["modality"] == "image":
+        return await _probe_image_assignment(row=row, assignment_id=assignment_id, job_id=job_id)
     challenge = row["challenge"] or {}
     prompt = str(challenge.get("prompt") or "")
     started = _now()
@@ -2050,6 +2433,560 @@ async def probe_assignment(
     }
 
 
+def _media_response_commitment(witnesses: list[dict[str, Any]]) -> str:
+    committed = [
+        {
+            "role": str(witness["role"]),
+            "worker_id": str(witness["worker_id"]),
+            "sha256": str(witness["sha256"]).lower(),
+            "bytes": int(witness["bytes"]),
+            "content_type": str(witness["content_type"]).lower(),
+            "latency_ms": int(witness["latency_ms"]),
+        }
+        for witness in witnesses
+    ]
+    return _canonical({"witnesses": committed})
+
+
+def _validated_media_witnesses(
+    row: dict[str, Any],
+    raw_witnesses: Any,
+) -> list[dict[str, Any]]:
+    """Normalize and bind a stored witness set to its private challenge."""
+    challenge = row["challenge"] or {}
+    reference_ids = [str(value) for value in (challenge.get("reference_worker_ids") or [])]
+    expected = [
+        ("candidate", str(row["target_worker_id"])),
+        *(("reference", worker_id) for worker_id in reference_ids),
+    ]
+    if not isinstance(raw_witnesses, list) or len(raw_witnesses) != 3 or len(expected) != 3:
+        raise AssignmentError("image probe witness set is malformed")
+
+    max_bytes = int(media_validation_policy()["max_output_bytes"])
+    normalized: list[dict[str, Any]] = []
+    try:
+        for raw, (expected_role, expected_worker_id) in zip(
+            raw_witnesses,
+            expected,
+            strict=True,
+        ):
+            if not isinstance(raw, dict):
+                raise ValueError
+            witness = {
+                "role": str(raw["role"]),
+                "worker_id": str(raw["worker_id"]),
+                "url": str(raw["url"]),
+                "sha256": str(raw["sha256"]).lower(),
+                "bytes": int(raw["bytes"]),
+                "content_type": str(raw["content_type"]).lower(),
+                "latency_ms": int(raw["latency_ms"]),
+            }
+            if (
+                witness["role"] != expected_role
+                or witness["worker_id"] != expected_worker_id
+                or not witness["url"].startswith("https://")
+                or not _SHA256_RE.fullmatch(witness["sha256"])
+                or not 0 < witness["bytes"] <= max_bytes
+                or witness["content_type"] != "image/webp"
+                or witness["latency_ms"] < 0
+            ):
+                raise ValueError
+            normalized.append(witness)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AssignmentError("image probe witness set is malformed") from exc
+    if len({witness["url"] for witness in normalized}) != 3:
+        raise AssignmentError("image probe witness URLs are not independent")
+    return normalized
+
+
+def _verified_media_group_witnesses(
+    row: dict[str, Any],
+    group: dict[str, Any],
+) -> list[dict[str, Any]]:
+    witnesses = _validated_media_witnesses(row, group.get("probe_witnesses"))
+    stored_hash = str(group.get("probe_witness_hash") or "")
+    if not _SHA256_RE.fullmatch(stored_hash) or not secrets.compare_digest(
+        stored_hash,
+        _hash_obj({"witnesses": witnesses}),
+    ):
+        raise AssignmentError("image probe witness commitment is invalid")
+    return witnesses
+
+
+def _verify_media_group_binding(row: dict[str, Any], group: dict[str, Any]) -> None:
+    """Prove an assignment still names the immutable challenge it joined."""
+    group_id = str(row.get("probe_group_id") or "")
+    challenge = row.get("challenge") or {}
+    expected_hash = _hash_obj({
+        "group_id": group_id,
+        "worker_id": str(row["target_worker_id"]),
+        "model": str(row["model"]),
+        "challenge": challenge,
+    })
+    bound = (
+        str(group.get("id") or "") == group_id
+        and str(group.get("target_worker_id") or "") == str(row["target_worker_id"])
+        and str(group.get("model") or "") == str(row["model"])
+        and group.get("modality") == "image"
+        and group.get("capability") == row["capability"]
+        and group.get("canary_kind") == row["canary_kind"]
+        and _canonical(group.get("challenge") or {}) == _canonical(challenge)
+        and secrets.compare_digest(str(group.get("challenge_hash") or ""), expected_hash)
+    )
+    if not bound:
+        raise AssignmentError("image assignment does not match its probe group")
+
+
+async def _claim_media_group_execution(
+    *,
+    group_id: str,
+    owner_job_id: str,
+) -> tuple[str, dict[str, Any]]:
+    """Claim the one GPU execution for a media group or observe its state."""
+    now = _now()
+    policy = media_validation_policy()
+    lease_seconds = max(PROBE_LEASE_SECONDS, int(policy["probe_timeout_seconds"]) + 120)
+    retryable = probe_groups_t.c.probe_status.in_(("not_started", "failed", "timeout"))
+    stale_running = sa.and_(
+        probe_groups_t.c.probe_status == "running",
+        sa.or_(
+            probe_groups_t.c.probe_lease_expires.is_(None),
+            probe_groups_t.c.probe_lease_expires <= now,
+        ),
+    )
+    async with await new_session() as session:
+        claimed = await session.execute(
+            sa.update(probe_groups_t)
+            .where(
+                probe_groups_t.c.id == group_id,
+                probe_groups_t.c.modality == "image",
+                probe_groups_t.c.expires >= now,
+                probe_groups_t.c.probe_attempts < PROBE_MAX_ATTEMPTS,
+                sa.or_(retryable, stale_running),
+            )
+            .values(
+                probe_job_id=owner_job_id,
+                probe_status="running",
+                probe_attempts=probe_groups_t.c.probe_attempts + 1,
+                probe_lease_expires=now + timedelta(seconds=lease_seconds),
+            )
+        )
+        await session.commit()
+        group = (
+            await session.execute(
+                sa.select(probe_groups_t).where(probe_groups_t.c.id == group_id)
+            )
+        ).mappings().first()
+    if not group:
+        raise AssignmentError("image probe group not found")
+    group = dict(group)
+    if claimed.rowcount == 1:
+        return "claimed", group
+    if group["probe_status"] == "completed":
+        return "completed", group
+    if group["probe_status"] == "running":
+        return "running", group
+    if int(group["probe_attempts"] or 0) >= PROBE_MAX_ATTEMPTS:
+        return "exhausted", group
+    return "retryable", group
+
+
+async def _complete_media_group(
+    *,
+    group_id: str,
+    owner_job_id: str,
+    witnesses: list[dict[str, Any]],
+) -> dict[str, Any]:
+    witness_hash = _hash_obj({"witnesses": witnesses})
+    now = _now()
+    async with await new_session() as session:
+        completed = await session.execute(
+            sa.update(probe_groups_t)
+            .where(
+                probe_groups_t.c.id == group_id,
+                probe_groups_t.c.probe_job_id == owner_job_id,
+                probe_groups_t.c.probe_status == "running",
+            )
+            .values(
+                probe_status="completed",
+                probe_lease_expires=None,
+                probe_witnesses=witnesses,
+                probe_witness_hash=witness_hash,
+                probe_completed=now,
+            )
+        )
+        await session.commit()
+        group = (
+            await session.execute(
+                sa.select(probe_groups_t).where(probe_groups_t.c.id == group_id)
+            )
+        ).mappings().first()
+    if not group:
+        raise AssignmentError("image probe group not found")
+    group = dict(group)
+    if completed.rowcount != 1 and (
+        group["probe_status"] != "completed"
+        or not secrets.compare_digest(str(group["probe_witness_hash"] or ""), witness_hash)
+    ):
+        raise AssignmentError("image probe group lease was lost")
+    return group
+
+
+async def _fail_media_group(*, group_id: str, owner_job_id: str, status: str = "failed") -> None:
+    try:
+        async with await new_session() as session:
+            await session.execute(
+                sa.update(probe_groups_t)
+                .where(
+                    probe_groups_t.c.id == group_id,
+                    probe_groups_t.c.probe_job_id == owner_job_id,
+                    probe_groups_t.c.probe_status == "running",
+                )
+                .values(probe_status=status, probe_lease_expires=None)
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning(
+            "failed to mark media probe group=%s status=%s error_type=%s",
+            opaque_id(group_id),
+            status,
+            error_type(exc),
+        )
+
+
+async def _probe_image_assignment(
+    *,
+    row: dict[str, Any],
+    assignment_id: str,
+    job_id: str,
+) -> dict[str, Any]:
+    """Execute one group witness set or reuse it for independent scoring."""
+    from . import recipes
+
+    challenge = row["challenge"] or {}
+    reference_ids = [str(value) for value in (challenge.get("reference_worker_ids") or [])]
+    if len(reference_ids) != 2 or len({str(row["target_worker_id"]), *reference_ids}) != 3:
+        await _mark_probe(job_id, "failed")
+        raise AssignmentError("image assignment reference set is malformed")
+    recipe = recipes.get_recipe(str(challenge.get("recipe_root") or ""))
+    if (
+        recipe is None
+        or not recipe.deterministic
+        or recipe.recipe_id != challenge.get("recipe_id")
+        or recipe.model_name != row["model"]
+        or recipe.model_digest != challenge.get("model_digest")
+    ):
+        await _mark_probe(job_id, "failed")
+        raise AssignmentError("image assignment recipe is no longer authoritative")
+
+    reference_uuid_values = []
+    try:
+        from uuid import UUID
+
+        reference_uuid_values = [UUID(value) for value in reference_ids]
+    except ValueError as exc:
+        await _mark_probe(job_id, "failed")
+        raise AssignmentError("image assignment reference identity is invalid") from exc
+    async with await new_session() as session:
+        reference_rows = (
+            await session.execute(
+                sa.select(workers_t.c.id, workers_t.c.name).where(
+                    workers_t.c.id.in_(reference_uuid_values)
+                )
+            )
+        ).all()
+    names = {str(worker_id): str(name) for worker_id, name in reference_rows}
+    if set(names) != set(reference_ids):
+        await _mark_probe(job_id, "failed")
+        raise AssignmentError("image assignment reference worker is unavailable")
+
+    parameters = challenge.get("parameters") or {}
+    inputs = {
+        "prompt": challenge.get("prompt"),
+        "seed": challenge.get("seed"),
+        "width": parameters.get("width"),
+        "height": parameters.get("height"),
+    }
+    for challenge_name, recipe_name in (
+        ("steps", "steps"),
+        ("cfg_scale", "cfg"),
+        ("sampler", "sampler"),
+        ("scheduler", "scheduler"),
+    ):
+        if challenge_name in parameters:
+            inputs[recipe_name] = parameters[challenge_name]
+    try:
+        resolved = recipes.resolve(recipe.recipe_root, inputs)
+    except recipes.RecipeError as exc:
+        await _mark_probe(job_id, "failed")
+        raise AssignmentError("image assignment recipe inputs are invalid") from exc
+
+    group_id = str(row["probe_group_id"] or "")
+    if not group_id:
+        await _mark_probe(job_id, "failed")
+        raise AssignmentError("image assignment has no probe group")
+
+    group_deadline = _aware(row["probe_lease_expires"])
+    group: dict[str, Any] | None = None
+    while _now() < group_deadline:
+        state, observed = await _claim_media_group_execution(
+            group_id=group_id,
+            owner_job_id=job_id,
+        )
+        try:
+            _verify_media_group_binding(row, observed)
+        except AssignmentError:
+            if state == "claimed":
+                await _fail_media_group(group_id=group_id, owner_job_id=job_id)
+            await _mark_probe(job_id, "failed")
+            raise
+        if state == "completed":
+            group = observed
+            break
+        if state == "claimed":
+            stages = [
+                ("candidate", str(row["target_worker_id"]), row["target_worker_name"], job_id),
+                ("reference", reference_ids[0], names[reference_ids[0]], str(uuid4())),
+                ("reference", reference_ids[1], names[reference_ids[1]], str(uuid4())),
+            ]
+            try:
+                results = await asyncio.gather(
+                    *(
+                        _run_targeted_image_stage(
+                            row=row,
+                            assignment_id=assignment_id,
+                            job_id=stage_job_id,
+                            role=role,
+                            worker_id=worker_id,
+                            worker_name=worker_name,
+                            challenge=challenge,
+                            resolved=resolved,
+                        )
+                        for role, worker_id, worker_name, stage_job_id in stages
+                    )
+                )
+            except Exception as exc:
+                logger.error(
+                    "validator image group execution failed group=%s error_type=%s",
+                    opaque_id(group_id),
+                    error_type(exc),
+                )
+                await _fail_media_group(group_id=group_id, owner_job_id=job_id)
+                await _mark_probe(job_id, "failed")
+                return {
+                    "status": "error",
+                    "probe_status": "failed",
+                    "assignment_id": assignment_id,
+                    "job_id": job_id,
+                    "message": "image probe execution failed",
+                    "code": 502,
+                    "economic_effect": "none",
+                }
+            if any(result.get("status") != "completed" for result in results):
+                await _fail_media_group(group_id=group_id, owner_job_id=job_id)
+                await _mark_probe(job_id, "failed")
+                return {
+                    "status": "error",
+                    "probe_status": "failed",
+                    "assignment_id": assignment_id,
+                    "job_id": job_id,
+                    "message": "image probe was inconclusive",
+                    "code": 502,
+                    "economic_effect": "none",
+                }
+            try:
+                fresh_witnesses = _validated_media_witnesses(
+                    row,
+                    [result["witness"] for result in results],
+                )
+                group = await _complete_media_group(
+                    group_id=group_id,
+                    owner_job_id=job_id,
+                    witnesses=fresh_witnesses,
+                )
+            except AssignmentError:
+                await _fail_media_group(group_id=group_id, owner_job_id=job_id)
+                await _mark_probe(job_id, "failed")
+                raise
+            except Exception as exc:
+                logger.error(
+                    "validator image witness commit failed group=%s error_type=%s",
+                    opaque_id(group_id),
+                    error_type(exc),
+                )
+                await _fail_media_group(group_id=group_id, owner_job_id=job_id)
+                await _mark_probe(job_id, "failed")
+                return {
+                    "status": "error",
+                    "probe_status": "failed",
+                    "assignment_id": assignment_id,
+                    "job_id": job_id,
+                    "message": "image probe witness commit failed",
+                    "code": 503,
+                    "economic_effect": "none",
+                }
+            break
+        if state == "exhausted":
+            await _mark_probe(job_id, "failed")
+            raise AssignmentError("image probe group retry limit reached")
+        await asyncio.sleep(0.25)
+
+    if group is None:
+        await _mark_probe(job_id, "timeout")
+        return {
+            "status": "error",
+            "probe_status": "timeout",
+            "assignment_id": assignment_id,
+            "job_id": job_id,
+            "message": "image probe group timed out",
+            "code": 504,
+            "economic_effect": "none",
+        }
+    try:
+        witnesses = _verified_media_group_witnesses(row, group)
+    except AssignmentError:
+        await _mark_probe(job_id, "failed")
+        raise
+    response_commitment = _media_response_commitment(witnesses)
+    prompt_commitment = _canonical(challenge)
+    evidence = {
+        "assignment_id": assignment_id,
+        "probe_group_id": row["probe_group_id"],
+        "grid_nonce": row["grid_nonce"],
+        "worker_id": row["target_worker_id"],
+        "model": row["model"],
+        "modality": row["modality"],
+        "capability": row["capability"],
+        "canary_kind": row["canary_kind"],
+        "prompt_hash": _hash_text(prompt_commitment),
+        "response_hash": _hash_text(response_commitment),
+    }
+    evidence["evidence_hash"] = _hash_obj(evidence)
+    candidate_latency = int(witnesses[0]["latency_ms"])
+    await _mark_probe(
+        job_id,
+        "completed",
+        prompt_hash=evidence["prompt_hash"],
+        response_hash=evidence["response_hash"],
+        evidence_hash=evidence["evidence_hash"],
+        verdict="witnessed",
+        latency_ms=candidate_latency,
+    )
+    return {
+        "status": "completed",
+        "assignment_id": assignment_id,
+        "probe_group_id": row["probe_group_id"],
+        "job_id": job_id,
+        "grid_nonce": row["grid_nonce"],
+        "target_worker_id": row["target_worker_id"],
+        "target_worker_name": row["target_worker_name"],
+        "model": row["model"],
+        "modality": row["modality"],
+        "capability": row["capability"],
+        "canary_kind": row["canary_kind"],
+        "witnesses": witnesses,
+        "probe_latency_ms": candidate_latency,
+        **evidence,
+        "economic_effect": "none",
+    }
+
+
+async def _run_targeted_image_stage(
+    *,
+    row: dict[str, Any],
+    assignment_id: str,
+    job_id: str,
+    role: str,
+    worker_id: str,
+    worker_name: str,
+    challenge: dict[str, Any],
+    resolved: dict[str, Any],
+) -> dict[str, Any]:
+    from . import job_queue, token_stream
+
+    parameters = challenge["parameters"]
+    payload = {
+        "prompt": challenge["prompt"],
+        "negative_prompt": "",
+        "seed": challenge["seed"],
+        "width": parameters["width"],
+        "height": parameters["height"],
+        "steps": parameters.get("steps"),
+        "cfg_scale": parameters.get("cfg_scale"),
+        "n": 1,
+        "ext": "webp",
+        "recipe_engine": resolved["engine"],
+        "recipe_spec": resolved["spec"],
+        "recipe_root": resolved["recipe_root"],
+        "recipe_id": resolved["recipe_id"],
+        "deterministic": True,
+        "_validator_probe": True,
+        "_validator_assignment_id": assignment_id,
+        "_validator_probe_group_id": row["probe_group_id"],
+        "_validator_grid_nonce": row["grid_nonce"],
+        "_validator_role": role,
+    }
+    route_models = resolved.get("required_models") or [row["model"]]
+    try:
+        await job_queue.submit_job(
+            job_id,
+            payload,
+            route_models,
+            job_type="image",
+            preferred_worker=worker_name,
+            hard_target_worker=worker_name,
+        )
+    except Exception as exc:
+        logger.error(
+            "validator image dispatch failed assignment=%s job=%s error_type=%s",
+            opaque_id(assignment_id),
+            opaque_id(job_id),
+            error_type(exc),
+        )
+        return {"status": "error", "code": 503}
+
+    try:
+        timeout = media_validation_policy()["probe_timeout_seconds"]
+        async for event in token_stream.subscribe_tokens(job_id, timeout=timeout):
+            if event.get("error"):
+                return {"status": "error", "code": event.get("code", 502)}
+            if event.get("text") != token_stream.DONE_SENTINEL:
+                continue
+            try:
+                body = json.loads(event.get("full_text") or "{}")
+                witness = dict(body["witness"])
+                grid = event.get("grid") or {}
+                committed = {
+                    "role": str(witness["role"]),
+                    "worker_id": str(witness["worker_id"]),
+                    "url": str(witness["url"]),
+                    "sha256": str(witness["sha256"]).lower(),
+                    "bytes": int(witness["bytes"]),
+                    "content_type": str(witness["content_type"]).lower(),
+                    "latency_ms": int(witness["latency_ms"]),
+                }
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                return {"status": "error", "code": 502}
+            if (
+                committed["role"] != role
+                or committed["worker_id"] != worker_id
+                or grid.get("worker_id") != worker_id
+                or grid.get("assignment_id") != assignment_id
+                or grid.get("grid_nonce") != row["grid_nonce"]
+            ):
+                return {"status": "error", "code": 502}
+            return {"status": "completed", "witness": committed}
+        return {"status": "error", "code": 504}
+    except Exception as exc:
+        logger.error(
+            "validator image probe failed assignment=%s job=%s error_type=%s",
+            opaque_id(assignment_id),
+            opaque_id(job_id),
+            error_type(exc),
+        )
+        return {"status": "error", "code": 502}
+
+
 async def _run_targeted_text_stage(
     *,
     row: dict[str, Any],
@@ -2145,6 +3082,12 @@ async def _claim_probe_lease(
     """Atomically claim one bounded probe attempt for an assignment."""
     now = _now()
     lease_expires = now + timedelta(seconds=PROBE_LEASE_SECONDS)
+    media_lease_expires = now + timedelta(
+        seconds=max(
+            PROBE_LEASE_SECONDS,
+            int(get_settings().validator_media_probe_timeout_seconds) + 120,
+        ),
+    )
     # Worker-visible job IDs use the ordinary opaque UUID shape. Assignment
     # attribution stays in Core; a marker here would let workers special-case
     # validation before producing output.
@@ -2173,7 +3116,10 @@ async def _claim_probe_lease(
                 probe_job_id=job_id,
                 probe_status="running",
                 probe_attempts=assignments_t.c.probe_attempts + 1,
-                probe_lease_expires=lease_expires,
+                probe_lease_expires=sa.case(
+                    (assignments_t.c.modality == "image", media_lease_expires),
+                    else_=lease_expires,
+                ),
                 probed=now,
             )
         )
@@ -2190,9 +3136,19 @@ async def _claim_probe_lease(
         raise AssignmentError("assignment not found")
     if claimed.rowcount == 1:
         challenge = row["challenge"] or {}
+        if row["modality"] == "image":
+            if (
+                not media_validation_policy()["enabled"]
+                or row["capability"] != "image.fidelity.v1"
+                or challenge.get("schema") != "aipg.validator.media.challenge.v1"
+                or challenge.get("kind") != "image.fidelity"
+            ):
+                await _mark_probe(job_id, "failed")
+                raise AssignmentError("image probe gate is not authoritative")
+            return dict(row), job_id
         if row["modality"] != "text":
             await _mark_probe(job_id, "failed")
-            raise AssignmentError("only text probes are enabled in this rollout")
+            raise AssignmentError("unsupported validator probe modality")
         if not str(challenge.get("prompt") or ""):
             await _mark_probe(job_id, "failed")
             raise AssignmentError("assignment has no prompt")

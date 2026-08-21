@@ -4,10 +4,13 @@
 """Real-Postgres proofs for shared validator-group allocation."""
 
 import asyncio
+import hashlib
+import json
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -17,7 +20,7 @@ from eth_account.messages import encode_defunct
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from grid_api import auth, database, safe_logging
-from grid_api.services import validator_references
+from grid_api.services import recipes, validator_references
 from grid_api.services import validators as validators_svc
 from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import metadata as v2_metadata
@@ -64,7 +67,7 @@ async def pg():
         await engine.dispose()
 
 
-async def _seed_validators(count: int):
+async def _seed_validators(count: int, *, capabilities=None):
     rows = []
     async with await database.new_session() as session:
         for index in range(count):
@@ -81,7 +84,7 @@ async def _seed_validators(count: int):
                     account_id=account_id,
                     signing_wallet=wallet,
                     software_version="pg-test",
-                    capabilities=["text.basic.v1"],
+                    capabilities=capabilities or ["text.basic.v1"],
                     registration_signature="0x" + "11" * 65,
                     status="active",
                     last_heartbeat=validators_svc._now(),
@@ -171,6 +174,49 @@ def _reference_policy():
     }
 
 
+def _media_settings():
+    return SimpleNamespace(
+        validator_media_probe_enabled=True,
+        validator_media_bond_chain_id=8453,
+        validator_media_bond_contract="0x" + "a" * 40,
+        validator_media_bond_verifier_version="worker-registry-v2",
+        validator_media_minimum_bond_raw=10**18,
+        validator_media_minimum_quality_pass_rate=0.95,
+        validator_media_max_output_bytes=25 * 1024 * 1024,
+        validator_media_probe_timeout_seconds=600,
+    )
+
+
+def _seed_deterministic_image_recipe():
+    recipes._BY_ROOT.clear()
+    recipes._BY_ID.clear()
+    recipes._BY_NAME.clear()
+    recipes._BY_MODEL.clear()
+    recipes.register_recipe(
+        "0x" + "b" * 64,
+        "postgres-image-fidelity",
+        {
+            "_grid": {
+                "modelName": "krea-2-turbo",
+                "jobType": "image",
+                "deterministic": True,
+                "modelDigest": "c" * 64,
+                "requiredModels": ["krea-2-turbo"],
+                "vars": {
+                    "prompt": "1.inputs.text",
+                    "seed": "2.inputs.seed",
+                    "width": "3.inputs.width",
+                    "height": "3.inputs.height",
+                },
+            },
+            "1": {"inputs": {"text": ""}},
+            "2": {"inputs": {"seed": 0}},
+            "3": {"inputs": {"width": 512, "height": 512}},
+        },
+        recipe_id=77,
+    )
+
+
 @pytest.mark.asyncio
 async def test_reference_bond_threshold_is_exact_at_uint_scale_on_postgres(pg):
     now = datetime.now(UTC)
@@ -241,6 +287,143 @@ async def test_concurrent_reference_groups_lock_only_their_selected_pair(pg):
     assert {item.worker_id for item in first}.isdisjoint(
         {item.worker_id for item in second},
     )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_image_validators_join_one_bonded_reference_group(pg, monkeypatch):
+    validators = await _seed_validators(5, capabilities=["image.fidelity.v1"])
+    monkeypatch.setattr(validators_svc, "get_settings", _media_settings)
+    _seed_deterministic_image_recipe()
+    now = datetime.now(UTC)
+    async with await database.new_session() as session:
+        candidate = await _seed_media_worker(session, 301, now=now)
+        references = [
+            await _seed_media_worker(session, 302, now=now),
+            await _seed_media_worker(session, 303, now=now),
+        ]
+        for reference in references:
+            await _seed_reference(session, reference, now=now, bond_amount_raw=10**18)
+        await session.commit()
+    workers = [
+        {
+            "worker_id": str(worker[0]),
+            "name": f"pg-media-rig-{index}-{worker[0].hex[:8]}",
+            "models": ["krea-2-turbo"],
+            "job_types": ["image"],
+        }
+        for worker, index in zip([candidate, *references], (301, 302, 303), strict=True)
+    ]
+
+    results = await asyncio.gather(
+        *[
+            validators_svc.issue_assignments(
+                account_id=account_id,
+                validator_id=validator_id,
+                validator_wallet=wallet,
+                active_workers=workers,
+                limit=1,
+                modality="image",
+            )
+            for account_id, validator_id, wallet, _private_key in validators
+        ],
+    )
+
+    group_ids = {result["assignments"][0]["probe_group_id"] for result in results}
+    assert len(group_ids) == 1
+    async with await database.new_session() as session:
+        group = (
+            await session.execute(
+                sa.select(probe_groups_t).where(probe_groups_t.c.id == next(iter(group_ids)))
+            )
+        ).mappings().one()
+        assert await session.scalar(
+            sa.select(sa.func.count()).select_from(assignments_t).where(
+                assignments_t.c.probe_group_id == group["id"],
+            )
+        ) == 5
+    assert set(group["challenge"]["reference_worker_ids"]) == {
+        str(references[0][0]), str(references[1][0]),
+    }
+
+    from grid_api.services import job_queue, token_stream
+
+    worker_ids_by_name = {
+        f"pg-media-rig-{index}-{worker[0].hex[:8]}": str(worker[0])
+        for worker, index in zip([candidate, *references], (301, 302, 303), strict=True)
+    }
+    submitted = {}
+    all_stages_submitted = asyncio.Event()
+    release_results = asyncio.Event()
+
+    async def capture_submit(stage_job_id, payload, models, **kwargs):
+        submitted[stage_job_id] = {"payload": payload, "models": models, **kwargs}
+        if len(submitted) == 3:
+            all_stages_submitted.set()
+
+    async def completed_events(stage_job_id, **_kwargs):
+        await release_results.wait()
+        item = submitted[stage_job_id]
+        payload = item["payload"]
+        worker_id = worker_ids_by_name[item["hard_target_worker"]]
+        witness = {
+            "role": payload["_validator_role"],
+            "worker_id": worker_id,
+            "url": f"https://media.example/validator/{stage_job_id}/0.webp",
+            "sha256": hashlib.sha256(worker_id.encode()).hexdigest(),
+            "bytes": 123,
+            "content_type": "image/webp",
+            "latency_ms": 100,
+        }
+        yield {
+            "text": token_stream.DONE_SENTINEL,
+            "full_text": json.dumps({"witness": witness}),
+            "grid": {
+                "worker_id": worker_id,
+                "assignment_id": payload["_validator_assignment_id"],
+                "grid_nonce": payload["_validator_grid_nonce"],
+                "economic_effect": "none",
+            },
+        }
+
+    monkeypatch.setattr(job_queue, "submit_job", capture_submit)
+    monkeypatch.setattr(token_stream, "subscribe_tokens", completed_events)
+    tasks = [
+        asyncio.create_task(
+            validators_svc.probe_assignment(
+                account_id=account_id,
+                validator_id=validator_id,
+                assignment_id=issued["assignments"][0]["assignment_id"],
+            )
+        )
+        for (account_id, validator_id, _wallet, _private_key), issued in zip(
+            validators,
+            results,
+            strict=True,
+        )
+    ]
+    await asyncio.wait_for(all_stages_submitted.wait(), timeout=5)
+    await asyncio.sleep(0.1)
+    release_results.set()
+    probed = await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
+
+    assert len(submitted) == 3
+    assert all(result["status"] == "completed" for result in probed)
+    assert all(result["witnesses"] == probed[0]["witnesses"] for result in probed)
+    async with await database.new_session() as session:
+        final_group = (
+            await session.execute(
+                sa.select(probe_groups_t).where(probe_groups_t.c.id == group["id"])
+            )
+        ).mappings().one()
+        assignment_rows = (
+            await session.execute(
+                sa.select(assignments_t).where(assignments_t.c.probe_group_id == group["id"])
+            )
+        ).mappings().all()
+    assert final_group["probe_status"] == "completed"
+    assert final_group["probe_attempts"] == 1
+    assert all(row["probe_status"] == "completed" for row in assignment_rows)
+    assert all(row["probe_attempts"] == 1 for row in assignment_rows)
 
 
 @pytest.mark.asyncio

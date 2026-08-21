@@ -28,6 +28,9 @@ transport, accounts, stats, health/metrics.
 - `worker_ws.py` - `/v1/workers/ws`: registration + dispatch + health/eviction + streaming.
   **God-file (~1.1K LOC); split target = registration / dispatch / health / stream.** Highest
   bug history (eviction cascade, idle-redelivery) - change carefully, add tests.
+  Assignment-bound image probes branch before ordinary media settlement: they
+  strip all `_validator_*` metadata, freeze the uploaded object through Core,
+  acknowledge with `den: 0`, and never touch customer or worker economics.
 - `accounts.py` - native Google/strict EIP-4361 SIWE auth, bounded service exchange, and
   default-off legacy dashboard/internal session creation,
   account profile (incl. resolved `payout{asset, aipg_bps, active, live_asset}`),
@@ -77,7 +80,9 @@ transport, accounts, stats, health/metrics.
   `GET /v1/validator/assignments/health`. Health separates probe,
   accepted-evidence, worker-pass, quorum, finalization, and aggregate validator
   liveness stages. Shared 3-of-5 quorum remains preview-only with no
-  routing/reward/slash authority.
+  routing/reward/slash authority. The image-fidelity assignment lane is
+  default-off and fail-closed on governed recipe/model digest, bond/reference
+  policy, and validator capability; video remains disabled.
   Health also exposes privacy-preserving network aggregates over a bounded
   `since_hours` window; never relabel registered validators as independently
   operated validators.
@@ -134,6 +139,12 @@ transport, accounts, stats, health/metrics.
   must not bill users, pay den, write worker ledger rows, or strike workers.
   Worker-visible job IDs and payloads must not reveal validator markers,
   assignment/group IDs, or Grid nonces; evidence binding stays inside Core.
+- A media witness is authoritative transport only after Core freezes the upload
+  under a key the worker cannot write and hashes the frozen bytes. Worker-reported
+  digests, mutable upload URLs, and self-declared model names are never evidence.
+- Media worker execution is group-owned, not validator-owned: one candidate and
+  two references run once, then every quorum member independently scores the
+  same committed frozen witness set.
 - Missing validator registration/assignment/probe support must fail closed.
   Ordinary chat inference and worker inventory are never fallback targeting
   paths.
