@@ -119,3 +119,8 @@ independently operated nodes in production, add self-validation and
 correlated-operator controls, define dispute windows, and make evidence
 replayable. Slashing requires a separate objective-fraud policy and contract
 review after those controls are proven.
+
+The accepted post-preview contract and Core-federation sequence is defined in
+[`DECENTRALIZATION_ROADMAP.md`](DECENTRALIZATION_ROADMAP.md). It keeps validator
+staking and economic authority gated on independent production evidence rather
+than registration count.

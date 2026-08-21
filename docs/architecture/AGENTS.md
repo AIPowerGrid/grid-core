@@ -22,6 +22,9 @@ validation, worker incentives, and trust boundaries.
 - `MEDIA_VALIDATION_V1.md` - accepted fail-closed image/video validation design:
   private challenges, cached bond eligibility, rotating references, Core object
   hashing, validator fetch defenses, modality scoring, and rollout gates.
+- `DECENTRALIZATION_ROADMAP.md` - accepted sequence from independently proven
+  validator quorum through Base evidence/reward contracts and signed-event
+  trusted-partner Core federation.
 - `WORKER_PROFILE_V1.md` - signed worker installation profiles, ACE-Step audio
   data flow, identity/privacy boundaries, and go-live gates.
 - `ACE_STEP_AUDIO_CONTROLS.md` - governed ACE-Step control surface, quality

@@ -16,6 +16,9 @@ for humans and agents.
 - `FUNDING_CANARY_RUNBOOK.md` - dark deploy, real-money canary evidence, and
   rollback gates.
 - `V2.md` - v2 API/design notes.
+- `architecture/DECENTRALIZATION_ROADMAP.md` - accepted post-preview Base
+  validator and trusted-partner Core federation phases, event contract, and
+  go-live gates.
 
 ## Local Contracts
 
