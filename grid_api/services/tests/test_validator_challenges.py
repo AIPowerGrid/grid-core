@@ -16,6 +16,7 @@ from grid_api.services import den, validators
         ("math", None, "text.reasoning.v1"),
         ("json.object", "json.object", "text.structured.v1"),
         ("context.retrieve", "context.retrieve", "text.context.4k.v1"),
+        ("context.retrieve.16k", "context.retrieve.16k", "text.context.16k.v1"),
         ("logic.steps", "logic.steps", "text.reasoning.multistep.v1"),
         ("tool.call", "tool.call", "text.tool_call.v1"),
         ("tool.chain", "tool.chain", "text.tool_chain.v1"),
@@ -145,6 +146,19 @@ def test_context_scoring_requires_only_the_exact_retrieved_token():
     assert validators._score_text_challenge(challenge, "The value is A1B2C3D4", 10) == "failed"
 
 
+def test_context_challenge_tiers_match_their_declared_token_windows():
+    challenge_4k = validators._make_text_challenge("context.retrieve")
+    challenge_16k = validators._make_text_challenge("context.retrieve.16k")
+
+    assert 3_000 <= den.count_tokens(challenge_4k["prompt"]) <= 5_000
+    assert 14_000 <= den.count_tokens(challenge_16k["prompt"]) <= 18_000
+    assert challenge_4k["prompt"].count("\nrecord=") == 100
+    assert challenge_16k["prompt"].count("\nrecord=") == 400
+    assert challenge_16k["kind"] == "context.retrieve.16k"
+    assert challenge_16k["capability"] == "text.context.16k.v1"
+    assert "expected" not in challenge_16k
+
+
 def test_multistep_scoring_rejects_ambiguous_numeric_answers():
     challenge = _challenge("logic.steps", "42")
 
@@ -183,6 +197,34 @@ def test_richer_validator_capabilities_select_only_advertised_families():
 
     assert kinds == ("json.object", "context.retrieve")
     assert capabilities == {"text.structured.v1", "text.context.4k.v1"}
+
+
+def test_16k_context_family_requires_its_exact_scorer_capability():
+    kinds, capabilities = validators._supported_text_challenges(["text.context.16k.v1"])
+
+    assert kinds == ("context.retrieve.16k",)
+    assert capabilities == {"text.context.16k.v1"}
+
+
+def test_long_context_families_require_worker_advertised_headroom():
+    kinds = ("echo", "context.retrieve", "context.retrieve.16k")
+
+    assert validators._worker_eligible_text_challenges(
+        kinds,
+        {"max_context_length": 4_096},
+    ) == ("echo",)
+    assert validators._worker_eligible_text_challenges(
+        kinds,
+        {"max_context_length": 8_192},
+    ) == ("echo", "context.retrieve")
+    assert validators._worker_eligible_text_challenges(
+        kinds,
+        {"max_context_length": 32_768},
+    ) == kinds
+    assert validators._worker_eligible_text_challenges(
+        kinds,
+        {"max_context_length": "unknown"},
+    ) == ("echo",)
 
 
 def test_tool_call_family_requires_its_exact_scorer_capability():

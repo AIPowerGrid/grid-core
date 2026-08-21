@@ -375,6 +375,7 @@ _TEXT_CHALLENGE_KINDS = (
     "math",
     "json.object",
     "context.retrieve",
+    "context.retrieve.16k",
     "logic.steps",
     "tool.call",
     "tool.chain",
@@ -386,11 +387,20 @@ _TEXT_CHALLENGE_CAPABILITIES = {
     "math": "text.reasoning.v1",
     "json.object": "text.structured.v1",
     "context.retrieve": "text.context.4k.v1",
+    "context.retrieve.16k": "text.context.16k.v1",
     "logic.steps": "text.reasoning.multistep.v1",
     "tool.call": "text.tool_call.v1",
     "tool.chain": "text.tool_chain.v1",
     "stop.sequence": "text.stop_sequence.v1",
     "token.limit": "text.token_limit.v1",
+}
+
+# Leave headroom for tokenizer differences and request framing. The challenge
+# prompts are counted with the Grid's model-agnostic tokenizer, while a worker's
+# advertised context limit belongs to its backend tokenizer.
+_TEXT_CAPABILITY_MIN_WORKER_CONTEXT = {
+    "text.context.4k.v1": 8_192,
+    "text.context.16k.v1": 32_768,
 }
 
 
@@ -409,6 +419,33 @@ def _supported_text_challenges(capabilities: list[str] | None) -> tuple[tuple[st
         if _TEXT_CHALLENGE_CAPABILITIES[kind] in supported_capabilities
     )
     return kinds, supported_capabilities
+
+
+def _worker_eligible_text_challenges(
+    challenge_kinds: tuple[str, ...],
+    worker: dict[str, Any],
+) -> tuple[str, ...]:
+    try:
+        max_context = int(worker.get("max_context_length") or 0)
+    except (TypeError, ValueError):
+        max_context = 0
+    return tuple(
+        kind
+        for kind in challenge_kinds
+        if max_context
+        >= _TEXT_CAPABILITY_MIN_WORKER_CONTEXT.get(
+            _TEXT_CHALLENGE_CAPABILITIES[kind],
+            0,
+        )
+    )
+
+
+def _worker_supports_text_capability(capability: str, worker: dict[str, Any]) -> bool:
+    try:
+        max_context = int(worker.get("max_context_length") or 0)
+    except (TypeError, ValueError):
+        max_context = 0
+    return max_context >= _TEXT_CAPABILITY_MIN_WORKER_CONTEXT.get(capability, 0)
 
 
 def media_validation_policy() -> dict[str, Any]:
@@ -594,8 +631,8 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         )
         kind = "json.object"
         capability = "text.structured.v1"
-    elif selected == "context.retrieve":
-        record_count = 180
+    elif selected in {"context.retrieve", "context.retrieve.16k"}:
+        record_count = 400 if selected == "context.retrieve.16k" else 100
         target_index = secrets.randbelow(record_count)
         records: list[str] = []
         target_key = ""
@@ -615,8 +652,12 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
             f"{target_key}. Reply with only that record's value.\n\n"
             + "\n".join(records)
         )
-        kind = "context.retrieve"
-        capability = "text.context.4k.v1"
+        kind = selected
+        capability = (
+            "text.context.16k.v1"
+            if selected == "context.retrieve.16k"
+            else "text.context.4k.v1"
+        )
     elif selected == "logic.steps":
         value = secrets.randbelow(18) + 3
         start = value
@@ -857,7 +898,7 @@ def _normalized_text_answer(
         return _normalized_tool_chain(tool_chain)
     if not answer:
         return None
-    if kind in ("echo", "context.retrieve", "stop.sequence"):
+    if kind in ("echo", "context.retrieve", "context.retrieve.16k", "stop.sequence"):
         candidate = _strip_wrapping_quotes(answer)
         return candidate if candidate and not re.search(r"\s", candidate) else None
     if kind == "json.object":
@@ -1154,6 +1195,12 @@ async def issue_assignments(
             model = models[0]
             if (worker_id, model) in existing_keys:
                 continue
+            eligible_challenge_kinds = _worker_eligible_text_challenges(
+                challenge_kinds,
+                worker,
+            )
+            if not eligible_challenge_kinds:
+                continue
 
             if session.bind and session.bind.dialect.name == "postgresql":
                 lock_key = int.from_bytes(
@@ -1186,6 +1233,11 @@ async def issue_assignments(
             for candidate in candidate_groups:
                 if candidate["capability"] not in supported_capabilities:
                     continue
+                if not _worker_supports_text_capability(
+                    candidate["capability"],
+                    worker,
+                ):
+                    continue
                 assigned_count = int(
                     await session.scalar(
                         sa.select(sa.func.count())
@@ -1215,7 +1267,7 @@ async def issue_assignments(
                 continue
 
             if group is None:
-                challenge = _make_text_challenge(secrets.choice(challenge_kinds))
+                challenge = _make_text_challenge(secrets.choice(eligible_challenge_kinds))
                 group_id = f"prg_{uuid4().hex}"
                 group_values = {
                     "id": group_id,
@@ -1225,7 +1277,7 @@ async def issue_assignments(
                     "modality": "text",
                     "capability": challenge["capability"],
                     "canary_kind": challenge["kind"],
-                    "scoring_policy_id": "text.generated.v5",
+                    "scoring_policy_id": "text.generated.v6",
                     "challenge": challenge,
                     "challenge_hash": _hash_obj({
                         "group_id": group_id,
