@@ -72,7 +72,8 @@ scores that output locally before signing.
 
 Candidate text families are randomized exact instruction, generated
 arithmetic, strict JSON object compliance, context retrieval, generated
-multistep integer logic, and one exact randomized function call. The validator
+multistep integer logic, one exact randomized function call, and randomized
+stop-sequence compliance. The validator
 registration must advertise the matching
 scorer capability before it can join that probe group. Legacy
 `text.basic.v1` registrations are compatible only with echo/arithmetic. This

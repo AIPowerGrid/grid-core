@@ -18,6 +18,7 @@ from grid_api.services import validators
         ("context.retrieve", "context.retrieve", "text.context.4k.v1"),
         ("logic.steps", "logic.steps", "text.reasoning.multistep.v1"),
         ("tool.call", "tool.call", "text.tool_call.v1"),
+        ("stop.sequence", "stop.sequence", "text.stop_sequence.v1"),
     ],
 )
 def test_generated_challenge_families_hide_expected_answer(family, kind, capability):
@@ -135,6 +136,15 @@ def test_tool_call_family_requires_its_exact_scorer_capability():
 
     assert kinds == ("tool.call",)
     assert capabilities == {"text.tool_call.v1"}
+
+
+def test_stop_sequence_challenge_commits_only_the_pre_stop_output():
+    challenge = validators._make_text_challenge("stop.sequence")
+    prefix, remainder = challenge["prompt"].rsplit(": ", 1)[1].split(challenge["stop"])
+
+    assert validators._score_text_challenge(challenge, prefix, 10) == "healthy"
+    assert validators._score_text_challenge(challenge, prefix + remainder, 10) == "failed"
+    assert challenge["stop"] not in prefix
 
 
 def test_modern_basic_scorers_can_finish_legacy_basic_groups():

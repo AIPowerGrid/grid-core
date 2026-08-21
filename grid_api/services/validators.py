@@ -374,6 +374,7 @@ _TEXT_CHALLENGE_KINDS = (
     "context.retrieve",
     "logic.steps",
     "tool.call",
+    "stop.sequence",
 )
 _TEXT_CHALLENGE_CAPABILITIES = {
     "echo": "text.instruction.v1",
@@ -382,6 +383,7 @@ _TEXT_CHALLENGE_CAPABILITIES = {
     "context.retrieve": "text.context.4k.v1",
     "logic.steps": "text.reasoning.multistep.v1",
     "tool.call": "text.tool_call.v1",
+    "stop.sequence": "text.stop_sequence.v1",
 }
 
 
@@ -496,7 +498,7 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         )
         kind = "logic.steps"
         capability = "text.reasoning.multistep.v1"
-    else:
+    elif selected == "tool.call":
         function_name = f"record_{secrets.token_hex(4)}"
         number_field = f"count_{secrets.token_hex(3)}"
         token_field = f"token_{secrets.token_hex(3)}"
@@ -530,6 +532,16 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
             },
         }]
         tool_choice = {"type": "function", "function": {"name": function_name}}
+    else:
+        expected = secrets.token_hex(6).upper()
+        stop = f"<STOP_{secrets.token_hex(5).upper()}>"
+        suffix = secrets.token_hex(6).upper()
+        prompt = (
+            "Output the following characters exactly, with no spaces or explanation: "
+            f"{expected}{stop}{suffix}"
+        )
+        kind = "stop.sequence"
+        capability = "text.stop_sequence.v1"
     challenge = {
         "kind": kind,
         "prompt": prompt,
@@ -541,6 +553,8 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
     if selected == "tool.call":
         challenge["tools"] = tools
         challenge["tool_choice"] = tool_choice
+    if selected == "stop.sequence":
+        challenge["stop"] = stop
     return challenge
 
 
@@ -595,7 +609,7 @@ def _normalized_text_answer(kind: str, text: str, tool_calls: Any = None) -> str
         return _normalized_tool_call(tool_calls)
     if not answer:
         return None
-    if kind in ("echo", "context.retrieve"):
+    if kind in ("echo", "context.retrieve", "stop.sequence"):
         candidate = _strip_wrapping_quotes(answer)
         return candidate if candidate and not re.search(r"\s", candidate) else None
     if kind == "json.object":
@@ -661,7 +675,7 @@ def _assignment_to_dict(
             key: challenge[key]
             for key in (
                 "kind", "prompt", "expected_hash", "max_tokens", "temperature",
-                "tools", "tool_choice",
+                "tools", "tool_choice", "stop",
             )
             if key in challenge
         }
@@ -1789,7 +1803,7 @@ async def probe_assignment(
         "_validator_probe_group_id": row["probe_group_id"],
         "_validator_grid_nonce": row["grid_nonce"],
     }
-    for key in ("tools", "tool_choice"):
+    for key in ("tools", "tool_choice", "stop"):
         if key in challenge:
             payload["request"][key] = challenge[key]
 

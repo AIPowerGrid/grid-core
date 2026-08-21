@@ -966,6 +966,41 @@ async def test_tool_call_probe_forwards_schema_and_commits_witnessed_call(db, mo
     assert row["probe_response_hash"] == result["response_hash"]
 
 
+@pytest.mark.asyncio
+async def test_stop_sequence_is_exposed_and_forwarded_to_the_targeted_request(db, monkeypatch):
+    from grid_api.services import job_queue
+
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, capabilities=["text.stop_sequence.v1"])
+    issued = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=[{
+            "worker_id": str(uuid.uuid4()), "name": "rig-stop",
+            "models": ["qwen3-27b"], "job_types": ["text"],
+        }],
+        limit=1,
+    )
+    assignment = issued["assignments"][0]
+    submitted = {}
+
+    async def capture_submit(_job_id, payload, _models, **_kwargs):
+        submitted.update(payload)
+        raise RuntimeError("stop after capture")
+
+    monkeypatch.setattr(job_queue, "submit_job", capture_submit)
+    result = await validators_svc.probe_assignment(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+
+    assert result["status"] == "error"
+    assert assignment["challenge"]["stop"]
+    assert submitted["request"]["stop"] == assignment["challenge"]["stop"]
+
+
 def test_validator_capabilities_expose_assignment_gates():
     app = FastAPI()
     app.state.limiter = limiter
