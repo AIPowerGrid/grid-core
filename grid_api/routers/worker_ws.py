@@ -120,6 +120,8 @@ def _is_assignment_bound_validator_job(job: dict) -> bool:
         return False
     if job.get("job_type") == "image":
         return payload.get("_validator_role") in {"candidate", "reference"}
+    if job.get("job_type") == "video":
+        return payload.get("_validator_role") == "candidate"
     return job.get("job_type", "text") == "text"
 
 
@@ -1159,20 +1161,27 @@ async def _handle_validator_media_probe(
     selected_model: str,
     worker_id: str,
 ) -> bool:
-    """Collect one immutable, economically inert image-validation witness."""
+    """Collect one immutable, economically inert image or video witness."""
     import time as _time
 
     job_id = job["job_id"]
     payload = job["payload"]
-    if job.get("job_type") != "image":
+    job_type = str(job.get("job_type") or "")
+    if job_type not in {"image", "video"}:
         await token_stream.publish_error(job_id, "Unsupported validator media modality.")
         await ws.send_json({"type": "ack", "id": job_id, "den": 0})
         return True
+    expected_roles = {"candidate", "reference"} if job_type == "image" else {"candidate"}
+    if payload.get("_validator_role") not in expected_roles:
+        await token_stream.publish_error(job_id, "Invalid validator media witness role.")
+        await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+        return True
+    ext = "webp" if job_type == "image" else "mp4"
     worker_payload = {
         key: value for key, value in payload.items() if not key.startswith("_validator_")
     }
     try:
-        slots = storage.presign_outputs(job_id, 1, "webp", job_type="image")
+        slots = storage.presign_outputs(job_id, 1, ext, job_type=job_type)
     except Exception:
         logger.error("validator media presign failed")
         await token_stream.publish_error(job_id, "Validator storage unavailable.")
@@ -1183,7 +1192,7 @@ async def _handle_validator_media_probe(
         {
             "type": "job",
             "id": job_id,
-            "job_type": "image",
+            "job_type": job_type,
             "model": selected_model,
             "payload": worker_payload,
             "upload": [
@@ -1215,7 +1224,7 @@ async def _handle_validator_media_probe(
             frozen = await asyncio.to_thread(
                 storage.freeze_validator_output,
                 slots[0],
-                witness_key=f"validator/{job_id}/0.webp",
+                witness_key=f"validator/{job_id}/0.{ext}",
                 max_bytes=get_settings().validator_media_max_output_bytes,
             )
         except Exception:

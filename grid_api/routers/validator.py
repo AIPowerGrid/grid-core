@@ -25,6 +25,7 @@ router = APIRouter()
 
 def _capabilities_payload() -> dict[str, Any]:
     media_policy = validators_svc.media_validation_policy()
+    video_policy = validators_svc.video_validation_policy()
     return {
         "validator_api_version": "v1-preview",
         "mode": "shared_quorum_preview",
@@ -40,7 +41,7 @@ def _capabilities_payload() -> dict[str, Any]:
             "assignment_health": True,
             "quorum": True,
             "image_fidelity": media_policy["enabled"],
-            "video_validation": False,
+            "video_validation": video_policy["enabled"],
             "validator_rewards": False,
             "staking_required": False,
             "epoch_roots": False,
@@ -52,7 +53,11 @@ def _capabilities_payload() -> dict[str, Any]:
                 "capability": media_policy["capability"],
                 "economic_effect": "none",
             },
-            "video": {"enabled": False, "economic_effect": "none"},
+            "video": {
+                "enabled": video_policy["enabled"],
+                "capability": video_policy["capability"],
+                "economic_effect": "none",
+            },
         },
         "probe_policy": {
             "max_attempts": validators_svc.PROBE_MAX_ATTEMPTS,
@@ -278,7 +283,7 @@ async def validator_assignments(
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
     limit: int = Query(5, ge=1, le=25),
-    modality: str = Query("text", pattern="^(text|image)$"),
+    modality: str = Query("text", pattern="^(text|image|video)$"),
 ):
     """Return Grid-issued assignments for this validator account.
 

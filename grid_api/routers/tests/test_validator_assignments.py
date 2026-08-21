@@ -197,9 +197,10 @@ async def _fresh_assignment(account_id):
     return validator_id, issued["assignments"][0]
 
 
-def _media_settings(*, enabled=True):
+def _media_settings(*, enabled=True, video_enabled=False):
     return SimpleNamespace(
         validator_media_probe_enabled=enabled,
+        validator_video_probe_enabled=video_enabled,
         validator_media_bond_chain_id=8453,
         validator_media_bond_contract="0x" + "a" * 40,
         validator_media_bond_verifier_version="worker-registry-v2",
@@ -296,6 +297,49 @@ def _register_image_recipe(*, deterministic=True, recipe_id=42):
             "1": {"inputs": {"text": ""}},
             "2": {"inputs": {"seed": 0, "steps": 12}},
             "3": {"inputs": {"width": 512, "height": 512}},
+        },
+        recipe_id=recipe_id,
+    )
+
+
+def _register_video_recipe(*, recipe_id=84, include_fps=True):
+    recipes._BY_ROOT.clear()
+    recipes._BY_ID.clear()
+    recipes._BY_NAME.clear()
+    recipes._BY_MODEL.clear()
+    video_vars = {
+        "prompt": "1.inputs.text",
+        "seed": "2.inputs.seed",
+        "width": "3.inputs.width",
+        "height": "3.inputs.height",
+        "seconds": "4.inputs.seconds",
+        "steps": "2.inputs.steps",
+    }
+    if include_fps:
+        video_vars["fps"] = "4.inputs.fps"
+    return recipes.register_recipe(
+        "0x" + "d" * 64,
+        "video-contract-test",
+        {
+            "_grid": {
+                "engine": "comfyui",
+                "modelName": "Video Contract",
+                "jobType": "video",
+                "deterministic": False,
+                "requiredModels": ["video-checkpoint"],
+                "vars": video_vars,
+                "clamps": {
+                    "width": [512, 1024],
+                    "height": [512, 1024],
+                    "seconds": [1, 4],
+                    "fps": [8, 24],
+                    "steps": [4, 20],
+                },
+            },
+            "1": {"inputs": {"text": ""}},
+            "2": {"inputs": {"seed": 0, "steps": 8}},
+            "3": {"inputs": {"width": 512, "height": 512}},
+            "4": {"inputs": {"seconds": 2, "fps": 8}},
         },
         recipe_id=recipe_id,
     )
@@ -1345,6 +1389,7 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["features"]["image_fidelity"] is False
     assert body["features"]["video_validation"] is False
     assert body["media_validation"]["image"]["economic_effect"] == "none"
+    assert body["media_validation"]["video"]["economic_effect"] == "none"
 
 
 @pytest.mark.asyncio
@@ -1563,6 +1608,158 @@ async def test_image_assignment_requires_governed_recipe_and_bonded_references(d
         signature=_sign(attestation),
     )
     assert accepted["authority"] == "authoritative"
+
+
+@pytest.mark.asyncio
+async def test_video_assignment_gate_is_fail_closed(db, monkeypatch):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, capabilities=["video.contract.v1"])
+    monkeypatch.setattr(
+        validators_svc,
+        "get_settings",
+        lambda: _media_settings(enabled=True, video_enabled=False),
+    )
+
+    with pytest.raises(validators_svc.AssignmentError, match="not enabled"):
+        await validators_svc.issue_assignments(
+            account_id=account_id,
+            validator_id=validator_id,
+            validator_wallet=TEST_WALLET,
+            active_workers=[],
+            limit=1,
+            modality="video",
+        )
+
+
+@pytest.mark.asyncio
+async def test_video_contract_assignment_is_governed_targeted_and_shared(db, monkeypatch):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, capabilities=["video.contract.v1"])
+    monkeypatch.setattr(
+        validators_svc,
+        "get_settings",
+        lambda: _media_settings(enabled=True, video_enabled=True),
+    )
+    worker_id = str(uuid.uuid4())
+    active = [{
+        "worker_id": worker_id,
+        "name": "video-rig-1",
+        "models": ["video-checkpoint"],
+        "job_types": ["video"],
+    }]
+
+    _register_video_recipe(include_fps=False)
+    blocked = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=active,
+        limit=1,
+        modality="video",
+    )
+    assert blocked["assignments"] == []
+
+    _register_video_recipe()
+    issued = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=active,
+        limit=1,
+        modality="video",
+    )
+    assignment = issued["assignments"][0]
+    challenge = assignment["challenge"]
+    assert assignment["target_worker_id"] == worker_id
+    assert assignment["capability"] == "video.contract.v1"
+    assert challenge["kind"] == "video.contract"
+    assert challenge["recipe_id"] == 84
+    assert challenge["reference_worker_ids"] == []
+    assert challenge["parameters"] == {
+        "seed": challenge["seed"],
+        "width": 512,
+        "height": 512,
+        "frame_count": 16,
+        "fps": 8,
+        "duration_s": 2.0,
+        "motion_required": True,
+        "steps": 8,
+    }
+    assert issued["economic_effect"] == "none"
+
+    from grid_api.services import job_queue, token_stream
+
+    submitted = {}
+
+    async def capture_submit(stage_job_id, payload, models, **kwargs):
+        submitted[stage_job_id] = {"payload": payload, "models": models, **kwargs}
+
+    async def completed_events(stage_job_id, **_kwargs):
+        witness = {
+            "role": "candidate",
+            "worker_id": worker_id,
+            "url": f"https://media.example/validator/{stage_job_id}/0.mp4",
+            "sha256": "e" * 64,
+            "bytes": 456,
+            "content_type": "video/mp4",
+            "latency_ms": 900,
+        }
+        yield {
+            "text": token_stream.DONE_SENTINEL,
+            "full_text": json.dumps({"witness": witness}),
+            "grid": {
+                "worker_id": worker_id,
+                "assignment_id": assignment["assignment_id"],
+                "grid_nonce": assignment["grid_nonce"],
+                "economic_effect": "none",
+            },
+        }
+
+    monkeypatch.setattr(job_queue, "submit_job", capture_submit)
+    monkeypatch.setattr(token_stream, "subscribe_tokens", completed_events)
+    result = await validators_svc.probe_assignment(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+
+    assert result["status"] == "completed"
+    assert result["witnesses"][0]["content_type"] == "video/mp4"
+    assert result["witnesses"][0]["worker_id"] == worker_id
+    assert len(submitted) == 1
+    dispatched = next(iter(submitted.values()))
+    assert dispatched["job_type"] == "video"
+    assert dispatched["hard_target_worker"] == "video-rig-1"
+    assert dispatched["models"] == ["video-checkpoint"]
+    assert dispatched["payload"]["frames"] == 16
+    assert dispatched["payload"]["fps"] == 8
+
+    second_key = "0x" + "03" * 32
+    second_account = uuid.uuid4()
+    second_validator = await _register(
+        second_account,
+        private_key=second_key,
+        capabilities=["video.contract.v1"],
+    )
+    second_wallet = Account.from_key(second_key).address.lower()
+    second_issued = await validators_svc.issue_assignments(
+        account_id=second_account,
+        validator_id=second_validator,
+        validator_wallet=second_wallet,
+        active_workers=active,
+        limit=1,
+        modality="video",
+    )
+    second_assignment = second_issued["assignments"][0]
+    assert second_assignment["probe_group_id"] == assignment["probe_group_id"]
+    reused = await validators_svc.probe_assignment(
+        account_id=second_account,
+        validator_id=second_validator,
+        assignment_id=second_assignment["assignment_id"],
+    )
+    assert reused["status"] == "completed"
+    assert reused["witnesses"] == result["witnesses"]
+    assert len(submitted) == 1
 
 
 def test_media_group_witness_commitment_fails_closed(monkeypatch):

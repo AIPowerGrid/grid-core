@@ -2,9 +2,9 @@
 
 **Status:** accepted design; deterministic image assignment, hard-targeted
 three-worker execution, immutable Core witness hashing, and validator scoring
-are implemented dark. The validator repo also has dark video contract/fidelity
-scoring, but Core video assignment generation and targeted execution remain
-disabled. No production gate is enabled.
+are implemented dark. Core and the validator also implement a separately gated
+single-candidate `video.contract.v1` path. No production gate is enabled, and
+reference-based video fidelity remains disabled.
 
 This document defines the trust boundary for assignment-bound image and video
 validation. It deliberately does not enable production media assignments,
@@ -279,15 +279,20 @@ penalty.
 
 ## Runtime Gate
 
-`VALIDATOR_MEDIA_PROBE_ENABLED=0` is the master default. Enabling it is still
+`VALIDATOR_MEDIA_PROBE_ENABLED=0` is the media master default. Enabling it is still
 insufficient: Core also requires a valid chain id, reviewed bond-contract
 address, verifier version, positive minimum bond, bounded quality threshold,
 positive object-size/timeout limits, a registered validator advertising
 `image.fidelity.v1`, an on-chain RecipeVault recipe id, deterministic metadata,
 a 32-byte `modelDigest`, exact prompt/seed/width/height controls, and two fresh
-independent references. Any missing condition yields no media assignment.
+independent references. Any missing condition yields no image assignment.
 
-Video is not accepted by the assignment API in this rollout.
+Video has an independent `VALIDATOR_VIDEO_PROBE_ENABLED=0` gate and also
+requires the media master gate, positive byte/timeout bounds, a validator
+advertising `video.contract.v1`, and an on-chain RecipeVault text-to-video recipe
+with explicit prompt, seed, width, height, seconds, and fps variables. It runs
+one candidate and commits one Core-frozen MP4. It does not select references or
+claim model fidelity. Missing or ambiguous timing metadata yields no assignment.
 
 ## Rollout Gates
 
