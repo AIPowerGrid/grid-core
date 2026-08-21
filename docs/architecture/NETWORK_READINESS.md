@@ -178,12 +178,16 @@ The production page presents text and media independently, so an unfinished
 media release does not hide text onboarding. Its current release lookup is not
 yet the authoritative gate: it accepts published asset names without validating
 the complete manifest/checksum contract or platform-signing identities. The
-green website rollout PR adds exact asset-set, digest, size, SBOM, manifest, and
-platform-signing checks; exposes the benchmark-only media qualification tool as
-non-enrolling; and keeps final downloads closed until verified releases exist.
-That PR remains unmerged because website `main` deploys production. Do not call
-this item complete until the reviewed rollout is explicitly approved, deployed,
-and checked against both valid and deliberately incomplete release fixtures.
+green website rollout PR adds exact asset-set, digest, size, SBOM, manifest,
+tag-commit, and platform-signing checks; bounds downloaded manifest and checksum
+files before buffering; caches immutable release evidence for 24 hours; exposes
+the benchmark-only media qualification tool as non-enrolling; and keeps final
+downloads closed until verified releases exist. Its 29 release-gate tests and
+six desktop/mobile browser tests pass, including the real immutable
+qualification release and deliberately incomplete legacy text release. That PR
+remains unmerged because website `main` deploys production. Do not call this
+item complete until the reviewed rollout is explicitly approved, deployed, and
+checked on the production page.
 
 ### 16. Three independent workers per flagship model - External
 
@@ -338,9 +342,10 @@ them wholesale.
 Core, contracts, text worker, media worker, and validator require their current
 CI/security status names. Validator `master` additionally enforces one approving
 review, stale-review dismissal, admin compliance, linear history, resolved
-conversations, and no force-push/deletion. Administrative bypass and zero
-required reviews remain a sole-maintainer tradeoff on the other protected repos,
-so their rules do not prevent an admin from pushing before checks finish. Stale
+conversations, and no force-push/deletion. The other protected repos also enforce
+rules for administrators and do not permit force-push/deletion, but zero required
+reviews remains a sole-maintainer tradeoff: a maintainer can merge or directly
+commit once strict required checks pass without independent approval. Stale
 status names must be reconciled whenever a workflow matrix changes. Media-worker
 `main` now requires a stable final manager-release gate in addition to its test,
 dependency, and secret checks; the gate itself depends on both platform builds.
@@ -357,11 +362,16 @@ credential was found and no credential value was copied into the audit record.
 The other findings were deterministic local-service fixture values, public
 cryptographic constants/test vectors in a retired paper-wallet bundle,
 documented placeholders, and operational metadata such as retired internal IPs,
-bucket names, and developer paths. Full-history scanning is still not a clean
-enforced gate: those reachable findings require either coordinated history
-repair or exact-fingerprint baselines with rationale and review dates. Current
-protected-branch worktrees scan clean. Text, media, and validator release
-pipelines carry checksums, SBOM/provenance gates appropriate to their maturity.
+bucket names, and developer paths. Green history-gate PRs now replace broad
+path, placeholder, address, and test-value allowlists with exact reviewed
+fingerprints or rule-scoped public constants across Core, text worker, media
+worker, validator, frontend, website, and contracts. Every gate scans complete
+reachable history with a checksum-verified scanner and uses a committed
+synthetic private-key negative control to prove that example labels cannot hide
+a future secret. These gates remain unmerged, so protected defaults are not yet
+uniformly hardened. Current protected-branch worktrees scan clean. Text, media,
+and validator release pipelines carry checksums, SBOM/provenance gates
+appropriate to their maturity.
 Text-worker `main` now requires the exact four-platform release-payload assembly
 check on every change. Media-worker `main` records explicit Authenticode state,
 runs Linux and Windows manager packaging on every change, and requires their
