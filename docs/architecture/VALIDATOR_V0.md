@@ -71,8 +71,9 @@ committed output and transport hashes, never Core's private verdict. Each node
 scores that output locally before signing.
 
 Candidate text families are randomized exact instruction, generated
-arithmetic, strict JSON object compliance, context retrieval, and generated
-multistep integer logic. The validator registration must advertise the matching
+arithmetic, strict JSON object compliance, context retrieval, generated
+multistep integer logic, and one exact randomized function call. The validator
+registration must advertise the matching
 scorer capability before it can join that probe group. Legacy
 `text.basic.v1` registrations are compatible only with echo/arithmetic. This
 prevents an older binary from turning an unsupported challenge into a false

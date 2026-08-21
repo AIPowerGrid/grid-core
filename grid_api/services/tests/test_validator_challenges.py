@@ -17,6 +17,7 @@ from grid_api.services import validators
         ("json.object", "json.object", "text.structured.v1"),
         ("context.retrieve", "context.retrieve", "text.context.4k.v1"),
         ("logic.steps", "logic.steps", "text.reasoning.multistep.v1"),
+        ("tool.call", "tool.call", "text.tool_call.v1"),
     ],
 )
 def test_generated_challenge_families_hide_expected_answer(family, kind, capability):
@@ -28,6 +29,42 @@ def test_generated_challenge_families_hide_expected_answer(family, kind, capabil
     assert len(challenge["prompt"]) > 20
     assert len(challenge["expected_hash"]) == 64
     int(challenge["expected_hash"], 16)
+
+
+def test_tool_call_challenge_is_dynamic_and_carries_a_strict_schema():
+    challenge = validators._make_text_challenge("tool.call")
+    function = challenge["tools"][0]["function"]
+
+    assert function["name"] in challenge["prompt"]
+    assert function["strict"] is True
+    assert function["parameters"]["additionalProperties"] is False
+    assert challenge["tool_choice"]["function"]["name"] == function["name"]
+
+
+def test_tool_call_scoring_requires_one_exact_call_and_no_text():
+    expected = json.dumps(
+        {"arguments": {"count_a": 7, "token_b": "A1"}, "name": "record_c"},
+        sort_keys=True, separators=(",", ":"),
+    )
+    challenge = _challenge("tool.call", expected)
+    correct = [{
+        "id": "call_opaque",
+        "type": "function",
+        "function": {"name": "record_c", "arguments": '{"token_b":"A1","count_a":7}'},
+    }]
+
+    assert validators._score_text_challenge(challenge, "", 10, tool_calls=correct) == "healthy"
+    assert validators._score_text_challenge(
+        challenge, "I called it.", 10, tool_calls=correct
+    ) == "failed"
+    assert validators._score_text_challenge(
+        challenge, "", 10, tool_calls=correct + correct
+    ) == "failed"
+    wrong = [{
+        **correct[0],
+        "function": {"name": "record_c", "arguments": '{"count_a":8,"token_b":"A1"}'},
+    }]
+    assert validators._score_text_challenge(challenge, "", 10, tool_calls=wrong) == "failed"
 
 
 def _challenge(kind: str, expected: str) -> dict:
@@ -91,6 +128,13 @@ def test_richer_validator_capabilities_select_only_advertised_families():
 
     assert kinds == ("json.object", "context.retrieve")
     assert capabilities == {"text.structured.v1", "text.context.4k.v1"}
+
+
+def test_tool_call_family_requires_its_exact_scorer_capability():
+    kinds, capabilities = validators._supported_text_challenges(["text.tool_call.v1"])
+
+    assert kinds == ("tool.call",)
+    assert capabilities == {"text.tool_call.v1"}
 
 
 def test_modern_basic_scorers_can_finish_legacy_basic_groups():

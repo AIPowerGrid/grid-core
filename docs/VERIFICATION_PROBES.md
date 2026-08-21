@@ -126,7 +126,10 @@ in this rollout; image/video validator lanes are future work.
 
 Text challenge families are selected cryptographically rather than from worker
 ordering. Current candidate families are exact instruction, generated
-arithmetic, strict JSON, context retrieval, and generated multistep logic.
+arithmetic, strict JSON, context retrieval, generated multistep logic, and an
+exact single-function call with randomized names and arguments. Tool-call
+evidence commits the witnessed text plus structured call; Core and the node
+normalize the call independently. Multi-turn tool chains remain future work.
 Group membership is capability-gated; legacy `text.basic.v1` nodes receive only
 echo/arithmetic. Each validator normalizes the output and checks the one-way
 expected-answer commitment locally instead of signing Core's private verdict.

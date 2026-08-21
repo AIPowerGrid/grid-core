@@ -373,6 +373,7 @@ _TEXT_CHALLENGE_KINDS = (
     "json.object",
     "context.retrieve",
     "logic.steps",
+    "tool.call",
 )
 _TEXT_CHALLENGE_CAPABILITIES = {
     "echo": "text.instruction.v1",
@@ -380,6 +381,7 @@ _TEXT_CHALLENGE_CAPABILITIES = {
     "json.object": "text.structured.v1",
     "context.retrieve": "text.context.4k.v1",
     "logic.steps": "text.reasoning.multistep.v1",
+    "tool.call": "text.tool_call.v1",
 }
 
 
@@ -470,7 +472,7 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         )
         kind = "context.retrieve"
         capability = "text.context.4k.v1"
-    else:
+    elif selected == "logic.steps":
         value = secrets.randbelow(18) + 3
         start = value
         operations: list[str] = []
@@ -494,7 +496,41 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         )
         kind = "logic.steps"
         capability = "text.reasoning.multistep.v1"
-    return {
+    else:
+        function_name = f"record_{secrets.token_hex(4)}"
+        number_field = f"count_{secrets.token_hex(3)}"
+        token_field = f"token_{secrets.token_hex(3)}"
+        arguments = {
+            number_field: secrets.randbelow(9000) + 1000,
+            token_field: secrets.token_hex(6).upper(),
+        }
+        expected = _canonical({"name": function_name, "arguments": arguments})
+        prompt = (
+            f"Call the {function_name} tool exactly once. Set {number_field!r} to "
+            f"{arguments[number_field]} and {token_field!r} to {arguments[token_field]!r}. "
+            "Do not answer in text."
+        )
+        kind = "tool.call"
+        capability = "text.tool_call.v1"
+        tools = [{
+            "type": "function",
+            "function": {
+                "name": function_name,
+                "description": "Record the two exact values requested by the user.",
+                "strict": True,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        number_field: {"type": "integer"},
+                        token_field: {"type": "string"},
+                    },
+                    "required": [number_field, token_field],
+                    "additionalProperties": False,
+                },
+            },
+        }]
+        tool_choice = {"type": "function", "function": {"name": function_name}}
+    challenge = {
         "kind": kind,
         "prompt": prompt,
         "expected_hash": _hash_text(expected),
@@ -502,6 +538,10 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         "temperature": 0,
         "capability": capability,
     }
+    if selected == "tool.call":
+        challenge["tools"] = tools
+        challenge["tool_choice"] = tool_choice
+    return challenge
 
 
 def _strip_think(text: str) -> str:
@@ -527,8 +567,32 @@ def _strip_wrapping_quotes(text: str) -> str:
     return answer
 
 
-def _normalized_text_answer(kind: str, text: str) -> str | None:
+def _normalized_tool_call(tool_calls: Any) -> str | None:
+    if not isinstance(tool_calls, list) or len(tool_calls) != 1:
+        return None
+    call = tool_calls[0]
+    if not isinstance(call, dict):
+        return None
+    function = call.get("function")
+    if not isinstance(function, dict) or not isinstance(function.get("name"), str):
+        return None
+    arguments = function.get("arguments")
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(arguments, dict):
+        return None
+    return _canonical({"name": function["name"], "arguments": arguments})
+
+
+def _normalized_text_answer(kind: str, text: str, tool_calls: Any = None) -> str | None:
     answer = _strip_think(text)
+    if kind == "tool.call":
+        if answer:
+            return None
+        return _normalized_tool_call(tool_calls)
     if not answer:
         return None
     if kind in ("echo", "context.retrieve"):
@@ -546,11 +610,13 @@ def _normalized_text_answer(kind: str, text: str) -> str | None:
     return None
 
 
-def _score_text_challenge(challenge: dict[str, Any], text: str, latency_ms: int) -> str:
+def _score_text_challenge(
+    challenge: dict[str, Any], text: str, latency_ms: int, *, tool_calls: Any = None
+) -> str:
     expected_hash = str(challenge.get("expected_hash") or "")
     if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
         return "failed"
-    candidate = _normalized_text_answer(str(challenge.get("kind") or ""), text)
+    candidate = _normalized_text_answer(str(challenge.get("kind") or ""), text, tool_calls)
     if candidate is None:
         return "failed"
     if not secrets.compare_digest(_hash_text(candidate), expected_hash):
@@ -593,7 +659,10 @@ def _assignment_to_dict(
         challenge = row["challenge"] or {}
         out["challenge"] = {
             key: challenge[key]
-            for key in ("kind", "prompt", "expected_hash", "max_tokens", "temperature")
+            for key in (
+                "kind", "prompt", "expected_hash", "max_tokens", "temperature",
+                "tools", "tool_choice",
+            )
             if key in challenge
         }
     return out
@@ -835,7 +904,7 @@ async def issue_assignments(
                     "modality": "text",
                     "capability": challenge["capability"],
                     "canary_kind": challenge["kind"],
-                    "scoring_policy_id": "text.generated.v3",
+                    "scoring_policy_id": "text.generated.v4",
                     "challenge": challenge,
                     "challenge_hash": _hash_obj({
                         "group_id": group_id,
@@ -1720,6 +1789,9 @@ async def probe_assignment(
         "_validator_probe_group_id": row["probe_group_id"],
         "_validator_grid_nonce": row["grid_nonce"],
     }
+    for key in ("tools", "tool_choice"):
+        if key in challenge:
+            payload["request"][key] = challenge[key]
 
     started = _now()
     try:
@@ -1751,6 +1823,8 @@ async def probe_assignment(
     full_text = ""
     grid_meta = None
     usage = None
+    tool_calls = None
+    finish_reason = None
     try:
         async for event in token_stream.subscribe_tokens(job_id, timeout=PROBE_TIMEOUT_SECONDS):
             if event.get("error"):
@@ -1766,6 +1840,8 @@ async def probe_assignment(
                 full_text = event.get("full_text") or "".join(chunks)
                 usage = event.get("usage")
                 grid_meta = event.get("grid")
+                tool_calls = event.get("tool_calls")
+                finish_reason = event.get("finish_reason")
                 break
             chunks.append(token_stream.event_content_text(event))
         else:
@@ -1787,6 +1863,11 @@ async def probe_assignment(
         )
         raise
 
+    response_commitment = (
+        _canonical({"text": full_text, "tool_calls": tool_calls})
+        if str(challenge.get("kind") or "") == "tool.call"
+        else full_text
+    )
     evidence = {
         "assignment_id": assignment_id,
         "probe_group_id": row["probe_group_id"],
@@ -1797,11 +1878,13 @@ async def probe_assignment(
         "capability": row["capability"],
         "canary_kind": row["canary_kind"],
         "prompt_hash": _hash_text(str((row["challenge"] or {}).get("prompt") or "")),
-        "response_hash": _hash_text(full_text),
+        "response_hash": _hash_text(response_commitment),
     }
     evidence["evidence_hash"] = _hash_obj(evidence)
     latency_ms = int((_now() - started).total_seconds() * 1000)
-    probe_verdict = _score_text_challenge(row["challenge"] or {}, full_text, latency_ms)
+    probe_verdict = _score_text_challenge(
+        row["challenge"] or {}, full_text, latency_ms, tool_calls=tool_calls
+    )
     await _mark_probe(
         job_id,
         "completed",
@@ -1824,6 +1907,8 @@ async def probe_assignment(
         "capability": row["capability"],
         "canary_kind": row["canary_kind"],
         "output_text": full_text,
+        "tool_calls": tool_calls,
+        "finish_reason": finish_reason,
         "usage": usage,
         "grid": grid_meta,
         "probe_latency_ms": latency_ms,
