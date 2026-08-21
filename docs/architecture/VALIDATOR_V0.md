@@ -71,7 +71,7 @@ committed output and transport hashes, never Core's private verdict. Each node
 scores that output locally before signing.
 
 Candidate text families are randomized exact instruction, generated
-arithmetic, strict JSON object compliance, calibrated 4K/16K context retrieval,
+arithmetic, strict JSON object compliance, calibrated 4K/16K/32K context retrieval,
 generated multistep integer logic, one exact randomized function call, one
 exact two-stage tool-call chain, and randomized stop-sequence compliance. The
 validator registration must advertise the matching scorer capability before it

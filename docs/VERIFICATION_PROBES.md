@@ -131,7 +131,7 @@ fidelity.
 
 Text challenge families are selected cryptographically rather than from worker
 ordering. Current candidate families are exact instruction, generated
-arithmetic, strict JSON, calibrated 4K/16K context retrieval, generated
+arithmetic, strict JSON, calibrated 4K/16K/32K context retrieval, generated
 multistep logic, and an exact single-function call plus a two-stage tool-call
 chain with randomized names and arguments. Tool-call evidence commits the
 witnessed text plus structured calls; Core and the node normalize each call
@@ -174,7 +174,7 @@ Deploy notes / learnings:
 
 ### Follow-ups (known, not yet done)
 1. **Grader hardening** — add hidden code execution, longer tool-call chains,
-   32K+ context tiers, and streaming-integrity checks. Keep judge models a
+   64K+ context tiers, and streaming-integrity checks. Keep judge models a
    supporting signal rather than an objective authority.
 2. **Media/video validator lanes** — deterministic image fidelity and
    non-deterministic video contract paths exist in the dark candidate and remain
