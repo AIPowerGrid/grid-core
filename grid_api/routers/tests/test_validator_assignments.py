@@ -458,6 +458,10 @@ async def test_validator_disagreement_marks_assignment_disputed(db):
         "quorum_status": "disputed",
         "quorum_outcome": "disputed",
     }
+    health = await validators_svc.assignment_health()
+    assert health["network"]["agreement_rate"] == 0.5
+    assert health["network"]["disputed_rate"] == 1.0
+    assert health["network"]["disputed_groups"] == 1
 
 
 @pytest.mark.asyncio
@@ -548,6 +552,20 @@ async def test_three_distinct_registered_validators_accept_shared_probe_group(db
     assert health["validators"]["active"] == 3
     assert health["validators"]["heartbeat_fresh"] == 3
     assert health["validators"]["participating_24h"] == 3
+    assert health["network"]["assignments_completed"] == 3
+    assert health["network"]["groups_with_evidence"] == 1
+    assert health["network"]["authoritative_votes"] == 3
+    assert health["network"]["agreement_rate"] == 1.0
+    assert health["network"]["disputed_rate"] == 0.0
+    assert health["network"]["coverage"] == {"workers": 1, "models": 1}
+    assert health["network"]["software_versions"] == [
+        {"version": "0.1.0-test", "validators": 3}
+    ]
+    assert health["network"]["operator_independence"] == {
+        "verified": 0,
+        "proven": False,
+        "status": "not_yet_verified",
+    }
 
     dissent_key = "0x" + f"{9:064x}"
     dissent_wallet = Account.from_key(dissent_key).address.lower()

@@ -43,7 +43,7 @@ economic eligibility.
 | `POST /v1/validator/probe/{assignment_id}` | `validator.probe` | hard-target the assigned worker |
 | `POST /v1/validator/attest` | `validator.attest` | submit signed assignment evidence |
 | `GET /v1/validator/scorecards` | `validator.read` | read redacted aggregates |
-| `GET /v1/validator/assignments/health` | `validator.read` | inspect assignment workflow health |
+| `GET /v1/validator/assignments/health` | `validator.read` | inspect assignment workflow and aggregate network health |
 | `GET /v1/validator/workers` | `validator.read` | read inventory only |
 
 Missing registration, assignment, probe, or attestation support fails closed.
@@ -79,6 +79,10 @@ worker strike.
 Scorecards expose aggregate verdict counts and health only. They must not expose
 raw prompts or outputs, expected answers, nonces, signatures, canonical account
 IDs, validator identities, private challenge policies, or reference outputs.
+Aggregate network health includes completed assignments, vote agreement and
+dispute rates, worker/model coverage, and bounded software-version cohorts.
+Registered, fresh, and participating counts remain separate from independently
+verified operators; the latter remains zero until external review exists.
 
 ## Schema And Deployment
 

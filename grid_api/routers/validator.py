@@ -296,11 +296,16 @@ async def validator_assignment_health(
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
     limit: int = Query(25, ge=1, le=100),
+    since_hours: int = Query(24, ge=1, le=24 * 90),
 ):
     """Return assignment evidence health for the current validator account."""
     user = await _validator_user(apikey, authorization, required_scope="validator.read")
     await _active_validator(user)
-    return await validators_svc.assignment_health(account_id=user["account_id"], limit=limit)
+    return await validators_svc.assignment_health(
+        account_id=user["account_id"],
+        limit=limit,
+        since_hours=since_hours,
+    )
 
 
 @router.post("/v1/validator/probe/{assignment_id}")
