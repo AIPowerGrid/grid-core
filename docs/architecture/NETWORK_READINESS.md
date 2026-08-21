@@ -70,16 +70,19 @@ production migration `0020+` and live registration/heartbeat proof.
 
 Four-platform binaries, multi-architecture Docker builds, checksums, a
 checksum-verifying installer, SPDX SBOM, and GitHub provenance workflows exist.
-Build-only GitHub runs and a clean downloaded release payload have passed. No
-tag, GitHub Release, or registry image has been published. Publication remains
-gated on the Core rollout and authenticated canary.
+Fresh build-only GitHub runs and an independent clean-download verification of
+the complete 85-package SPDX/checksum payload have passed. No tag, GitHub
+Release, or registry image has been published. Publication remains gated on
+the Core rollout and authenticated canary.
 
 ### 6. Validator onboarding - Implemented
 
-The public `/validate` page release-gates incomplete assets, links scoped key
-creation, documents health commands, and says there are no rewards, stake,
-slashing, or routing effects. The Console has registration/scorecard surfaces.
-The page remains intentionally download-closed until item 5 is published.
+The public `/validate` page release-gates incomplete assets and independently
+requires the live Core `shared_quorum_preview`, 3-of-5, scoped, non-economic
+capability contract. A complete GitHub Release cannot unlock downloads against
+the older production Core. The page links scoped key creation, documents health
+commands, and says there are no rewards, stake, slashing, or routing effects.
+The Console has registration/scorecard surfaces. Downloads remain closed.
 
 ### 7. Five to ten independent preview operators - External
 
@@ -132,11 +135,12 @@ the privacy-safe subset. Production endpoint rollout is pending.
 
 ### 14. Public media-worker manager release - External/Partial
 
-Manager packaging and CI pass, but the release trust contract correctly blocks
-publication. Missing evidence includes distinct real minimum/midrange/datacenter
-benchmark reports, an on-chain RecipeVault root, offline profile signing, the
-exact signed active profile, and platform-signing review. Do not replace those
-with synthetic reports or an unsigned draft profile.
+Manager packaging and fresh standalone Linux/Windows qualification builds pass,
+but the release trust contract correctly blocks publication. Missing evidence
+includes distinct real minimum/midrange/datacenter benchmark reports, an
+on-chain RecipeVault root, offline profile signing, the exact signed active
+profile, and platform-signing review. Do not replace those with synthetic
+reports or an unsigned draft profile.
 
 ### 15. Independent text and media choices on `/run` - Implemented
 
@@ -154,15 +158,16 @@ gap.
 
 ### 17. Hardware-aware operator recommendation - Implemented
 
-`/run` uses browser-local OS, accelerator, VRAM, RAM, disk, and operator intent
-to recommend text, media, or validator paths. Signed worker profiles remain the
-final local capability authority.
+`/run` uses browser-local OS, accelerator type and model, VRAM, RAM, disk, and
+expected or measured text throughput to recommend a worker path. Signed worker
+profiles remain the final local capability authority.
 
 ### 18. Demand and opportunity without promises - Implemented
 
-`/run` combines public worker counts, recent jobs, and observed network
-telemetry. It labels the data as network opportunity rather than a hardware
-benchmark or fixed earnings forecast.
+`/run` combines public worker counts, recent jobs, jobs per worker, and observed
+network telemetry. It separates single-worker resilience risk from historical
+workload share and labels both as planning signals rather than a hardware
+benchmark, payout forecast, or fixed earnings promise.
 
 ## Better Validation
 
