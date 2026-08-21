@@ -50,6 +50,42 @@ attestations in place, preserved every row, completed locally in 0.66 seconds,
 and passed `alembic check` with no schema drift. This proves the migration data
 shape and constraints, not production lock duration or backup restoration.
 
+## Approval-Ready Merge Sequence
+
+All pull requests listed here were mergeable with green hosted checks at the
+evidence snapshot. Recheck the exact head and required statuses immediately
+before each merge; a green ancestor or paired branch does not prove a changed
+head.
+
+1. Land history/security foundations before feature branches: Core PR 22
+   (`e798b440`), text-worker PR 15 (`db8f9424`), media-worker PR 14
+   (`ac05d780`), Console PR 16 (`4edbd952`), contracts PR 4
+   (`a814693a`), website PR 5 (`e3432ea1`), documentation PR 3
+   (`bf1bff22`), Python SDK PR 2 (`890abbe0`), JavaScript SDK PR 2
+   (`2fa540fc`), and validator PR 3 (`17ce7357`). Validator PR 3 still
+   requires the configured independent approval. Treat website, Console, and
+   documentation default-branch merges as deployment-capable because their
+   hosting integrations are outside the source diff.
+2. Land contracts PR 3 (`c8015c2b`) after contracts PR 4. This enables
+   deployable-contract Slither policy and tested source changes only; it does
+   not authorize a Diamond cut or any Base transaction.
+3. Land validator release PR 2 (`4b226ad6`) after validator PR 3, then
+   validator capability PR 4 (`81b66390`). Both require independent review.
+   Do not create a tag or publish binaries until Core is rolled out, a live
+   authenticated canary passes, and macOS/Windows signing evidence is present.
+4. Land website rollout PR 4 (`01dc7d24`) only after website PR 5 and explicit
+   production approval. Its release-policy and browser tests are green, but a
+   main merge deploys the public worker/validator onboarding surface.
+5. Land Core validator PR 21 (`a8c48ecd`) only after Core PR 22, a supervised
+   production snapshot plus scratch restore, a signed-in account/validator
+   acceptance pass, and explicit deployment approval. Merge is not proof that
+   production moved from `20d57669` or Alembic `0019`.
+
+After each paired merge, refresh the dependent PR against the new default
+branch and rerun every required status. Contract code, release artifacts,
+production migrations, charging changes, and Base transactions remain separate
+approval events.
+
 ## Immediate Validator Preview
 
 ### 1. Dedicated validator API scopes - Ready
