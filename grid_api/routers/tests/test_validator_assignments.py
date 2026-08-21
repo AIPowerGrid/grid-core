@@ -1211,6 +1211,73 @@ async def test_stop_sequence_is_exposed_and_forwarded_to_the_targeted_request(db
     assert submitted["request"]["stop"] == assignment["challenge"]["stop"]
 
 
+@pytest.mark.asyncio
+async def test_token_limit_probe_forwards_budget_and_commits_terminal_evidence(db, monkeypatch):
+    from grid_api.services import den, job_queue, token_stream
+
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, capabilities=["text.token_limit.v1"])
+    issued = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=[{
+            "worker_id": str(uuid.uuid4()), "name": "rig-token-limit",
+            "models": ["qwen3-27b"], "job_types": ["text"],
+        }],
+        limit=1,
+    )
+    assignment = issued["assignments"][0]
+    challenge = assignment["challenge"]
+    token = challenge["prompt"].split("Repeat exactly ", 1)[1].split(" ", 1)[0]
+    pieces = []
+    while den.count_tokens(" ".join(pieces)) < challenge["max_tokens"] // 2:
+        pieces.append(token)
+    output_text = " ".join(pieces)
+    submitted = {}
+
+    async def capture_submit(job_id, payload, models, **kwargs):
+        submitted.update(job_id=job_id, payload=payload, models=models, kwargs=kwargs)
+
+    async def completed_events(*_args, **_kwargs):
+        yield {
+            "text": token_stream.DONE_SENTINEL,
+            "full_text": output_text,
+            "full_reasoning": "",
+            "finish_reason": "length",
+            "usage": {"completion_tokens": 1},
+            "grid": {"worker": "rig-token-limit"},
+        }
+
+    monkeypatch.setattr(job_queue, "submit_job", capture_submit)
+    monkeypatch.setattr(token_stream, "subscribe_tokens", completed_events)
+    result = await validators_svc.probe_assignment(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+
+    assert result["status"] == "completed"
+    assert result["canary_kind"] == "token.limit"
+    assert result["finish_reason"] == "length"
+    assert submitted["payload"]["request"]["max_tokens"] == challenge["max_tokens"]
+    assert submitted["kwargs"]["hard_target_worker"] == "rig-token-limit"
+    response_commitment = validators_svc._canonical({
+        "text": output_text,
+        "reasoning": "",
+        "finish_reason": "length",
+    })
+    assert result["response_hash"] == validators_svc._hash_text(response_commitment)
+
+    async with await database.new_session() as session:
+        row = (await session.execute(
+            sa.select(assignments_t).where(assignments_t.c.id == assignment["assignment_id"])
+        )).mappings().one()
+    assert row["probe_status"] == "completed"
+    assert row["probe_verdict"] == "healthy"
+    assert row["probe_response_hash"] == result["response_hash"]
+
+
 def test_validator_capabilities_expose_assignment_gates():
     app = FastAPI()
     app.state.limiter = limiter

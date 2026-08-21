@@ -175,8 +175,11 @@ benchmark, payout forecast, or fixed earnings promise.
 
 Implemented randomized lanes cover exact instruction, arithmetic, strict JSON,
 context retrieval, multistep logic, one function call, a two-stage tool chain,
-and stop-sequence compliance. Hidden code execution, larger long-context tiers,
-longer tool chains, streaming integrity, and token-budget honesty remain open.
+stop-sequence compliance, and gross output-budget compliance using an
+independent model-agnostic token counter with cross-tokenizer tolerance. Hidden
+code execution, larger long-context tiers, longer tool chains, and streaming
+integrity remain open; exact native-tokenizer equivalence is intentionally not
+claimed.
 
 ### 20. Private deterministic image validation - Ready dark
 
@@ -273,10 +276,15 @@ workflow matrix changes.
 
 ### 32. CI, scanning, provenance, and deploy identity - Partial
 
-Key repos have tests, full-history/worktree secret scanning, CodeQL or language
+Key repos have tests, tracked-worktree secret scanning, CodeQL or language
 security checks, dependency monitoring, and SHA-pinned release tooling where
-artifacts exist. Text, media, and validator release pipelines carry checksums,
-SBOM/provenance gates appropriate to their maturity. Core production
+artifacts exist. Full-history scanning is not yet a clean enforced gate: Core
+history still reports old API-key-shaped values and infrastructure strings that
+require revocation review plus either history repair or an explicit reviewed
+baseline; validator history reports one retired local-path disclosure. Current
+Core and validator worktrees scan clean. Text, media, and validator release
+pipelines carry checksums, SBOM/provenance gates appropriate to their maturity.
+Core production
 dependencies now resolve into a reviewed Python 3.12/Linux lock with exact
 versions and package hashes; Docker, host bootstrap, and CI install that lock
 with `--require-hashes` from binary wheels only, the Core image base is
