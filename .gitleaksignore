@@ -5,6 +5,8 @@
 # rejected by the production account endpoint with HTTP 401. The remaining
 # entries are retired bucket/developer-path disclosures. This file records no
 # secret value and must never contain a broad rule, path, or regex exclusion.
+# This exact code fingerprint is a keyword-argument placeholder, not a secret.
+bbfaca603eda75ae20805cbfc39884c1fa2e12fa:grid_api/services/p2p/protocol.py:generic-api-key:168
 2a8219045f1c5b00d8188df543d2a653bc6596c5:docs/SYSTEM_SWEEP_2026-07-01.md:aipg-local-dev-path:91
 2a8219045f1c5b00d8188df543d2a653bc6596c5:docs/SYSTEM_SWEEP_2026-07-01.md:aipg-r2-bucket:13
 2fafcf40227390c4b0b6ddf82b93d6fabd2819dd:clientData_template.py:generic-api-key:9

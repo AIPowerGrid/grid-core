@@ -31,20 +31,26 @@ description = "BIP-39 mnemonic or seed phrase assignment"
 regex = '''(?i)(?:mnemonic|seed[\s_-]?phrase)\s*[:=]\s*["']?(?:\w+\s+){11,}'''
 tags = ["aipg", "wallet"]
 
-[allowlist]
-description = "Generated files and explicit non-secret fixtures"
-paths = [
-  '''(?i)(^|/)(?:\.venv[^/]*|venv[^/]*|node_modules|__pycache__|\.pytest_cache|\.ruff_cache|\.next|\.open-next|dist|build|out|cache)(/|$)''',
-  '''(?i)\.env\.(?:example|template|sample)$''',
-  '''(?i)(^|/)(?:examples?|samples?)/''',
-  '''(?i)(?:package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|Cargo\.lock|uv\.lock)$''',
-  '''(?i)\.gitleaks\.toml$''',
-  '''(?i)secret-scan\.ya?ml$''',
-]
+[[allowlists]]
+description = "Published Base token contracts"
+targetRules = ["generic-api-key"]
 regexes = [
-  '''(?i)(?:your[-_]?api[-_]?key|example|placeholder|changeme|xxxx+|<[a-z_]+>)''',
-  '''0x[a-fA-F0-9]{40}\b''',
-  '''(?i)0x1{64}\b''',
-  '''receipt_signature=signature''',
-  '''aipg\.pendingDeposit\.v1''',
+  '''(?i)^0xa1c0deCaFE3E9Bf06A5F29B7015CD373a9854608$''',
+  '''(?i)^0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913$''',
+]
+
+[[allowlists]]
+description = "Deterministic invalid EVM test key"
+targetRules = ["aipg-evm-private-key"]
+regexTarget = "match"
+regexes = [
+  '''(?i)^PRIVATE_KEY=0x1{64}\b''',
+]
+
+[[allowlists]]
+description = "Scanner definitions name the forbidden bucket patterns"
+targetRules = ["aipg-r2-bucket"]
+paths = [
+  '''(^|/)\.gitleaks\.toml$''',
+  '''(^|/)\.github/workflows/secret-scan\.ya?ml$''',
 ]
