@@ -209,10 +209,13 @@ wallet proof resolves to one funded account without multiplying its balance.
 
 ## Production parity gate
 
-Charging must remain `off` until one human signs into every surface with the
-same verified Google identity and, separately, the same wallet. Capture the
-following authenticated, `no-store` responses without recording cookies,
-service keys, Core user tokens, Google tokens, or SIWE signatures:
+The intended gate required charging to remain `off` until one human signed into
+every surface with the same verified Google identity and, separately, the same
+wallet. Production entered a one-account/one-model `allowlist` before the full
+receipt set below was retained. Do not expand that cohort or enable free value
+until the missing evidence is captured. Capture the following authenticated,
+`no-store` responses without recording cookies, service keys, Core user tokens,
+Google tokens, or SIWE signatures:
 
 | Surface | Read endpoint | Account field | Purchased balance field |
 | --- | --- | --- | --- |
@@ -229,13 +232,21 @@ The gate passes only when:
    service client; no public shared-demo credential was used.
 4. The Google run and wallet run each pass independently. A wallet linked to a
    Google account must resolve to that same canonical ID in both runs.
-5. Core remains `GRID_CHARGING_MODE=off` throughout this identity proof.
+5. Core remains on the existing one-account/one-model allowlist throughout this
+   identity proof; no additional account, service, or model is selected.
 
-After parity passes, set `GRID_CHARGING_MODE=allowlist` for only this account.
-Run one minimum-cost successful job through Art, Music, and Chat, waiting for
-each durable reservation to settle before starting the next. After every job,
-all four read endpoints must converge on the same decreased purchased balance,
-and the Core ledger must contain exactly one settled charge for that job.
-Any mismatch, stranded hold, duplicate charge, service-owned charge, or
+Code-level parity is currently proven by the three named Core contract tests and
+the consumer-app mismatch tests. Production also has Google, wallet, and
+service-app identity events on one canonical account, but those audit events are
+not substitutes for the four endpoint responses above. The live gate therefore
+remains incomplete.
+
+After parity passes, deliberately fund the existing allowlisted account and run
+one minimum-cost successful job through Art, Music, and Chat, waiting for each
+durable reservation to settle before starting the next. After every job, all
+four read endpoints must converge on the same decreased purchased balance, and
+the Core ledger must contain exactly one settled charge for that job. Any
+mismatch, stranded hold, duplicate charge, service-owned charge, or
 unallowlisted debit fails the canary and requires returning the mode to `off`.
-Global `on` remains a separate rollout decision after the canary window.
+Global `on` remains a separate rollout decision after the complete canary and
+observation window.
