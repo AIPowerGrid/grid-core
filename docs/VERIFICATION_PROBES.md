@@ -4,7 +4,10 @@
 evidence-only. Registered validators, shared probe groups, targeted assignment
 leases, and distinct-identity 3-of-5 quorum are merged candidates through
 Alembic `0022`, not production-live. Economic validator authority, rewards,
-staking, and slashing are not live.
+staking, and slashing are not live. The current immutable candidate requires
+Alembic through `0024`; quorum itself lands in `0022`, while `0023`-`0024`
+provide the dark media-reference schema that the candidate imports with media
+assignments disabled.
 
 ## The problem
 
@@ -27,7 +30,7 @@ We verify the same *fact* two ways, in order:
 | Trust model | centralized spot-check | preview: distinct signed identities; future: independent quorum + disputes |
 | Economic weight | **none** (evidence only) | preview: **none**; future: accepted-evidence reward / objective-fraud slash |
 | New assumptions | none | preview: signed assignment binding; future: operator independence, bonding, disputes |
-| Ships | live evidence-only | candidate preview through `0022`; economic phase deferred |
+| Ships | live evidence-only | candidate preview through `0024`; economic phase deferred |
 
 **Build order rationale:** we ARE a centralized coordinator today; a coordinator that
 spot-checks its own workers is coherent and needs nothing new. A validator network that
@@ -144,7 +147,7 @@ expected-answer commitment locally instead of signing Core's private verdict.
 Coordinator-run probes remain live and evidence-only. Registered-validator
 assignments, shared probe groups, and 3-of-5 quorum are merged candidates, not
 production authority: production still needs the immutable Core release and
-Alembic migrations through `0022`. Do not publish validator binaries against an
+Alembic migrations through `0024`. Do not publish validator binaries against an
 older Core capability response.
 
 Deploy notes / learnings:
