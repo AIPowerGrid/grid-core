@@ -778,9 +778,109 @@ async def issue_assignments(
     }
 
 
-async def assignment_health(*, account_id=None, limit: int = 25) -> dict[str, Any]:
+async def _network_health_in_session(session, *, since_hours: int) -> dict[str, Any]:
+    """Return privacy-preserving aggregate validator network health."""
+    cutoff = _now() - timedelta(hours=since_hours)
+    vote_rows = (
+        await session.execute(
+            sa.select(
+                attestations_t.c.probe_group_id,
+                attestations_t.c.verdict,
+                sa.func.count().label("count"),
+            )
+            .where(
+                attestations_t.c.authority == "authoritative",
+                attestations_t.c.probe_group_id.isnot(None),
+                attestations_t.c.validator_id.isnot(None),
+                attestations_t.c.created >= cutoff,
+            )
+            .group_by(attestations_t.c.probe_group_id, attestations_t.c.verdict)
+        )
+    ).mappings().all()
+    votes_by_group: dict[str, dict[str, int]] = {}
+    for row in vote_rows:
+        votes_by_group.setdefault(str(row["probe_group_id"]), {})[
+            str(row["verdict"])
+        ] = int(row["count"])
+
+    group_ids = list(votes_by_group)
+    group_meta = []
+    if group_ids:
+        group_meta = (
+            await session.execute(
+                sa.select(
+                    probe_groups_t.c.id,
+                    probe_groups_t.c.target_worker_id,
+                    probe_groups_t.c.model,
+                ).where(probe_groups_t.c.id.in_(group_ids))
+            )
+        ).mappings().all()
+
+    total_votes = sum(sum(counts.values()) for counts in votes_by_group.values())
+    plurality_votes = sum(max(counts.values()) for counts in votes_by_group.values())
+    disputed_groups = sum(1 for counts in votes_by_group.values() if len(counts) > 1)
+    evidence_groups = len(votes_by_group)
+    completed_assignments = int(
+        await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(assignments_t)
+            .where(
+                assignments_t.c.probe_status == "completed",
+                assignments_t.c.created >= cutoff,
+            )
+        )
+        or 0
+    )
+    version_rows = (
+        await session.execute(
+            sa.select(
+                validators_t.c.software_version,
+                sa.func.count().label("count"),
+            )
+            .where(
+                validators_t.c.status == "active",
+                validators_t.c.last_heartbeat
+                >= _now() - timedelta(seconds=VALIDATOR_HEARTBEAT_FRESH_SECONDS),
+            )
+            .group_by(validators_t.c.software_version)
+            .order_by(sa.func.count().desc(), validators_t.c.software_version.asc())
+            .limit(20)
+        )
+    ).mappings().all()
+
+    return {
+        "window_hours": since_hours,
+        "assignments_completed": completed_assignments,
+        "groups_with_evidence": evidence_groups,
+        "authoritative_votes": total_votes,
+        "agreement_rate": (plurality_votes / total_votes) if total_votes else None,
+        "disputed_rate": (disputed_groups / evidence_groups) if evidence_groups else None,
+        "disputed_groups": disputed_groups,
+        "coverage": {
+            "workers": len({str(row["target_worker_id"]) for row in group_meta}),
+            "models": len({str(row["model"]) for row in group_meta}),
+        },
+        "software_versions": [
+            {"version": str(row["software_version"]), "validators": int(row["count"])}
+            for row in version_rows
+        ],
+        "operator_independence": {
+            "verified": 0,
+            "proven": False,
+            "status": "not_yet_verified",
+        },
+    }
+
+
+async def assignment_health(
+    *,
+    account_id=None,
+    limit: int = 25,
+    since_hours: int = 24,
+) -> dict[str, Any]:
     """Return probe, assignment, and real group-quorum health without raw evidence."""
     safe_limit = max(1, min(int(limit), 100))
+    safe_since = max(1, min(int(since_hours), 24 * 90))
     async with await new_session() as session:
         await _finalize_due_assignments(session)
         await session.commit()
@@ -917,6 +1017,10 @@ async def assignment_health(*, account_id=None, limit: int = 25) -> dict[str, An
             )
             or 0
         )
+        network_health = await _network_health_in_session(
+            session,
+            since_hours=safe_since,
+        )
     return {
         "quorum": {
             "pending": quorum_counts.get("pending", 0),
@@ -943,6 +1047,7 @@ async def assignment_health(*, account_id=None, limit: int = 25) -> dict[str, An
             "participating_24h": participating_validators,
             "heartbeat_fresh_seconds": VALIDATOR_HEARTBEAT_FRESH_SECONDS,
         },
+        "network": network_health,
         "probe": probe_counts,
         "recent": recent,
         "economic_effect": "none",

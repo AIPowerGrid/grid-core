@@ -76,6 +76,9 @@ transport, accounts, stats, health/metrics.
   accepted-evidence, worker-pass, quorum, finalization, and aggregate validator
   liveness stages. Shared 3-of-5 quorum remains preview-only with no
   routing/reward/slash authority.
+  Health also exposes privacy-preserving network aggregates over a bounded
+  `since_hours` window; never relabel registered validators as independently
+  operated validators.
 - `styles.py` - `GET /v1/styles` for curated creative presets.
 - `health.py` - `GET /health`.
 - `metrics.py` - `GET /metrics` Prometheus exposition.

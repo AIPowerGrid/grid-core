@@ -110,7 +110,9 @@ The rest require a v2 account API key and are evidence-only:
 - `GET /v1/validator/scorecards` — aggregate worker/model evidence without raw
   payloads, nonces, signatures, account IDs, or validator identities.
 - `GET /v1/validator/assignments/health` — assignment and quorum lifecycle
-  health.
+  health plus privacy-preserving agreement, dispute, coverage, and software
+  version aggregates. It does not claim registered accounts are independent
+  operators.
 - `GET /v1/validator/workers` — current worker inventory for validator discovery.
 
 Core requires three matching votes from five distinct registered validator
