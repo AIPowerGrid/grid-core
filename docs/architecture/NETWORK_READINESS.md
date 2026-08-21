@@ -213,11 +213,12 @@ benchmark, payout forecast, or fixed earnings promise.
 ### 19. Rich text validation - Partial
 
 Implemented randomized lanes cover exact instruction, arithmetic, strict JSON,
-calibrated 4K and 16K context retrieval, multistep logic, one function call, a
+calibrated 4K, 16K, and 32K context retrieval, multistep logic, one function
+call, a
 two-stage tool chain, stop-sequence compliance, and gross output-budget
 compliance using an independent model-agnostic token counter with
 cross-tokenizer tolerance. Context tiers require conservative worker-advertised
-headroom. Hidden code execution, 32K+ long-context tiers, longer tool chains,
+headroom. Hidden code execution, 64K+ long-context tiers, longer tool chains,
 and streaming integrity remain open; exact native-tokenizer equivalence is
 intentionally not claimed.
 

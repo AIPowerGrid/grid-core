@@ -17,6 +17,7 @@ from grid_api.services import den, validators
         ("json.object", "json.object", "text.structured.v1"),
         ("context.retrieve", "context.retrieve", "text.context.4k.v1"),
         ("context.retrieve.16k", "context.retrieve.16k", "text.context.16k.v1"),
+        ("context.retrieve.32k", "context.retrieve.32k", "text.context.32k.v1"),
         ("logic.steps", "logic.steps", "text.reasoning.multistep.v1"),
         ("tool.call", "tool.call", "text.tool_call.v1"),
         ("tool.chain", "tool.chain", "text.tool_chain.v1"),
@@ -146,17 +147,31 @@ def test_context_scoring_requires_only_the_exact_retrieved_token():
     assert validators._score_text_challenge(challenge, "The value is A1B2C3D4", 10) == "failed"
 
 
+@pytest.mark.parametrize("kind", ["context.retrieve.16k", "context.retrieve.32k"])
+def test_long_context_scoring_uses_the_same_exact_contract(kind):
+    challenge = _challenge(kind, "A1B2C3D4")
+
+    assert validators._score_text_challenge(challenge, "`A1B2C3D4`", 10) == "healthy"
+    assert validators._score_text_challenge(challenge, "A1B2C3D4 extra", 10) == "failed"
+
+
 def test_context_challenge_tiers_match_their_declared_token_windows():
     challenge_4k = validators._make_text_challenge("context.retrieve")
     challenge_16k = validators._make_text_challenge("context.retrieve.16k")
+    challenge_32k = validators._make_text_challenge("context.retrieve.32k")
 
     assert 3_000 <= den.count_tokens(challenge_4k["prompt"]) <= 5_000
     assert 14_000 <= den.count_tokens(challenge_16k["prompt"]) <= 18_000
+    assert 28_000 <= den.count_tokens(challenge_32k["prompt"]) <= 36_000
     assert challenge_4k["prompt"].count("\nrecord=") == 100
     assert challenge_16k["prompt"].count("\nrecord=") == 400
+    assert challenge_32k["prompt"].count("\nrecord=") == 800
     assert challenge_16k["kind"] == "context.retrieve.16k"
     assert challenge_16k["capability"] == "text.context.16k.v1"
+    assert challenge_32k["kind"] == "context.retrieve.32k"
+    assert challenge_32k["capability"] == "text.context.32k.v1"
     assert "expected" not in challenge_16k
+    assert "expected" not in challenge_32k
 
 
 def test_multistep_scoring_rejects_ambiguous_numeric_answers():
@@ -206,8 +221,20 @@ def test_16k_context_family_requires_its_exact_scorer_capability():
     assert capabilities == {"text.context.16k.v1"}
 
 
+def test_32k_context_family_requires_its_exact_scorer_capability():
+    kinds, capabilities = validators._supported_text_challenges(["text.context.32k.v1"])
+
+    assert kinds == ("context.retrieve.32k",)
+    assert capabilities == {"text.context.32k.v1"}
+
+
 def test_long_context_families_require_worker_advertised_headroom():
-    kinds = ("echo", "context.retrieve", "context.retrieve.16k")
+    kinds = (
+        "echo",
+        "context.retrieve",
+        "context.retrieve.16k",
+        "context.retrieve.32k",
+    )
 
     assert validators._worker_eligible_text_challenges(
         kinds,
@@ -220,6 +247,10 @@ def test_long_context_families_require_worker_advertised_headroom():
     assert validators._worker_eligible_text_challenges(
         kinds,
         {"max_context_length": 32_768},
+    ) == kinds[:-1]
+    assert validators._worker_eligible_text_challenges(
+        kinds,
+        {"max_context_length": 65_536},
     ) == kinds
     assert validators._worker_eligible_text_challenges(
         kinds,

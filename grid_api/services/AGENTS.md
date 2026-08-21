@@ -47,7 +47,7 @@ content sanitization, and reward settlement.
   registration per canonical account, builds shared probe groups, binds one
   assignment and authoritative vote per registered validator/group, and
   aggregates a conservative 3-of-5 preview quorum. Text groups use randomized
-  exact-instruction, arithmetic, strict-JSON, calibrated 4K/16K
+  exact-instruction, arithmetic, strict-JSON, calibrated 4K/16K/32K
   context-retrieval, multistep logic, exact function-call, two-stage tool-chain,
   stop-sequence, and gross token-limit families. Token-limit scoring uses
   Grid-side `o200k_base` counting over visible plus reasoning output, a
