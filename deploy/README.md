@@ -66,12 +66,38 @@ restored scratch database before applying it to production. Source
 After the scratch proof, run Alembic from the candidate release with the service
 environment loaded, then verify `alembic current` equals its single head.
 
+For an existing host, run the candidate backup tool directly before changing
+the live symlink. Do not start its systemd unit yet because that unit correctly
+resolves scripts through the still-live `/home/aipg/current` release:
+
+```bash
+sudo bash -c "set -a; source /etc/aipg/grid.env; set +a; \
+  AIPG_BACKUP_DIR=/var/lib/aipg-backup \
+  '$RELEASE/scripts/backup_postgres.sh'"
+BACKUP="$(sudo find /var/lib/aipg-backup -maxdepth 1 -name 'grid-postgres-*.dump' -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)"
+sudo bash -c "set -a; source /etc/aipg/grid.env; set +a; \
+  AIPG_RESTORE_BACKUP='$BACKUP' \
+  AIPG_RESTORE_CANDIDATE='$RELEASE' \
+  '$RELEASE/scripts/prove_postgres_restore.sh'"
+```
+
+The proof verifies the checksum, restores into a generated
+`aipg_restore_proof_*` database, upgrades with the candidate, runs
+`alembic check`, compares current revision to the candidate head, and drops only
+that generated database. Review the output before enabling the timer with
+`sudo systemctl enable --now aipg-postgres-backup.timer` after the release
+symlink has moved. Local backups are a deployment safety net, not an off-host
+disaster-recovery strategy; add an encrypted remote copy under a separate
+reviewed retention policy.
+
 Install the versioned unit assets, select the release atomically, and restart:
 
 ```bash
 sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-gridapi.service" /etc/systemd/system/
 sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-payout.service" /etc/systemd/system/
 sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-payout.timer" /etc/systemd/system/
+sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-postgres-backup.service" /etc/systemd/system/
+sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-postgres-backup.timer" /etc/systemd/system/
 sudo install -m 0644 "$RELEASE/deploy/nginx/aipg-api.conf" /etc/nginx/sites-available/aipg-api.conf
 sudo ln -sfn /etc/nginx/sites-available/aipg-api.conf /etc/nginx/sites-enabled/aipg-api.conf
 sudo ln -s "$RELEASE" /home/aipg/.current.next
@@ -87,6 +113,8 @@ The payout timer is a money-moving control. Preserve its prior enabled/active
 state; do not enable or start it merely because unit files were installed. The
 payout wrapper derives its Python interpreter from the selected immutable
 release, so Core and payout accounting cannot silently execute different trees.
+Preserve the backup timer's prior state as well; first-time enablement requires
+the supervised backup/restore proof above.
 
 `-H` is intentional: asyncpg may otherwise inspect root's PostgreSQL client
 certificate path.
@@ -135,5 +163,7 @@ Restore a database backup only under an incident plan.
 ## Asset status
 
 - `systemd/aipg-gridapi.service` is the FastAPI unit template.
+- `systemd/aipg-postgres-backup.{service,timer}` provides local daily backups;
+  its first restore proof remains a deployment gate.
 - `nginx/aipg-api.conf` serves retirement responses without a legacy process.
 - `bootstrap.sh` requires `GRID_CORE_COMMIT` and installs an immutable release.

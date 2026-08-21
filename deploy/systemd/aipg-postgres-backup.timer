@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the AIPG PostgreSQL backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:17:00 UTC
+Persistent=true
+RandomizedDelaySec=900
+Unit=aipg-postgres-backup.service
+
+[Install]
+WantedBy=timers.target

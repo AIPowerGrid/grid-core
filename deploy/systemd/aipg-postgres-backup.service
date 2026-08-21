@@ -1,0 +1,36 @@
+[Unit]
+Description=AIPG PostgreSQL verified backup
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/home/aipg/current
+EnvironmentFile=/etc/aipg/grid.env
+Environment=AIPG_BACKUP_DIR=/var/lib/aipg-backup
+Environment=AIPG_BACKUP_RETENTION_DAYS=14
+ExecStart=/home/aipg/current/scripts/backup_postgres.sh
+UMask=0077
+StateDirectory=aipg-backup
+StateDirectoryMode=0700
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=read-only
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/aipg-backup
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallArchitectures=native
