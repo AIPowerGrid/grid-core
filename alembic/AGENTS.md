@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current head: `0022`
+- `versions/` - ordered migration revisions. Current head: `0023`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -23,7 +23,8 @@ production database match the Grid-owned schema contracts without relying on
   `0019` adds service SIWE domain binding; `0020` adds registered validator
   identities and binds assignments/attestations to them; `0021` adds bounded,
   reclaimable validator-probe leases; `0022` adds shared probe groups and
-  distinct-validator quorum constraints).
+  distinct-validator quorum constraints; `0023` adds the fail-closed bonded
+  media reference-worker snapshot pool).
 
 ## Local Contracts
 
@@ -41,6 +42,10 @@ production database match the Grid-owned schema contracts without relying on
   evidence must be registration-bound in application code.
 - A validator assignment may have only one active probe lease. Retries are
   bounded, and a late result may update only the matching current job id.
+- `grid_validator_reference_workers` is a background-sync cache, not worker
+  self-report. Keep it empty until the reviewed cooldown-backed WorkerRegistry
+  is deployed; media validation must fail closed when snapshots are stale or
+  identities are not independent.
 - Migrations must be idempotent only where Alembic expects them to be; do not
   hide failed DDL with broad exception swallowing.
 - Economic constraints matter: unique `grid_ledger.job_id`, non-null credit refs

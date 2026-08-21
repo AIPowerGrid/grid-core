@@ -7,8 +7,9 @@ completion ledger, prepaid credits, credit ledger, reservations, canonical
 identities/account aliases, promotional campaigns/grants, settlement
 epochs, per-asset revenue pots (`grid_revenue`), multi-asset payout legs
 (`grid_payout_legs`), registered validator identities plus shared probe-group/
-assignment/attestation evidence rows, and
-bounded service clients plus their delegation audit events.
+assignment/attestation evidence rows, bounded service clients plus their
+delegation audit events, and the fail-closed bonded media reference-worker
+snapshot pool.
 
 ## Ownership
 
@@ -58,6 +59,10 @@ bounded service clients plus their delegation audit events.
   `validator_id` foreign keys preserve attribution; account uniqueness prevents
   identity rotation. Group/validator uniqueness on assignments and
   attestations prevents duplicate membership or votes.
+- `grid_validator_reference_workers` is derived only from finalized Base bond
+  sync plus non-economic quality review. Active selection requires fresh bond,
+  quality, worker-presence, account, and payout-wallet evidence; no worker may
+  self-declare reference eligibility.
 - Account IDs are UUIDs. Quota identities such as `v2:<uuid>` are not DB foreign
   keys and must not be passed to credit ledger functions.
 - New columns need explicit migrations, tests, and backfill/default strategy for

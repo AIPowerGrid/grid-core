@@ -63,6 +63,10 @@ content sanitization, and reward settlement.
   identities. Independent-operator counts remain zero until externally
   reviewed; registration count is not independence proof. The public network
   status surface uses only these redacted aggregates and never assignment rows.
+  `validator_references.py` owns the dark media reference selector: fresh
+  finalized bond + quality snapshots, online workers, distinct accounts and
+  payout wallets, row-locked recent-use rotation, and fail-closed insufficiency.
+  It is not yet called by assignment or dispatch paths.
 - **Model/media governance:** `recipes.py`, `recipe_import.py`, `styles.py`,
   `loras.py`, `model_registry.py`.
 - **Safety:** `sanitizer.py` - **secrets redactor only** (strips API keys/PGP from prompts).
