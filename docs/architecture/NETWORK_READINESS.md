@@ -217,7 +217,7 @@ benchmark, payout forecast, or fixed earnings promise.
 
 ## Better Validation
 
-### 19. Rich text validation - Partial
+### 19. Rich text validation - Ready, backend canaries pending
 
 Implemented randomized lanes cover exact instruction, arithmetic, strict JSON,
 calibrated 4K, 16K, and 32K context retrieval, multistep logic, one function
@@ -228,6 +228,9 @@ one bounded function AST and independently interpret only integer arithmetic.
 Context tiers require conservative worker-advertised headroom. Richer code and
 logic tiers, 64K+ long-context tiers, longer tool chains, and streaming integrity
 remain open; exact native-tokenizer equivalence is intentionally not claimed.
+Those are future depth, not substitutes for live proof of the implemented
+capability set. Production enablement still requires hard-targeted acceptance
+and negative canaries against representative text backends.
 
 ### 20. Private deterministic image validation - Ready dark
 
