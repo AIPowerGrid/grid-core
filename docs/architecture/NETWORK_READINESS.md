@@ -203,11 +203,20 @@ seeds remain only in tests and illustrative documentation, not the live
 challenge generator. Live prompt banks, golden pHashes, answer keys, and
 private thresholds are forbidden from public binaries and repos.
 
-### 22. Video validation lanes - Open
+### 22. Video validation lanes - Partial/Dark
 
-Duration, dimensions, frame count, motion, temporal consistency, prompt
-relevance, and deterministic workflow comparison remain design work. Image
-fidelity code must not be described as video validation.
+The validator source has fail-closed `video.contract.v1` and
+`video.fidelity.v1` scorers: authenticated MP4/WebM witnesses are decoded in a
+killable bounded child process; dimensions, frame count, fps, duration,
+timestamps, blank/static frames, and latency are checked; and fidelity compares
+per-frame pHashes plus a lightweight motion profile only after two references
+agree. Malformed assignments, unsafe fetches, local decoder timeouts, and
+reference decode failures/disagreement are inconclusive; authenticated
+malformed candidate bytes may fail. Core still issues no video assignments.
+Targeted media execution, immutable witness retention, bonded
+reference operation, real LTX/workflow calibration, prompt/key-event relevance,
+and media-enabled release-binary qualification remain open. No video evidence
+affects routing, rewards, strikes, bonds, or slashing.
 
 ### 23. Rotating bonded references - Ready dark/External
 
