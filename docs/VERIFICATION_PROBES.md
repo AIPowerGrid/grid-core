@@ -93,8 +93,11 @@ Mirrors the `GRID_CHARGING_ENABLED=0` and Validator-V0 patterns:
 - **Even when ON, evidence-only.** Attestations have **no** routing, reward, strike, slash,
   credit, or payout effect. A `fail` verdict changes nothing today — it is recorded and
   visible, nothing more. (There is nothing wired to consume verdicts, by design.)
-- Conservative cadence (`GRID_PROBE_INTERVAL`, default 300s), tiny prompts (`max_tokens`
-  ~24) so probe load on the GPU pool is negligible even in a 1-worker-per-model pool.
+- Legacy coordinator canaries retain their conservative `GRID_PROBE_INTERVAL`
+  cadence and tiny outputs. Shared-validator text probes are real GPU work,
+  including calibrated 32K context requests, so Core separately limits new
+  groups to one per worker/model per hour by default (with a five-minute hard
+  floor).
 
 ## Shared-quorum validator API (candidate preview)
 
@@ -128,6 +131,11 @@ strike, slash, credit, or payout effect. Text plus feature-gated image-fidelity
 and video-contract assignment paths exist in the candidate. Video remains
 default-off and proves only an objective output contract, not exact model
 fidelity.
+
+Each shared group owns one challenge copy; validator-specific assignment rows
+carry only their nonce and membership state and are hydrated at the API
+boundary. Core prunes finalized assignment/group machinery after 90 days by
+default while retaining signed attestations as the durable evidence record.
 
 Text challenge families are selected cryptographically rather than from worker
 ordering. Current candidate families are exact instruction, generated

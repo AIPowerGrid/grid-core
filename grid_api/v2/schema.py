@@ -761,6 +761,8 @@ validator_probe_groups = sa.Table(
     sa.Column("scoring_policy_id", sa.String(128), nullable=False),
     # The full challenge is Core-private. Assignment responses expose only the
     # prompt and one-way scoring commitment required for independent scoring.
+    # Legacy ungrouped assignments own a challenge. Shared-group assignments
+    # store {} and resolve the single authoritative copy from the probe group.
     sa.Column("challenge", PortableJSON, nullable=False, default=dict),
     sa.Column("challenge_hash", sa.String(64), nullable=False, unique=True),
     sa.Column("status", sa.String(24), nullable=False, default="pending", index=True),

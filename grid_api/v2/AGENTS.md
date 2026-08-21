@@ -46,6 +46,9 @@ snapshot pool.
   (NULL → grid defaults); SELECTed on the HOT auth path — their migrations
   (0009) must run before code that reads them.
 - `grid_validator_probe_groups` is the shared challenge and quorum lifecycle.
+  A grouped challenge is stored once on the probe group; grouped assignment
+  rows keep an empty challenge object and resolve the group copy when issued or
+  probed. Legacy ungrouped assignments continue to own their challenge.
   Media groups lease exactly one candidate-plus-two-reference execution and
   persist one response-committed frozen witness set for independent scoring by
   every assigned validator. Retries are bounded and stale leases reclaimable.
@@ -57,6 +60,10 @@ snapshot pool.
   Scorecards may aggregate them for
   operator/console visibility, but they must not be treated as economic truth
   until reward/dispute rules are live.
+  Finalized assignment and group rows are bounded operational state and may be
+  pruned after the configured retention window. Signed attestation rows and
+  their canonical payloads remain the durable evidence record; pruning must not
+  delete or rewrite them.
 - `grid_validators` binds one normalized signing wallet to one canonical account
   and records capabilities, version, and heartbeat. Assignment and attestation
   `validator_id` foreign keys preserve attribution; account uniqueness prevents
