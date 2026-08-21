@@ -64,30 +64,29 @@ evidence snapshot. Recheck the exact head and required statuses immediately
 before each merge; a green ancestor or paired branch does not prove a changed
 head.
 
-1. Six non-deploying history/security foundations are merged and green on
-   protected `main`: Core PR 22 (`471e849a`), text-worker PR 15 (`c03f7d19`),
-   media-worker PR 14 (`1423e440`), contracts PR 4 (`69c48b86`), Python SDK PR
-   2 (`d6073054`), and JavaScript SDK PR 2 (`6e07bfd6`). Remaining foundations
-   are Console PR 16 (`4edbd952`), website PR 5 (`e3432ea1`), documentation PR
-   3 (`bf1bff22`), and validator PR 3 (`17ce7357`). Validator PR 3 still
-   requires the configured independent approval. Treat website, Console, and
-   documentation default-branch merges as deployment-capable because their
-   hosting integrations are outside the source diff.
-2. Land contracts PR 3 (`03dc08b5`) after contracts PR 4. This enables
+1. Nine history/security foundations are merged on protected default branches:
+   Core PR 22 (`471e849a`), text-worker PR 15 (`c03f7d19`), media-worker PR 14
+   (`1423e440`), contracts PR 4 (`69c48b86`), Python SDK PR 2 (`d6073054`),
+   JavaScript SDK PR 2 (`6e07bfd6`), Console PR 16 (`ad39a7db`), website PR 5
+   (`300c69e1`), and documentation PR 3 (`6d241e7a`). Their post-merge checks
+   and hosting builds must remain green. Validator PR 3 (`17ce7357`) is the
+   remaining foundation and still requires the configured independent approval.
+2. Contracts PR 3 is merged at `8899348a` after contracts PR 4. This enables
    deployable-contract Slither policy and tested source changes only; it does
    not authorize a Diamond cut or any Base transaction.
 3. Land validator release PR 2 (`4b226ad6`) after validator PR 3, then
    validator capability PR 4 (`81b66390`). Both require independent review.
    Do not create a tag or publish binaries until Core is rolled out, a live
    authenticated canary passes, and macOS/Windows signing evidence is present.
-4. Land website rollout PR 4 (`01dc7d24`) only after website PR 5 and explicit
+4. Land website rollout PR 4 (`5a08d50`) only after website PR 5 and explicit
    production approval. Its release-policy and browser tests are green, but a
    main merge deploys the public worker/validator onboarding surface.
-5. Core validator PR 21 at `c73864ee` is rebased after Core PR 22 and its
-   supervised production snapshot plus scratch restore has passed. Land it
-   only after a signed-in account/validator acceptance pass and explicit
-   deployment approval. Merge is not proof that production moved from
-   `20d57669` or Alembic `0019`.
+5. Core validator PR 21 has a runtime-proven candidate at `c73864ee` and a
+   readiness-document-only descendant at `3c3eeed9`, both after Core PR 22. Its
+   supervised production snapshot plus scratch restore has passed. Land the
+   exact final green head only after a signed-in account/validator acceptance
+   pass and explicit deployment approval. Merge is not proof that production
+   moved from `20d57669` or Alembic `0019`.
 
 After each paired merge, refresh the dependent PR against the new default
 branch and rerun every required status. Contract code, release artifacts,
