@@ -10,6 +10,7 @@ umask 077
 
 BACKUP_DIR="${AIPG_BACKUP_DIR:-/var/lib/aipg-backup}"
 RETENTION_DAYS="${AIPG_BACKUP_RETENTION_DAYS:-14}"
+BACKUP_SCHEMA="${AIPG_BACKUP_SCHEMA:-public}"
 
 die() {
     echo "error: $*" >&2
@@ -20,6 +21,8 @@ for name in POSTGRES_USER POSTGRES_PASS POSTGRES_URL; do
     [[ -n "${!name:-}" ]] || die "$name is required"
 done
 [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] || die "AIPG_BACKUP_RETENTION_DAYS must be a non-negative integer"
+[[ "$BACKUP_SCHEMA" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] ||
+    die "AIPG_BACKUP_SCHEMA must be one PostgreSQL identifier"
 [[ "$POSTGRES_URL" =~ ^([A-Za-z0-9._-]+):([0-9]{1,5})/([A-Za-z0-9_-]+)$ ]] ||
     die "POSTGRES_URL must use host:port/database form"
 
@@ -73,6 +76,7 @@ pg_dump \
     --port="$port" \
     --username="$POSTGRES_USER" \
     --dbname="$database" \
+    --schema="$BACKUP_SCHEMA" \
     --format=custom \
     --compress=9 \
     --file="$partial"

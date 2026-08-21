@@ -32,8 +32,9 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - `verify_demand_canary.py` - read-only reconciliation of one canonical
   account's balance, reservations, purchased-credit refs, and worker ledger
   terminals.
-- `backup_postgres.sh` - root-only custom-format PostgreSQL backup with
-  checksum, archive validation, locking, and bounded local retention.
+- `backup_postgres.sh` - root-only custom-format backup of the Grid-owned
+  PostgreSQL schema with checksum, archive validation, locking, and bounded
+  local retention. It excludes unrelated extension and legacy schemas.
 - `prove_postgres_restore.sh` - restores one verified backup into a guarded
   disposable local database and migrates it with an immutable candidate.
 
@@ -73,6 +74,10 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - Put reusable logic in the owning service package and test it there.
 - Backup/restore tools must never print database credentials. Restore proof may
   only create or drop its generated `aipg_restore_proof_*` database.
+- Backups default to the Grid-owned `public` schema. `AIPG_BACKUP_SCHEMA` may
+  select one explicit PostgreSQL identifier for a controlled migration, but a
+  backup must never silently absorb unrelated extension schemas such as
+  `cron`.
 - Invoke Python operator tools through the selected release's `.venv/bin/python`;
   their env-based shebang assumes an already activated virtual environment.
 
