@@ -2,15 +2,17 @@
 
 ## Status
 
-V0 is an evidence-only preview. Core can register validators, issue shared
-targeted text probe groups, verify signed evidence, aggregate distinct-validator
+V0 is an evidence-only preview. Core can register validators, issue targeted
+text capability batches, verify signed evidence, aggregate distinct-validator
 3-of-5 quorum, and expose scorecards. No
 validator evidence changes routing, worker health, den, payouts, rewards, bonds,
 credits, strikes, or slashing.
 
 The quorum mechanism is implemented but has no economic authority. It proves
-distinct registered Grid accounts signed votes over one shared challenge; it
-does not prove those accounts are independently controlled. Independent
+distinct registered Grid accounts signed votes about one worker/capability
+batch; each new v8 assignment has a separately randomized challenge. It does
+not prove those accounts are independently controlled or establish general
+model quality. Independent
 operators, correlated-control defenses, dispute windows, and adversarial
 operation remain rollout gates.
 
@@ -81,20 +83,29 @@ worker advertises conservative context headroom. Legacy
 prevents an older binary from turning an unsupported challenge into a false
 worker failure.
 
+Scorecards classify these results as availability, protocol conformance, or
+narrow capability evidence. Public generated templates are recognizable even
+when their values are random, so no current text canary is quality-eligible and
+none proves the exact model behind a worker.
+
 The targeted probe is isolated from customer economics: it does not reserve or
 settle demand credits, award den, create a payout ledger completion, or apply a
 worker strike.
 
 It still consumes worker capacity. Core therefore creates at most one new text
 probe group per worker/model per configured interval (one hour by default,
-never less than five minutes). A group stores one challenge copy and assignments
-resolve it at issue/probe time instead of duplicating large 32K payloads.
+never less than five minutes). A v8 group stores a bounded generator/capability
+envelope and each assignment stores its concrete randomized challenge. Open v7
+groups drain with their original shared challenge during rollout.
 
 Core hard-targets the job internally but sends the worker an ordinary opaque
 UUID and a payload with all validator assignment/group/nonce markers removed.
 Those fields are restored only into the Core-to-validator evidence response
-after completion. Prompt fingerprinting remains an adversarial concern, so V0
-evidence still has no economic authority.
+after completion. Prompt templates and the post-completion zero-den worker ACK
+remain retrospective fingerprints. V0 evidence therefore has no economic
+authority. A paid audit rail must first be stake/Sybil-gated, budgeted, and
+tested against a model-switching worker; simply reporting fake den would corrupt
+the payout contract.
 
 ## Privacy
 

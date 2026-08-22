@@ -38,6 +38,37 @@ def test_generated_challenge_families_hide_expected_answer(family, kind, capabil
     int(challenge["expected_hash"], 16)
 
 
+def test_template_specific_echo_solver_earns_protocol_evidence_not_quality():
+    challenge = validators._make_text_challenge("echo")
+    match = re.fullmatch(
+        r"Reply with exactly this token and nothing else: ([0-9A-F]+)",
+        challenge["prompt"],
+    )
+
+    assert match is not None
+    assert validators._score_text_challenge(challenge, match.group(1), 10) == "healthy"
+    assert validators._score_dimension("text", challenge["capability"]) == "protocol_conformance"
+    assert validators._quality_eligible("text", challenge["capability"]) is False
+
+
+@pytest.mark.parametrize(
+    ("modality", "capability", "dimension"),
+    [
+        ("text", "text.structured.v1", "protocol_conformance"),
+        ("text", "text.stop_sequence.v1", "protocol_conformance"),
+        ("text", "text.token_limit.v1", "protocol_conformance"),
+        ("text", "text.tool_call.v1", "protocol_conformance"),
+        ("text", "text.reasoning.multistep.v1", "capability"),
+        ("text", "text.code.v1", "capability"),
+        ("image", "image.fidelity.v1", "fidelity"),
+        ("video", "video.contract.v1", "protocol_conformance"),
+    ],
+)
+def test_current_probe_dimensions_are_never_quality(modality, capability, dimension):
+    assert validators._score_dimension(modality, capability) == dimension
+    assert validators._quality_eligible(modality, capability) is False
+
+
 def test_tool_call_challenge_is_dynamic_and_carries_a_strict_schema():
     challenge = validators._make_text_challenge("tool.call")
     function = challenge["tools"][0]["function"]

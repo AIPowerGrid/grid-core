@@ -1,13 +1,11 @@
 # Verification Probes — coordinator canaries → validator consensus
 
-**Status:** Coordinator canaries and the original assignment schema are live
-evidence-only. Registered validators, shared probe groups, targeted assignment
-leases, and distinct-identity 3-of-5 quorum are merged candidates through
-Alembic `0022`, not production-live. Economic validator authority, rewards,
-staking, and slashing are not live. The current immutable candidate requires
-Alembic through `0024`; quorum itself lands in `0022`, while `0023`-`0024`
-provide the dark media-reference schema that the candidate imports with media
-assignments disabled.
+**Status:** Coordinator canaries plus registered-validator assignments, targeted
+leases, and distinct-identity 3-of-5 quorum are production-live and evidence-only
+on Core `0d850e73` with Alembic through `0024`. Three first-party pilot nodes
+proved the protocol path on 2026-08-21, not independent operator control.
+Economic validator authority, rewards, staking, routing effects, and slashing
+are not live. Media assignments remain default-off.
 
 ## The problem
 
@@ -30,7 +28,7 @@ We verify the same *fact* two ways, in order:
 | Trust model | centralized spot-check | preview: distinct signed identities; future: independent quorum + disputes |
 | Economic weight | **none** (evidence only) | preview: **none**; future: accepted-evidence reward / objective-fraud slash |
 | New assumptions | none | preview: signed assignment binding; future: operator independence, bonding, disputes |
-| Ships | live evidence-only | candidate preview through `0024`; economic phase deferred |
+| Ships | live evidence-only | live evidence-only through `0024`; economic phase deferred |
 
 **Build order rationale:** we ARE a centralized coordinator today; a coordinator that
 spot-checks its own workers is coherent and needs nothing new. A validator network that
@@ -99,7 +97,7 @@ Mirrors the `GRID_CHARGING_ENABLED=0` and Validator-V0 patterns:
   groups to one per worker/model per hour by default (with a five-minute hard
   floor).
 
-## Shared-quorum validator API (candidate preview)
+## Shared-quorum validator API (live evidence-only preview)
 
 Public capability discovery is live:
 
@@ -123,18 +121,21 @@ The rest require a v2 account API key and are evidence-only:
   operators.
 - `GET /v1/validator/workers` — current worker inventory for validator discovery.
 
-Core requires three matching votes from five distinct registered validator
-accounts over one probe group. It records quorum state (`pending`, `accepted`,
-`disputed`, `finalized`),
+Core requires three matching verdicts from five distinct registered validator
+accounts within one worker/capability batch. Text v8 verdicts cover separate
+randomized challenge instances, not byte-identical executions. Core records
+quorum state (`pending`, `accepted`, `disputed`, `finalized`),
 but the whole preview surface has `economic_effect: none`: no routing, reward,
 strike, slash, credit, or payout effect. Text plus feature-gated image-fidelity
 and video-contract assignment paths exist in the candidate. Video remains
 default-off and proves only an objective output contract, not exact model
 fidelity.
 
-Each shared group owns one challenge copy; validator-specific assignment rows
-carry only their nonce and membership state and are hydrated at the API
-boundary. Core prunes finalized assignment/group machinery after 90 days by
+New `text.generated.v8` groups are capability batches, not identical-exam
+groups. The batch fixes one target worker/model, capability, and concrete canary
+kind, while every validator assignment stores a separately randomized challenge
+and commitment. Already-open v7 groups finish with their original shared
+challenge. Core prunes finalized assignment/group machinery after 90 days by
 default while retaining signed attestations as the durable evidence record.
 
 Text challenge families are selected cryptographically rather than from worker
@@ -155,13 +156,27 @@ Group membership is capability-gated; legacy `text.basic.v1` nodes receive only
 echo/arithmetic. Each validator normalizes the output and checks the one-way
 expected-answer commitment locally instead of signing Core's private verdict.
 
-## Deployment status (2026-08-20)
+Scorecards classify evidence into `availability`, `protocol_conformance`,
+`capability`, `quality`, and `fidelity`. Echo, strict JSON, a single exact tool
+call, stop-sequence, and token-limit checks are protocol conformance. Current
+reasoning, context, code, and chained-tool probes are capability samples. No
+current generated canary is quality-eligible, so a template-specific solver
+cannot convert a passing echo or JSON check into a quality score.
+
+Random values stop exact answer replay; they do not make a public template
+unrecognizable. Core strips `_validator_*` metadata before WebSocket dispatch,
+but recognizable prompts and the post-completion `den: 0` acknowledgment can
+still label probes over time. This is an explicit economic-authority blocker.
+Before evidence affects routing, rewards, or slashing, audit jobs must use a
+broad production-shaped distribution and an ordinary bounded worker-payment
+path whose dispatch and terminal acknowledgment do not reveal probe status.
+
+## Deployment status (2026-08-22)
 
 Coordinator-run probes remain live and evidence-only. Registered-validator
-assignments, shared probe groups, and 3-of-5 quorum are merged candidates, not
-production authority: production still needs the immutable Core release and
-Alembic migrations through `0024`. Do not publish validator binaries against an
-older Core capability response.
+assignments, shared probe groups, and 3-of-5 quorum are production-live as
+evidence only, not production authority. Do not publish validator binaries
+against an older Core capability response.
 
 Deploy notes / learnings:
 - **Historical rollout note.** The July 1 hotpatch/create_all rollout was
@@ -181,15 +196,19 @@ Deploy notes / learnings:
   `/home/aipg`.
 
 ### Follow-ups (known, not yet done)
-1. **Grader hardening** — add hidden code execution, longer tool-call chains,
+1. **Probe indistinguishability** — compensate bounded audit work through an
+   ordinary worker settlement path, remove the retrospective zero-den label,
+   add production-shaped blind synthetic workloads, and continuously test a
+   template detector/model-switching worker. This gates every economic effect.
+2. **Grader hardening** — add hidden code execution, longer tool-call chains,
    64K+ context tiers, and streaming-integrity checks. Keep judge models a
    supporting signal rather than an objective authority.
-2. **Media/video validator lanes** — deterministic image fidelity and
+3. **Media/video validator lanes** — deterministic image fidelity and
    non-deterministic video contract paths exist in the dark candidate and remain
    economically inert. Video needs a governed recipe with explicit fps/timing
    metadata plus a real LTX canary before its independent operator gate is
    enabled. Reference-based `video.fidelity.v1` remains deferred.
-3. **Economic gates** — do not attach routing, validator rewards, worker strikes, or
+4. **Economic gates** — do not attach routing, validator rewards, worker strikes, or
    slashing until assignment targeting, nonce-bound evidence, quorum, and dispute
    flows have been proven under load.
 
@@ -200,16 +219,16 @@ Deploy notes / learnings:
   `GRID_PROBE_SIGNING_KEY` is set; records `signature` + `validator_wallet` (signer) +
   `signature_status="signed"`. Tamper-evident + attributable; future staked validators
   sign the same digest with their own keys.
-- **Capability-tiered canary** (`hard_arithmetic`) — 2-digit × 2-digit multiplication.
-  Small/cheap models routinely botch multi-digit multiplication; the larger model a
-  worker CLAIMS to run gets it right. So a `fail` here is a **model-downgrade signal**
-  (worker swapped in a smaller model than advertised), not just a bad sample — the first
-  real model-swap heuristic. Evidence only.
+- **Capability-tiered canary** (`hard_arithmetic`) — 2-digit multiplication is
+  an objective capability sample. A failure is useful negative evidence, but a
+  pass is not a model-identity or model-size proof: a script or tiny specialist
+  can solve the public family. Evidence only.
 
 ## Model-swap detection — still needed (the hard part)
 
-Canaries catch a *broken* or *much-weaker* worker. A worker running a same-tier-but-cheaper
-model that still nails multiplication won't be caught by canaries alone. Two robust
+Canaries catch a *broken* worker and sample narrow advertised capabilities. They
+do not establish model identity: a template router, specialist program, or
+same-tier cheaper model can pass. Two stronger
 detectors, both blocked on infrastructure we don't have yet:
 - **Cross-worker consensus** — dispatch the SAME deterministic canary (temp=0, fixed seed)
   to N workers claiming the same model via `preferred_worker` affinity, compare outputs;

@@ -40,6 +40,10 @@ def _capabilities_payload() -> dict[str, Any]:
             "worker_scorecards": True,
             "assignment_health": True,
             "quorum": True,
+            "score_dimensions": True,
+            "unique_text_batch_challenges": True,
+            "blind_quality": False,
+            "worker_terminal_indistinguishable": False,
             "image_fidelity": media_policy["enabled"],
             "video_validation": video_policy["enabled"],
             "validator_rewards": False,
@@ -63,6 +67,11 @@ def _capabilities_payload() -> dict[str, Any]:
             "max_attempts": validators_svc.PROBE_MAX_ATTEMPTS,
             "lease_seconds": validators_svc.PROBE_LEASE_SECONDS,
             "attestation_grace_seconds": validators_svc.ATTESTATION_GRACE_SECONDS,
+            "text_batch_scoring_policy": validators_svc._TEXT_BATCH_SCORING_POLICY,
+            "challenge_instance": "unique_per_validator",
+            "quality_eligible": False,
+            "worker_payload_hides_assignment": True,
+            "worker_terminal_indistinguishable": False,
         },
         "quorum_policy": {
             "threshold": validators_svc.QUORUM_MIN,
@@ -153,7 +162,11 @@ def _capabilities_payload() -> dict[str, Any]:
                 "Registration does not by itself prove independent operation or "
                 "prevent correlated control."
             ),
-            "Validator rewards are intentionally disabled until shared-challenge quorum is proven.",
+            "Validator rewards are intentionally disabled until shared-batch quorum is proven.",
+            (
+                "Generated canaries are protocol/capability evidence, not blind quality evidence; "
+                "the zero-den terminal acknowledgment remains a retrospective probe fingerprint."
+            ),
         ],
     }
 

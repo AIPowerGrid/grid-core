@@ -44,7 +44,7 @@ content sanitization, and reward settlement.
   poll secret locally; Core stores only their hashes, installs only
   `worker.connect`, and removes the key expiry only after manager ACK.
 - **Validation evidence:** `validators.py` verifies one linked-wallet validator
-  registration per canonical account, builds shared probe groups, binds one
+  registration per canonical account, builds shared probe batches, binds one
   assignment and authoritative vote per registered validator/group, and
   aggregates a conservative 3-of-5 preview quorum. Text groups use randomized
   exact-instruction, arithmetic, strict-JSON, calibrated 4K/16K/32K
@@ -55,7 +55,13 @@ content sanitization, and reward settlement.
   import, call, or otherwise run worker-supplied code. Token-limit scoring uses
   Grid-side `o200k_base` counting over visible plus reasoning output, a
   length-style finish, and a documented cross-tokenizer tolerance;
-  worker order must not determine the family. An accepted target-worker failure
+  worker order must not determine the family. New `text.generated.v8` batches
+  fix one capability/canary lane but issue and persist a distinct randomized
+  challenge for every validator; already-open v7 groups drain with their shared
+  challenge. Scorecards classify evidence as availability, protocol conformance,
+  capability, quality, or fidelity. No current generated canary is quality-eligible.
+  A regex/template solver may therefore pass protocol evidence but cannot earn a
+  quality score. An accepted target-worker failure
   becomes economically inert failed evidence; a coordinator dispatch failure
   remains inconclusive. Group allocation
   must match the validator's advertised scorer capability; legacy
@@ -233,6 +239,10 @@ content sanitization, and reward settlement.
 - Validator attestations and scorecards are evidence only until reward/dispute
   rules exist. A submitted or aggregated `failed` verdict is not a worker strike
   by itself.
+- Random challenge values prevent answer replay, not template recognition. Do
+  not describe generated canaries as blind workload validation or proof of a
+  model family. Protocol-conformance evidence must remain separate from
+  capability and quality evidence.
 - Authoritative validator evidence requires a Grid-issued assignment id, nonce,
   and matching probe evidence hash. Preview/local evidence stays visible only as
   preview.
