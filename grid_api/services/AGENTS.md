@@ -239,6 +239,9 @@ content sanitization, and reward settlement.
 - Validator attestations and scorecards are evidence only until reward/dispute
   rules exist. A submitted or aggregated `failed` verdict is not a worker strike
   by itself.
+- `router.py` must not read validator attestations into model or replica scores.
+  Until blind quality evidence and a reviewed activation policy exist, `auto`
+  routing may use curated tiers plus Grid-measured throughput/latency only.
 - Random challenge values prevent answer replay, not template recognition. Do
   not describe generated canaries as blind workload validation or proof of a
   model family. Protocol-conformance evidence must remain separate from

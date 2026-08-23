@@ -91,6 +91,8 @@ Mirrors the `GRID_CHARGING_ENABLED=0` and Validator-V0 patterns:
 - **Even when ON, evidence-only.** Attestations have **no** routing, reward, strike, slash,
   credit, or payout effect. A `fail` verdict changes nothing today — it is recorded and
   visible, nothing more. (There is nothing wired to consume verdicts, by design.)
+- `grid_api.services.router` does not query validator attestations. Current
+  `auto` scores use only Grid-measured throughput and latency.
 - Legacy coordinator canaries retain their conservative `GRID_PROBE_INTERVAL`
   cadence and tiny outputs. Shared-validator text probes are real GPU work,
   including calibrated 32K context requests, so Core separately limits new

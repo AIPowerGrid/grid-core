@@ -8,6 +8,10 @@ text capability batches, verify signed evidence, aggregate distinct-validator
 validator evidence changes routing, worker health, den, payouts, rewards, bonds,
 credits, strikes, or slashing.
 
+`auto` model and replica scores explicitly exclude `grid_validator_attestations`;
+they use curated tiers and Grid-measured throughput/latency only. Public-template
+canaries therefore cannot steer production traffic through a side channel.
+
 The quorum mechanism is implemented but has no economic authority. It proves
 distinct registered Grid accounts signed votes about one worker/capability
 batch; each new v8 assignment has a separately randomized challenge. It does
