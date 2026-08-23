@@ -84,12 +84,14 @@ async def _reservation_sweeper():
     import os
     from .services.credits import sweep_stale_reservations
     from .services.promotions import sweep_stale_spends
+    from .services.validator_audits import sweep_stale as sweep_stale_validator_audits
     interval = int(os.getenv("RESERVATION_SWEEP_SECONDS", "300") or 300)
     stale = int(os.getenv("RESERVATION_STALE_SECONDS", "3600") or 3600)
     while True:
         try:
             await sweep_stale_reservations(older_than_seconds=stale)
             await sweep_stale_spends(older_than_seconds=stale)
+            await sweep_stale_validator_audits()
         except Exception as e:
             logger.error(f"Reservation sweeper error: {e}")
             from .services import alerts

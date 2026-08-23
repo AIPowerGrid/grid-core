@@ -25,6 +25,7 @@ from grid_api import auth, database, safe_logging
 from grid_api.ratelimit import limiter
 from grid_api.routers import validator as validator_router
 from grid_api.services import recipes
+from grid_api.services import validator_audits
 from grid_api.services import validator_operators
 from grid_api.services import validators as validators_svc
 from grid_api.v2.schema import (
@@ -897,7 +898,7 @@ async def test_three_distinct_registered_validators_accept_shared_probe_group(db
     }]
     group_ids = set()
     challenge_prompts = set()
-    expected_hashes = set()
+    challenge_commitments = set()
     statuses = []
     registered_ids = []
     for key_int in (4, 5, 6):
@@ -918,7 +919,9 @@ async def test_three_distinct_registered_validators_accept_shared_probe_group(db
         assert assignment["challenge"]["expected_hash"]
         assert assignment["quality_eligible"] is False
         challenge_prompts.add(assignment["challenge"]["prompt"])
-        expected_hashes.add(assignment["challenge"]["expected_hash"])
+        challenge_commitments.add(
+            validators_svc._hash_obj(assignment["challenge"]),
+        )
         group_ids.add(assignment["probe_group_id"])
         evidence_hash = f"{key_int}" * 64
         async with await database.new_session() as session:
@@ -956,7 +959,7 @@ async def test_three_distinct_registered_validators_accept_shared_probe_group(db
 
     assert group_ids == {assignment["probe_group_id"]}
     assert len(challenge_prompts) == 3
-    assert len(expected_hashes) == 3
+    assert len(challenge_commitments) == 3
     assert statuses == ["pending", "pending", "accepted"]
     async with await database.new_session() as session:
         group = (
@@ -2255,6 +2258,8 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["features"]["unique_text_batch_challenges"] is True
     assert body["features"]["blind_quality"] is False
     assert body["features"]["worker_terminal_indistinguishable"] is False
+    assert body["features"]["paid_worker_audits"] is False
+    assert body["features"]["paid_text_terminal_ack_matches_demand"] is False
     assert body["probe_policy"]["max_attempts"] >= 1
     assert body["probe_policy"]["lease_seconds"] > validators_svc.PROBE_TIMEOUT_SECONDS
     assert body["probe_policy"]["text_batch_scoring_policy"] == "text.generated.v8"
@@ -2262,6 +2267,8 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["probe_policy"]["quality_eligible"] is False
     assert body["probe_policy"]["worker_payload_hides_assignment"] is True
     assert body["probe_policy"]["worker_terminal_indistinguishable"] is False
+    assert body["paid_audit_policy"]["requested"] is False
+    assert body["paid_audit_policy"]["validator_rewards"] is False
     assert (
         body["authority_model"]["authoritative"]
         == "requires Grid-issued assignment_id + grid_nonce + probe evidence hash"
@@ -2273,6 +2280,80 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["features"]["video_validation"] is False
     assert body["media_validation"]["image"]["economic_effect"] == "none"
     assert body["media_validation"]["video"]["economic_effect"] == "none"
+
+
+def test_validator_capabilities_describe_paid_worker_pilot_without_quality_claims(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        validator_audits,
+        "get_settings",
+        lambda: SimpleNamespace(
+            validator_paid_audit_enabled=True,
+            validator_paid_audit_wallets=TEST_WALLET,
+            validator_paid_audit_daily_den=100,
+            validator_paid_audit_max_den_per_job=10,
+            validator_paid_audit_stale_seconds=3600,
+        ),
+    )
+    app = FastAPI()
+    app.state.limiter = limiter
+    app.include_router(validator_router.router)
+
+    with TestClient(app) as client:
+        resp = client.get("/v1/validator/capabilities")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["economic_effect"] == "none"
+    assert body["features"]["paid_worker_audits"] is True
+    assert body["features"]["paid_text_terminal_ack_matches_demand"] is True
+    assert body["features"]["worker_terminal_indistinguishable"] is False
+    assert body["features"]["blind_quality"] is False
+    assert body["features"]["validator_rewards"] is False
+    assert body["paid_audit_policy"]["worker_compensation"] == "audit_budget"
+    assert body["endpoints"]["assignments"]["economic_effect"] == (
+        "bounded_worker_compensation"
+    )
+
+
+@pytest.mark.asyncio
+async def test_paid_audit_mode_issues_only_to_reviewed_wallet(db, monkeypatch):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id)
+    monkeypatch.setattr(
+        validator_audits,
+        "get_settings",
+        lambda: SimpleNamespace(
+            validator_paid_audit_enabled=True,
+            validator_paid_audit_wallets=TEST_WALLET,
+            validator_paid_audit_daily_den=100,
+            validator_paid_audit_max_den_per_job=10,
+            validator_paid_audit_stale_seconds=3600,
+        ),
+    )
+    issued = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=[{
+            "worker_id": str(uuid.uuid4()),
+            "name": "paid-audit-rig",
+            "models": ["qwen3-27b"],
+            "job_types": ["text"],
+        }],
+        limit=1,
+    )
+    assert issued["assignments"][0]["worker_compensation"] == "audit_budget"
+
+    with pytest.raises(validators_svc.AssignmentError, match="not approved"):
+        await validators_svc.issue_assignments(
+            account_id=account_id,
+            validator_id=validator_id,
+            validator_wallet="0x" + "f" * 40,
+            active_workers=[],
+            limit=1,
+        )
 
 
 @pytest.mark.asyncio

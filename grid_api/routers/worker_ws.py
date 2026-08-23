@@ -32,7 +32,15 @@ from ..config import get_settings
 from ..database import new_session
 from ..redis_client import get_redis
 from ..services import accounts as accounts_svc
-from ..services import audio, credits, job_queue, signing, storage, token_stream
+from ..services import (
+    audio,
+    credits,
+    job_queue,
+    signing,
+    storage,
+    token_stream,
+    validator_audits,
+)
 from ..services import ledger as ledger_svc
 from ..services import worker_identity as worker_identity_svc
 from ..services.den import calculate_den, calculate_media_den, count_tokens
@@ -1086,12 +1094,14 @@ async def worker_websocket(ws: WebSocket):
 async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict) -> bool:
     """Dispatch one assignment-bound validator probe.
 
-    Validator probes are evidence collection, not paid inference. They must not
-    reserve credits, append worker-payout ledger rows, award den, or strike
-    workers directly. Any bad result becomes signed validator evidence later.
+    Validator probes collect evidence and never reserve demand credits, reward
+    validators, or strike workers. A reviewed assignment may compensate the
+    target worker from the bounded audit budget; that terminal uses the same
+    committed-ledger-before-ACK invariant as ordinary demand work.
     """
     job_id = job["job_id"]
     payload = job["payload"]
+    paid_audit = payload.get("_validator_paid_audit") is True
     worker_payload = {
         key: value
         for key, value in payload.items()
@@ -1106,8 +1116,23 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
         },
     )
 
+    import time as _time
+
+    gen_start = _time.time()
     gen = await _handle_worker_generation(ws, job, worker_info)
+    gen_time = _time.time() - gen_start
     if gen["client_error"] is not None:
+        if paid_audit:
+            try:
+                await validator_audits.release(job_id)
+            except Exception:
+                logger.critical(
+                    "Paid audit release failed for client-error job %s; not acking",
+                    job_id,
+                    exc_info=True,
+                )
+                await token_stream.publish_error(job_id, "Audit settlement failed; please retry.")
+                return False
         await token_stream.publish_error(job_id, gen["client_error"], code=400)
         await ws.send_json({"type": "ack", "id": job_id, "den": 0})
         return True
@@ -1117,6 +1142,17 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
         # is itself validator evidence. Publish a terminal witness instead of an
         # HTTP-style transport error so the independent validator can commit and
         # sign a failed verdict. This remains economically inert.
+        if paid_audit:
+            try:
+                await validator_audits.release(job_id)
+            except Exception:
+                logger.critical(
+                    "Paid audit release failed for worker-fault job %s; not acking",
+                    job_id,
+                    exc_info=True,
+                )
+                await token_stream.publish_error(job_id, "Audit settlement failed; please retry.")
+                return False
         grid_meta = {
             "worker_id": worker_id,
             "assignment_id": payload.get("_validator_assignment_id"),
@@ -1132,6 +1168,80 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
             finish_reason="error",
             grid=grid_meta,
         )
+        await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+        return True
+
+    if paid_audit:
+        full_text = gen["full_text"]
+        full_reasoning = gen.get("full_reasoning") or ""
+        requested_max = int(payload.get("max_length", 512) or 512)
+        server_token_count = count_tokens(full_text) + count_tokens(full_reasoning)
+        worker_metered = int(gen.get("metered") or server_token_count)
+        effective_tokens = min(server_token_count, worker_metered, requested_max)
+        prompt_text = str(payload.get("prompt") or "")
+        ctx_cap = int(worker_info.get("max_context_length", 2048) or 2048)
+        prompt_tokens = min(len(prompt_text.split()), ctx_cap)
+        den_awarded = calculate_den(
+            output_tokens=effective_tokens,
+            prompt_tokens=prompt_tokens,
+            model_name=selected_model,
+            generation_time_seconds=gen_time,
+        )
+        result_hash = ledger_svc.content_hash(full_text)
+        payout_wallet = worker_info.get("wallet_address", "")
+        verified_sig = signing.verify_worker_sig(
+            job_id,
+            result_hash,
+            gen.get("worker_sig"),
+            _receipt_signers(worker_info),
+        )
+        settle_result, paid_den = await validator_audits.record_and_settle(
+            job_id=job_id,
+            ledger_values=dict(
+                job_id=job_id,
+                worker_id=worker_id,
+                wallet=payout_wallet,
+                model=selected_model,
+                job_type="text",
+                den=den_awarded,
+                output_units=effective_tokens,
+                duration=gen_time,
+                ttft=gen.get("ttft"),
+                prompt_hash=ledger_svc.text_hash(prompt_text),
+                result_hash=result_hash,
+                worker_sig=verified_sig,
+            ),
+        )
+        if settle_result not in {"settled", "duplicate", "stale_no_payout"}:
+            logger.critical(
+                "Paid audit terminal failed for job %s (settle=%s); not acking",
+                job_id,
+                settle_result,
+            )
+            await token_stream.publish_error(job_id, "Audit settlement failed; please retry.")
+            return False
+        if settle_result == "settled":
+            grid_meta = {
+                **(gen["grid_meta"] or {}),
+                "worker_id": worker_id,
+                "assignment_id": payload.get("_validator_assignment_id"),
+                "grid_nonce": payload.get("_validator_grid_nonce"),
+                "economic_effect": "worker_compensated_audit",
+            }
+            await token_stream.publish_done(
+                job_id,
+                full_text,
+                full_reasoning,
+                tool_calls=gen["tool_calls"],
+                usage=gen["usage"],
+                finish_reason=gen["finish_reason"],
+                grid=grid_meta,
+            )
+            await ws.send_json({"type": "ack", "id": job_id, "den": paid_den})
+            return True
+
+        # A duplicate or a late success after the budget hold was released is
+        # terminally closed without payout. Do not publish a second success.
         await ws.send_json({"type": "ack", "id": job_id, "den": 0})
         return True
 

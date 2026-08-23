@@ -70,6 +70,16 @@ class GridSettings(BaseSettings):
     validator_text_group_min_interval_seconds: int = 3600
     validator_history_retention_days: int = 90
     validator_history_sweep_seconds: int = 21600
+    # Optional worker compensation for text audits. This does not reward
+    # validators or give evidence economic authority. It only removes the
+    # retrospective zero-den worker fingerprint for a reviewed pilot cohort.
+    # All four values must be configured; otherwise paid assignment issuance
+    # fails closed.
+    validator_paid_audit_enabled: bool = False
+    validator_paid_audit_wallets: str = ""
+    validator_paid_audit_daily_den: float = 0.0
+    validator_paid_audit_max_den_per_job: float = 0.0
+    validator_paid_audit_stale_seconds: int = 3600
 
     # Best-effort operator alerts. The webhook is a production secret and must
     # never be committed, logged, or returned by an API.

@@ -20,7 +20,7 @@ from eth_account.messages import encode_defunct
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from grid_api import auth, database, safe_logging
-from grid_api.services import recipes, validator_references
+from grid_api.services import recipes, validator_audits, validator_references
 from grid_api.services import validators as validators_svc
 from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import metadata as v2_metadata
@@ -96,6 +96,45 @@ async def _seed_validators(count: int, *, capabilities=None):
             rows.append((account_id, validator_id, wallet, private_key))
         await session.commit()
     return rows
+
+
+@pytest.mark.asyncio
+async def test_concurrent_paid_audit_reserves_cannot_exceed_daily_den(pg, monkeypatch):
+    wallet = "0x" + "a" * 40
+    monkeypatch.setattr(
+        validator_audits,
+        "get_settings",
+        lambda: SimpleNamespace(
+            validator_paid_audit_enabled=True,
+            validator_paid_audit_wallets=wallet,
+            validator_paid_audit_daily_den=30,
+            validator_paid_audit_max_den_per_job=10,
+            validator_paid_audit_stale_seconds=3600,
+        ),
+    )
+
+    async def attempt():
+        try:
+            return await validator_audits.reserve(
+                job_id=str(uuid.uuid4()),
+                assignment_id=f"asg_{uuid.uuid4().hex}",
+                probe_group_id=f"prg_{uuid.uuid4().hex}",
+                worker_id=str(uuid.uuid4()),
+                validator_wallet=wallet,
+            )
+        except validator_audits.AuditBudgetError:
+            return "rejected"
+
+    results = await asyncio.gather(*(attempt() for _ in range(20)))
+    assert results.count("held") == 3
+    assert results.count("rejected") == 17
+    assert await validator_audits.snapshot() == {
+        "budget_day": datetime.now(UTC).date().isoformat(),
+        "limit_den": 30.0,
+        "held_den": 30.0,
+        "spent_den": 0.0,
+        "remaining_den": 0.0,
+    }
 
 
 def _workers():

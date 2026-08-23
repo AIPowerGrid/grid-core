@@ -4,8 +4,9 @@
 """Validator endpoints.
 
 These endpoints build the assignment-bound evidence path. They do not route
-production jobs, reward validators, penalize workers, slash bonds, or write
-economic ledger rows.
+production jobs, reward validators, penalize workers, or slash bonds. Optional
+paid-audit mode compensates target workers from a bounded network budget while
+leaving evidence economically inert.
 """
 
 from typing import Any, Optional
@@ -17,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..auth import extract_api_key
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
+from ..services import validator_audits
 from ..services import validators as validators_svc
 from .stats import _active_workers
 
@@ -26,6 +28,10 @@ router = APIRouter()
 def _capabilities_payload() -> dict[str, Any]:
     media_policy = validators_svc.media_validation_policy()
     video_policy = validators_svc.video_validation_policy()
+    audit_policy = validator_audits.public_policy()
+    worker_effect = (
+        "bounded_worker_compensation" if audit_policy["enabled"] else "none"
+    )
     return {
         "validator_api_version": "v1-preview",
         "mode": "shared_quorum_preview",
@@ -44,6 +50,8 @@ def _capabilities_payload() -> dict[str, Any]:
             "unique_text_batch_challenges": True,
             "blind_quality": False,
             "worker_terminal_indistinguishable": False,
+            "paid_worker_audits": audit_policy["enabled"],
+            "paid_text_terminal_ack_matches_demand": audit_policy["enabled"],
             "image_fidelity": media_policy["enabled"],
             "video_validation": video_policy["enabled"],
             "validator_rewards": False,
@@ -72,7 +80,10 @@ def _capabilities_payload() -> dict[str, Any]:
             "quality_eligible": False,
             "worker_payload_hides_assignment": True,
             "worker_terminal_indistinguishable": False,
+            "paid_text_terminal_ack_matches_demand": audit_policy["enabled"],
+            "worker_compensation": audit_policy["worker_compensation"],
         },
+        "paid_audit_policy": audit_policy,
         "quorum_policy": {
             "threshold": validators_svc.QUORUM_MIN,
             "target_validators": validators_svc.QUORUM_TARGET,
@@ -111,14 +122,14 @@ def _capabilities_payload() -> dict[str, Any]:
                 "method": "GET",
                 "path": "/v1/validator/assignments",
                 "auth": "validator.assignments",
-                "economic_effect": "none",
+                "economic_effect": worker_effect,
             },
             "targeted_probe": {
                 "enabled": True,
                 "method": "POST",
                 "path": "/v1/validator/probe/{assignment_id}",
                 "auth": "validator.probe",
-                "economic_effect": "none",
+                "economic_effect": worker_effect,
             },
             "attest": {
                 "enabled": True,
@@ -164,8 +175,9 @@ def _capabilities_payload() -> dict[str, Any]:
             ),
             "Validator rewards are intentionally disabled until shared-batch quorum is proven.",
             (
-                "Generated canaries are protocol/capability evidence, not blind quality evidence; "
-                "the zero-den terminal acknowledgment remains a retrospective probe fingerprint."
+                "Generated canaries are protocol/capability evidence, not blind quality evidence. "
+                "Evidence-only mode retains the zero-den terminal fingerprint; paid-audit mode "
+                "removes that label only for an operator-reviewed, budget-bounded cohort."
             ),
         ],
     }

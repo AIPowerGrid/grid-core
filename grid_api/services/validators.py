@@ -5,8 +5,9 @@
 
 This module is the boundary between preview validator evidence and
 assignment-bound evidence. It deliberately does not route production traffic,
-reward validators, slash workers, move credits, or write worker payout ledger
-rows.
+reward validators, slash workers, or move user credits. Optional paid text
+audits reserve a bounded network budget here; the worker transport owns the
+atomic payout-ledger terminal.
 """
 
 from __future__ import annotations
@@ -1361,6 +1362,7 @@ def _assignment_to_dict(
         "capability": row["capability"],
         "canary_kind": row["canary_kind"],
         "scoring_policy_id": row["scoring_policy_id"],
+        "worker_compensation": row.get("worker_compensation") or "none",
         "score_dimension": _score_dimension(row["modality"], row["capability"]),
         "quality_eligible": _quality_eligible(row["modality"], row["capability"]),
         "status": row["status"],
@@ -1574,7 +1576,11 @@ async def issue_assignments(
     limit: int = 5,
     modality: str = "text",
 ) -> dict[str, Any]:
-    """Return this validator's work from shared, economically inert probe groups."""
+    """Return this validator's work from shared evidence-only probe groups.
+
+    Optional paid-audit mode compensates the target worker from a bounded
+    network budget. It does not reward validators or give evidence authority.
+    """
     safe_limit = max(1, min(int(limit), 25))
     if modality == "image":
         return await _issue_image_assignments(
@@ -1598,6 +1604,12 @@ async def issue_assignments(
     now = _now()
     expires = now + timedelta(seconds=ASSIGNMENT_TTL_SECONDS)
     wallet = validator_wallet.lower() if validator_wallet and _ADDR_RE.match(validator_wallet) else None
+    from . import validator_audits
+
+    try:
+        worker_compensation = validator_audits.assignment_compensation(wallet)
+    except validator_audits.AuditBudgetError as exc:
+        raise AssignmentError(str(exc)) from exc
 
     async with await new_session() as session:
         # Serialize concurrent polls from the same registered validator. The DB
@@ -1638,6 +1650,7 @@ async def issue_assignments(
                     assignments_t.c.modality == "text",
                     assignments_t.c.status != "finalized",
                     _assignment_available_for_validator(validator_id, now),
+                    assignments_t.c.worker_compensation == worker_compensation,
                 )
                 .order_by(assignments_t.c.created.asc())
                 .limit(safe_limit)
@@ -1847,6 +1860,7 @@ async def issue_assignments(
                 "capability": group["capability"],
                 "canary_kind": group["canary_kind"],
                 "scoring_policy_id": group["scoring_policy_id"],
+                "worker_compensation": worker_compensation,
                 "challenge": challenge,
                 "status": "pending",
                 "quorum_status": "pending",
@@ -2717,6 +2731,10 @@ async def assignment_health(
             session,
             since_hours=safe_since,
         )
+    from . import validator_audits
+
+    audit_policy = validator_audits.public_policy()
+    audit_budget = await validator_audits.snapshot() if audit_policy["enabled"] else None
     return {
         "quorum": {
             "pending": quorum_counts.get("pending", 0),
@@ -2745,6 +2763,10 @@ async def assignment_health(
             "heartbeat_fresh_seconds": VALIDATOR_HEARTBEAT_FRESH_SECONDS,
         },
         "network": network_health,
+        "paid_audit": {
+            "policy": audit_policy,
+            "budget": audit_budget,
+        },
         "probe": probe_counts,
         "recent": recent,
         "economic_effect": "none",
@@ -3237,8 +3259,10 @@ async def probe_assignment(
     """Run a stored assignment against exactly its target worker.
 
     This queues a hard-targeted validator probe job and waits for the worker
-    response. It never reserves credits, writes ledger rows, pays den, strikes,
-    or slashes. The caller can use the returned hashes in a signed attestation.
+    response. It never reserves demand credits, rewards validators, strikes, or
+    slashes. A text assignment snapshotted as ``audit_budget`` compensates the
+    target worker through the bounded network audit ledger. The caller can use
+    the returned hashes in a signed attestation.
     """
     row, job_id = await _claim_probe_lease(
         account_id=account_id,
@@ -3414,7 +3438,11 @@ async def probe_assignment(
         "grid": grid_meta,
         "probe_latency_ms": latency_ms,
         **evidence,
-        "economic_effect": "none",
+        "economic_effect": (
+            "worker_compensated_audit"
+            if row.get("worker_compensation") == "audit_budget"
+            else "none"
+        ),
     }
     if not await _mark_probe(
         job_id,
@@ -4321,8 +4349,26 @@ async def _run_targeted_text_stage(
     prompt: str,
     request: dict[str, Any],
 ) -> dict[str, Any]:
-    """Dispatch and witness one economically inert stage on the assigned worker."""
-    from . import job_queue, token_stream
+    """Dispatch and witness one stage, reserving audit den when promised."""
+    from . import job_queue, token_stream, validator_audits
+
+    paid_audit = row.get("worker_compensation") == "audit_budget"
+    if paid_audit:
+        try:
+            await validator_audits.reserve(
+                job_id=job_id,
+                assignment_id=assignment_id,
+                probe_group_id=str(row["probe_group_id"]),
+                worker_id=str(row["target_worker_id"]),
+                validator_wallet=str(row.get("validator_wallet") or ""),
+            )
+        except validator_audits.AuditBudgetError as exc:
+            return {
+                "status": "error",
+                "probe_status": "failed",
+                "message": str(exc),
+                "code": 429 if "exhausted" in str(exc) else 503,
+            }
 
     payload = {
         "request": request,
@@ -4334,6 +4380,7 @@ async def _run_targeted_text_stage(
         "_validator_assignment_id": assignment_id,
         "_validator_probe_group_id": row["probe_group_id"],
         "_validator_grid_nonce": row["grid_nonce"],
+        "_validator_paid_audit": paid_audit,
     }
     try:
         await job_queue.submit_job(
@@ -4345,6 +4392,8 @@ async def _run_targeted_text_stage(
             hard_target_worker=row["target_worker_name"],
         )
     except Exception as exc:
+        if paid_audit:
+            await validator_audits.release(job_id)
         logger.error(
             "validator probe dispatch failed assignment=%s job=%s error_type=%s",
             opaque_id(assignment_id),

@@ -209,10 +209,12 @@ Deploy notes / learnings:
   `/home/aipg`.
 
 ### Follow-ups (known, not yet done)
-1. **Probe indistinguishability** — compensate bounded audit work through an
-   ordinary worker settlement path, remove the retrospective zero-den label,
-   add production-shaped blind synthetic workloads, and continuously test a
-   template detector/model-switching worker. This gates every economic effect.
+1. **Probe indistinguishability** — candidate migration `0025` implements a
+   default-off, reviewed-wallet text audit budget and an atomic ordinary worker
+   settlement/ACK, removing the retrospective zero-den label only in that
+   cohort. Production still needs migration/canary evidence, blind synthetic
+   workloads, and continuous template-detector/model-switching tests. This
+   gates every evidence-driven economic effect.
 2. **Grader hardening** — add hidden code execution, longer tool-call chains,
    64K+ context tiers, and streaming-integrity checks. Keep judge models a
    supporting signal rather than an objective authority.

@@ -63,6 +63,10 @@ executes an immutable release selected through `/home/aipg/current`.
   validator runbook aligned when changing these controls.
 - Apply Alembic `0024` before code that issues media assignments; it adds the
   group execution lease and shared frozen-witness columns read by that path.
+- Apply Alembic `0025` before any code that reads assignment compensation or
+  enables paid text audits. Keep `VALIDATOR_PAID_AUDIT_ENABLED=0` unless the
+  reviewed wallet cohort, positive daily/per-job den caps, Postgres migration,
+  stale-hold sweeper, and supervised settlement/ACK canary are all proven.
 - `VALIDATOR_MEDIA_PROBE_ENABLED` is not a standalone launch switch. Keep it off
   until the reviewed bond contract/verifier/minimum, finalized reference sync,
   governed deterministic recipe/model digest, independent operators, immutable
