@@ -775,8 +775,9 @@ validator_probe_groups = sa.Table(
     sa.Column("scoring_policy_id", sa.String(128), nullable=False),
     # The full challenge is Core-private. Assignment responses expose only the
     # prompt and one-way scoring commitment required for independent scoring.
-    # Legacy ungrouped assignments own a challenge. Shared-group assignments
-    # store {} and resolve the single authoritative copy from the probe group.
+    # Text v8 groups store a generator/capability envelope and assignments own
+    # concrete challenges. Open v7 groups retain one shared challenge. Media
+    # groups own their deterministic/shared witness challenge.
     sa.Column("challenge", PortableJSON, nullable=False, default=dict),
     sa.Column("challenge_hash", sa.String(64), nullable=False, unique=True),
     sa.Column("status", sa.String(24), nullable=False, default="pending", index=True),
@@ -834,6 +835,15 @@ validator_assignments = sa.Table(
     sa.Column("capability", sa.String(128), nullable=False),
     sa.Column("canary_kind", sa.String(64), nullable=False),
     sa.Column("scoring_policy_id", sa.String(128), nullable=False),
+    # none = evidence-only preview; audit_budget = worker receives ordinary
+    # den from the bounded network audit budget. This is snapshotted when the
+    # assignment is issued so a configuration change cannot silently downgrade
+    # a promised paid audit into free work.
+    sa.Column("worker_compensation", sa.String(24), nullable=False, default="none"),
+    sa.CheckConstraint(
+        "worker_compensation IN ('none', 'audit_budget')",
+        name="ck_grid_validator_assignments_worker_compensation",
+    ),
     sa.Column("challenge", PortableJSON, nullable=False, default=dict),
     sa.Column("status", sa.String(24), nullable=False, default="pending", index=True),
     sa.Column("quorum_status", sa.String(24), nullable=False, default="pending", index=True),
@@ -862,6 +872,70 @@ validator_assignments = sa.Table(
         "probe_group_id",
         "validator_id",
         name="uq_grid_validator_assignments_group_validator",
+    ),
+)
+
+
+# Durable network-funded worker compensation for validator audit jobs. These
+# tables do not reward validators and do not make evidence authoritative for
+# routing/slashing. A day row is the serialized budget counter; each GPU stage
+# gets one immutable reservation so retries and late success cannot mint den
+# outside the configured cap.
+validator_audit_budgets = sa.Table(
+    "grid_validator_audit_budgets",
+    metadata,
+    sa.Column("budget_day", sa.Date, primary_key=True),
+    sa.Column("limit_den", sa.Numeric(24, 8), nullable=False),
+    sa.Column("held_den", sa.Numeric(24, 8), nullable=False, default=0),
+    sa.Column("spent_den", sa.Numeric(24, 8), nullable=False, default=0),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.CheckConstraint("limit_den > 0", name="ck_grid_validator_audit_budget_limit"),
+    sa.CheckConstraint("held_den >= 0", name="ck_grid_validator_audit_budget_held"),
+    sa.CheckConstraint("spent_den >= 0", name="ck_grid_validator_audit_budget_spent"),
+    sa.CheckConstraint(
+        "held_den + spent_den <= limit_den",
+        name="ck_grid_validator_audit_budget_total",
+    ),
+)
+
+validator_audit_reservations = sa.Table(
+    "grid_validator_audit_reservations",
+    metadata,
+    sa.Column("job_id", sa.Uuid, primary_key=True),
+    sa.Column("assignment_id", sa.String(96), nullable=False, index=True),
+    sa.Column("probe_group_id", sa.String(96), nullable=False, index=True),
+    sa.Column("worker_id", sa.Uuid, nullable=False, index=True),
+    sa.Column("validator_wallet", sa.String(42), nullable=False, index=True),
+    sa.Column(
+        "budget_day",
+        sa.Date,
+        sa.ForeignKey("grid_validator_audit_budgets.budget_day", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("reserved_den", sa.Numeric(24, 8), nullable=False),
+    sa.Column("settled_den", sa.Numeric(24, 8), nullable=True),
+    sa.Column("status", sa.String(16), nullable=False, default="held", index=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+    sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.CheckConstraint("reserved_den > 0", name="ck_grid_validator_audit_reserved"),
+    sa.CheckConstraint(
+        "settled_den IS NULL OR settled_den >= 0",
+        name="ck_grid_validator_audit_settled",
+    ),
+    sa.CheckConstraint(
+        "settled_den IS NULL OR settled_den <= reserved_den",
+        name="ck_grid_validator_audit_settled_cap",
+    ),
+    sa.CheckConstraint(
+        "status IN ('held', 'settled', 'released')",
+        name="ck_grid_validator_audit_status",
+    ),
+    sa.CheckConstraint(
+        "(status = 'held' AND settled_den IS NULL) OR "
+        "(status IN ('settled', 'released') AND settled_den IS NOT NULL)",
+        name="ck_grid_validator_audit_terminal_amount",
     ),
 )
 

@@ -51,6 +51,63 @@ def test_template_specific_echo_solver_earns_protocol_evidence_not_quality():
     assert validators._quality_eligible("text", challenge["capability"]) is False
 
 
+def _public_template_detector(prompt: str) -> str | None:
+    """Deliberately cheap red-team classifier, not production validation code."""
+    signatures = {
+        "echo": "exactly this token and nothing else",
+        "json.object": "Return exactly one valid JSON object",
+        "context.retrieve": "Read the record set below",
+        "logic.steps": "Reply with only the final integer",
+        "code.function": "Return only the function definition",
+        "tool.call": "tool exactly once",
+        "tool.chain": "After the tool result arrives",
+        "stop.sequence": "Output the following characters exactly",
+        "token.limit": "until the generation limit stops you",
+    }
+    if re.search(r"What is \d+ [*+] \d+\? Reply with only the number", prompt):
+        return "math"
+    for family, signature in signatures.items():
+        if signature in prompt:
+            return family
+    return None
+
+
+@pytest.mark.parametrize("family", validators._TEXT_CHALLENGE_KINDS)
+def test_public_template_classifier_can_label_current_probes_but_gets_no_quality(family):
+    challenge = validators._make_text_challenge(family)
+
+    assert _public_template_detector(challenge["prompt"]) is not None
+    assert validators._quality_eligible("text", challenge["capability"]) is False
+
+
+def test_template_router_can_pass_narrow_lanes_but_cannot_become_quality_model():
+    echo = validators._make_text_challenge("echo")
+    echo_answer = echo["prompt"].rsplit(": ", 1)[1]
+    math = validators._make_text_challenge("math.mul")
+    left, right = map(
+        int,
+        re.fullmatch(
+            r"What is (\d+) \* (\d+)\? Reply with only the number\.",
+            math["prompt"],
+        ).groups(),
+    )
+
+    assert validators._score_text_challenge(echo, echo_answer, 10) == "healthy"
+    assert validators._score_text_challenge(math, str(left * right), 10) == "healthy"
+    for challenge in (echo, math):
+        assert validators._quality_eligible("text", challenge["capability"]) is False
+
+
+def test_cached_answer_replay_fails_a_fresh_assignment():
+    first = validators._make_text_challenge("echo")
+    second = validators._make_text_challenge("echo")
+    cached = first["prompt"].rsplit(": ", 1)[1]
+
+    assert first["expected_hash"] != second["expected_hash"]
+    assert validators._score_text_challenge(first, cached, 10) == "healthy"
+    assert validators._score_text_challenge(second, cached, 10) == "failed"
+
+
 @pytest.mark.parametrize(
     ("modality", "capability", "dimension"),
     [

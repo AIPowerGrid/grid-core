@@ -124,9 +124,12 @@ Core-verified fact. Media fidelity and preview-only rows remain explicitly
 `validator_opinion` because Core commits transport witnesses but does not run
 the node's local pHash/decode scorer.
 
-The targeted probe is isolated from customer economics: it does not reserve or
-settle demand credits, award den, create a payout ledger completion, or apply a
-worker strike.
+The targeted probe is isolated from customer economics: it never reserves or
+settles demand credits, rewards a validator, grants evidence authority, or
+applies a worker strike. Candidate migration `0026` adds a default-off worker
+compensation rail for text audits. In that mode only reviewed validator wallets
+receive assignments; each GPU stage reserves from a durable daily den budget
+and atomically commits the ordinary worker ledger row before DONE/ACK.
 
 It still consumes worker capacity. Core therefore creates at most one new text
 probe group per worker/model per configured interval (one hour by default,
@@ -140,11 +143,12 @@ without opening a duplicate group for the blocked model.
 Core hard-targets the job internally but sends the worker an ordinary opaque
 UUID and a payload with all validator assignment/group/nonce markers removed.
 Those fields are restored only into the Core-to-validator evidence response
-after completion. Prompt templates and the post-completion zero-den worker ACK
-remain retrospective fingerprints. V0 evidence therefore has no economic
-authority. A paid audit rail must first be stake/Sybil-gated, budgeted, and
-tested against a model-switching worker; simply reporting fake den would corrupt
-the payout contract.
+after completion. Prompt templates remain recognizable. Evidence-only jobs also
+retain the post-completion zero-den fingerprint; candidate paid text audits
+replace that terminal label with normally calculated, budget-capped den. The
+initial Sybil boundary is an operator-reviewed wallet cohort because no audited,
+deployed ValidatorRegistry exists yet. Evidence remains non-authoritative in
+both modes; simply reporting fake den would corrupt the payout contract.
 
 The sealed-assignment compatibility mode also withholds target,
 model, nonce, policy, and challenge from `GET /v1/validator/assignments`. The

@@ -64,17 +64,20 @@ content sanitization, and reward settlement.
   challenge. Scorecards classify evidence as availability, protocol conformance,
   capability, quality, or fidelity. No current generated canary is quality-eligible.
   A regex/template solver may therefore pass protocol evidence but cannot earn a
-  quality score. An accepted target-worker failure
-  becomes economically inert failed evidence; a coordinator dispatch failure
-  remains inconclusive. Group allocation
+  quality score. An accepted target-worker failure becomes non-authoritative
+  failed evidence; a coordinator dispatch failure remains inconclusive. Group allocation
   must match the validator's advertised scorer capability; legacy
   `text.basic.v1` nodes receive only echo/arithmetic. Expected answers
-  and Core's private verdict are not returned to nodes. The path remains non-economic and
-  must not route production jobs, reward, slash, or write worker ledger rows.
-  Non-economic does not mean resource-free: Core permits at most one new text
-  group per worker/model per configured interval (one hour by default), stores
-  the challenge once on the shared group, and hydrates validator-specific
-  assignments at the API boundary. Finalized assignment/group machinery is
+  and Core's private verdict are not returned to nodes. Evidence must not route
+  production jobs, reward validators, strike, or slash. Optional
+  `validator_audits.py` worker compensation is a separate dark rail: paid mode
+  admits only operator-reviewed validator wallets, snapshots `audit_budget` on
+  the assignment, reserves a per-stage den cap from a durable UTC-day budget,
+  and atomically commits the ordinary worker ledger row with settlement before
+  DONE/ACK. It never bills a user or gives evidence authority. Core permits at
+  most one new text group per worker/model per configured interval (one hour by
+  default); v8 assignments own their randomized challenge while the group owns
+  only the generator/capability envelope. Finalized assignment/group machinery is
   pruned after the configured retention window; signed attestations remain the
   durable evidence record.
   New probes stop at assignment expiry; already-completed probes may deliver

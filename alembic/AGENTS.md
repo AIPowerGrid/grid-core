@@ -28,7 +28,9 @@ production database match the Grid-owned schema contracts without relying on
   and one committed frozen witness set per probe group; `0025` adds a bounded
   durable assignment result used to recover completed-but-unattested probes;
   `0026` adds opaque operator groups, expiring independence-review
-  state, and bounded qualification heartbeat samples).
+  state, and bounded qualification heartbeat samples; `0027` adds the
+  snapshotted assignment compensation mode plus durable audit-den budgets and
+  per-stage reservations).
 
 ## Local Contracts
 

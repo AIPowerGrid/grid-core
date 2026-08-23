@@ -56,8 +56,9 @@ A static benchmark is trivially cheated (cache the answers). So:
 
 - **Worker-visible transport looks ordinary** — validator markers, assignment
   ids, group ids, and nonces are stripped before dispatch, and worker-visible
-  job ids use ordinary UUIDs. This raises the cost of fingerprinting but does
-  not make probes literally indistinguishable from paid traffic.
+  job ids use ordinary UUIDs. Candidate paid text audits also use a bounded
+  ordinary den terminal after atomic ledger settlement. Recognizable prompt
+  families still prevent a claim of literal indistinguishability.
 - **Procedurally generated** — random chess positions, random needle facts,
   random seeds — plus a large, rotating probe bank. Nothing to pre-cache.
 - **Validator-signed, random cadence** — unpredictable timing and origin.

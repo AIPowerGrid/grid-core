@@ -25,6 +25,7 @@ from grid_api import auth, database, safe_logging
 from grid_api.ratelimit import limiter
 from grid_api.routers import validator as validator_router
 from grid_api.services import recipes
+from grid_api.services import validator_audits
 from grid_api.services import validator_operators
 from grid_api.services import validators as validators_svc
 from grid_api.v2.schema import (
@@ -2489,6 +2490,8 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["features"]["sealed_assignments"] is False
     assert body["features"]["blind_quality"] is False
     assert body["features"]["worker_terminal_indistinguishable"] is False
+    assert body["features"]["paid_worker_audits"] is False
+    assert body["features"]["paid_text_terminal_ack_matches_demand"] is False
     assert body["probe_policy"]["max_attempts"] >= 1
     assert body["probe_policy"]["lease_seconds"] > validators_svc.PROBE_TIMEOUT_SECONDS
     assert body["probe_policy"]["text_batch_scoring_policy"] == "text.generated.v8"
@@ -2497,6 +2500,8 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["probe_policy"]["quality_eligible"] is False
     assert body["probe_policy"]["worker_payload_hides_assignment"] is True
     assert body["probe_policy"]["worker_terminal_indistinguishable"] is False
+    assert body["paid_audit_policy"]["requested"] is False
+    assert body["paid_audit_policy"]["validator_rewards"] is False
     assert (
         body["authority_model"]["authoritative"]
         == "requires Grid-issued assignment_id + grid_nonce + probe evidence hash"
@@ -2528,6 +2533,80 @@ def test_validator_capabilities_expose_enabled_sealed_assignment_mode(monkeypatc
     assert body["features"]["sealed_assignments"] is True
     assert body["probe_policy"]["assignment_disclosure"] == "after_probe_completion"
     assert body["economic_effect"] == "none"
+
+
+def test_validator_capabilities_describe_paid_worker_pilot_without_quality_claims(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        validator_audits,
+        "get_settings",
+        lambda: SimpleNamespace(
+            validator_paid_audit_enabled=True,
+            validator_paid_audit_wallets=TEST_WALLET,
+            validator_paid_audit_daily_den=100,
+            validator_paid_audit_max_den_per_job=10,
+            validator_paid_audit_stale_seconds=3600,
+        ),
+    )
+    app = FastAPI()
+    app.state.limiter = limiter
+    app.include_router(validator_router.router)
+
+    with TestClient(app) as client:
+        resp = client.get("/v1/validator/capabilities")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["economic_effect"] == "none"
+    assert body["features"]["paid_worker_audits"] is True
+    assert body["features"]["paid_text_terminal_ack_matches_demand"] is True
+    assert body["features"]["worker_terminal_indistinguishable"] is False
+    assert body["features"]["blind_quality"] is False
+    assert body["features"]["validator_rewards"] is False
+    assert body["paid_audit_policy"]["worker_compensation"] == "audit_budget"
+    assert body["endpoints"]["assignments"]["economic_effect"] == (
+        "bounded_worker_compensation"
+    )
+
+
+@pytest.mark.asyncio
+async def test_paid_audit_mode_issues_only_to_reviewed_wallet(db, monkeypatch):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id)
+    monkeypatch.setattr(
+        validator_audits,
+        "get_settings",
+        lambda: SimpleNamespace(
+            validator_paid_audit_enabled=True,
+            validator_paid_audit_wallets=TEST_WALLET,
+            validator_paid_audit_daily_den=100,
+            validator_paid_audit_max_den_per_job=10,
+            validator_paid_audit_stale_seconds=3600,
+        ),
+    )
+    issued = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=[{
+            "worker_id": str(uuid.uuid4()),
+            "name": "paid-audit-rig",
+            "models": ["qwen3-27b"],
+            "job_types": ["text"],
+        }],
+        limit=1,
+    )
+    assert issued["assignments"][0]["worker_compensation"] == "audit_budget"
+
+    with pytest.raises(validators_svc.AssignmentError, match="not approved"):
+        await validators_svc.issue_assignments(
+            account_id=account_id,
+            validator_id=validator_id,
+            validator_wallet="0x" + "f" * 40,
+            active_workers=[],
+            limit=1,
+        )
 
 
 def test_validator_lifecycle_routes_require_scoped_account_and_forward_signatures(monkeypatch):

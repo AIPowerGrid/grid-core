@@ -157,6 +157,132 @@ async def test_validator_worker_failure_becomes_signed_evidence_candidate(monkey
 
 
 @pytest.mark.asyncio
+async def test_paid_validator_probe_commits_before_ordinary_den_ack(monkeypatch):
+    ws = _WebSocket()
+    job_id = str(uuid.uuid4())
+    worker_id = str(uuid.uuid4())
+    job = {
+        "job_id": job_id,
+        "payload": {
+            "request": {"model": "model-a", "messages": []},
+            "api_format": "openai-chat",
+            "prompt": "ordinary-looking request",
+            "max_length": 32,
+            "temperature": 0,
+            "_validator_probe": True,
+            "_validator_assignment_id": "asg-paid",
+            "_validator_probe_group_id": "prg-paid",
+            "_validator_grid_nonce": "nonce-paid",
+            "_validator_paid_audit": True,
+        },
+    }
+
+    async def generation(*_args):
+        return {
+            "client_error": None,
+            "failed": False,
+            "grid_meta": {},
+            "full_text": "a useful answer",
+            "full_reasoning": "",
+            "tool_calls": [],
+            "usage": {},
+            "finish_reason": "stop",
+            "metered": 3,
+            "ttft": 0.1,
+            "worker_sig": None,
+        }
+
+    order = []
+
+    async def settle(**kwargs):
+        order.append(("settle", kwargs))
+        return "settled", 1.75
+
+    async def publish_done(*args, **kwargs):
+        order.append(("done", (args, kwargs)))
+
+    monkeypatch.setattr(worker_ws, "_handle_worker_generation", generation)
+    monkeypatch.setattr(worker_ws.validator_audits, "record_and_settle", settle)
+    monkeypatch.setattr(worker_ws.token_stream, "publish_done", publish_done)
+    monkeypatch.setattr(worker_ws.signing, "verify_worker_sig", lambda *_args: None)
+
+    assert await worker_ws._handle_validator_probe(
+        ws,
+        job,
+        "model-a",
+        worker_id,
+        {"name": "rig-a", "max_context_length": 4096, "wallet_address": ""},
+    )
+    assert [item[0] for item in order] == ["settle", "done"]
+    dispatched = ws.sent[0]
+    assert "validator" not in str(dispatched).lower()
+    assert ws.sent[-1] == {"type": "ack", "id": job_id, "den": 1.75}
+    assert order[1][1][1]["grid"]["economic_effect"] == "worker_compensated_audit"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("settle_status", ["error", "no_reservation", "worker_mismatch", "unexpected"])
+async def test_paid_validator_probe_invalid_settlement_is_not_acked(monkeypatch, settle_status):
+    ws = _WebSocket()
+    job_id = str(uuid.uuid4())
+    job = {
+        "job_id": job_id,
+        "payload": {
+            "prompt": "ordinary-looking request",
+            "max_length": 32,
+            "_validator_probe": True,
+            "_validator_assignment_id": "asg-paid",
+            "_validator_probe_group_id": "prg-paid",
+            "_validator_grid_nonce": "nonce-paid",
+            "_validator_paid_audit": True,
+        },
+    }
+
+    async def generation(*_args):
+        return {
+            "client_error": None,
+            "failed": False,
+            "grid_meta": {},
+            "full_text": "answer",
+            "full_reasoning": "",
+            "tool_calls": [],
+            "usage": {},
+            "finish_reason": "stop",
+            "metered": 1,
+            "ttft": 0.1,
+            "worker_sig": None,
+        }
+
+    errors = []
+
+    async def publish_error(*args, **kwargs):
+        errors.append((args, kwargs))
+
+    monkeypatch.setattr(worker_ws, "_handle_worker_generation", generation)
+    monkeypatch.setattr(
+        worker_ws.validator_audits,
+        "record_and_settle",
+        lambda **_kwargs: _async_result((settle_status, 0.0)),
+    )
+    monkeypatch.setattr(worker_ws.token_stream, "publish_error", publish_error)
+    monkeypatch.setattr(worker_ws.signing, "verify_worker_sig", lambda *_args: None)
+
+    assert not await worker_ws._handle_validator_probe(
+        ws,
+        job,
+        "model-a",
+        str(uuid.uuid4()),
+        {"name": "rig-a", "max_context_length": 4096, "wallet_address": ""},
+    )
+    assert errors
+    assert len(ws.sent) == 1
+
+
+async def _async_result(value):
+    return value
+
+
+@pytest.mark.asyncio
 async def test_validator_image_probe_freezes_output_without_economic_side_effects(monkeypatch):
     job_id = str(uuid.uuid4())
     ws = _WebSocket(
