@@ -741,8 +741,22 @@ validators = sa.Table(
     sa.Column("registration_signature", sa.String(132), nullable=False),
     sa.Column("status", sa.String(16), nullable=False, default="active", index=True),
     sa.Column("last_heartbeat", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
+    # Opaque maintainer-reviewed grouping. Multiple accounts controlled by one
+    # operator share a group and count once; the identifier is never public.
+    sa.Column("operator_group_id", sa.String(96), nullable=True, index=True),
+    sa.Column("independence_status", sa.String(16), nullable=False, default="unreviewed", index=True),
+    sa.Column("qualification_started_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("heartbeat_sample_count", sa.Integer, nullable=False, default=0),
+    sa.Column("last_heartbeat_sampled_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("independence_reviewed_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("independence_expires_at", sa.DateTime(timezone=True), nullable=True, index=True),
+    sa.Column("independence_review_ref", sa.String(128), nullable=True),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
     sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.CheckConstraint(
+        "independence_status IN ('unreviewed', 'candidate', 'verified', 'rejected')",
+        name="ck_grid_validators_independence_status",
+    ),
     sa.UniqueConstraint("signing_wallet", name="uq_grid_validators_signing_wallet"),
     sa.UniqueConstraint("account_id", name="uq_grid_validators_account_id"),
     sa.UniqueConstraint("account_id", "signing_wallet", name="uq_grid_validators_account_wallet"),

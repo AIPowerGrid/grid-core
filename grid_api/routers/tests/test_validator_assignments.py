@@ -25,6 +25,7 @@ from grid_api import auth, database, safe_logging
 from grid_api.ratelimit import limiter
 from grid_api.routers import validator as validator_router
 from grid_api.services import recipes
+from grid_api.services import validator_operators
 from grid_api.services import validators as validators_svc
 from grid_api.v2.schema import (
     accounts as accounts_t,
@@ -210,6 +211,220 @@ def _media_settings(*, enabled=True, video_enabled=False):
         validator_media_max_output_bytes=25 * 1024 * 1024,
         validator_media_probe_timeout_seconds=600,
     )
+
+
+@pytest.mark.asyncio
+async def test_operator_review_requires_qualification_and_compare_and_swap(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id)
+    review_now = datetime.now(UTC)
+
+    preview = await validator_operators.review_operator(
+        validator_id,
+        action="candidate",
+        operator_group_id="opg_independent_test_01",
+        review_ref="review:test-candidate",
+        apply=False,
+        now=review_now,
+    )
+    assert preview["proposed_status"] == "candidate"
+    await validator_operators.review_operator(
+        validator_id,
+        action="candidate",
+        operator_group_id="opg_independent_test_01",
+        review_ref="review:test-candidate",
+        expected_digest=preview["current_digest"],
+        apply=True,
+        now=review_now,
+    )
+
+    with pytest.raises(
+        validator_operators.OperatorReviewError,
+        match="qualification or heartbeat coverage",
+    ):
+        await validator_operators.review_operator(
+            validator_id,
+            action="verify",
+            review_ref="review:test-verify-early",
+            apply=False,
+            now=review_now,
+        )
+
+    started = review_now - timedelta(seconds=validator_operators.MIN_QUALIFICATION_SECONDS + 60)
+    expected_samples = (
+        validator_operators.MIN_QUALIFICATION_SECONDS
+        // validator_operators.SAMPLE_INTERVAL_SECONDS
+    ) + 1
+    required_samples = int(expected_samples * validator_operators.MIN_SAMPLE_COVERAGE) + 1
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t)
+            .where(validators_t.c.id == validator_id)
+            .values(
+                qualification_started_at=started,
+                heartbeat_sample_count=required_samples,
+                last_heartbeat_sampled_at=review_now,
+                last_heartbeat=review_now,
+            )
+        )
+        await session.commit()
+
+    verify_preview = await validator_operators.review_operator(
+        validator_id,
+        action="verify",
+        review_ref="review:test-verify",
+        apply=False,
+        now=review_now,
+    )
+    assert verify_preview["qualification"]["time_ready"] is True
+    assert verify_preview["qualification"]["coverage_ready"] is True
+    applied = await validator_operators.review_operator(
+        validator_id,
+        action="verify",
+        review_ref="review:test-verify",
+        expected_digest=verify_preview["current_digest"],
+        apply=True,
+        now=review_now,
+    )
+    assert applied["proposed_status"] == "verified"
+
+    with pytest.raises(validator_operators.OperatorReviewError, match="state changed"):
+        await validator_operators.review_operator(
+            validator_id,
+            action="reject",
+            review_ref="review:stale-preview",
+            expected_digest=verify_preview["current_digest"],
+            apply=True,
+            now=review_now,
+        )
+
+
+@pytest.mark.asyncio
+async def test_candidate_heartbeat_sampling_is_rate_limited(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t)
+            .where(validators_t.c.id == validator_id)
+            .values(
+                operator_group_id="opg_heartbeat_test_01",
+                independence_status="candidate",
+                qualification_started_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+
+    for _ in range(2):
+        await validators_svc.heartbeat_validator(
+            account_id=account_id,
+            signing_wallet=TEST_WALLET,
+            software_version="0.1.0-test",
+            capabilities=["text.basic.v1"],
+        )
+    async with await database.new_session() as session:
+        count = await session.scalar(
+            sa.select(validators_t.c.heartbeat_sample_count).where(
+                validators_t.c.id == validator_id
+            )
+        )
+        await session.execute(
+            sa.update(validators_t)
+            .where(validators_t.c.id == validator_id)
+            .values(
+                last_heartbeat_sampled_at=datetime.now(UTC)
+                - timedelta(seconds=validators_svc.VALIDATOR_OPERATOR_SAMPLE_INTERVAL_SECONDS + 1)
+            )
+        )
+        await session.commit()
+    assert count == 1
+
+    await validators_svc.heartbeat_validator(
+        account_id=account_id,
+        signing_wallet=TEST_WALLET,
+        software_version="0.1.0-test",
+        capabilities=["text.basic.v1"],
+    )
+    async with await database.new_session() as session:
+        count = await session.scalar(
+            sa.select(validators_t.c.heartbeat_sample_count).where(
+                validators_t.c.id == validator_id
+            )
+        )
+    assert count == 2
+
+
+@pytest.mark.asyncio
+async def test_one_operator_group_cannot_fill_two_quorum_seats(db):
+    account_a, account_b, account_c = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    key_a, key_b, key_c = "0x" + "21" * 32, "0x" + "22" * 32, "0x" + "23" * 32
+    validator_a = await _register(account_a, key_a)
+    validator_b = await _register(account_b, key_b)
+    validator_c = await _register(account_c, key_c)
+    now = datetime.now(UTC)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t)
+            .where(validators_t.c.id.in_((validator_a, validator_b)))
+            .values(operator_group_id="opg_shared_control_01")
+        )
+        await session.execute(
+            sa.update(validators_t)
+            .where(validators_t.c.id == validator_c)
+            .values(operator_group_id="opg_separate_control_02")
+        )
+        await session.commit()
+
+    worker = [{
+        "worker_id": str(uuid.uuid4()),
+        "name": "independence-target",
+        "models": ["qwen3-27b"],
+        "job_types": ["text"],
+    }]
+    first = await validators_svc.issue_assignments(
+        account_id=account_a,
+        validator_id=validator_a,
+        validator_wallet=Account.from_key(key_a).address.lower(),
+        active_workers=worker,
+        limit=1,
+    )
+    same_operator = await validators_svc.issue_assignments(
+        account_id=account_b,
+        validator_id=validator_b,
+        validator_wallet=Account.from_key(key_b).address.lower(),
+        active_workers=worker,
+        limit=1,
+    )
+    separate_operator = await validators_svc.issue_assignments(
+        account_id=account_c,
+        validator_id=validator_c,
+        validator_wallet=Account.from_key(key_c).address.lower(),
+        active_workers=worker,
+        limit=1,
+    )
+
+    assert len(first["assignments"]) == 1
+    assert same_operator["assignments"] == []
+    assert len(separate_operator["assignments"]) == 1
+    assert (
+        separate_operator["assignments"][0]["probe_group_id"]
+        == first["assignments"][0]["probe_group_id"]
+    )
+
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t).values(
+                independence_status="verified",
+                independence_reviewed_at=now,
+                independence_expires_at=now + timedelta(days=30),
+                last_heartbeat=now,
+            )
+        )
+        await session.commit()
+    health = await validators_svc.public_health()
+    assert health["verified_independent"] == 2
+    assert health["participating_independent"] == 0
+    assert health["independence_proven"] is False
 
 
 async def _seed_image_worker(session, index, *, now):
@@ -915,11 +1130,13 @@ async def test_three_distinct_registered_validators_accept_shared_probe_group(db
     challenge_prompts = set()
     expected_hashes = set()
     statuses = []
+    registered_ids = []
     for key_int in (4, 5, 6):
         private_key = "0x" + f"{key_int:064x}"
         wallet = Account.from_key(private_key).address.lower()
         account_id = uuid.uuid4()
         validator_id = await _register(account_id, private_key)
+        registered_ids.append(validator_id)
         issued = await validators_svc.issue_assignments(
             account_id=account_id,
             validator_id=validator_id,
@@ -1008,9 +1225,38 @@ async def test_three_distinct_registered_validators_accept_shared_probe_group(db
     ]
     assert health["network"]["operator_independence"] == {
         "verified": 0,
+        "participating": 0,
         "proven": False,
         "status": "not_yet_verified",
+        "minimum": 3,
     }
+    assert health["quorum_policy"]["operator_independence_required_for_acceptance"] is False
+
+    review_now = datetime.now(UTC)
+    async with await database.new_session() as session:
+        for index, validator_id in enumerate(registered_ids):
+            await session.execute(
+                sa.update(validators_t)
+                .where(validators_t.c.id == validator_id)
+                .values(
+                    operator_group_id=f"opg_quorum_test_{index:02d}",
+                    independence_status="verified",
+                    independence_reviewed_at=review_now,
+                    independence_expires_at=review_now + timedelta(days=30),
+                    last_heartbeat=review_now,
+                )
+            )
+        await session.commit()
+    independent_health = await validators_svc.assignment_health()
+    assert independent_health["network"]["operator_independence"] == {
+        "verified": 3,
+        "participating": 3,
+        "proven": True,
+        "status": "quorum_available",
+        "minimum": 3,
+    }
+    assert independent_health["recent"][0]["independent_attested_operators"] == 3
+    assert independent_health["recent"][0]["independent_quorum_reached"] is True
 
     dissent_key = "0x" + f"{9:064x}"
     dissent_wallet = Account.from_key(dissent_key).address.lower()
