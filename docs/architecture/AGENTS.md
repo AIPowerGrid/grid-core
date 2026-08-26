@@ -19,6 +19,8 @@ validation, worker incentives, and trust boundaries.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only
   invariants, scorer-capability matching, scorecard privacy rules, and future
   economic gates.
+- `VALIDATOR_ANTI_GAMING.md` - executable hostile-worker baseline, public-probe
+  limitations, blind-audit contract, and the quality-evidence promotion gate.
 - `MEDIA_VALIDATION_V1.md` - accepted fail-closed image/video validation design:
   private challenges, cached bond eligibility, rotating references, Core object
   hashing, validator fetch defenses, dark validator-side modality scoring, and
