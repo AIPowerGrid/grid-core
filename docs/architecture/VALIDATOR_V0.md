@@ -99,6 +99,13 @@ narrow capability evidence. Public generated templates are recognizable even
 when their values are random, so no current text canary is quality-eligible and
 none proves the exact model behind a worker.
 
+For objective text lanes, Core independently computes a private verdict and
+scorecards report how many signed validator votes matched or disagreed with it.
+Disagreement remains visible signed evidence; it is not silently relabeled as a
+Core-verified fact. Media fidelity and preview-only rows remain explicitly
+`validator_opinion` because Core commits transport witnesses but does not run
+the node's local pHash/decode scorer.
+
 The targeted probe is isolated from customer economics: it does not reserve or
 settle demand credits, award den, create a payout ledger completion, or apply a
 worker strike.
@@ -107,7 +114,10 @@ It still consumes worker capacity. Core therefore creates at most one new text
 probe group per worker/model per configured interval (one hour by default,
 never less than five minutes). A v8 group stores a bounded generator/capability
 envelope and each assignment stores its concrete randomized challenge. Open v7
-groups drain with their original shared challenge during rollout.
+groups drain with their original shared challenge during rollout. Multi-model
+workers rotate toward the least recently covered model instead of `models[0]`;
+a node already occupying an unfilled group may cover another advertised model
+without opening a duplicate group for the blocked model.
 
 Core hard-targets the job internally but sends the worker an ordinary opaque
 UUID and a payload with all validator assignment/group/nonce markers removed.

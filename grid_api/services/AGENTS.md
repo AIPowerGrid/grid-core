@@ -55,7 +55,10 @@ content sanitization, and reward settlement.
   import, call, or otherwise run worker-supplied code. Token-limit scoring uses
   Grid-side `o200k_base` counting over visible plus reasoning output, a
   length-style finish, and a documented cross-tokenizer tolerance;
-  worker order must not determine the family. New `text.generated.v8` batches
+  worker order must not determine the family. Multi-model workers rotate toward
+  the least recently covered advertised model; a validator already assigned to
+  an unfilled group for one model may cover another model, but cannot create a
+  second group for the blocked model. New `text.generated.v8` batches
   fix one capability/canary lane but issue and persist a distinct randomized
   challenge for every validator; already-open v7 groups drain with their shared
   challenge. Scorecards classify evidence as availability, protocol conformance,
@@ -84,7 +87,10 @@ content sanitization, and reward settlement.
   attempt counter. Missing, oversized, or uncommitted results fail closed.
   Aggregate health may expose bounded counts, agreement/dispute rates,
   worker/model coverage, and software-version cohorts, but never validator
-  identities. Independent-operator counts remain zero until externally
+  identities. Scorecards label objective text votes as Core-matched or
+  Core-disagreed and media/preview verdicts as validator opinion; a raw vote is
+  never silently promoted to Core-verified fact. Independent-operator counts
+  remain zero until externally
   reviewed; registration count is not independence proof. The public network
   status surface uses only these redacted aggregates and never assignment rows.
   `validator_references.py` owns the dark media reference selector: fresh
