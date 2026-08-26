@@ -4363,7 +4363,9 @@ async def _run_targeted_text_stage(
                 job_id=job_id,
                 assignment_id=assignment_id,
                 probe_group_id=str(row["probe_group_id"]),
+                grid_nonce=str(row["grid_nonce"]),
                 worker_id=str(row["target_worker_id"]),
+                model=str(row["model"]),
                 validator_wallet=str(row.get("validator_wallet") or ""),
             )
         except validator_audits.AuditBudgetError as exc:

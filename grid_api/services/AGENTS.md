@@ -75,8 +75,9 @@ content sanitization, and reward settlement.
   the assignment, reserves before dispatch under global daily/hourly,
   per-validator daily, per-worker daily, and per-stage den caps, and atomically
   commits the ordinary worker ledger row plus a bounded synthetic terminal
-  result before DONE/ACK. A reclaimed settled queue item replays that result
-  without GPU dispatch or a second payout. It never bills a user or gives
+  result before DONE/ACK. Reservations and replay bind job, assignment, group,
+  nonce, worker, and model; mismatched queue work fails closed. A reclaimed
+  settled queue item replays that result without GPU dispatch or a second payout. It never bills a user or gives
   evidence authority. Core permits at
   most one new text group per worker/model per configured interval (one hour by
   default); v8 assignments own their randomized challenge while the group owns

@@ -205,7 +205,7 @@ async def test_paid_validator_probe_commits_before_ordinary_den_ack(monkeypatch)
     monkeypatch.setattr(
         worker_ws.validator_audits,
         "settled_result",
-        lambda _job_id: _async_result(None),
+        lambda _job_id, **_kwargs: _async_result(None),
     )
     monkeypatch.setattr(worker_ws.validator_audits, "record_and_settle", settle)
     monkeypatch.setattr(worker_ws.token_stream, "publish_done", publish_done)
@@ -267,7 +267,7 @@ async def test_paid_validator_probe_invalid_settlement_is_not_acked(monkeypatch,
     monkeypatch.setattr(
         worker_ws.validator_audits,
         "settled_result",
-        lambda _job_id: _async_result(None),
+        lambda _job_id, **_kwargs: _async_result(None),
     )
     monkeypatch.setattr(
         worker_ws.validator_audits,
@@ -324,7 +324,7 @@ async def test_paid_validator_probe_replays_committed_result_without_gpu_dispatc
     monkeypatch.setattr(
         worker_ws.validator_audits,
         "settled_result",
-        lambda _job_id: _async_result((terminal, 1.5)),
+        lambda _job_id, **_kwargs: _async_result((terminal, 1.5)),
     )
     monkeypatch.setattr(worker_ws.token_stream, "publish_done", publish_done)
 

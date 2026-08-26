@@ -8,7 +8,7 @@ authority. Keep it off until the supervised canary below is approved.
 
 ## Preconditions
 
-1. Deploy reviewed code only after Alembic `0026` succeeds and `alembic check`
+1. Deploy reviewed code only after Alembic `0027` succeeds and `alembic check`
    reports no drift.
 2. Keep `VALIDATOR_PAID_AUDIT_ENABLED=0` during migration and process restart.
 3. Confirm the validator node's assignment journal and dead-letter CLI are the
@@ -38,9 +38,12 @@ zero-den worker acknowledgment; this is expected and remains recognizable.
    ordinary positive-den worker ACK, and one completed assignment result.
 4. Reclaim or replay the same queue job. It must publish the stored result
    without dispatching the worker and without adding a second ledger row.
-5. Exceed each cap in a controlled test. The extra request must fail before GPU
+5. In a staging copy, alter the reclaimed queue payload's assignment id, probe
+   group, nonce, worker, or model. Recovery must fail closed: no stored result,
+   worker dispatch, ledger row, payout, or queue ACK.
+6. Exceed each cap in a controlled test. The extra request must fail before GPU
    dispatch and the aggregate reservation health must show no invariant breach.
-6. Confirm validator evidence remains in the protocol/capability dimension and
+7. Confirm validator evidence remains in the protocol/capability dimension and
    has no routing, reward, strike, or slash consumer.
 
 ## Recovery

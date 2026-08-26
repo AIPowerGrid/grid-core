@@ -123,7 +123,9 @@ async def test_concurrent_paid_audit_reserves_cannot_exceed_daily_den(pg, monkey
                 job_id=str(uuid.uuid4()),
                 assignment_id=f"asg_{uuid.uuid4().hex}",
                 probe_group_id=f"prg_{uuid.uuid4().hex}",
+                grid_nonce=f"nonce_{uuid.uuid4().hex}",
                 worker_id=str(uuid.uuid4()),
+                model="model-a",
                 validator_wallet=wallet,
             )
         except validator_audits.AuditBudgetError:
@@ -177,7 +179,9 @@ async def test_concurrent_paid_audit_scoped_caps_are_atomic(pg, monkeypatch, sco
                 job_id=str(uuid.uuid4()),
                 assignment_id=f"asg_{uuid.uuid4().hex}",
                 probe_group_id=f"prg_{uuid.uuid4().hex}",
+                grid_nonce=f"nonce_{uuid.uuid4().hex}",
                 worker_id=worker_id,
+                model="model-a",
                 validator_wallet=wallet,
             )
         except validator_audits.AuditBudgetError:
@@ -211,7 +215,9 @@ async def test_concurrent_paid_audit_terminal_commits_once_with_replay(pg, monke
         "job_id": job_id,
         "assignment_id": f"asg_{uuid.uuid4().hex}",
         "probe_group_id": f"prg_{uuid.uuid4().hex}",
+        "grid_nonce": f"nonce_{uuid.uuid4().hex}",
         "worker_id": worker_id,
+        "model": "model-a",
         "validator_wallet": wallet,
     }
     terminal = {
@@ -240,6 +246,9 @@ async def test_concurrent_paid_audit_terminal_commits_once_with_replay(pg, monke
         *(
             validator_audits.record_and_settle(
                 job_id=job_id,
+                assignment_id=args["assignment_id"],
+                probe_group_id=args["probe_group_id"],
+                grid_nonce=args["grid_nonce"],
                 ledger_values=ledger_values,
                 terminal_result=terminal,
             )
@@ -248,7 +257,14 @@ async def test_concurrent_paid_audit_terminal_commits_once_with_replay(pg, monke
     )
     assert results.count(("settled", 4.5)) == 1
     assert results.count(("duplicate", 4.5)) == 9
-    assert await validator_audits.settled_result(job_id) == (terminal, 4.5)
+    assert await validator_audits.settled_result(
+        job_id,
+        assignment_id=args["assignment_id"],
+        probe_group_id=args["probe_group_id"],
+        grid_nonce=args["grid_nonce"],
+        worker_id=worker_id,
+        model="model-a",
+    ) == (terminal, 4.5)
     async with await database.new_session() as session:
         assert await session.scalar(sa.select(sa.func.count()).select_from(ledger_t)) == 1
 

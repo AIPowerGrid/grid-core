@@ -64,7 +64,9 @@ def _reservation_args(job_id=None, **overrides):
         "job_id": str(job_id or uuid.uuid4()),
         "assignment_id": f"asg_{uuid.uuid4().hex}",
         "probe_group_id": f"prg_{uuid.uuid4().hex}",
+        "grid_nonce": f"nonce_{uuid.uuid4().hex}",
         "worker_id": str(uuid.uuid4()),
+        "model": "model-a",
         "validator_wallet": WALLET,
     }
     values.update(overrides)
@@ -76,7 +78,7 @@ def _ledger_values(args, den):
         "job_id": args["job_id"],
         "worker_id": args["worker_id"],
         "wallet": "0x" + "b" * 40,
-        "model": "model-a",
+        "model": args["model"],
         "job_type": "text",
         "den": den,
         "output_units": 7,
@@ -95,6 +97,26 @@ def _terminal(args, text="a useful synthetic answer"):
         "usage": {"completion_tokens": 4},
         "finish_reason": "stop",
     }
+
+
+def _binding(args):
+    return {
+        "job_id": args["job_id"],
+        "assignment_id": args["assignment_id"],
+        "probe_group_id": args["probe_group_id"],
+        "grid_nonce": args["grid_nonce"],
+    }
+
+
+async def _settled_result(args):
+    return await validator_audits.settled_result(
+        args["job_id"],
+        assignment_id=args["assignment_id"],
+        probe_group_id=args["probe_group_id"],
+        grid_nonce=args["grid_nonce"],
+        worker_id=args["worker_id"],
+        model=args["model"],
+    )
 
 
 def test_paid_mode_fails_closed_without_complete_policy(monkeypatch):
@@ -131,7 +153,7 @@ async def test_reserve_and_atomic_settle_move_only_actual_den(db):
     }
 
     status, paid = await validator_audits.record_and_settle(
-        job_id=args["job_id"],
+        **_binding(args),
         ledger_values=_ledger_values(args, 3.25),
         terminal_result=_terminal(args),
     )
@@ -145,7 +167,7 @@ async def test_reserve_and_atomic_settle_move_only_actual_den(db):
             )
         ).one()
     assert row == (3.25, "text")
-    replay = await validator_audits.settled_result(args["job_id"])
+    replay = await _settled_result(args)
     assert replay == (_terminal(args), 3.25)
     assert await validator_audits.snapshot() == {
         "budget_day": datetime.now(UTC).date().isoformat(),
@@ -168,7 +190,7 @@ async def test_per_job_and_daily_caps_are_enforced_before_dispatch(db):
     assert (await validator_audits.snapshot())["held_den"] == 20.0
 
     status, paid = await validator_audits.record_and_settle(
-        job_id=first["job_id"],
+        **_binding(first),
         ledger_values=_ledger_values(first, 999),
         terminal_result=_terminal(first),
     )
@@ -245,22 +267,22 @@ async def test_terminal_result_is_json_safe_bounded_and_atomic(db):
     await validator_audits.reserve(**args)
 
     status, paid = await validator_audits.record_and_settle(
-        job_id=args["job_id"],
+        **_binding(args),
         ledger_values=_ledger_values(args, 4),
         terminal_result={"bad": object()},
     )
     assert (status, paid) == ("error", 0.0)
-    assert await validator_audits.settled_result(args["job_id"]) is None
+    assert await _settled_result(args) is None
     async with await database.new_session() as session:
         assert await session.scalar(sa.select(sa.func.count()).select_from(ledger_t)) == 0
 
     status, paid = await validator_audits.record_and_settle(
-        job_id=args["job_id"],
+        **_binding(args),
         ledger_values=_ledger_values(args, 4),
         terminal_result={"full_text": "x" * (validator_audits._TERMINAL_RESULT_MAX_BYTES + 1)},
     )
     assert (status, paid) == ("error", 0.0)
-    assert await validator_audits.settled_result(args["job_id"]) is None
+    assert await _settled_result(args) is None
 
 
 @pytest.mark.asyncio
@@ -272,7 +294,7 @@ async def test_release_then_late_success_cannot_mint_payout(db):
     with pytest.raises(validator_audits.AuditBudgetError, match="already terminal"):
         await validator_audits.reserve(**args)
     status, paid = await validator_audits.record_and_settle(
-        job_id=args["job_id"],
+        **_binding(args),
         ledger_values=_ledger_values(args, 4),
         terminal_result=_terminal(args),
     )
@@ -290,7 +312,7 @@ async def test_settlement_rejects_job_substitution_without_moving_money(db):
     values["job_id"] = str(uuid.uuid4())
 
     assert await validator_audits.record_and_settle(
-        job_id=args["job_id"],
+        **_binding(args),
         ledger_values=values,
         terminal_result=_terminal(args),
     ) == ("error", 0.0)
@@ -313,7 +335,7 @@ async def test_settlement_rejects_worker_substitution_without_moving_money(db):
     values["worker_id"] = str(uuid.uuid4())
 
     assert await validator_audits.record_and_settle(
-        job_id=args["job_id"],
+        **_binding(args),
         ledger_values=values,
         terminal_result=_terminal(args),
     ) == ("worker_mismatch", 0.0)
@@ -326,6 +348,64 @@ async def test_settlement_rejects_worker_substitution_without_moving_money(db):
         )
     assert status == "held"
     assert (await validator_audits.snapshot())["held_den"] == 10.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "settle_status"),
+    (
+        ("assignment_id", "assignment_mismatch"),
+        ("probe_group_id", "assignment_mismatch"),
+        ("grid_nonce", "assignment_mismatch"),
+        ("model", "model_mismatch"),
+    ),
+)
+async def test_settlement_rejects_bound_work_substitution_without_moving_money(
+    db, field, settle_status
+):
+    args = _reservation_args()
+    await validator_audits.reserve(**args)
+    binding = _binding(args)
+    ledger_values = _ledger_values(args, 4)
+    if field == "model":
+        ledger_values["model"] = "different-model"
+    else:
+        binding[field] = f"different-{field}"
+
+    assert await validator_audits.record_and_settle(
+        **binding,
+        ledger_values=ledger_values,
+        terminal_result=_terminal(args),
+    ) == (settle_status, 0.0)
+    async with await database.new_session() as session:
+        assert await session.scalar(sa.select(sa.func.count()).select_from(ledger_t)) == 0
+        status = await session.scalar(
+            sa.select(reservations_t.c.status).where(
+                reservations_t.c.job_id == uuid.UUID(args["job_id"]),
+            ),
+        )
+    assert status == "held"
+
+
+@pytest.mark.asyncio
+async def test_settled_replay_rejects_queue_payload_rebinding(db):
+    args = _reservation_args()
+    await validator_audits.reserve(**args)
+    assert await validator_audits.record_and_settle(
+        **_binding(args),
+        ledger_values=_ledger_values(args, 4),
+        terminal_result=_terminal(args),
+    ) == ("settled", 4.0)
+
+    with pytest.raises(validator_audits.AuditBudgetError, match="different work"):
+        await validator_audits.settled_result(
+            args["job_id"],
+            assignment_id="asg_different",
+            probe_group_id=args["probe_group_id"],
+            grid_nonce=args["grid_nonce"],
+            worker_id=args["worker_id"],
+            model=args["model"],
+        )
 
 
 @pytest.mark.asyncio

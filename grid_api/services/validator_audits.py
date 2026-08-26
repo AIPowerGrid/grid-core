@@ -178,7 +178,9 @@ async def reserve(
     job_id: str,
     assignment_id: str,
     probe_group_id: str,
+    grid_nonce: str,
     worker_id: str,
+    model: str,
     validator_wallet: str,
 ) -> str:
     """Reserve the configured per-job cap before GPU dispatch.
@@ -215,7 +217,9 @@ async def reserve(
                 same_reservation = (
                     existing["assignment_id"] == assignment_id
                     and existing["probe_group_id"] == probe_group_id
+                    and existing["grid_nonce"] == grid_nonce
                     and existing["worker_id"] == worker_uuid
+                    and existing["model"] == model
                     and existing["validator_wallet"] == wallet
                     and _den(existing["reserved_den"]) == reserve_den
                 )
@@ -305,7 +309,9 @@ async def reserve(
                     job_id=job_uuid,
                     assignment_id=assignment_id,
                     probe_group_id=probe_group_id,
+                    grid_nonce=grid_nonce,
                     worker_id=worker_uuid,
+                    model=model,
                     validator_wallet=wallet,
                     budget_day=today,
                     reserved_den=reserve_den,
@@ -332,7 +338,9 @@ async def reserve(
                 same_reservation = (
                     existing["assignment_id"] == assignment_id
                     and existing["probe_group_id"] == probe_group_id
+                    and existing["grid_nonce"] == grid_nonce
                     and existing["worker_id"] == worker_uuid
+                    and existing["model"] == model
                     and existing["validator_wallet"] == wallet
                     and _den(existing["reserved_den"]) == reserve_den
                 )
@@ -351,6 +359,9 @@ async def reserve(
 async def record_and_settle(
     *,
     job_id: str,
+    assignment_id: str,
+    probe_group_id: str,
+    grid_nonce: str,
     ledger_values: dict[str, Any],
     terminal_result: dict[str, Any],
 ) -> tuple[str, float]:
@@ -372,15 +383,28 @@ async def record_and_settle(
             if not reservation:
                 await session.rollback()
                 return "no_reservation", 0.0
+            if (
+                reservation["assignment_id"] != assignment_id
+                or reservation["probe_group_id"] != probe_group_id
+                or reservation["grid_nonce"] != grid_nonce
+            ):
+                await session.rollback()
+                return "assignment_mismatch", 0.0
+            if ledger_svc.as_uuid(ledger_values.get("worker_id")) != reservation["worker_id"]:
+                await session.rollback()
+                return "worker_mismatch", 0.0
+            if str(ledger_values.get("model") or "") != reservation["model"]:
+                await session.rollback()
+                return "model_mismatch", 0.0
+            if ledger_svc.as_uuid(stored_result.get("worker_id")) != reservation["worker_id"]:
+                await session.rollback()
+                return "worker_mismatch", 0.0
             if reservation["status"] == "released":
                 await session.rollback()
                 return "stale_no_payout", 0.0
             if reservation["status"] == "settled":
                 await session.rollback()
                 return "duplicate", float(reservation["settled_den"] or 0)
-            if ledger_svc.as_uuid(ledger_values.get("worker_id")) != reservation["worker_id"]:
-                await session.rollback()
-                return "worker_mismatch", 0.0
 
             actual_den = min(
                 max(_den(ledger_values.get("den", 0)), Decimal(0)),
@@ -435,8 +459,16 @@ async def record_and_settle(
         return "error", 0.0
 
 
-async def settled_result(job_id: str) -> tuple[dict[str, Any], float] | None:
-    """Return an atomically settled synthetic result for crash replay."""
+async def settled_result(
+    job_id: str,
+    *,
+    assignment_id: str,
+    probe_group_id: str,
+    grid_nonce: str,
+    worker_id: str,
+    model: str,
+) -> tuple[dict[str, Any], float] | None:
+    """Return a settled result only when the full queued-work binding matches."""
     async with await new_session() as session:
         row = (
             await session.execute(
@@ -444,11 +476,24 @@ async def settled_result(job_id: str) -> tuple[dict[str, Any], float] | None:
                     reservations_t.c.status,
                     reservations_t.c.settled_den,
                     reservations_t.c.terminal_result,
+                    reservations_t.c.assignment_id,
+                    reservations_t.c.probe_group_id,
+                    reservations_t.c.grid_nonce,
+                    reservations_t.c.worker_id,
+                    reservations_t.c.model,
                 ).where(reservations_t.c.job_id == ledger_svc.as_uuid(job_id)),
             )
         ).mappings().first()
     if not row or row["status"] != "settled" or not isinstance(row["terminal_result"], dict):
         return None
+    if (
+        row["assignment_id"] != assignment_id
+        or row["probe_group_id"] != probe_group_id
+        or row["grid_nonce"] != grid_nonce
+        or row["worker_id"] != ledger_svc.as_uuid(worker_id)
+        or row["model"] != model
+    ):
+        raise AuditBudgetError("settled audit result is bound to different work")
     return dict(row["terminal_result"]), float(row["settled_den"] or 0)
 
 

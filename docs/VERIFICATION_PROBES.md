@@ -209,7 +209,7 @@ Deploy notes / learnings:
   `/home/aipg`.
 
 ### Follow-ups (known, not yet done)
-1. **Probe indistinguishability** — candidate migration `0026` implements a
+1. **Probe indistinguishability** — candidate migration `0027` implements a
    default-off, reviewed-wallet text audit budget and an atomic ordinary worker
    settlement/result/ACK, removing the retrospective zero-den label only in
    that cohort. Global daily/hourly, per-validator daily, per-worker daily, and
