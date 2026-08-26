@@ -400,6 +400,37 @@ _TEXT_CHALLENGE_CAPABILITIES = {
     "token.limit": "text.token_limit.v1",
 }
 
+_TEXT_PROTOCOL_CAPABILITIES = frozenset(
+    {
+        "text.instruction.v1",
+        "text.structured.v1",
+        "text.stop_sequence.v1",
+        "text.token_limit.v1",
+        "text.tool_call.v1",
+    },
+)
+_TEXT_BATCH_SCORING_POLICY = "text.generated.v8"
+
+
+def _score_dimension(modality: str | None, capability: str | None) -> str:
+    """Classify evidence without implying that a canary is a quality score."""
+    normalized_modality = str(modality or "")
+    normalized_capability = str(capability or "")
+    if normalized_capability in _TEXT_PROTOCOL_CAPABILITIES:
+        return "protocol_conformance"
+    if normalized_capability.startswith("text."):
+        return "capability"
+    if "fidelity" in normalized_capability:
+        return "fidelity"
+    if normalized_modality in {"image", "video", "audio"}:
+        return "protocol_conformance"
+    return "availability"
+
+
+def _quality_eligible(modality: str | None, capability: str | None) -> bool:
+    """Current generated probes are not blind workload quality evidence."""
+    return _score_dimension(modality, capability) == "quality"
+
 # Leave headroom for tokenizer differences and request framing. The challenge
 # prompts are counted with the Grid's model-agnostic tokenizer, while a worker's
 # advertised context limit belongs to its backend tokenizer.
@@ -722,7 +753,11 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
     cryptographic randomness so worker order cannot fingerprint a family.
     """
     selected = kind or secrets.choice(_TEXT_CHALLENGE_KINDS)
-    if selected not in _TEXT_CHALLENGE_KINDS:
+    # A shared v8 batch fixes the capability and concrete canary kind while
+    # issuing fresh values to every validator. Math needs explicit add/mul
+    # selectors so every member stays in the same comparable lane.
+    valid_selectors = {*_TEXT_CHALLENGE_KINDS, "math.add", "math.mul"}
+    if selected not in valid_selectors:
         raise ValueError("unsupported text challenge kind")
 
     challenge_max_tokens = PROBE_MAX_TOKENS
@@ -732,10 +767,13 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         expected = token
         kind = "echo"
         capability = "text.instruction.v1"
-    elif selected == "math":
+    elif selected in {"math", "math.add", "math.mul"}:
         a = secrets.randbelow(80) + 11
         b = secrets.randbelow(80) + 11
-        if secrets.randbelow(2):
+        add = selected == "math.add" or (
+            selected == "math" and bool(secrets.randbelow(2))
+        )
+        if add:
             prompt = f"What is {a} + {b}? Reply with only the number."
             expected = str(a + b)
             kind = "math.add"
@@ -987,6 +1025,15 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         challenge["function_name"] = function_name
         challenge["test_inputs"] = test_inputs
     return challenge
+
+
+def _text_generator_selector(canary_kind: str) -> str:
+    """Map a stored concrete canary kind back to its randomized generator."""
+    if canary_kind in {"math.add", "math.mul"}:
+        return canary_kind
+    if canary_kind in _TEXT_CHALLENGE_KINDS:
+        return canary_kind
+    raise AssignmentError("text probe group has an unsupported canary kind")
 
 
 def _strip_think(text: str) -> str:
@@ -1249,6 +1296,8 @@ def _assignment_to_dict(
         "capability": row["capability"],
         "canary_kind": row["canary_kind"],
         "scoring_policy_id": row["scoring_policy_id"],
+        "score_dimension": _score_dimension(row["modality"], row["capability"]),
+        "quality_eligible": _quality_eligible(row["modality"], row["capability"]),
         "status": row["status"],
         "quorum_status": row["quorum_status"],
         "quorum_outcome": row["quorum_outcome"],
@@ -1602,6 +1651,13 @@ async def issue_assignments(
                     continue
                 challenge = _make_text_challenge(secrets.choice(eligible_challenge_kinds))
                 group_id = f"prg_{uuid4().hex}"
+                batch_contract = {
+                    "schema": "aipg.validator.text.batch.v1",
+                    "generator_kind": _text_generator_selector(challenge["kind"]),
+                    "capability": challenge["capability"],
+                    "score_dimension": _score_dimension("text", challenge["capability"]),
+                    "quality_eligible": False,
+                }
                 group_values = {
                     "id": group_id,
                     "target_worker_id": worker_id,
@@ -1610,13 +1666,13 @@ async def issue_assignments(
                     "modality": "text",
                     "capability": challenge["capability"],
                     "canary_kind": challenge["kind"],
-                    "scoring_policy_id": "text.generated.v7",
-                    "challenge": challenge,
+                    "scoring_policy_id": _TEXT_BATCH_SCORING_POLICY,
+                    "challenge": batch_contract,
                     "challenge_hash": _hash_obj({
                         "group_id": group_id,
                         "worker_id": worker_id,
                         "model": model,
-                        "challenge": challenge,
+                        "challenge": batch_contract,
                     }),
                     "status": "pending",
                     "quorum_status": "pending",
@@ -1632,7 +1688,19 @@ async def issue_assignments(
                 await session.execute(sa.insert(probe_groups_t).values(**group_values))
                 group = group_values
             else:
-                challenge = group["challenge"] or {}
+                if group["scoring_policy_id"] == _TEXT_BATCH_SCORING_POLICY:
+                    challenge = _make_text_challenge(
+                        _text_generator_selector(str(group["canary_kind"])),
+                    )
+                    if (
+                        challenge["capability"] != group["capability"]
+                        or challenge["kind"] != group["canary_kind"]
+                    ):
+                        raise AssignmentError("generated challenge does not match probe batch")
+                else:
+                    # Rollout compatibility: finish already-open v7 groups with
+                    # their original shared challenge, then create only v8.
+                    challenge = group["challenge"] or {}
 
             assignment_id = f"asg_{uuid4().hex}"
             grid_nonce = secrets.token_urlsafe(24)
@@ -1664,7 +1732,16 @@ async def issue_assignments(
                 "finalized": None,
             }
             await session.execute(
-                sa.insert(assignments_t).values(**{**values, "challenge": {}})
+                sa.insert(assignments_t).values(
+                    **{
+                        **values,
+                        "challenge": (
+                            challenge
+                            if group["scoring_policy_id"] == _TEXT_BATCH_SCORING_POLICY
+                            else {}
+                        ),
+                    },
+                ),
             )
             rows.append(values)
             existing_keys.add((worker_id, model))
@@ -2865,6 +2942,9 @@ async def scorecards(
             "model": row["model"],
             "modality": row["modality"],
             "capability": row["capability"],
+            "score_dimension": _score_dimension(row["modality"], row["capability"]),
+            "quality_eligible": _quality_eligible(row["modality"], row["capability"]),
+            "quality_score": None,
             "authority": row["authority"],
             "quorum_status": row["quorum_status"],
             "total": total,
