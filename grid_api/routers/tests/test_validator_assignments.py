@@ -366,6 +366,12 @@ async def test_preview_attestation_does_not_affect_authoritative_scorecards(db):
     assert preview["items"][0]["total"] == 1
     assert preview["items"][0]["quality_eligible"] is False
     assert preview["items"][0]["quality_score"] is None
+    assert preview["items"][0]["verdict_verification"] == {
+        "basis": "validator_opinion",
+        "core_matched": 0,
+        "core_disagreed": 0,
+        "validator_opinion": 1,
+    }
 
 
 @pytest.mark.asyncio
@@ -538,6 +544,12 @@ async def test_authoritative_attestation_requires_grid_assignment_and_nonce(db):
     assert authoritative["items"][0]["authority"] == "authoritative"
     assert authoritative["items"][0]["quorum_status"] == "pending"
     assert authoritative["items"][0]["worker_id"] == assignment["target_worker_id"]
+    assert authoritative["items"][0]["verdict_verification"] == {
+        "basis": "objective_core_cross_check",
+        "core_matched": 1,
+        "core_disagreed": 0,
+        "validator_opinion": 0,
+    }
 
     next_work = await validators_svc.issue_assignments(
         account_id=account_id,
@@ -552,6 +564,31 @@ async def test_authoritative_attestation_requires_grid_assignment_and_nonce(db):
         limit=1,
     )
     assert next_work["assignments"] == []
+
+
+@pytest.mark.asyncio
+async def test_objective_verdict_disagreement_is_explicit_in_scorecards(db):
+    account_id = uuid.uuid4()
+    validator_id, _assignment_row, payload = await _assignment(
+        account_id,
+        verdict="healthy",
+    )
+    dissent = {**payload, "verdict": "failed"}
+    await validators_svc.record_attestation(
+        account_id=account_id,
+        validator_id=validator_id,
+        payload=dissent,
+        signature=_sign(dissent),
+    )
+
+    scorecard = (await validators_svc.scorecards(authority="authoritative"))["items"][0]
+    assert scorecard["failed"] == 1
+    assert scorecard["verdict_verification"] == {
+        "basis": "objective_core_cross_check",
+        "core_matched": 0,
+        "core_disagreed": 1,
+        "validator_opinion": 0,
+    }
 
 
 @pytest.mark.asyncio
@@ -1061,6 +1098,71 @@ async def test_32k_context_assignment_requires_target_worker_headroom(db):
         limit=1,
     )
     assert reloaded["assignments"][0]["challenge"] == assignment["challenge"]
+
+
+@pytest.mark.asyncio
+async def test_text_assignment_rotates_across_every_advertised_model(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id)
+    worker = {
+        "worker_id": str(uuid.uuid4()),
+        "name": "rig-multi-model",
+        "models": ["model-a", "model-b", "model-a"],
+        "job_types": ["text"],
+    }
+    first = (
+        await validators_svc.issue_assignments(
+            account_id=account_id,
+            validator_id=validator_id,
+            validator_wallet=TEST_WALLET,
+            active_workers=[worker],
+            limit=1,
+        )
+    )["assignments"][0]
+    assert first["model"] == "model-a"
+
+    evidence_hash = "a" * 64
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(assignments_t)
+            .where(assignments_t.c.id == first["assignment_id"])
+            .values(
+                probe_status="completed",
+                probe_evidence_hash=evidence_hash,
+                probe_verdict="healthy",
+            )
+        )
+        await session.commit()
+    payload = _payload(
+        assignment_source="grid",
+        assignment_id=first["assignment_id"],
+        probe_group_id=first["probe_group_id"],
+        grid_nonce=first["grid_nonce"],
+        worker_id=first["target_worker_id"],
+        model=first["model"],
+        modality=first["modality"],
+        capability=first["capability"],
+        canary_kind=first["canary_kind"],
+        evidence_hash=evidence_hash,
+        verdict="healthy",
+    )
+    await validators_svc.record_attestation(
+        account_id=account_id,
+        validator_id=validator_id,
+        payload=payload,
+        signature=_sign(payload),
+    )
+
+    second = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=[worker],
+        limit=1,
+    )
+    assert second["count"] == 1
+    assert second["assignments"][0]["model"] == "model-b"
+    assert second["assignments"][0]["probe_group_id"] != first["probe_group_id"]
 
 
 @pytest.mark.asyncio
