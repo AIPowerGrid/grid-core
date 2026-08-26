@@ -18,8 +18,9 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   and worker structures.
 - `abis/` / `_abi.py` - local contract ABI loaders used by background sync.
 - `main.py` - lifecycle: DB/Redis init, stale-job reclaimer, reservation and
-  billing invariant monitors, validator operational-history pruning, operator
-  alerts, recipe sync, router registration, and root health metadata.
+  billing invariant monitors, validator operational-history pruning,
+  default-off finalized worker-bond sync, operator alerts, recipe sync, router
+  registration, and root health metadata.
 
 ## Local Contracts
 
@@ -33,6 +34,9 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   production path without a dedicated design/test pass.
 - **On-chain:** read via background sync loops or offline jobs, cached; never
   perform Base RPC calls on the hot request path.
+- The validator bond loop may update only existing reviewed reference rows. It
+  verifies one finalized block, the configured Diamond address, all expected
+  selector routes, and the routed facet runtime hash before one atomic refresh.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
 - **Safety:** `services/sanitizer.py` is secret redaction, not a content safety

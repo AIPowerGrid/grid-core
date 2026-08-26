@@ -18,6 +18,7 @@ from eth_account import Account
 from eth_account.messages import encode_defunct
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -203,8 +204,14 @@ def _media_settings(*, enabled=True, video_enabled=False):
     return SimpleNamespace(
         validator_media_probe_enabled=enabled,
         validator_video_probe_enabled=video_enabled,
+        validator_media_bond_sync_enabled=True,
+        base_rpc_url=SecretStr("https://rpc.invalid"),
         validator_media_bond_chain_id=8453,
         validator_media_bond_contract="0x" + "a" * 40,
+        validator_media_bond_facet_runtime_hash="0x" + "b" * 64,
+        validator_media_bond_confirmation_rpc_url=SecretStr(
+            "https://rpc-two.invalid",
+        ),
         validator_media_bond_verifier_version="worker-registry-v2",
         validator_media_minimum_bond_raw=10**18,
         validator_media_minimum_quality_pass_rate=0.95,
@@ -2598,6 +2605,34 @@ async def test_image_assignment_gate_is_fail_closed(db, monkeypatch):
             limit=1,
             modality="image",
         )
+
+
+def test_image_policy_requires_live_finalized_sync_and_runtime(monkeypatch):
+    settings = _media_settings()
+    settings.validator_media_bond_sync_enabled = False
+    settings.validator_media_bond_facet_runtime_hash = ""
+    settings.validator_media_bond_confirmation_rpc_url = None
+    monkeypatch.setattr(validators_svc, "get_settings", lambda: settings)
+
+    policy = validators_svc.media_validation_policy()
+
+    assert policy["enabled"] is False
+    assert "finalized bond sync disabled" in policy["reasons"]
+    assert "reviewed bond facet runtime not configured" in policy["reasons"]
+    assert "independent confirmation RPC not configured" in policy["reasons"]
+
+
+def test_image_policy_rejects_same_rpc_host(monkeypatch):
+    settings = _media_settings()
+    settings.validator_media_bond_confirmation_rpc_url = SecretStr(
+        "https://rpc.invalid/another-account",
+    )
+    monkeypatch.setattr(validators_svc, "get_settings", lambda: settings)
+
+    policy = validators_svc.media_validation_policy()
+
+    assert policy["enabled"] is False
+    assert "Base RPC sources are not independent" in policy["reasons"]
 
 
 @pytest.mark.asyncio

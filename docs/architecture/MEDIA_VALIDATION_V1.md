@@ -102,14 +102,28 @@ block, minimum bond, active status, and non-slashed status. A stale, missing, or
 ambiguous bond snapshot removes the worker from selection without affecting
 ordinary production routing.
 
-Migration `0023` and `services/validator_references.py` implement the durable
-record and fail-closed identity/freshness/rotation selector. The dark image
+Migration `0023`, `services/validator_references.py`, and the default-off
+`services/validator_bonds.py` background loop implement the durable record,
+finalized bond refresh, and fail-closed identity/freshness/rotation selector.
+The sync queries two distinct Base RPC providers, pins both to their newest
+mutually finalized block, and requires exact agreement on that block hash and
+complete snapshot. For each source it verifies
+the configured Grid Diamond, requires all 16 reviewed WorkerRegistry selectors
+to resolve to one facet, pins that facet's runtime hash, and reads only the
+distinct payout wallets already present in the reviewed reference table at one
+finalized block. It never scans the registry-wide append-only worker history, so
+historical worker growth cannot exhaust the bounded reference sync. The sync
+updates only reference rows created by a separate review process; chain state
+alone never creates or activates a trusted reference. The dark image
 assignment path calls it in the same transaction that persists the immutable
 probe group. Insufficient or ambiguous references produce no assignment.
 
 The currently deployed WorkerRegistry does not yet provide the reviewed
-cooldown-backed bond contract required by this design. Until that facet and its
-sync are deployed and verified, the eligible reference pool is empty.
+cooldown-backed bond contract required by this design. The sync defaults off,
+its address/runtime/version configuration defaults empty, and ordinary failures
+leave the prior cache untouched so freshness expires fail closed. Until the
+facet is independently reviewed, cut, verified, and the sync is dark-canary
+proven, the eligible reference pool is empty.
 
 Migration `0024` adds the group execution lease, bounded attempt counter,
 frozen witness JSON, full-witness commitment, and completion timestamp. This
@@ -308,8 +322,12 @@ claim model fidelity. Missing or ambiguous timing metadata yields no assignment.
 All gates are required before an operator enables production image assignments:
 
 - reviewed cooldown-backed WorkerRegistry facet deployed and code-verified;
-- background bond sync with finalized-block, chain-id, code-address, freshness,
-  and reorg tests;
+- background bond sync with finalized-block, chain-id, Diamond selector-route,
+  facet-runtime, bounded reviewed-wallet reads, freshness, stale-write, and
+  reorg/finality tests;
+- at least two independently operated Base RPC sources (or one independently
+  verified local node plus a second provider) agreeing on one mutually finalized
+  block hash and bond snapshot before the cache is production-authoritative;
 - at least three independently controlled bonded workers on each validated
   model, providing one candidate plus two references;
 - reference-pool schema, rotation, independence, and ambiguity tests on real

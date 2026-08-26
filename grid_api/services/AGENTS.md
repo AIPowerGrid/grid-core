@@ -123,6 +123,13 @@ content sanitization, and reward settlement.
   hard-targets one candidate, freezes one MP4 witness, and checks objective
   container/timing/motion properties. It does not claim model fidelity and has
   no reference workers. Both lanes remain non-economic.
+  `validator_bonds.py` owns the default-off Base cache refresh. It verifies all
+  WorkerRegistry selectors route through the reviewed Grid Diamond to one
+  bytecode-pinned facet at one mutually finalized block, requires two distinct
+  RPC sources to return the exact same block hash and complete snapshot, bounds
+  reads to the payout wallets in pre-existing reviewed reference rows, and never
+  scans the global append-only worker history. It never creates/activates a
+  reference, mutates quality review, or touches economics.
 - **Model/media governance:** `recipes.py`, `recipe_import.py`, `styles.py`,
   `loras.py`, `model_registry.py`.
 - **Safety:** `sanitizer.py` - **secrets redactor only** (strips API keys/PGP from prompts).
@@ -312,6 +319,9 @@ content sanitization, and reward settlement.
   over scattered `os.getenv`.
 - Keep synchronous Web3/R2/network work off the event loop; use startup loops,
   offline jobs, or `asyncio.to_thread` as appropriate.
+- Bond-sync failure must leave the last snapshot untouched so freshness expiry
+  fails closed. Never partially persist an RPC traversal or accept a stale block
+  over a newer cached block.
 
 ## Verification
 

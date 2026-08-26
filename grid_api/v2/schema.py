@@ -340,9 +340,10 @@ workers = sa.Table(
 
 
 # Bond and quality snapshots used only to select rotating media-validation
-# references. Rows are written by a future finalized-block background sync and
-# are never worker self-report. The table remains empty until the reviewed,
-# cooldown-backed WorkerRegistry is deployed and verified.
+# references. Bond fields are refreshed by the default-off finalized-block
+# synchronizer after two RPC providers agree and are never worker self-report.
+# Reference rows still require a separate operator review; chain state alone
+# never creates or activates one.
 validator_reference_workers = sa.Table(
     "grid_validator_reference_workers",
     metadata,

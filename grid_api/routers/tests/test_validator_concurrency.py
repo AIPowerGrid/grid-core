@@ -17,6 +17,7 @@ import pytest_asyncio
 import sqlalchemy as sa
 from eth_account import Account
 from eth_account.messages import encode_defunct
+from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from grid_api import auth, database, safe_logging
@@ -178,8 +179,14 @@ def _reference_policy():
 def _media_settings():
     return SimpleNamespace(
         validator_media_probe_enabled=True,
+        validator_media_bond_sync_enabled=True,
+        base_rpc_url=SecretStr("https://rpc.invalid"),
         validator_media_bond_chain_id=8453,
         validator_media_bond_contract="0x" + "a" * 40,
+        validator_media_bond_facet_runtime_hash="0x" + "b" * 64,
+        validator_media_bond_confirmation_rpc_url=SecretStr(
+            "https://rpc-two.invalid",
+        ),
         validator_media_bond_verifier_version="worker-registry-v2",
         validator_media_minimum_bond_raw=10**18,
         validator_media_minimum_quality_pass_rate=0.95,

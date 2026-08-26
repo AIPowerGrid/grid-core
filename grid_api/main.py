@@ -132,6 +132,37 @@ async def _validator_history_sweeper():
         await asyncio.sleep(interval)
 
 
+async def _validator_bond_sync_loop():
+    """Refresh the dark media-reference bond cache from finalized Base state."""
+    from .config import get_settings
+    from .safe_logging import error_type
+    from .services import alerts
+    from .services.validator_bonds import sync_reference_bonds_once
+
+    settings = get_settings()
+    interval = max(60, settings.validator_media_bond_sync_seconds)
+    while True:
+        try:
+            result = await sync_reference_bonds_once(settings=settings)
+            if result["status"] == "synced":
+                logger.info(
+                    "Validator bond cache refreshed rows=%d inactive=%d block=%d",
+                    result["updated"],
+                    result["inactive"],
+                    result["finalized_block"],
+                )
+        except Exception as exc:
+            logger.error("Validator bond sync error_type=%s", error_type(exc))
+            alerts.emit(
+                "validator_bond_sync_failed",
+                "warning",
+                "The finalized worker-bond cache refresh failed.",
+                fields={"error_type": error_type(exc)},
+                dedupe_key="validator-bond-sync-failed",
+            )
+        await asyncio.sleep(interval)
+
+
 async def _recipe_sync_loop():
     """Background task: refresh approved recipes from on-chain RecipeVault.
     No-ops until RECIPEVAULT_ADDRESS/BASE_RPC_URL are set; curated local recipes
@@ -230,6 +261,7 @@ async def lifespan(app: FastAPI):
     recipe_sync = asyncio.create_task(_recipe_sync_loop())
     sweeper = asyncio.create_task(_reservation_sweeper())
     validator_history_sweeper = asyncio.create_task(_validator_history_sweeper())
+    validator_bond_sync = asyncio.create_task(_validator_bond_sync_loop())
     billing_monitor = asyncio.create_task(_billing_monitor())
     # Verification probes ("validator zero") — dormant unless GRID_PROBE_ENABLED;
     # even ON it only records evidence (no reward/slash). See VERIFICATION_PROBES.md.
@@ -255,6 +287,7 @@ async def lifespan(app: FastAPI):
     recipe_sync.cancel()
     sweeper.cancel()
     validator_history_sweeper.cancel()
+    validator_bond_sync.cancel()
     billing_monitor.cancel()
     prober.cancel()
     await close_p2p()  # Shutdown P2P

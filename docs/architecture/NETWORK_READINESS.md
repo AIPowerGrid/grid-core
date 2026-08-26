@@ -333,7 +333,14 @@ rewards, strikes, bonds, or slashing.
 Core has a fail-closed finalized-bond snapshot cache and distinct
 account/wallet rotation selector. The eligible pool is empty because the
 reviewed cooldown-backed WorkerRegistry deployment and independent reference
-operators do not exist. No permanent trusted worker is accepted as the oracle.
+operators do not exist. A stacked Core candidate now verifies the Grid Diamond,
+all 16 WorkerRegistry selector routes, and the routed facet runtime at the newest
+mutually finalized block shared by two agreeing RPC providers before atomically
+refreshing only independently reviewed rows. It reads only those reviewed payout
+wallets and never scans the registry-wide append-only worker history;
+its loop and media assignment gate both default off. External contract review,
+facet deployment, live RPC/reorg canary evidence, and independent reference
+operators remain open. No permanent trusted worker is accepted as the oracle.
 
 ## Demand And Economics
 

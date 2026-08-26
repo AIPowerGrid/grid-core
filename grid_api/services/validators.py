@@ -34,6 +34,7 @@ from ..v2.schema import validator_attestations as attestations_t
 from ..v2.schema import validator_probe_groups as probe_groups_t
 from ..v2.schema import validators as validators_t
 from ..v2.schema import workers as workers_t
+from .validator_bonds import rpc_sources_are_distinct
 
 logger = logging.getLogger("grid_api.validators")
 
@@ -79,6 +80,7 @@ VALIDATOR_OPERATOR_SAMPLE_INTERVAL_SECONDS = max(
 )
 
 _ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
 _SIG_RE = re.compile(r"^(0x)?[0-9a-fA-F]{130}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -756,12 +758,31 @@ def media_validation_policy() -> dict[str, Any]:
     """Return the fail-closed assignment gate without exposing private state."""
     settings = get_settings()
     contract = settings.validator_media_bond_contract.strip().lower()
+    runtime_hash = settings.validator_media_bond_facet_runtime_hash.strip().lower()
     verifier = settings.validator_media_bond_verifier_version.strip()
+    primary_rpc = (
+        settings.base_rpc_url.get_secret_value() if settings.base_rpc_url else ""
+    )
+    confirmation_rpc = (
+        settings.validator_media_bond_confirmation_rpc_url.get_secret_value()
+        if settings.validator_media_bond_confirmation_rpc_url
+        else ""
+    )
     reasons: list[str] = []
     if not settings.validator_media_probe_enabled:
         reasons.append("operator gate disabled")
+    if not settings.validator_media_bond_sync_enabled:
+        reasons.append("finalized bond sync disabled")
+    if not settings.base_rpc_url:
+        reasons.append("Base RPC not configured")
+    if not settings.validator_media_bond_confirmation_rpc_url:
+        reasons.append("independent confirmation RPC not configured")
+    elif not rpc_sources_are_distinct(primary_rpc, confirmation_rpc):
+        reasons.append("Base RPC sources are not independent")
     if not _ADDR_RE.fullmatch(contract):
         reasons.append("reviewed bond contract not configured")
+    if not _HASH_RE.fullmatch(runtime_hash):
+        reasons.append("reviewed bond facet runtime not configured")
     if not verifier:
         reasons.append("bond verifier version not configured")
     if settings.validator_media_bond_chain_id <= 0:
@@ -782,6 +803,7 @@ def media_validation_policy() -> dict[str, Any]:
         "reasons": reasons,
         "chain_id": settings.validator_media_bond_chain_id,
         "bond_contract": contract,
+        "bond_facet_runtime_hash": runtime_hash,
         "bond_verifier_version": verifier,
         "minimum_bond_raw": settings.validator_media_minimum_bond_raw,
         "minimum_quality_pass_rate": settings.validator_media_minimum_quality_pass_rate,

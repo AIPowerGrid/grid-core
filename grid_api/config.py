@@ -50,6 +50,10 @@ class GridSettings(BaseSettings):
     )
     worker_enrollment_ttl_seconds: int = 900
 
+    # Shared Base read endpoint. SecretStr prevents authenticated provider URLs
+    # from appearing in settings reprs or operational logs.
+    base_rpc_url: SecretStr | None = None
+
     # Assignment-bound media validation. This stays dark until every field is
     # explicitly configured against a reviewed, deployed WorkerRegistry and a
     # fresh finalized-block/quality sync has populated the reference pool.
@@ -63,8 +67,16 @@ class GridSettings(BaseSettings):
     validator_video_probe_enabled: bool = False
     validator_media_bond_chain_id: int = 8453
     validator_media_bond_contract: str = ""
+    validator_media_bond_facet_runtime_hash: str = ""
+    validator_media_bond_confirmation_rpc_url: SecretStr | None = None
     validator_media_bond_verifier_version: str = ""
     validator_media_minimum_bond_raw: int = 0
+    validator_media_bond_sync_enabled: bool = False
+    validator_media_bond_sync_seconds: int = 300
+    validator_media_bond_rpc_timeout_seconds: int = 20
+    # Bound reviewed reference-wallet reads per finalized snapshot. Core never
+    # scans the registry-wide append-only worker history for this cache.
+    validator_media_bond_max_workers: int = 10_000
     validator_media_minimum_quality_pass_rate: float = 0.95
     validator_media_max_output_bytes: int = 25 * 1024 * 1024
     validator_media_probe_timeout_seconds: int = 600

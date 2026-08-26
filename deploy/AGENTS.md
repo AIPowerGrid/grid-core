@@ -73,6 +73,12 @@ executes an immutable release selected through `/home/aipg/current`.
   until the reviewed bond contract/verifier/minimum, finalized reference sync,
   governed deterministic recipe/model digest, independent operators, immutable
   R2 witness retention, and supervised preview gates are all proven.
+- `VALIDATOR_MEDIA_BOND_SYNC_ENABLED` is independently dark. Its Diamond
+  address, facet runtime hash, verifier version, primary Base RPC, independently
+  operated confirmation RPC, bounds, and interval must be set together. The
+  cache refreshes only when both RPCs return the same complete finalized
+  snapshot. Enabling the loop does not enable media assignments or
+  create/activate a reference row.
 - Do not enable the backup timer merely because its unit was installed. Run one
   backup, restore it into the generated scratch database, migrate with the exact
   candidate release, and inspect the proof first.
