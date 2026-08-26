@@ -452,6 +452,43 @@ async def test_concurrent_validators_join_one_shared_probe_group(pg):
 
 
 @pytest.mark.asyncio
+async def test_concurrent_common_control_gets_one_shared_probe_seat(pg):
+    validators = await _seed_validators(5)
+    async with await database.new_session() as session:
+        for index, (_account_id, validator_id, _wallet, _key) in enumerate(validators):
+            operator_group = "opg_common_control_01" if index < 2 else f"opg_independent_{index:02d}"
+            await session.execute(
+                sa.update(validators_t)
+                .where(validators_t.c.id == validator_id)
+                .values(operator_group_id=operator_group),
+            )
+        await session.commit()
+
+    workers = _workers()
+    results = await asyncio.gather(
+        *[
+            validators_svc.issue_assignments(
+                account_id=account_id,
+                validator_id=validator_id,
+                validator_wallet=wallet,
+                active_workers=workers,
+                limit=1,
+            )
+            for account_id, validator_id, wallet, _private_key in validators
+        ],
+    )
+
+    assert sum(bool(result["assignments"]) for result in results[:2]) == 1
+    assert all(result["assignments"] for result in results[2:])
+    assignments = [item for result in results for item in result["assignments"]]
+    assert len(assignments) == 4
+    assert len({item["probe_group_id"] for item in assignments}) == 1
+    async with await database.new_session() as session:
+        assert await session.scalar(sa.select(sa.func.count()).select_from(probe_groups_t)) == 1
+        assert await session.scalar(sa.select(sa.func.count()).select_from(assignments_t)) == 4
+
+
+@pytest.mark.asyncio
 async def test_postgres_prune_preserves_evidence_and_clears_retired_links(pg):
     account_id, validator_id, wallet, _private_key = (await _seed_validators(1))[0]
     issued = await validators_svc.issue_assignments(

@@ -63,7 +63,11 @@ Exit evidence:
   commitments and bounded evidence.
 
 Registration alone does not satisfy this phase. Operator independence must be
-reviewed and recorded through a privacy-safe process.
+reviewed and recorded through a privacy-safe process. The first off-chain
+registry assigns opaque common-control groups, requires a 72-hour sampled
+qualification, expires reviews, prevents a group from occupying multiple seats,
+and publishes only aggregate counts. It is a conservative precursor to, not a
+replacement for, the audited Base registry in Phase B.
 
 ## Phase B - Base Validator And Evidence Contracts
 

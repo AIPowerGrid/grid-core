@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current head: `0025`
+- `versions/` - ordered migration revisions. Current head: `0026`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -26,7 +26,9 @@ production database match the Grid-owned schema contracts without relying on
   distinct-validator quorum constraints; `0023` adds the fail-closed bonded
   media reference-worker snapshot pool; `0024` adds one leased media execution
   and one committed frozen witness set per probe group; `0025` adds a bounded
-  durable assignment result used to recover completed-but-unattested probes).
+  durable assignment result used to recover completed-but-unattested probes;
+  `0026` adds opaque operator groups, expiring independence-review
+  state, and bounded qualification heartbeat samples).
 
 ## Local Contracts
 
@@ -46,6 +48,9 @@ production database match the Grid-owned schema contracts without relying on
   bounded, and a late result may update only the matching current job id. A
   completed assignment may replay only its stored result to the same registered
   validator during the attestation grace window.
+- `0026` is operational metadata, not a trust grant. Existing registrations
+  backfill to `unreviewed`; only the preview-first maintainer review tool may
+  move them through candidate qualification to an expiring verified state.
 - `grid_validator_reference_workers` is a background-sync cache, not worker
   self-report. Keep it empty until the reviewed cooldown-backed WorkerRegistry
   is deployed; media validation must fail closed when snapshots are stale or

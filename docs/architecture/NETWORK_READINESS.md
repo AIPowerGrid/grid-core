@@ -137,6 +137,12 @@ quorum mechanics but count as one operator. No evidence currently proves five
 independent operators. Until that exists, public language must remain
 **distributed testing**, not decentralized validation.
 
+Core candidate code adds the missing privacy-safe registry: opaque common-control
+groups, rate-limited qualification samples, expiring reviews, one group per
+quorum seat, and aggregate-only health. This is source-ready but does not change
+the external status above until migration `0026` is dark-deployed and real
+operators complete qualification.
+
 ## Real Quorum
 
 ### 8. Shared probe groups - Implemented/live

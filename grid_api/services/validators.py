@@ -73,6 +73,10 @@ VALIDATOR_HEARTBEAT_FRESH_SECONDS = max(
     60,
     int(os.getenv("VALIDATOR_HEARTBEAT_FRESH_SECONDS", "900") or 900),
 )
+VALIDATOR_OPERATOR_SAMPLE_INTERVAL_SECONDS = max(
+    60,
+    int(os.getenv("VALIDATOR_OPERATOR_SAMPLE_INTERVAL_SECONDS", "300") or 300),
+)
 
 _ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _SIG_RE = re.compile(r"^(0x)?[0-9a-fA-F]{130}$")
@@ -549,6 +553,14 @@ async def heartbeat_validator(
         raise RegistrationError("software_version is invalid")
     normalized_capabilities = _registration_capabilities({"capabilities": capabilities})
     now = _now()
+    sample_cutoff = now - timedelta(seconds=VALIDATOR_OPERATOR_SAMPLE_INTERVAL_SECONDS)
+    sample_due = sa.and_(
+        validators_t.c.independence_status.in_(("candidate", "verified")),
+        sa.or_(
+            validators_t.c.last_heartbeat_sampled_at.is_(None),
+            validators_t.c.last_heartbeat_sampled_at <= sample_cutoff,
+        ),
+    )
     async with await new_session() as session:
         await session.execute(
             sa.update(validators_t)
@@ -557,6 +569,14 @@ async def heartbeat_validator(
                 software_version=software_version,
                 capabilities=normalized_capabilities,
                 last_heartbeat=now,
+                heartbeat_sample_count=sa.case(
+                    (sample_due, validators_t.c.heartbeat_sample_count + 1),
+                    else_=validators_t.c.heartbeat_sample_count,
+                ),
+                last_heartbeat_sampled_at=sa.case(
+                    (sample_due, now),
+                    else_=validators_t.c.last_heartbeat_sampled_at,
+                ),
                 updated=now,
             ),
         )
@@ -567,6 +587,33 @@ async def heartbeat_validator(
         "last_heartbeat": now.isoformat(),
         "economic_effect": "none",
     }
+
+
+async def _operator_already_assigned(
+    session,
+    *,
+    probe_group_id: str,
+    validator_id: str,
+    operator_group_id: str | None,
+) -> bool:
+    """Return true when this registration or its reviewed control group has a seat."""
+    conditions = [assignments_t.c.validator_id == validator_id]
+    if operator_group_id:
+        conditions.append(validators_t.c.operator_group_id == operator_group_id)
+    count = await session.scalar(
+        sa.select(sa.func.count())
+        .select_from(
+            assignments_t.outerjoin(
+                validators_t,
+                validators_t.c.id == assignments_t.c.validator_id,
+            )
+        )
+        .where(
+            assignments_t.c.probe_group_id == probe_group_id,
+            sa.or_(*conditions),
+        )
+    )
+    return bool(count)
 
 
 _TEXT_CHALLENGE_KINDS = (
@@ -1737,7 +1784,11 @@ async def issue_assignments(
         # uniqueness guard remains the final protection on group membership.
         validator_row = (
             await session.execute(
-                sa.select(validators_t.c.id, validators_t.c.capabilities)
+                sa.select(
+                    validators_t.c.id,
+                    validators_t.c.capabilities,
+                    validators_t.c.operator_group_id,
+                )
                 .where(validators_t.c.id == validator_id)
                 .with_for_update()
             )
@@ -1849,13 +1900,11 @@ async def issue_assignments(
                 )
                 if assigned_count >= int(candidate["target_validator_count"]):
                     continue
-                already_assigned = await session.scalar(
-                    sa.select(sa.func.count())
-                    .select_from(assignments_t)
-                    .where(
-                        assignments_t.c.probe_group_id == candidate["id"],
-                        assignments_t.c.validator_id == validator_id,
-                    )
+                already_assigned = await _operator_already_assigned(
+                    session,
+                    probe_group_id=str(candidate["id"]),
+                    validator_id=validator_id,
+                    operator_group_id=validator_row["operator_group_id"],
                 )
                 if not already_assigned:
                     group = candidate
@@ -2043,7 +2092,11 @@ async def _issue_image_assignments(
     async with await new_session() as session:
         validator_row = (
             await session.execute(
-                sa.select(validators_t.c.id, validators_t.c.capabilities)
+                sa.select(
+                    validators_t.c.id,
+                    validators_t.c.capabilities,
+                    validators_t.c.operator_group_id,
+                )
                 .where(validators_t.c.id == validator_id)
                 .with_for_update()
             )
@@ -2134,11 +2187,11 @@ async def _issue_image_assignments(
                     if assigned_count >= int(candidate["target_validator_count"]):
                         continue
                     unfilled_group_exists = True
-                    already_assigned = await session.scalar(
-                        sa.select(sa.func.count()).select_from(assignments_t).where(
-                            assignments_t.c.probe_group_id == candidate["id"],
-                            assignments_t.c.validator_id == validator_id,
-                        )
+                    already_assigned = await _operator_already_assigned(
+                        session,
+                        probe_group_id=str(candidate["id"]),
+                        validator_id=validator_id,
+                        operator_group_id=validator_row["operator_group_id"],
                     )
                     if not already_assigned:
                         group = candidate
@@ -2272,7 +2325,11 @@ async def _issue_video_assignments(
     async with await new_session() as session:
         validator_row = (
             await session.execute(
-                sa.select(validators_t.c.id, validators_t.c.capabilities)
+                sa.select(
+                    validators_t.c.id,
+                    validators_t.c.capabilities,
+                    validators_t.c.operator_group_id,
+                )
                 .where(validators_t.c.id == validator_id)
                 .with_for_update()
             )
@@ -2363,11 +2420,11 @@ async def _issue_video_assignments(
                     if assigned_count >= int(candidate["target_validator_count"]):
                         continue
                     unfilled_group_exists = True
-                    already_assigned = await session.scalar(
-                        sa.select(sa.func.count()).select_from(assignments_t).where(
-                            assignments_t.c.probe_group_id == candidate["id"],
-                            assignments_t.c.validator_id == validator_id,
-                        )
+                    already_assigned = await _operator_already_assigned(
+                        session,
+                        probe_group_id=str(candidate["id"]),
+                        validator_id=validator_id,
+                        operator_group_id=validator_row["operator_group_id"],
                     )
                     if not already_assigned:
                         group = candidate
@@ -2459,7 +2516,9 @@ async def _issue_video_assignments(
 
 async def _network_health_in_session(session, *, since_hours: int) -> dict[str, Any]:
     """Return privacy-preserving aggregate validator network health."""
-    cutoff = _now() - timedelta(hours=since_hours)
+    now = _now()
+    cutoff = now - timedelta(hours=since_hours)
+    heartbeat_cutoff = now - timedelta(seconds=VALIDATOR_HEARTBEAT_FRESH_SECONDS)
     vote_rows = (
         await session.execute(
             sa.select(
@@ -2518,14 +2577,47 @@ async def _network_health_in_session(session, *, since_hours: int) -> dict[str, 
             )
             .where(
                 validators_t.c.status == "active",
-                validators_t.c.last_heartbeat
-                >= _now() - timedelta(seconds=VALIDATOR_HEARTBEAT_FRESH_SECONDS),
+                validators_t.c.last_heartbeat >= heartbeat_cutoff,
             )
             .group_by(validators_t.c.software_version)
             .order_by(sa.func.count().desc(), validators_t.c.software_version.asc())
             .limit(20)
         )
     ).mappings().all()
+    verified_filter = sa.and_(
+        validators_t.c.status == "active",
+        validators_t.c.last_heartbeat >= heartbeat_cutoff,
+        validators_t.c.operator_group_id.isnot(None),
+        validators_t.c.independence_status == "verified",
+        validators_t.c.independence_reviewed_at.isnot(None),
+        validators_t.c.independence_expires_at >= now,
+    )
+    verified_operators = int(
+        await session.scalar(
+            sa.select(sa.func.count(sa.distinct(validators_t.c.operator_group_id))).where(
+                verified_filter
+            )
+        )
+        or 0
+    )
+    participating_operators = int(
+        await session.scalar(
+            sa.select(sa.func.count(sa.distinct(validators_t.c.operator_group_id)))
+            .select_from(
+                validators_t.join(
+                    attestations_t,
+                    attestations_t.c.validator_id == validators_t.c.id,
+                )
+            )
+            .where(
+                verified_filter,
+                attestations_t.c.authority == "authoritative",
+                attestations_t.c.created >= cutoff,
+            )
+        )
+        or 0
+    )
+    independence_proven = verified_operators >= QUORUM_MIN
 
     return {
         "window_hours": since_hours,
@@ -2544,9 +2636,17 @@ async def _network_health_in_session(session, *, since_hours: int) -> dict[str, 
             for row in version_rows
         ],
         "operator_independence": {
-            "verified": 0,
-            "proven": False,
-            "status": "not_yet_verified",
+            "verified": verified_operators,
+            "participating": participating_operators,
+            "proven": independence_proven,
+            "status": (
+                "quorum_available"
+                if independence_proven
+                else "below_quorum"
+                if verified_operators
+                else "not_yet_verified"
+            ),
+            "minimum": QUORUM_MIN,
         },
     }
 
@@ -2604,6 +2704,7 @@ async def public_health(*, since_hours: int = 24) -> dict[str, Any]:
         "heartbeat_fresh": int(validator_row["fresh"] or 0),
         "participating": participating,
         "verified_independent": network["operator_independence"]["verified"],
+        "participating_independent": network["operator_independence"]["participating"],
         "independence_proven": network["operator_independence"]["proven"],
         "quorum": {
             "pending": quorum.get("pending", 0),
@@ -2630,6 +2731,8 @@ async def assignment_health(
     """Return probe, assignment, and real group-quorum health without raw evidence."""
     safe_limit = max(1, min(int(limit), 100))
     safe_since = max(1, min(int(since_hours), 24 * 90))
+    now = _now()
+    operator_fresh_cutoff = now - timedelta(seconds=VALIDATOR_HEARTBEAT_FRESH_SECONDS)
     async with await new_session() as session:
         await _finalize_due_assignments(session)
         await session.commit()
@@ -2684,6 +2787,28 @@ async def assignment_health(
                 )
                 or 0
             )
+            independent_attested = int(
+                await session.scalar(
+                    sa.select(sa.func.count(sa.distinct(validators_t.c.operator_group_id)))
+                    .select_from(
+                        attestations_t.join(
+                            validators_t,
+                            validators_t.c.id == attestations_t.c.validator_id,
+                        )
+                    )
+                    .where(
+                        attestations_t.c.probe_group_id == group["id"],
+                        attestations_t.c.authority == "authoritative",
+                        validators_t.c.operator_group_id.isnot(None),
+                        validators_t.c.status == "active",
+                        validators_t.c.last_heartbeat >= operator_fresh_cutoff,
+                        validators_t.c.independence_status == "verified",
+                        validators_t.c.independence_reviewed_at.isnot(None),
+                        validators_t.c.independence_expires_at >= now,
+                    )
+                )
+                or 0
+            )
             recent.append({
                 "probe_group_id": group["id"],
                 "target_worker_id": group["target_worker_id"],
@@ -2694,6 +2819,8 @@ async def assignment_health(
                 "quorum_outcome": group["quorum_outcome"],
                 "assigned_validators": assigned,
                 "attested_validators": attested,
+                "independent_attested_operators": independent_attested,
+                "independent_quorum_reached": independent_attested >= int(group["quorum_threshold"]),
                 "threshold": int(group["quorum_threshold"]),
                 "target_validators": int(group["target_validator_count"]),
                 "created": group["created"].isoformat() if group["created"] else None,
@@ -2781,7 +2908,8 @@ async def assignment_health(
             "threshold": QUORUM_MIN,
             "target_validators": QUORUM_TARGET,
             "distinct_registered_validators": True,
-            "operator_independence_proven": False,
+            "operator_independence_proven": network_health["operator_independence"]["proven"],
+            "operator_independence_required_for_acceptance": False,
         },
         "stages": {
             "probes_completed": probe_counts.get("completed", 0),

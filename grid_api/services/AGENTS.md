@@ -90,9 +90,17 @@ content sanitization, and reward settlement.
   identities. Scorecards label objective text votes as Core-matched or
   Core-disagreed and media/preview verdicts as validator opinion; a raw vote is
   never silently promoted to Core-verified fact. Independent-operator counts
-  remain zero until externally
-  reviewed; registration count is not independence proof. The public network
-  status surface uses only these redacted aggregates and never assignment rows.
+  remain zero until externally reviewed; registration count is not independence
+  proof. `validator_operators.py` owns the review state: an opaque control group,
+  at least 72 hours of qualification, rate-limited heartbeat coverage, an
+  expiring maintainer review, and preview-first compare-and-swap transitions.
+  A control group occupies at most one seat in any probe group. Public health
+  exposes only distinct aggregate group counts, never group ids or review refs.
+  Preview group acceptance still records distinct-registration quorum for
+  compatibility; independent-operator quorum is a separate explicit signal and
+  is not required for acceptance until a later reviewed authority gate.
+  The public network status surface uses only these redacted aggregates and
+  never assignment rows.
   `validator_references.py` owns the dark media reference selector: fresh
   finalized bond + quality snapshots, online workers, distinct accounts and
   payout wallets, row-locked recent-use rotation, and fail-closed insufficiency.
