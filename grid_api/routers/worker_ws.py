@@ -1091,6 +1091,29 @@ async def worker_websocket(ws: WebSocket):
             logger.info(f"Worker '{worker_info['name']}' cleaned up")
 
 
+async def _publish_paid_audit_result(
+    job_id: str,
+    payload: dict,
+    result: dict,
+) -> None:
+    grid_meta = {
+        **(result.get("grid_meta") or {}),
+        "worker_id": result["worker_id"],
+        "assignment_id": payload.get("_validator_assignment_id"),
+        "grid_nonce": payload.get("_validator_grid_nonce"),
+        "economic_effect": "worker_compensated_audit",
+    }
+    await token_stream.publish_done(
+        job_id,
+        result.get("full_text") or "",
+        result.get("full_reasoning") or "",
+        tool_calls=result.get("tool_calls"),
+        usage=result.get("usage"),
+        finish_reason=result.get("finish_reason"),
+        grid=grid_meta,
+    )
+
+
 async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict) -> bool:
     """Dispatch one assignment-bound validator probe.
 
@@ -1102,6 +1125,21 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
     job_id = job["job_id"]
     payload = job["payload"]
     paid_audit = payload.get("_validator_paid_audit") is True
+    if paid_audit:
+        try:
+            replay = await validator_audits.settled_result(job_id)
+        except Exception:
+            logger.critical(
+                "Paid audit replay lookup failed for job %s; not dispatching",
+                job_id,
+                exc_info=True,
+            )
+            await token_stream.publish_error(job_id, "Audit recovery failed; please retry.")
+            return False
+        if replay is not None:
+            terminal_result, _paid_den = replay
+            await _publish_paid_audit_result(job_id, payload, terminal_result)
+            return True
     worker_payload = {
         key: value
         for key, value in payload.items()
@@ -1195,8 +1233,18 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
             gen.get("worker_sig"),
             _receipt_signers(worker_info),
         )
+        terminal_result = {
+            "worker_id": worker_id,
+            "grid_meta": gen.get("grid_meta") or {},
+            "full_text": full_text,
+            "full_reasoning": full_reasoning,
+            "tool_calls": gen["tool_calls"],
+            "usage": gen["usage"],
+            "finish_reason": gen["finish_reason"],
+        }
         settle_result, paid_den = await validator_audits.record_and_settle(
             job_id=job_id,
+            terminal_result=terminal_result,
             ledger_values=dict(
                 job_id=job_id,
                 worker_id=worker_id,
@@ -1221,27 +1269,24 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
             await token_stream.publish_error(job_id, "Audit settlement failed; please retry.")
             return False
         if settle_result == "settled":
-            grid_meta = {
-                **(gen["grid_meta"] or {}),
-                "worker_id": worker_id,
-                "assignment_id": payload.get("_validator_assignment_id"),
-                "grid_nonce": payload.get("_validator_grid_nonce"),
-                "economic_effect": "worker_compensated_audit",
-            }
-            await token_stream.publish_done(
-                job_id,
-                full_text,
-                full_reasoning,
-                tool_calls=gen["tool_calls"],
-                usage=gen["usage"],
-                finish_reason=gen["finish_reason"],
-                grid=grid_meta,
-            )
+            await _publish_paid_audit_result(job_id, payload, terminal_result)
             await ws.send_json({"type": "ack", "id": job_id, "den": paid_den})
             return True
 
-        # A duplicate or a late success after the budget hold was released is
-        # terminally closed without payout. Do not publish a second success.
+        if settle_result == "duplicate":
+            replay = await validator_audits.settled_result(job_id)
+            if replay is None:
+                await token_stream.publish_error(job_id, "Audit recovery failed; please retry.")
+                return False
+            await _publish_paid_audit_result(job_id, payload, replay[0])
+        else:
+            # The hold expired before this late completion. The worker cannot
+            # receive payout and the validator must not mistake it for success.
+            await token_stream.publish_error(
+                job_id,
+                "Audit reservation expired before completion.",
+                code=409,
+            )
         await ws.send_json({"type": "ack", "id": job_id, "den": 0})
         return True
 

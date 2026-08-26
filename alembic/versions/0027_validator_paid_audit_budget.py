@@ -63,6 +63,7 @@ def upgrade() -> None:
         ),
         sa.Column("reserved_den", sa.Numeric(24, 8), nullable=False),
         sa.Column("settled_den", sa.Numeric(24, 8), nullable=True),
+        sa.Column("terminal_result", sa.JSON(), nullable=True),
         sa.Column("status", sa.String(16), nullable=False, server_default="held"),
         sa.Column("created", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
@@ -84,6 +85,11 @@ def upgrade() -> None:
             "(status IN ('settled', 'released') AND settled_den IS NOT NULL)",
             name="ck_grid_validator_audit_terminal_amount",
         ),
+        sa.CheckConstraint(
+            "(status = 'settled' AND terminal_result IS NOT NULL) OR "
+            "(status != 'settled' AND terminal_result IS NULL)",
+            name="ck_grid_validator_audit_terminal_result",
+        ),
     )
     for column in (
         "assignment_id",
@@ -99,9 +105,27 @@ def upgrade() -> None:
             "grid_validator_audit_reservations",
             [column],
         )
+    op.create_index(
+        "ix_grid_validator_audit_reservations_wallet_day",
+        "grid_validator_audit_reservations",
+        ["validator_wallet", "budget_day"],
+    )
+    op.create_index(
+        "ix_grid_validator_audit_reservations_worker_day",
+        "grid_validator_audit_reservations",
+        ["worker_id", "budget_day"],
+    )
 
 
 def downgrade() -> None:
+    op.drop_index(
+        "ix_grid_validator_audit_reservations_worker_day",
+        table_name="grid_validator_audit_reservations",
+    )
+    op.drop_index(
+        "ix_grid_validator_audit_reservations_wallet_day",
+        table_name="grid_validator_audit_reservations",
+    )
     for column in reversed((
         "assignment_id",
         "probe_group_id",

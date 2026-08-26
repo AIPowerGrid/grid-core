@@ -18,6 +18,7 @@ from grid_api.v2.schema import metadata
 from grid_api.v2.schema import validator_audit_reservations as reservations_t
 
 WALLET = "0x" + "a" * 40
+WALLET_2 = "0x" + "e" * 40
 
 
 def _settings(**overrides):
@@ -25,6 +26,9 @@ def _settings(**overrides):
         "validator_paid_audit_enabled": True,
         "validator_paid_audit_wallets": WALLET,
         "validator_paid_audit_daily_den": 25.0,
+        "validator_paid_audit_hourly_den": 20.0,
+        "validator_paid_audit_per_validator_daily_den": 20.0,
+        "validator_paid_audit_per_worker_daily_den": 20.0,
         "validator_paid_audit_max_den_per_job": 10.0,
         "validator_paid_audit_stale_seconds": 3600,
     }
@@ -55,14 +59,16 @@ async def db(monkeypatch):
         await engine.dispose()
 
 
-def _reservation_args(job_id=None):
-    return {
+def _reservation_args(job_id=None, **overrides):
+    values = {
         "job_id": str(job_id or uuid.uuid4()),
         "assignment_id": f"asg_{uuid.uuid4().hex}",
         "probe_group_id": f"prg_{uuid.uuid4().hex}",
         "worker_id": str(uuid.uuid4()),
         "validator_wallet": WALLET,
     }
+    values.update(overrides)
+    return values
 
 
 def _ledger_values(args, den):
@@ -76,6 +82,18 @@ def _ledger_values(args, den):
         "output_units": 7,
         "prompt_hash": "c" * 64,
         "result_hash": "d" * 64,
+    }
+
+
+def _terminal(args, text="a useful synthetic answer"):
+    return {
+        "worker_id": args["worker_id"],
+        "grid_meta": {},
+        "full_text": text,
+        "full_reasoning": "",
+        "tool_calls": [],
+        "usage": {"completion_tokens": 4},
+        "finish_reason": "stop",
     }
 
 
@@ -115,6 +133,7 @@ async def test_reserve_and_atomic_settle_move_only_actual_den(db):
     status, paid = await validator_audits.record_and_settle(
         job_id=args["job_id"],
         ledger_values=_ledger_values(args, 3.25),
+        terminal_result=_terminal(args),
     )
     assert (status, paid) == ("settled", 3.25)
     async with await database.new_session() as session:
@@ -126,6 +145,8 @@ async def test_reserve_and_atomic_settle_move_only_actual_den(db):
             )
         ).one()
     assert row == (3.25, "text")
+    replay = await validator_audits.settled_result(args["job_id"])
+    assert replay == (_terminal(args), 3.25)
     assert await validator_audits.snapshot() == {
         "budget_day": datetime.now(UTC).date().isoformat(),
         "limit_den": 25.0,
@@ -149,8 +170,97 @@ async def test_per_job_and_daily_caps_are_enforced_before_dispatch(db):
     status, paid = await validator_audits.record_and_settle(
         job_id=first["job_id"],
         ledger_values=_ledger_values(first, 999),
+        terminal_result=_terminal(first),
     )
     assert (status, paid) == ("settled", 10.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("settings", "first_overrides", "second_overrides", "message"),
+    (
+        (
+            {"validator_paid_audit_hourly_den": 10.0},
+            {},
+            {"worker_id": str(uuid.uuid4()), "validator_wallet": WALLET_2},
+            "hourly",
+        ),
+        (
+            {"validator_paid_audit_per_validator_daily_den": 10.0},
+            {},
+            {"worker_id": str(uuid.uuid4())},
+            "per-validator",
+        ),
+        (
+            {"validator_paid_audit_per_worker_daily_den": 10.0},
+            {},
+            {"validator_wallet": WALLET_2},
+            "per-worker",
+        ),
+    ),
+)
+async def test_scoped_caps_are_enforced_before_dispatch(
+    db,
+    monkeypatch,
+    settings,
+    first_overrides,
+    second_overrides,
+    message,
+):
+    limits = {
+        "validator_paid_audit_wallets": f"{WALLET},{WALLET_2}",
+        "validator_paid_audit_daily_den": 100.0,
+        "validator_paid_audit_hourly_den": 100.0,
+        "validator_paid_audit_per_validator_daily_den": 100.0,
+        "validator_paid_audit_per_worker_daily_den": 100.0,
+        **settings,
+    }
+    monkeypatch.setattr(
+        validator_audits,
+        "get_settings",
+        lambda: _settings(**limits),
+    )
+    first = _reservation_args(**first_overrides)
+    second = _reservation_args(**second_overrides)
+    if message == "per-worker":
+        second["worker_id"] = first["worker_id"]
+
+    await validator_audits.reserve(**first)
+    with pytest.raises(validator_audits.AuditBudgetError, match=message):
+        await validator_audits.reserve(**second)
+
+
+@pytest.mark.asyncio
+async def test_idempotent_reserve_rejects_job_id_rebinding(db):
+    args = _reservation_args()
+    await validator_audits.reserve(**args)
+    rebound = {**args, "assignment_id": f"asg_{uuid.uuid4().hex}"}
+    with pytest.raises(validator_audits.AuditBudgetError, match="different work"):
+        await validator_audits.reserve(**rebound)
+
+
+@pytest.mark.asyncio
+async def test_terminal_result_is_json_safe_bounded_and_atomic(db):
+    args = _reservation_args()
+    await validator_audits.reserve(**args)
+
+    status, paid = await validator_audits.record_and_settle(
+        job_id=args["job_id"],
+        ledger_values=_ledger_values(args, 4),
+        terminal_result={"bad": object()},
+    )
+    assert (status, paid) == ("error", 0.0)
+    assert await validator_audits.settled_result(args["job_id"]) is None
+    async with await database.new_session() as session:
+        assert await session.scalar(sa.select(sa.func.count()).select_from(ledger_t)) == 0
+
+    status, paid = await validator_audits.record_and_settle(
+        job_id=args["job_id"],
+        ledger_values=_ledger_values(args, 4),
+        terminal_result={"full_text": "x" * (validator_audits._TERMINAL_RESULT_MAX_BYTES + 1)},
+    )
+    assert (status, paid) == ("error", 0.0)
+    assert await validator_audits.settled_result(args["job_id"]) is None
 
 
 @pytest.mark.asyncio
@@ -164,6 +274,7 @@ async def test_release_then_late_success_cannot_mint_payout(db):
     status, paid = await validator_audits.record_and_settle(
         job_id=args["job_id"],
         ledger_values=_ledger_values(args, 4),
+        terminal_result=_terminal(args),
     )
     assert (status, paid) == ("stale_no_payout", 0.0)
     async with await database.new_session() as session:
@@ -181,6 +292,7 @@ async def test_settlement_rejects_job_substitution_without_moving_money(db):
     assert await validator_audits.record_and_settle(
         job_id=args["job_id"],
         ledger_values=values,
+        terminal_result=_terminal(args),
     ) == ("error", 0.0)
     async with await database.new_session() as session:
         assert await session.scalar(sa.select(sa.func.count()).select_from(ledger_t)) == 0
@@ -203,6 +315,7 @@ async def test_settlement_rejects_worker_substitution_without_moving_money(db):
     assert await validator_audits.record_and_settle(
         job_id=args["job_id"],
         ledger_values=values,
+        terminal_result=_terminal(args),
     ) == ("worker_mismatch", 0.0)
     async with await database.new_session() as session:
         assert await session.scalar(sa.select(sa.func.count()).select_from(ledger_t)) == 0
@@ -228,6 +341,11 @@ async def test_stale_sweeper_releases_crash_orphan(db):
         await session.commit()
     assert await validator_audits.sweep_stale(older_than_seconds=300) == 1
     assert (await validator_audits.snapshot())["held_den"] == 0.0
+    health = await validator_audits.reservation_health()
+    assert health["held"] == 0
+    assert health["released"] == 1
+    assert health["stale_held"] == 0
+    assert health["terminal_invariant_breaches"] == 0
 
 
 @pytest.mark.asyncio

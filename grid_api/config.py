@@ -73,11 +73,14 @@ class GridSettings(BaseSettings):
     # Optional worker compensation for text audits. This does not reward
     # validators or give evidence economic authority. It only removes the
     # retrospective zero-den worker fingerprint for a reviewed pilot cohort.
-    # All four values must be configured; otherwise paid assignment issuance
+    # Every budget value must be configured; otherwise paid assignment issuance
     # fails closed.
     validator_paid_audit_enabled: bool = False
     validator_paid_audit_wallets: str = ""
     validator_paid_audit_daily_den: float = 0.0
+    validator_paid_audit_hourly_den: float = 0.0
+    validator_paid_audit_per_validator_daily_den: float = 0.0
+    validator_paid_audit_per_worker_daily_den: float = 0.0
     validator_paid_audit_max_den_per_job: float = 0.0
     validator_paid_audit_stale_seconds: int = 3600
 
