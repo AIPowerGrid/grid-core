@@ -135,6 +135,12 @@ transport, accounts, stats, health/metrics.
   `grid_nonce`, and matching hard-targeted probe evidence hash before it is
   marked authoritative. Preview evidence may be stored, but must stay labeled
   as preview.
+- A completed targeted probe is recoverable only by the assignment's canonical
+  account and registered validator, only until that validator submits its
+  authoritative vote, and only through the bounded result envelope committed
+  by Core. A recovery request must return `replayed: true`; it must not dispatch
+  another worker job, consume another attempt, or expose another validator's
+  result.
 - Validator scorecards must aggregate evidence only. Do not expose raw payloads,
   nonces, signatures, account IDs, or validator identities from scorecard routes.
   They must expose the evidence dimension and whether it is quality-eligible;

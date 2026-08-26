@@ -70,6 +70,13 @@ Authoritative evidence must match all of:
 New probes stop at assignment expiry. A completed probe may deliver its signed
 attestation during a bounded post-expiry grace window (30 minutes by default),
 so a brief Core or network outage does not silently erase valid evidence.
+Core stores a JSON-safe synthetic probe-result envelope (maximum 512 KiB) when
+it marks the probe completed. Until the assigned validator submits its
+authoritative vote, assignment polling returns that unfinished delivery and a
+repeat probe request replays the stored envelope with `replayed: true`. Replay
+is owner-bound, does not contact the worker, and does not consume another probe
+attempt. Core refuses to mark the probe completed if the replay envelope cannot
+be committed.
 
 Assignment responses reveal the prompt and an expected-answer SHA-256
 commitment, never Core's plaintext expected answer. Probe responses reveal the
@@ -129,9 +136,10 @@ assignment/validator. Alembic `0021` adds atomic probe attempt counters and
 reclaimable leases, preventing concurrent replay from dispatching duplicate
 free inference. Alembic `0022` adds shared probe groups, one validator per
 canonical account, and DB-enforced one-assignment/one-attestation membership per
-validator and group. Apply all migrations before deploying shared-quorum Core
-code. Existing legacy evidence may remain unbound and must never be upgraded to
-authoritative by inference.
+validator and group. Alembic `0025` adds the bounded completed-probe result used
+for validator crash recovery. Apply all migrations before deploying replay-aware
+validator nodes. Existing legacy evidence may remain unbound and must never be
+upgraded to authoritative by inference.
 
 Finalized assignment and group rows are operational state and are pruned after
 90 days by default. Signed attestation rows remain the durable evidence record;
@@ -142,7 +150,9 @@ the pruning job does not delete them.
 Before evidence can affect routing or rewards, the network must prove multiple
 independently operated nodes in production, add self-validation and
 correlated-operator controls, define dispute windows, and make evidence
-replayable. Slashing requires a separate objective-fraud policy and contract
+replayable end to end. Core result replay closes only the Core-to-validator
+delivery gap; nodes still need a durable assignment journal and operator-visible
+dead-letter recovery. Slashing requires a separate objective-fraud policy and contract
 review after those controls are proven.
 
 The accepted post-preview contract and Core-federation sequence is defined in

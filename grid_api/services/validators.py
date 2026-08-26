@@ -41,6 +41,7 @@ VALID_VERDICTS = {"healthy", "slow", "failed"}
 VERDICT_SCORE = {"healthy": 1.0, "slow": 0.75, "failed": 0.0}
 VALID_AUTHORITY = {"all", "preview", "authoritative"}
 MAX_PAYLOAD_BYTES = 64 * 1024
+MAX_PROBE_RESULT_BYTES = 512 * 1024
 ASSIGNMENT_TTL_SECONDS = int(os.getenv("VALIDATOR_ASSIGNMENT_TTL_SECONDS", "900") or 900)
 ATTESTATION_GRACE_SECONDS = max(
     60,
@@ -119,6 +120,23 @@ def _attestation_hash(payload: dict[str, Any], signature: str | None) -> str:
 
 def _payload_size(payload: dict[str, Any]) -> int:
     return len(_canonical(payload).encode())
+
+
+def _bounded_probe_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Return a JSON-safe synthetic probe result within the replay limit."""
+    if not isinstance(result, dict) or result.get("status") != "completed":
+        raise AssignmentError("completed probe result is invalid")
+    try:
+        encoded = json.dumps(
+            result,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise AssignmentError("completed probe result is not JSON serializable") from exc
+    if len(encoded) > MAX_PROBE_RESULT_BYTES:
+        raise AssignmentError("completed probe result exceeds the replay limit")
+    return json.loads(encoded)
 
 
 def _string(payload: dict[str, Any], key: str, max_len: int) -> str | None:
@@ -1355,6 +1373,30 @@ async def _hydrate_assignment_challenges(session, rows) -> list[dict[str, Any]]:
     return hydrated
 
 
+def _assignment_available_for_validator(validator_id: str, now: datetime):
+    """Select new work or a completed result still awaiting this validator's vote."""
+    already_attested = sa.exists(
+        sa.select(attestations_t.c.id).where(
+            attestations_t.c.assignment_id == assignments_t.c.id,
+            attestations_t.c.validator_id == validator_id,
+            attestations_t.c.authority == "authoritative",
+        )
+    )
+    return sa.or_(
+        sa.and_(
+            assignments_t.c.probe_status != "completed",
+            assignments_t.c.expires >= now,
+        ),
+        sa.and_(
+            assignments_t.c.probe_status == "completed",
+            assignments_t.c.probe_result.isnot(None),
+            assignments_t.c.expires
+            >= now - timedelta(seconds=ATTESTATION_GRACE_SECONDS),
+            ~already_attested,
+        ),
+    )
+
+
 async def _finalize_due_assignments(session) -> None:
     now = _now()
     group_deadline = now - timedelta(seconds=ATTESTATION_GRACE_SECONDS)
@@ -1544,8 +1586,7 @@ async def issue_assignments(
                     assignments_t.c.validator_id == validator_id,
                     assignments_t.c.modality == "text",
                     assignments_t.c.status != "finalized",
-                    assignments_t.c.probe_status != "completed",
-                    assignments_t.c.expires >= now,
+                    _assignment_available_for_validator(validator_id, now),
                 )
                 .order_by(assignments_t.c.created.asc())
                 .limit(safe_limit)
@@ -1810,8 +1851,7 @@ async def _issue_image_assignments(
                     assignments_t.c.validator_id == validator_id,
                     assignments_t.c.modality == "image",
                     assignments_t.c.status != "finalized",
-                    assignments_t.c.probe_status != "completed",
-                    assignments_t.c.expires >= now,
+                    _assignment_available_for_validator(validator_id, now),
                 ).order_by(assignments_t.c.created.asc()).limit(limit)
             )
         ).mappings().all()
@@ -2040,8 +2080,7 @@ async def _issue_video_assignments(
                     assignments_t.c.validator_id == validator_id,
                     assignments_t.c.modality == "video",
                     assignments_t.c.status != "finalized",
-                    assignments_t.c.probe_status != "completed",
-                    assignments_t.c.expires >= now,
+                    _assignment_available_for_validator(validator_id, now),
                 ).order_by(assignments_t.c.created.asc()).limit(limit)
             )
         ).mappings().all()
@@ -2993,6 +3032,9 @@ async def probe_assignment(
         validator_id=validator_id,
         assignment_id=assignment_id,
     )
+    replay_result = row.pop("_replay_result", None)
+    if replay_result is not None:
+        return replay_result
     if row["modality"] == "image":
         return await _probe_image_assignment(row=row, assignment_id=assignment_id, job_id=job_id)
     if row["modality"] == "video":
@@ -3138,16 +3180,7 @@ async def probe_assignment(
         reasoning_text=full_reasoning,
         finish_reason=finish_reason,
     )
-    await _mark_probe(
-        job_id,
-        "completed",
-        prompt_hash=evidence["prompt_hash"],
-        response_hash=evidence["response_hash"],
-        evidence_hash=evidence["evidence_hash"],
-        verdict=probe_verdict,
-        latency_ms=latency_ms,
-    )
-    return {
+    result = {
         "status": "completed",
         "assignment_id": assignment_id,
         "probe_group_id": row["probe_group_id"],
@@ -3170,6 +3203,18 @@ async def probe_assignment(
         **evidence,
         "economic_effect": "none",
     }
+    if not await _mark_probe(
+        job_id,
+        "completed",
+        prompt_hash=evidence["prompt_hash"],
+        response_hash=evidence["response_hash"],
+        evidence_hash=evidence["evidence_hash"],
+        verdict=probe_verdict,
+        latency_ms=latency_ms,
+        result=result,
+    ):
+        raise AssignmentError("completed probe result could not be persisted")
+    return result
 
 
 def _media_response_commitment(witnesses: list[dict[str, Any]]) -> str:
@@ -3616,16 +3661,7 @@ async def _probe_image_assignment(
     }
     evidence["evidence_hash"] = _hash_obj(evidence)
     candidate_latency = int(witnesses[0]["latency_ms"])
-    await _mark_probe(
-        job_id,
-        "completed",
-        prompt_hash=evidence["prompt_hash"],
-        response_hash=evidence["response_hash"],
-        evidence_hash=evidence["evidence_hash"],
-        verdict="witnessed",
-        latency_ms=candidate_latency,
-    )
-    return {
+    result = {
         "status": "completed",
         "assignment_id": assignment_id,
         "probe_group_id": row["probe_group_id"],
@@ -3642,6 +3678,18 @@ async def _probe_image_assignment(
         **evidence,
         "economic_effect": "none",
     }
+    if not await _mark_probe(
+        job_id,
+        "completed",
+        prompt_hash=evidence["prompt_hash"],
+        response_hash=evidence["response_hash"],
+        evidence_hash=evidence["evidence_hash"],
+        verdict="witnessed",
+        latency_ms=candidate_latency,
+        result=result,
+    ):
+        raise AssignmentError("completed image probe result could not be persisted")
+    return result
 
 
 async def _probe_video_assignment(
@@ -3823,16 +3871,7 @@ async def _probe_video_assignment(
     }
     evidence["evidence_hash"] = _hash_obj(evidence)
     candidate_latency = int(witnesses[0]["latency_ms"])
-    await _mark_probe(
-        job_id,
-        "completed",
-        prompt_hash=evidence["prompt_hash"],
-        response_hash=evidence["response_hash"],
-        evidence_hash=evidence["evidence_hash"],
-        verdict="witnessed",
-        latency_ms=candidate_latency,
-    )
-    return {
+    result = {
         "status": "completed",
         "assignment_id": assignment_id,
         "probe_group_id": row["probe_group_id"],
@@ -3849,6 +3888,18 @@ async def _probe_video_assignment(
         **evidence,
         "economic_effect": "none",
     }
+    if not await _mark_probe(
+        job_id,
+        "completed",
+        prompt_hash=evidence["prompt_hash"],
+        response_hash=evidence["response_hash"],
+        evidence_hash=evidence["evidence_hash"],
+        verdict="witnessed",
+        latency_ms=candidate_latency,
+        result=result,
+    ):
+        raise AssignmentError("completed video probe result could not be persisted")
+    return result
 
 
 async def _run_targeted_image_stage(
@@ -4192,6 +4243,13 @@ async def _claim_probe_lease(
                 sa.select(
                     assignments_t,
                     probe_groups_t.c.challenge.label("group_challenge"),
+                    sa.exists(
+                        sa.select(attestations_t.c.id).where(
+                            attestations_t.c.assignment_id == assignments_t.c.id,
+                            attestations_t.c.validator_id == validator_id,
+                            attestations_t.c.authority == "authoritative",
+                        )
+                    ).label("has_authoritative_attestation"),
                 )
                 .outerjoin(
                     probe_groups_t,
@@ -4237,10 +4295,26 @@ async def _claim_probe_lease(
             await _mark_probe(job_id, "failed")
             raise AssignmentError("assignment has no prompt")
         return dict(row), job_id
+    if row["probe_status"] == "completed":
+        if row.get("has_authoritative_attestation"):
+            raise AssignmentError("assignment attestation already submitted")
+        deadline = (
+            _aware(row["expires"]) + timedelta(seconds=ATTESTATION_GRACE_SECONDS)
+            if row["expires"]
+            else now
+        )
+        if deadline < now:
+            raise AssignmentError("assignment has expired")
+        stored_result = row.get("probe_result")
+        if not isinstance(stored_result, dict):
+            raise AssignmentError("assignment probe completed without a replayable result")
+        row["_replay_result"] = {
+            **_bounded_probe_result(stored_result),
+            "replayed": True,
+        }
+        return row, str(row.get("probe_job_id") or "")
     if row["expires"] and _aware(row["expires"]) < now:
         raise AssignmentError("assignment has expired")
-    if row["probe_status"] == "completed":
-        raise AssignmentError("assignment probe already completed")
     if row["probe_status"] == "running":
         raise AssignmentError("assignment probe already in progress")
     if int(row["probe_attempts"] or 0) >= PROBE_MAX_ATTEMPTS:
@@ -4257,7 +4331,15 @@ async def _mark_probe(
     evidence_hash: str | None = None,
     verdict: str | None = None,
     latency_ms: int | None = None,
-) -> None:
+    result: dict[str, Any] | None = None,
+) -> bool:
+    stored_result = _bounded_probe_result(result) if result is not None else None
+    if status == "completed" and stored_result is None:
+        logger.warning(
+            "refusing to complete validator probe without durable result job=%s",
+            opaque_id(job_id),
+        )
+        return False
     try:
         async with await new_session() as session:
             values: dict[str, Any] = {
@@ -4274,12 +4356,18 @@ async def _mark_probe(
                 values["probe_verdict"] = verdict
             if latency_ms is not None:
                 values["probe_latency_ms"] = latency_ms
-            await session.execute(
+            if stored_result is not None:
+                values["probe_result"] = stored_result
+            updated = await session.execute(
                 sa.update(assignments_t)
                 .where(assignments_t.c.probe_job_id == job_id)
                 .values(**values)
             )
+            if updated.rowcount != 1:
+                await session.rollback()
+                return False
             await session.commit()
+            return True
     except Exception as exc:
         logger.warning(
             "failed to mark validator probe job=%s status=%s error_type=%s",
@@ -4287,3 +4375,4 @@ async def _mark_probe(
             status,
             error_type(exc),
         )
+        return False

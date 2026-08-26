@@ -836,6 +836,10 @@ validator_assignments = sa.Table(
     sa.Column("probe_evidence_hash", sa.String(64), nullable=True, index=True),
     sa.Column("probe_verdict", sa.String(16), nullable=True),
     sa.Column("probe_latency_ms", sa.Integer, nullable=True),
+    # Bounded synthetic validator result envelope used only to recover a
+    # completed probe when the validator crashes before persisting its signed
+    # attestation. It is returned only to this assignment's registered owner.
+    sa.Column("probe_result", PortableJSON, nullable=True),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
     sa.Column("expires", sa.DateTime(timezone=True), nullable=False, index=True),
     sa.Column("probed", sa.DateTime(timezone=True), nullable=True),
