@@ -1355,6 +1355,190 @@ async def test_probe_lease_retry_budget_and_late_result_guard(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_completed_probe_result_is_durable_and_replayable(db):
+    account_id = uuid.uuid4()
+    validator_id, assignment = await _fresh_assignment(account_id)
+    row, job_id = await validators_svc._claim_probe_lease(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+    result = {
+        "status": "completed",
+        "assignment_id": assignment["assignment_id"],
+        "job_id": job_id,
+        "grid_nonce": row["grid_nonce"],
+        "probe_latency_ms": 4321,
+        "evidence_hash": "a" * 64,
+        "economic_effect": "none",
+    }
+
+    assert await validators_svc._mark_probe(
+        job_id,
+        "completed",
+        evidence_hash=result["evidence_hash"],
+        verdict="healthy",
+        latency_ms=result["probe_latency_ms"],
+        result=result,
+    )
+    pending = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=[],
+        limit=5,
+    )
+    assert [item["assignment_id"] for item in pending["assignments"]] == [
+        assignment["assignment_id"]
+    ]
+    replayed = await validators_svc.probe_assignment(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+
+    assert replayed == {**result, "replayed": True}
+    async with await database.new_session() as session:
+        stored = (
+            await session.execute(
+                sa.select(assignments_t).where(
+                    assignments_t.c.id == assignment["assignment_id"]
+                )
+            )
+        ).mappings().one()
+    assert stored["probe_attempts"] == 1
+    assert stored["probe_result"] == result
+
+    payload = _payload(
+        assignment_source="grid",
+        assignment_id=assignment["assignment_id"],
+        probe_group_id=assignment["probe_group_id"],
+        grid_nonce=assignment["grid_nonce"],
+        worker_id=assignment["target_worker_id"],
+        model=assignment["model"],
+        modality=assignment["modality"],
+        capability=assignment["capability"],
+        canary_kind=assignment["canary_kind"],
+        evidence_hash=result["evidence_hash"],
+        verdict="healthy",
+    )
+    await validators_svc.record_attestation(
+        account_id=account_id,
+        validator_id=validator_id,
+        payload=payload,
+        signature=_sign(payload),
+    )
+    delivered = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=[],
+        limit=5,
+    )
+    assert delivered["assignments"] == []
+    with pytest.raises(validators_svc.AssignmentError, match="already submitted"):
+        await validators_svc.probe_assignment(
+            account_id=account_id,
+            validator_id=validator_id,
+            assignment_id=assignment["assignment_id"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_completed_probe_replay_is_owner_bound_and_grace_bounded(db):
+    account_id = uuid.uuid4()
+    validator_id, assignment = await _fresh_assignment(account_id)
+    _, job_id = await validators_svc._claim_probe_lease(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+    result = {
+        "status": "completed",
+        "assignment_id": assignment["assignment_id"],
+        "job_id": job_id,
+    }
+    assert await validators_svc._mark_probe(job_id, "completed", result=result)
+
+    with pytest.raises(validators_svc.AssignmentError, match="not found"):
+        await validators_svc.probe_assignment(
+            account_id=uuid.uuid4(),
+            validator_id=validator_id,
+            assignment_id=assignment["assignment_id"],
+        )
+
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(assignments_t)
+            .where(assignments_t.c.id == assignment["assignment_id"])
+            .values(expires=validators_svc._now() - timedelta(seconds=1))
+        )
+        await session.commit()
+    replayed = await validators_svc.probe_assignment(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+    assert replayed["replayed"] is True
+
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(assignments_t)
+            .where(assignments_t.c.id == assignment["assignment_id"])
+            .values(
+                expires=validators_svc._now()
+                - timedelta(seconds=validators_svc.ATTESTATION_GRACE_SECONDS + 1)
+            )
+        )
+        await session.commit()
+    with pytest.raises(validators_svc.AssignmentError, match="expired"):
+        await validators_svc.probe_assignment(
+            account_id=account_id,
+            validator_id=validator_id,
+            assignment_id=assignment["assignment_id"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_completed_probe_requires_bounded_replay_payload(db):
+    account_id = uuid.uuid4()
+    validator_id, assignment = await _fresh_assignment(account_id)
+    _, job_id = await validators_svc._claim_probe_lease(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+
+    assert not await validators_svc._mark_probe(job_id, "completed")
+    with pytest.raises(validators_svc.AssignmentError, match="replay limit"):
+        await validators_svc._mark_probe(
+            job_id,
+            "completed",
+            result={
+                "status": "completed",
+                "output_text": "x" * validators_svc.MAX_PROBE_RESULT_BYTES,
+            },
+        )
+    with pytest.raises(validators_svc.AssignmentError, match="not JSON serializable"):
+        await validators_svc._mark_probe(
+            job_id,
+            "completed",
+            result={"status": "completed", "bad": {object()}},
+        )
+
+    async with await database.new_session() as session:
+        stored = (
+            await session.execute(
+                sa.select(assignments_t).where(
+                    assignments_t.c.id == assignment["assignment_id"]
+                )
+            )
+        ).mappings().one()
+    assert stored["probe_status"] == "running"
+    assert stored["probe_result"] is None
+
+
+@pytest.mark.asyncio
 async def test_probe_dispatch_failure_releases_lease_for_retry(db, monkeypatch):
     from grid_api.services import job_queue
 

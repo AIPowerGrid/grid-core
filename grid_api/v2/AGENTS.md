@@ -59,6 +59,9 @@ snapshot pool.
   `grid_validator_assignments` gates authoritative evidence with Grid-issued
   assignment ids, nonces, and hard-targeted probe evidence hashes. Its attempt
   counter and lease deadline enforce one bounded active probe per assignment.
+  Its bounded `probe_result` stores only synthetic validator output and lets the
+  assigned validator recover a completed result until its authoritative vote is
+  accepted; it is not a customer inference archive.
   `grid_validator_attestations` stores both preview and authoritative evidence.
   Scorecards may aggregate them for
   operator/console visibility, but they must not be treated as economic truth

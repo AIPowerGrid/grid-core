@@ -111,7 +111,10 @@ The rest require a v2 account API key and are evidence-only:
   and issues a validator-specific nonce for the target worker/model.
 - `POST /v1/validator/probe/{assignment_id}` — runs the assignment against the
   targeted worker path and records the Grid-side prompt/response hashes, private
-  Core verdict, and latency. The response omits Core's verdict.
+  Core verdict, latency, and a bounded synthetic result envelope. The response
+  omits Core's verdict. If the validator loses the response before signing, the
+  same owner can request it again during the attestation window; Core returns
+  the committed envelope with `replayed: true` without redispatching work.
 - `POST /v1/validator/attest` — stores preview evidence, or authoritative
   evidence only when it matches the Grid-issued assignment, nonce, and evidence
   hash.
@@ -139,6 +142,9 @@ kind, while every validator assignment stores a separately randomized challenge
 and commitment. Already-open v7 groups finish with their original shared
 challenge. Core prunes finalized assignment/group machinery after 90 days by
 default while retaining signed attestations as the durable evidence record.
+Completed envelopes exist only as operational crash recovery: maximum 512 KiB,
+assignment-owner only, unavailable after that validator's authoritative vote,
+and removed with the assignment machinery.
 
 Text challenge families are selected cryptographically rather than from worker
 ordering. Current candidate families are exact instruction, generated
