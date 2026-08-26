@@ -2,6 +2,10 @@
 
 """Tests for the `model: "auto"` router (Step 1: heuristic gate + tier map)."""
 
+import pytest
+
+from grid_api import database
+from grid_api.routers import stats
 from grid_api.services import router as r
 
 AVAIL = [
@@ -137,3 +141,70 @@ def test_pick_worker_skips_wrong_model():
 def test_gate_is_fast():
     _, meta = _route("auto", "hello there")
     assert meta["gate_ms"] < 50  # CPU heuristic, must be cheap
+
+
+class _Rows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _RouterSession:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def execute(self, statement):
+        sql = str(statement)
+        assert "grid_validator_attestations" not in sql
+        return _Rows([
+            {
+                "worker_id": "00000000-0000-0000-0000-000000000001",
+                "model": "model-a",
+                "avg_dur": 2.0,
+                "sum_decode": 1.0,
+                "sum_units": 10,
+            },
+        ])
+
+
+@pytest.mark.asyncio
+async def test_score_refresh_excludes_validator_evidence(monkeypatch):
+    async def session():
+        return _RouterSession()
+
+    async def performance(_session, _since):
+        return {
+            ("model-a", "text"): {
+                "tokens_per_s": 10.0,
+                "avg_latency_s": 2.0,
+            },
+        }
+
+    monkeypatch.setattr(database, "new_session", session)
+    monkeypatch.setattr(stats, "_perf_by_model", performance)
+    monkeypatch.setitem(r._SCORE_CACHE, "scores", {})
+    monkeypatch.setitem(r._SCORE_CACHE, "workers", {})
+
+    await r._refresh_scores()
+
+    assert r._SCORE_CACHE["scores"]["model-a"] == {
+        "score": -0.1,
+        "quality": None,
+        "failed_rate": None,
+        "tps": 10.0,
+        "latency": 2.0,
+        "dimensions": ["throughput", "latency"],
+    }
+    worker = r._SCORE_CACHE["workers"][
+        "model-a|00000000-0000-0000-0000-000000000001"
+    ]
+    assert worker["quality"] is None
+    assert worker["dimensions"] == ["throughput", "latency"]

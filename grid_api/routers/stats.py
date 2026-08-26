@@ -442,10 +442,11 @@ async def status_network():
 
 @router.get("/v1/status/routing")
 async def status_routing():
-    """Observability for `model: "auto"` — current model scores + weights.
+    """Observability for `model: "auto"` — performance scores + weights.
 
-    Shows what the router sees: per-model score (validator quality + live speed),
-    the scoring weights, and the pin (if any). Evidence-only; no side effects.
+    Validator evidence has no routing authority. Current scores use only
+    Grid-measured throughput and latency; the response states that boundary so
+    scorecards cannot be mistaken for route inputs.
     """
     from ..services import router as router_svc
     scores = await router_svc.get_model_scores()
@@ -458,6 +459,8 @@ async def status_routing():
         "pin": os.getenv("GRID_ROUTING_PIN", "") or cfg.get("pin"),
         "score_ttl_s": router_svc._SCORE_TTL,
         "window_hours": router_svc._SCORE_WINDOW_H,
+        "validator_evidence_enabled": False,
+        "active_dimensions": ["throughput", "latency"],
     }
 
 

@@ -364,6 +364,8 @@ async def test_preview_attestation_does_not_affect_authoritative_scorecards(db):
     assert authoritative["items"] == []
     assert preview["items"][0]["authority"] == "preview"
     assert preview["items"][0]["total"] == 1
+    assert preview["items"][0]["quality_eligible"] is False
+    assert preview["items"][0]["quality_score"] is None
 
 
 @pytest.mark.asyncio
@@ -642,6 +644,8 @@ async def test_three_distinct_registered_validators_accept_shared_probe_group(db
         "job_types": ["text"],
     }]
     group_ids = set()
+    challenge_prompts = set()
+    expected_hashes = set()
     statuses = []
     for key_int in (4, 5, 6):
         private_key = "0x" + f"{key_int:064x}"
@@ -658,6 +662,9 @@ async def test_three_distinct_registered_validators_accept_shared_probe_group(db
         assignment = issued["assignments"][0]
         assert "expected" not in assignment["challenge"]
         assert assignment["challenge"]["expected_hash"]
+        assert assignment["quality_eligible"] is False
+        challenge_prompts.add(assignment["challenge"]["prompt"])
+        expected_hashes.add(assignment["challenge"]["expected_hash"])
         group_ids.add(assignment["probe_group_id"])
         evidence_hash = f"{key_int}" * 64
         async with await database.new_session() as session:
@@ -694,6 +701,8 @@ async def test_three_distinct_registered_validators_accept_shared_probe_group(db
         statuses.append(stored["quorum_status"])
 
     assert group_ids == {assignment["probe_group_id"]}
+    assert len(challenge_prompts) == 3
+    assert len(expected_hashes) == 3
     assert statuses == ["pending", "pending", "accepted"]
     async with await database.new_session() as session:
         group = (
@@ -804,6 +813,73 @@ async def test_three_distinct_registered_validators_accept_shared_probe_group(db
 
 
 @pytest.mark.asyncio
+async def test_open_v7_group_drains_with_its_shared_challenge(db):
+    worker_id = str(uuid.uuid4())
+    active_workers = [{
+        "worker_id": worker_id,
+        "name": "rig-v7-rollout",
+        "models": ["qwen3-27b"],
+        "job_types": ["text"],
+    }]
+    first_account = uuid.uuid4()
+    first_validator = await _register(first_account)
+    first = (
+        await validators_svc.issue_assignments(
+            account_id=first_account,
+            validator_id=first_validator,
+            validator_wallet=TEST_WALLET,
+            active_workers=active_workers,
+            limit=1,
+        )
+    )["assignments"][0]
+    shared_challenge = first["challenge"]
+
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(probe_groups_t)
+            .where(probe_groups_t.c.id == first["probe_group_id"])
+            .values(
+                scoring_policy_id="text.generated.v7",
+                challenge=shared_challenge,
+                challenge_hash=validators_svc._hash_obj(
+                    {
+                        "group_id": first["probe_group_id"],
+                        "worker_id": worker_id,
+                        "model": first["model"],
+                        "challenge": shared_challenge,
+                    },
+                ),
+            ),
+        )
+        await session.commit()
+
+    second_key = "0x" + f"{41:064x}"
+    second_wallet = Account.from_key(second_key).address.lower()
+    second_account = uuid.uuid4()
+    second_validator = await _register(second_account, second_key)
+    second = (
+        await validators_svc.issue_assignments(
+            account_id=second_account,
+            validator_id=second_validator,
+            validator_wallet=second_wallet,
+            active_workers=active_workers,
+            limit=1,
+        )
+    )["assignments"][0]
+
+    assert second["probe_group_id"] == first["probe_group_id"]
+    assert second["scoring_policy_id"] == "text.generated.v7"
+    assert second["challenge"] == shared_challenge
+    async with await database.new_session() as session:
+        stored = await session.scalar(
+            sa.select(assignments_t.c.challenge).where(
+                assignments_t.c.id == second["assignment_id"],
+            ),
+        )
+    assert stored == {}
+
+
+@pytest.mark.asyncio
 async def test_assignment_groups_require_matching_validator_scorer_capability(db):
     worker_id = str(uuid.uuid4())
     active_workers = [{
@@ -906,7 +982,7 @@ async def test_16k_context_assignment_requires_target_worker_headroom(db):
     )
     assert issued["count"] == 1
     assert issued["assignments"][0]["canary_kind"] == "context.retrieve.16k"
-    assert issued["assignments"][0]["scoring_policy_id"] == "text.generated.v7"
+    assert issued["assignments"][0]["scoring_policy_id"] == "text.generated.v8"
 
 
 @pytest.mark.asyncio
@@ -946,7 +1022,7 @@ async def test_32k_context_assignment_requires_target_worker_headroom(db):
     )
     assert issued["count"] == 1
     assert issued["assignments"][0]["canary_kind"] == "context.retrieve.32k"
-    assert issued["assignments"][0]["scoring_policy_id"] == "text.generated.v7"
+    assert issued["assignments"][0]["scoring_policy_id"] == "text.generated.v8"
 
     assignment = issued["assignments"][0]
     async with await database.new_session() as session:
@@ -964,8 +1040,18 @@ async def test_32k_context_assignment_requires_target_worker_headroom(db):
                 )
             )
         ).scalar_one()
-    assert stored_assignment == {}
-    assert stored_group["prompt"] == assignment["challenge"]["prompt"]
+    assert {
+        key: stored_assignment[key]
+        for key in assignment["challenge"]
+    } == assignment["challenge"]
+    assert stored_assignment["capability"] == assignment["capability"]
+    assert stored_group == {
+        "schema": "aipg.validator.text.batch.v1",
+        "generator_kind": "context.retrieve.32k",
+        "capability": "text.context.32k.v1",
+        "score_dimension": "capability",
+        "quality_eligible": False,
+    }
 
     reloaded = await validators_svc.issue_assignments(
         account_id=account_id,
@@ -1633,8 +1719,17 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["features"]["targeted_probe"] is True
     assert body["features"]["quorum"] is True
     assert body["features"]["validator_rewards"] is False
+    assert body["features"]["score_dimensions"] is True
+    assert body["features"]["unique_text_batch_challenges"] is True
+    assert body["features"]["blind_quality"] is False
+    assert body["features"]["worker_terminal_indistinguishable"] is False
     assert body["probe_policy"]["max_attempts"] >= 1
     assert body["probe_policy"]["lease_seconds"] > validators_svc.PROBE_TIMEOUT_SECONDS
+    assert body["probe_policy"]["text_batch_scoring_policy"] == "text.generated.v8"
+    assert body["probe_policy"]["challenge_instance"] == "unique_per_validator"
+    assert body["probe_policy"]["quality_eligible"] is False
+    assert body["probe_policy"]["worker_payload_hides_assignment"] is True
+    assert body["probe_policy"]["worker_terminal_indistinguishable"] is False
     assert (
         body["authority_model"]["authoritative"]
         == "requires Grid-issued assignment_id + grid_nonce + probe evidence hash"

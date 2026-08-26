@@ -137,10 +137,17 @@ transport, accounts, stats, health/metrics.
   as preview.
 - Validator scorecards must aggregate evidence only. Do not expose raw payloads,
   nonces, signatures, account IDs, or validator identities from scorecard routes.
+  They must expose the evidence dimension and whether it is quality-eligible;
+  current generated canaries must return `quality_eligible=false` and no quality
+  score.
 - Targeted validator probes must be hard-targeted to the assigned worker and
   must not bill users, pay den, write worker ledger rows, or strike workers.
   Worker-visible job IDs and payloads must not reveal validator markers,
   assignment/group IDs, or Grid nonces; evidence binding stays inside Core.
+  The current terminal `den: 0` acknowledgment is a retrospective probe
+  fingerprint. It is acceptable only while evidence has no economic authority;
+  routing/reward/slash activation requires a reviewed ordinary worker-payment
+  path for bounded audit work so terminal acknowledgments are indistinguishable.
 - A media witness is authoritative transport only after Core freezes the upload
   under a key the worker cannot write and hashes the frozen bytes. Worker-reported
   digests, mutable upload URLs, and self-declared model names are never evidence.

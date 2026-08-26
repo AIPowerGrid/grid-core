@@ -43,7 +43,7 @@ def test_validator_economic_bypass_requires_core_hard_target_metadata():
 
 
 @pytest.mark.asyncio
-async def test_validator_probe_is_indistinguishable_in_worker_transport(monkeypatch):
+async def test_validator_probe_hides_assignment_metadata_in_worker_dispatch(monkeypatch):
     ws = _WebSocket()
     job_id = str(uuid.uuid4())
     job = {

@@ -45,15 +45,18 @@ snapshot pool.
 - `grid_accounts.payout_asset`/`payout_aipg_bps` are worker payout preferences
   (NULL → grid defaults); SELECTed on the HOT auth path — their migrations
   (0009) must run before code that reads them.
-- `grid_validator_probe_groups` is the shared challenge and quorum lifecycle.
-  A grouped challenge is stored once on the probe group; grouped assignment
-  rows keep an empty challenge object and resolve the group copy when issued or
-  probed. Legacy ungrouped assignments continue to own their challenge.
-  Media groups lease exactly one candidate-plus-two-reference execution and
+- `grid_validator_probe_groups` is the shared batch and quorum lifecycle. New
+  text v8 groups store a generator/capability envelope, while each assignment
+  stores its own randomized challenge. Already-open text v7 groups retain their
+  shared challenge until they drain; legacy ungrouped assignments continue to
+  own their challenge. Media groups lease exactly one
+  candidate-plus-two-reference execution and
   persist one response-committed frozen witness set for independent scoring by
   every assigned validator. Retries are bounded and stale leases reclaimable.
-  It targets five distinct registrations and requires three matching votes by
-  default. `grid_validator_assignments` gates authoritative evidence with Grid-issued
+  It targets five distinct registrations and requires three matching verdicts
+  within that worker/capability lane by default. This is repeated capability
+  sampling, not byte-for-byte reproduction or a quality score.
+  `grid_validator_assignments` gates authoritative evidence with Grid-issued
   assignment ids, nonces, and hard-targeted probe evidence hashes. Its attempt
   counter and lease deadline enforce one bounded active probe per assignment.
   `grid_validator_attestations` stores both preview and authoritative evidence.

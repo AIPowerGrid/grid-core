@@ -13,9 +13,9 @@ concrete online model:
 
 This is deliberately CPU-cheap and dependency-free (rules only). The gate is a
 single function so a smarter classifier (embedding / ModernBERT) can drop in
-behind `classify()` later without touching callers. Worker-level scoring (pick
-the fastest/most-reliable replica via validator evidence) is Step 2 — this step
-picks the MODEL and leaves worker selection to the normal dispatch path.
+behind `classify()` later without touching callers. Worker-level scoring uses
+only Grid-measured performance. Validator evidence has no routing authority
+until a separately reviewed blind-quality policy is implemented.
 
 The tier map is curated behind the scenes: edit `routing.json` (or the file at
 $GRID_ROUTING_CONFIG). Users only ever see `auto`.
@@ -138,105 +138,94 @@ def _variant_override(model_field: str) -> str | None:
 
 
 async def _refresh_scores() -> None:
-    """Recompute model-level scores from validator quality + live speed.
+    """Recompute model and worker scores from live performance only.
 
-    Combines: validator avg_score + failed_rate (grid_validator_attestations)
-    and decode throughput / latency (ledger via stats._model_stats). Normalized
-    across the models present. Wrapped by get_model_scores() which guards it.
+    Public-template validator evidence is intentionally excluded. Current
+    attestations are availability/protocol/capability samples, not blind quality
+    evidence, and must not influence routing. Wrapped by ``get_model_scores()``,
+    which guards failures and retains the last good cache.
     """
+    from datetime import UTC, datetime, timedelta
+
     import sqlalchemy as sa
-    from datetime import datetime, timedelta, timezone
 
     from ..database import new_session
-    from ..v2.schema import validator_attestations as att
     from ..routers.stats import _perf_by_model
-
     from ..v2.schema import ledger as led
 
     cfg = _load_config()
-    since = datetime.now(timezone.utc) - timedelta(hours=_SCORE_WINDOW_H)
-    quality: dict[str, dict[str, float]] = {}
+    since = datetime.now(UTC) - timedelta(hours=_SCORE_WINDOW_H)
     speed: dict[str, dict[str, float | None]] = {}
-    wq: dict[tuple[str, str], dict[str, float]] = {}   # (model, worker) -> quality
-    wp: dict[tuple[str, str], dict[str, float]] = {}   # (model, worker) -> perf
+    wp: dict[tuple[str, str], dict[str, float]] = {}  # (model, worker) -> perf
     async with await new_session() as s:
-        rows = (
-            await s.execute(
-                sa.select(
-                    att.c.model,
-                    sa.func.count().label("n"),
-                    sa.func.sum(sa.case((att.c.verdict == "failed", 1), else_=0)).label("failed"),
-                    sa.func.avg(att.c.score).label("avg_score"),
-                )
-                .where(att.c.created >= since, att.c.model.isnot(None))
-                .group_by(att.c.model)
-            )
-        ).mappings().all()
-        for r in rows:
-            n = int(r["n"]) or 1
-            quality[r["model"]] = {
-                "avg_score": float(r["avg_score"]) if r["avg_score"] is not None else None,
-                "failed_rate": float(r["failed"] or 0) / n,
-            }
         for (model, jt), st in (await _perf_by_model(s, since)).items():
             if jt == "text":
-                speed[model] = {"tps": st.get("tokens_per_s"), "latency": st.get("avg_latency_s")}
-
-        # Per-WORKER quality (validator attestations, worker_id is String)
-        for r in (await s.execute(
-            sa.select(
-                att.c.worker_id, att.c.model,
-                sa.func.count().label("n"),
-                sa.func.sum(sa.case((att.c.verdict == "failed", 1), else_=0)).label("failed"),
-                sa.func.avg(att.c.score).label("avg_score"),
-            ).where(att.c.created >= since, att.c.worker_id.isnot(None), att.c.model.isnot(None))
-             .group_by(att.c.worker_id, att.c.model)
-        )).mappings().all():
-            n = int(r["n"]) or 1
-            wq[(r["model"], str(r["worker_id"]))] = {
-                "avg_score": float(r["avg_score"]) if r["avg_score"] is not None else None,
-                "failed_rate": float(r["failed"] or 0) / n,
-            }
+                speed[model] = {
+                    "tps": st.get("tokens_per_s"),
+                    "latency": st.get("avg_latency_s"),
+                }
         # Per-WORKER perf (ledger, worker_id is Uuid → compare as str)
-        for r in (await s.execute(
-            sa.select(
-                led.c.worker_id, led.c.model,
-                sa.func.avg(led.c.duration).label("avg_dur"),
-                sa.func.sum(led.c.duration - sa.func.coalesce(led.c.ttft, 0.0)).label("sum_decode"),
-                sa.func.sum(led.c.output_units).label("sum_units"),
-            ).where(led.c.created >= since, led.c.worker_id.isnot(None),
-                    led.c.duration.isnot(None), led.c.duration > 0, led.c.job_type == "text")
-             .group_by(led.c.worker_id, led.c.model)
-        )).mappings().all():
-            sd = float(r["sum_decode"] or 0.0)
-            wp[(r["model"], str(r["worker_id"]))] = {
-                "tps": round(int(r["sum_units"] or 0) / sd, 1) if sd > 0 else None,
-                "latency": round(float(r["avg_dur"]), 2) if r["avg_dur"] is not None else None,
+        worker_rows = (
+            await s.execute(
+                sa.select(
+                    led.c.worker_id,
+                    led.c.model,
+                    sa.func.avg(led.c.duration).label("avg_dur"),
+                    sa.func.sum(
+                        led.c.duration - sa.func.coalesce(led.c.ttft, 0.0),
+                    ).label("sum_decode"),
+                    sa.func.sum(led.c.output_units).label("sum_units"),
+                )
+                .where(
+                    led.c.created >= since,
+                    led.c.worker_id.isnot(None),
+                    led.c.duration.isnot(None),
+                    led.c.duration > 0,
+                    led.c.job_type == "text",
+                )
+                .group_by(led.c.worker_id, led.c.model),
+            )
+        ).mappings().all()
+        for row in worker_rows:
+            sd = float(row["sum_decode"] or 0.0)
+            wp[(row["model"], str(row["worker_id"]))] = {
+                "tps": round(int(row["sum_units"] or 0) / sd, 1) if sd > 0 else None,
+                "latency": (
+                    round(float(row["avg_dur"]), 2)
+                    if row["avg_dur"] is not None
+                    else None
+                ),
             }
 
-    models = set(quality) | set(speed)
-    tps_vals = [speed[m]["tps"] for m in models if speed.get(m, {}).get("tps")]
-    lat_vals = [speed[m]["latency"] for m in models if speed.get(m, {}).get("latency")]
+    models = set(speed)
+    tps_vals = [
+        speed[m]["tps"] for m in models if speed.get(m, {}).get("tps")
+    ]
+    lat_vals = [
+        speed[m]["latency"] for m in models if speed.get(m, {}).get("latency")
+    ]
     tps_max = max(tps_vals) if tps_vals else 1.0
     lat_max = max(lat_vals) if lat_vals else 1.0
     w = cfg.get("weights", _DEFAULT_CONFIG["weights"])
 
     scores: dict[str, dict[str, Any]] = {}
     for m in models:
-        q = quality.get(m, {})
         sp = speed.get(m, {})
-        # neutral priors so a model with no data isn't unfairly buried (cold start)
-        qual = q.get("avg_score") if q.get("avg_score") is not None else 0.7
-        failed = q.get("failed_rate", 0.0)
         tps_n = (sp.get("tps") / tps_max) if (sp.get("tps") and tps_max) else 0.5
         lat_n = (sp.get("latency") / lat_max) if (sp.get("latency") and lat_max) else 0.5
-        score = (w["quality"] * qual) + (w["throughput"] * tps_n) - (w["latency"] * lat_n) - (w["failure"] * failed)
-        scores[m] = {"score": round(score, 4), "quality": round(qual, 3), "failed_rate": round(failed, 3),
-                     "tps": sp.get("tps"), "latency": sp.get("latency")}
+        score = (w["throughput"] * tps_n) - (w["latency"] * lat_n)
+        scores[m] = {
+            "score": round(score, 4),
+            "quality": None,
+            "failed_rate": None,
+            "tps": sp.get("tps"),
+            "latency": sp.get("latency"),
+            "dimensions": ["throughput", "latency"],
+        }
 
     # Per-worker scores, normalized within each model (compare replicas of the
     # same model to each other). Keyed (model, worker_id).
-    wkeys = set(wq) | set(wp)
+    wkeys = set(wp)
     by_model: dict[str, list[float]] = {}
     for (m, _wid) in wkeys:
         v = wp.get((m, _wid), {})
@@ -244,17 +233,25 @@ async def _refresh_scores() -> None:
             by_model.setdefault(m, []).append(v["tps"])
     wscores: dict[str, dict[str, Any]] = {}
     for (m, wid) in wkeys:
-        q = wq.get((m, wid), {})
         p = wp.get((m, wid), {})
-        qual = q.get("avg_score") if q.get("avg_score") is not None else 0.7
-        failed = q.get("failed_rate", 0.0)
         tmax = max(by_model.get(m, [1.0]) or [1.0])
-        lmax = max([wp[(m, k)]["latency"] for (mm, k) in wkeys if mm == m and wp.get((m, k), {}).get("latency")] or [1.0])
+        latencies = [
+            wp[(m, key)]["latency"]
+            for (model, key) in wkeys
+            if model == m and wp.get((m, key), {}).get("latency")
+        ]
+        lmax = max(latencies or [1.0])
         tps_n = (p.get("tps") / tmax) if (p.get("tps") and tmax) else 0.5
         lat_n = (p.get("latency") / lmax) if (p.get("latency") and lmax) else 0.5
-        sc = (w["quality"] * qual) + (w["throughput"] * tps_n) - (w["latency"] * lat_n) - (w["failure"] * failed)
-        wscores[f"{m}|{wid}"] = {"score": round(sc, 4), "quality": round(qual, 3),
-                                 "failed_rate": round(failed, 3), "tps": p.get("tps"), "latency": p.get("latency")}
+        sc = (w["throughput"] * tps_n) - (w["latency"] * lat_n)
+        wscores[f"{m}|{wid}"] = {
+            "score": round(sc, 4),
+            "quality": None,
+            "failed_rate": None,
+            "tps": p.get("tps"),
+            "latency": p.get("latency"),
+            "dimensions": ["throughput", "latency"],
+        }
 
     _SCORE_CACHE["scores"] = scores
     _SCORE_CACHE["workers"] = wscores
@@ -366,6 +363,6 @@ def resolve_auto(model_field: str, prompt: str, available: list[str], scores: di
         meta["score"] = scores[chosen].get("score")
     logger.info(
         f"auto route: {model_field} -> {chosen} (class={task_class} effort={eff} "
-        f"fallback={fallback} {meta['gate_ms']}ms)"
+        f"fallback={fallback} {meta['gate_ms']}ms)",
     )
     return chosen, meta
