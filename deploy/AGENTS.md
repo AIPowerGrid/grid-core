@@ -61,6 +61,12 @@ executes an immutable release selected through `/home/aipg/current`.
   `VALIDATOR_HISTORY_SWEEP_SECONDS` bound finalized assignment/group machinery;
   signed attestations are preserved. Keep `env.template`, `config.py`, and the
   validator runbook aligned when changing these controls.
+- Keep `VALIDATOR_SEALED_ASSIGNMENTS_ENABLED=0` through the compatible-node
+  rollout. Merge and upgrade the validator fleet first, deploy the compatible
+  Core second, verify old unsealed operation, then enable the flag in a
+  supervised evidence-only canary. Roll back the flag, not the database, if a
+  node cannot verify terminal disclosure. This flag never enables routing,
+  rewards, strikes, or slashing.
 - Apply Alembic `0024` before code that issues media assignments; it adds the
   group execution lease and shared frozen-witness columns read by that path.
 - `VALIDATOR_MEDIA_PROBE_ENABLED` is not a standalone launch switch. Keep it off

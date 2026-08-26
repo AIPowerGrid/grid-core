@@ -141,6 +141,11 @@ transport, accounts, stats, health/metrics.
   `grid_nonce`, and matching hard-targeted probe evidence hash before it is
   marked authoritative. Preview evidence may be stored, but must stay labeled
   as preview.
+- Sealed assignment polling is compatibility-gated: when enabled, list responses
+  expose only opaque lifecycle/capability metadata and a SHA-256 seal. Target,
+  model, nonce, policy, and challenge may appear only in the terminal probe
+  disclosure, whose seal the node verifies before signing. Keep legacy full
+  polling until all participating nodes support the sealed form.
 - A completed targeted probe is recoverable only by the assignment's canonical
   account and registered validator, only until that validator submits its
   authoritative vote, and only through the bounded result envelope committed

@@ -1530,7 +1530,28 @@ def _assignment_to_dict(
     *,
     include_challenge: bool = True,
     include_grid_nonce: bool = True,
+    sealed: bool | None = None,
 ) -> dict[str, Any]:
+    if sealed is None:
+        sealed = bool(
+            getattr(get_settings(), "validator_sealed_assignments_enabled", False),
+        )
+    if sealed:
+        return {
+            "assignment_id": row["id"],
+            "modality": row["modality"],
+            "capability": row["capability"],
+            "scoring_policy_id": row["scoring_policy_id"],
+            "score_dimension": _score_dimension(row["modality"], row["capability"]),
+            "quality_eligible": _quality_eligible(row["modality"], row["capability"]),
+            "status": row["status"],
+            "probe_status": row["probe_status"],
+            "probe_attempts": int(row["probe_attempts"] or 0),
+            "created": row["created"].isoformat() if row["created"] else None,
+            "expires": row["expires"].isoformat() if row["expires"] else None,
+            "sealed": True,
+            "assignment_seal": _assignment_seal(row),
+        }
     out = {
         "assignment_id": row["id"],
         "probe_group_id": row.get("probe_group_id"),
@@ -1553,6 +1574,7 @@ def _assignment_to_dict(
         "expires": row["expires"].isoformat() if row["expires"] else None,
         "probed": row["probed"].isoformat() if row["probed"] else None,
         "finalized": row["finalized"].isoformat() if row["finalized"] else None,
+        "sealed": False,
     }
     if include_grid_nonce:
         out["grid_nonce"] = row["grid_nonce"]
@@ -1573,6 +1595,43 @@ def _assignment_to_dict(
         )
         out["challenge"] = {key: challenge[key] for key in keys if key in challenge}
     return out
+
+
+def _assignment_seal_payload(row) -> dict[str, Any]:
+    """Return the immutable assignment fields hidden until probe completion."""
+    return {
+        "schema": "aipg.validator.assignment.seal.v1",
+        "assignment_id": str(row["id"]),
+        "probe_group_id": str(row.get("probe_group_id") or ""),
+        "grid_nonce": str(row["grid_nonce"]),
+        "target_worker_id": str(row["target_worker_id"]),
+        "model": str(row["model"]),
+        "modality": str(row["modality"]),
+        "capability": str(row["capability"]),
+        "canary_kind": str(row["canary_kind"]),
+        "scoring_policy_id": str(row["scoring_policy_id"]),
+        "challenge": row.get("challenge") or {},
+    }
+
+
+def _assignment_seal(row) -> str:
+    return _hash_obj(_assignment_seal_payload(row))
+
+
+def _assignment_disclosure(row) -> dict[str, Any]:
+    """Reveal the sealed fields only in the terminal probe response."""
+    return {
+        "assignment_seal": _assignment_seal(row),
+        "probe_group_id": str(row.get("probe_group_id") or ""),
+        "grid_nonce": str(row["grid_nonce"]),
+        "target_worker_id": str(row["target_worker_id"]),
+        "model": str(row["model"]),
+        "modality": str(row["modality"]),
+        "capability": str(row["capability"]),
+        "canary_kind": str(row["canary_kind"]),
+        "scoring_policy_id": str(row["scoring_policy_id"]),
+        "challenge": row.get("challenge") or {},
+    }
 
 
 async def _hydrate_assignment_challenges(session, rows) -> list[dict[str, Any]]:
@@ -3576,15 +3635,9 @@ async def probe_assignment(
     result = {
         "status": "completed",
         "assignment_id": assignment_id,
-        "probe_group_id": row["probe_group_id"],
         "job_id": job_id,
-        "grid_nonce": row["grid_nonce"],
-        "target_worker_id": row["target_worker_id"],
         "target_worker_name": row["target_worker_name"],
-        "model": row["model"],
-        "modality": row["modality"],
-        "capability": row["capability"],
-        "canary_kind": row["canary_kind"],
+        **_assignment_disclosure(row),
         "output_text": full_text,
         "reasoning_text": full_reasoning if kind == "token.limit" else None,
         "tool_calls": tool_calls,
@@ -4057,15 +4110,9 @@ async def _probe_image_assignment(
     result = {
         "status": "completed",
         "assignment_id": assignment_id,
-        "probe_group_id": row["probe_group_id"],
         "job_id": job_id,
-        "grid_nonce": row["grid_nonce"],
-        "target_worker_id": row["target_worker_id"],
         "target_worker_name": row["target_worker_name"],
-        "model": row["model"],
-        "modality": row["modality"],
-        "capability": row["capability"],
-        "canary_kind": row["canary_kind"],
+        **_assignment_disclosure(row),
         "witnesses": witnesses,
         "probe_latency_ms": candidate_latency,
         **evidence,
@@ -4267,15 +4314,9 @@ async def _probe_video_assignment(
     result = {
         "status": "completed",
         "assignment_id": assignment_id,
-        "probe_group_id": row["probe_group_id"],
         "job_id": job_id,
-        "grid_nonce": row["grid_nonce"],
-        "target_worker_id": row["target_worker_id"],
         "target_worker_name": row["target_worker_name"],
-        "model": row["model"],
-        "modality": row["modality"],
-        "capability": row["capability"],
-        "canary_kind": row["canary_kind"],
+        **_assignment_disclosure(row),
         "witnesses": witnesses,
         "probe_latency_ms": candidate_latency,
         **evidence,
