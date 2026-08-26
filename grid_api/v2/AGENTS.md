@@ -74,8 +74,9 @@ snapshot pool.
   assignment is evidence-only (`none`) or owes ordinary worker den from the
   network audit budget (`audit_budget`). `grid_validator_audit_budgets` and
   `grid_validator_audit_reservations` are economic truth for that bounded
-  liability: reserve before dispatch; atomically settle with `grid_ledger`; a
-  release or stale sweep makes late success permanently non-payable.
+  liability: reserve before dispatch under every configured scope; atomically
+  settle with `grid_ledger` and a bounded replayable synthetic result; a release
+  or stale sweep makes late success permanently non-payable.
 - `grid_validators` binds one normalized signing wallet to one canonical account
   and records capabilities, version, and heartbeat. Assignment and attestation
   `validator_id` foreign keys preserve attribution; account uniqueness prevents

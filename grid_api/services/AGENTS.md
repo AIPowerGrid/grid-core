@@ -72,9 +72,12 @@ content sanitization, and reward settlement.
   production jobs, reward validators, strike, or slash. Optional
   `validator_audits.py` worker compensation is a separate dark rail: paid mode
   admits only operator-reviewed validator wallets, snapshots `audit_budget` on
-  the assignment, reserves a per-stage den cap from a durable UTC-day budget,
-  and atomically commits the ordinary worker ledger row with settlement before
-  DONE/ACK. It never bills a user or gives evidence authority. Core permits at
+  the assignment, reserves before dispatch under global daily/hourly,
+  per-validator daily, per-worker daily, and per-stage den caps, and atomically
+  commits the ordinary worker ledger row plus a bounded synthetic terminal
+  result before DONE/ACK. A reclaimed settled queue item replays that result
+  without GPU dispatch or a second payout. It never bills a user or gives
+  evidence authority. Core permits at
   most one new text group per worker/model per configured interval (one hour by
   default); v8 assignments own their randomized challenge while the group owns
   only the generator/capability envelope. Finalized assignment/group machinery is

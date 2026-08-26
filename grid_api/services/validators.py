@@ -2973,7 +2973,10 @@ async def assignment_health(
     from . import validator_audits
 
     audit_policy = validator_audits.public_policy()
-    audit_budget = await validator_audits.snapshot() if audit_policy["enabled"] else None
+    # Operational visibility survives rollback. Disabling new paid assignments
+    # must not hide holds that still need settlement or release.
+    audit_budget = await validator_audits.snapshot()
+    audit_reservations = await validator_audits.reservation_health()
     return {
         "quorum": {
             "pending": quorum_counts.get("pending", 0),
@@ -3005,6 +3008,7 @@ async def assignment_health(
         "paid_audit": {
             "policy": audit_policy,
             "budget": audit_budget,
+            "reservations": audit_reservations,
         },
         "probe": probe_counts,
         "recent": recent,

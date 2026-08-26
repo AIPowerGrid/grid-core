@@ -12,6 +12,7 @@ overspend the network audit budget.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 from datetime import UTC, date, datetime, timedelta
@@ -32,6 +33,7 @@ logger = logging.getLogger("grid_api.validator_audits")
 
 _ADDRESS_RE = re.compile(r"^0x[0-9a-f]{40}$")
 _DEN_QUANTUM = Decimal("0.00000001")
+_TERMINAL_RESULT_MAX_BYTES = 256 * 1024
 
 
 class AuditBudgetError(RuntimeError):
@@ -62,18 +64,37 @@ def policy() -> dict[str, Any]:
         reasons.append("reviewed validator wallet allowlist is missing or invalid")
     try:
         daily = _den(settings.validator_paid_audit_daily_den)
+        hourly = _den(settings.validator_paid_audit_hourly_den)
+        per_validator = _den(settings.validator_paid_audit_per_validator_daily_den)
+        per_worker = _den(settings.validator_paid_audit_per_worker_daily_den)
         per_job = _den(settings.validator_paid_audit_max_den_per_job)
     except AuditBudgetError:
         daily = Decimal(0)
+        hourly = Decimal(0)
+        per_validator = Decimal(0)
+        per_worker = Decimal(0)
         per_job = Decimal(0)
         if requested:
             reasons.append("audit den budget is invalid")
     if requested and daily <= 0:
         reasons.append("daily audit den budget must be positive")
+    if requested and hourly <= 0:
+        reasons.append("hourly audit den budget must be positive")
+    if requested and per_validator <= 0:
+        reasons.append("per-validator daily audit den budget must be positive")
+    if requested and per_worker <= 0:
+        reasons.append("per-worker daily audit den budget must be positive")
     if requested and per_job <= 0:
         reasons.append("per-job audit den cap must be positive")
-    if requested and daily > 0 and per_job > daily:
-        reasons.append("per-job audit den cap exceeds daily budget")
+    positive_caps = (daily, hourly, per_validator, per_worker)
+    if requested and per_job > 0 and any(cap > 0 and per_job > cap for cap in positive_caps):
+        reasons.append("per-job audit den cap exceeds a scoped budget")
+    if requested and hourly > 0 and daily > 0 and hourly > daily:
+        reasons.append("hourly audit den budget exceeds daily budget")
+    if requested and per_validator > 0 and daily > 0 and per_validator > daily:
+        reasons.append("per-validator audit den budget exceeds daily budget")
+    if requested and per_worker > 0 and daily > 0 and per_worker > daily:
+        reasons.append("per-worker audit den budget exceeds daily budget")
     if requested and int(settings.validator_paid_audit_stale_seconds) < 300:
         reasons.append("audit reservation stale threshold must be at least 300 seconds")
     return {
@@ -82,12 +103,18 @@ def policy() -> dict[str, Any]:
         "reasons": reasons,
         "reviewed_wallet_count": len(wallets),
         "daily_den": float(daily),
+        "hourly_den": float(hourly),
+        "per_validator_daily_den": float(per_validator),
+        "per_worker_daily_den": float(per_worker),
         "max_den_per_job": float(per_job),
         "worker_compensation": "audit_budget" if requested and not reasons else "none",
         "validator_rewards": False,
         "evidence_economic_authority": False,
         "_wallets": wallets,
         "_daily_decimal": daily,
+        "_hourly_decimal": hourly,
+        "_per_validator_decimal": per_validator,
+        "_per_worker_decimal": per_worker,
         "_per_job_decimal": per_job,
     }
 
@@ -122,6 +149,30 @@ async def _lock_budget_day(session, budget_day: date) -> None:
         )
 
 
+async def _used_den(session, *conditions) -> Decimal:
+    amount = sa.case(
+        (reservations_t.c.status == "held", reservations_t.c.reserved_den),
+        (reservations_t.c.status == "settled", reservations_t.c.settled_den),
+        else_=Decimal(0),
+    )
+    value = await session.scalar(
+        sa.select(sa.func.coalesce(sa.func.sum(amount), 0)).where(*conditions),
+    )
+    return _den(value or 0)
+
+
+def _terminal_result(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise AuditBudgetError("validator audit terminal result must be an object")
+    try:
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError) as exc:
+        raise AuditBudgetError("validator audit terminal result is not JSON-safe") from exc
+    if len(encoded.encode("utf-8")) > _TERMINAL_RESULT_MAX_BYTES:
+        raise AuditBudgetError("validator audit terminal result exceeds storage limit")
+    return json.loads(encoded)
+
+
 async def reserve(
     *,
     job_id: str,
@@ -141,24 +192,39 @@ async def reserve(
     wallet = str(validator_wallet or "").strip().lower()
     if wallet not in current["_wallets"]:
         raise AuditBudgetError("validator is not approved for paid audit assignments")
-    today = datetime.now(UTC).date()
+    now = datetime.now(UTC)
+    today = now.date()
+    hour_start = now.replace(minute=0, second=0, microsecond=0)
     reserve_den = current["_per_job_decimal"]
     daily_den = current["_daily_decimal"]
+    job_uuid = ledger_svc.as_uuid(job_id)
+    worker_uuid = ledger_svc.as_uuid(worker_id)
 
     async with await new_session() as session:
         try:
             await _lock_budget_day(session, today)
             existing = (
                 await session.execute(
-                    sa.select(reservations_t.c.status).where(
-                        reservations_t.c.job_id == ledger_svc.as_uuid(job_id),
+                    sa.select(reservations_t).where(
+                        reservations_t.c.job_id == job_uuid,
                     ),
                 )
-            ).scalar_one_or_none()
+            ).mappings().first()
             if existing is not None:
                 await session.rollback()
-                if existing == "held":
+                same_reservation = (
+                    existing["assignment_id"] == assignment_id
+                    and existing["probe_group_id"] == probe_group_id
+                    and existing["worker_id"] == worker_uuid
+                    and existing["validator_wallet"] == wallet
+                    and _den(existing["reserved_den"]) == reserve_den
+                )
+                if existing["status"] == "held" and same_reservation:
                     return "held"
+                if not same_reservation:
+                    raise AuditBudgetError(
+                        "validator audit job id is bound to different work",
+                    )
                 raise AuditBudgetError(
                     "validator audit reservation is already terminal for this job",
                 )
@@ -168,7 +234,6 @@ async def reserve(
                     sa.select(budgets_t).where(budgets_t.c.budget_day == today).with_for_update(),
                 )
             ).mappings().first()
-            now = datetime.now(UTC)
             if budget is None:
                 await session.execute(
                     sa.insert(budgets_t).values(
@@ -185,6 +250,40 @@ async def reserve(
                 # The first reserve snapshots the day's operator-approved cap.
                 # Mid-day env changes apply on the next UTC day.
                 budget_limit = _den(budget["limit_den"])
+
+            scoped_limits = (
+                (
+                    "hourly",
+                    current["_hourly_decimal"],
+                    (
+                        reservations_t.c.created >= hour_start,
+                        reservations_t.c.created < hour_start + timedelta(hours=1),
+                    ),
+                ),
+                (
+                    "per-validator daily",
+                    current["_per_validator_decimal"],
+                    (
+                        reservations_t.c.budget_day == today,
+                        reservations_t.c.validator_wallet == wallet,
+                    ),
+                ),
+                (
+                    "per-worker daily",
+                    current["_per_worker_decimal"],
+                    (
+                        reservations_t.c.budget_day == today,
+                        reservations_t.c.worker_id == worker_uuid,
+                    ),
+                ),
+            )
+            for label, limit_den, conditions in scoped_limits:
+                used_den = await _used_den(session, *conditions)
+                if used_den + reserve_den > limit_den:
+                    await session.rollback()
+                    raise AuditBudgetError(
+                        f"validator audit {label} den budget exhausted",
+                    )
 
             moved = await session.execute(
                 sa.update(budgets_t)
@@ -203,10 +302,10 @@ async def reserve(
                 raise AuditBudgetError("validator audit daily den budget exhausted")
             await session.execute(
                 sa.insert(reservations_t).values(
-                    job_id=ledger_svc.as_uuid(job_id),
+                    job_id=job_uuid,
                     assignment_id=assignment_id,
                     probe_group_id=probe_group_id,
-                    worker_id=ledger_svc.as_uuid(worker_id),
+                    worker_id=worker_uuid,
                     validator_wallet=wallet,
                     budget_day=today,
                     reserved_den=reserve_den,
@@ -222,23 +321,42 @@ async def reserve(
             raise
         except IntegrityError:
             await session.rollback()
-            existing = await session.scalar(
-                sa.select(reservations_t.c.status).where(
-                    reservations_t.c.job_id == ledger_svc.as_uuid(job_id),
-                ),
-            )
+            existing = (
+                await session.execute(
+                    sa.select(reservations_t).where(
+                        reservations_t.c.job_id == job_uuid,
+                    ),
+                )
+            ).mappings().first()
             if existing is not None:
-                if existing == "held":
+                same_reservation = (
+                    existing["assignment_id"] == assignment_id
+                    and existing["probe_group_id"] == probe_group_id
+                    and existing["worker_id"] == worker_uuid
+                    and existing["validator_wallet"] == wallet
+                    and _den(existing["reserved_den"]) == reserve_den
+                )
+                if existing["status"] == "held" and same_reservation:
                     return "held"
+                if not same_reservation:
+                    raise AuditBudgetError(
+                        "validator audit job id is bound to different work",
+                    )
                 raise AuditBudgetError(
                     "validator audit reservation is already terminal for this job",
                 )
             raise AuditBudgetError("validator audit budget reservation conflicted")
 
 
-async def record_and_settle(*, job_id: str, ledger_values: dict[str, Any]) -> tuple[str, float]:
-    """Atomically append the payout ledger row and settle its audit hold."""
+async def record_and_settle(
+    *,
+    job_id: str,
+    ledger_values: dict[str, Any],
+    terminal_result: dict[str, Any],
+) -> tuple[str, float]:
+    """Atomically append payout, settle the hold, and persist replayable DONE."""
     try:
+        stored_result = _terminal_result(terminal_result)
         if str(ledger_values.get("job_id") or "") != str(job_id):
             raise AuditBudgetError("audit ledger job does not match its reservation")
         if ledger_values.get("job_type") != "text":
@@ -281,7 +399,12 @@ async def record_and_settle(*, job_id: str, ledger_values: dict[str, Any]) -> tu
                     reservations_t.c.job_id == ledger_svc.as_uuid(job_id),
                     reservations_t.c.status == "held",
                 )
-                .values(status="settled", settled_den=actual_den, updated=now),
+                .values(
+                    status="settled",
+                    settled_den=actual_den,
+                    terminal_result=stored_result,
+                    updated=now,
+                ),
             )
             if moved.rowcount != 1:
                 await session.rollback()
@@ -312,6 +435,23 @@ async def record_and_settle(*, job_id: str, ledger_values: dict[str, Any]) -> tu
         return "error", 0.0
 
 
+async def settled_result(job_id: str) -> tuple[dict[str, Any], float] | None:
+    """Return an atomically settled synthetic result for crash replay."""
+    async with await new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(
+                    reservations_t.c.status,
+                    reservations_t.c.settled_den,
+                    reservations_t.c.terminal_result,
+                ).where(reservations_t.c.job_id == ledger_svc.as_uuid(job_id)),
+            )
+        ).mappings().first()
+    if not row or row["status"] != "settled" or not isinstance(row["terminal_result"], dict):
+        return None
+    return dict(row["terminal_result"]), float(row["settled_den"] or 0)
+
+
 async def release(job_id: str) -> str:
     """Release one unspent hold. Settled/released rows are strict no-ops."""
     async with await new_session() as session:
@@ -335,7 +475,12 @@ async def release(job_id: str) -> str:
                 reservations_t.c.job_id == ledger_svc.as_uuid(job_id),
                 reservations_t.c.status == "held",
             )
-            .values(status="released", settled_den=Decimal(0), updated=now),
+            .values(
+                status="released",
+                settled_den=Decimal(0),
+                terminal_result=sa.null(),
+                updated=now,
+            ),
         )
         budget_moved = await session.execute(
             sa.update(budgets_t)
@@ -396,4 +541,68 @@ async def snapshot(budget_day: date | None = None) -> dict[str, Any] | None:
         "held_den": float(row["held_den"]),
         "spent_den": float(row["spent_den"]),
         "remaining_den": float(row["limit_den"] - row["held_den"] - row["spent_den"]),
+    }
+
+
+async def reservation_health() -> dict[str, Any]:
+    """Return aggregate recovery state without raw worker or assignment IDs."""
+    now = datetime.now(UTC)
+    stale_seconds = max(300, int(get_settings().validator_paid_audit_stale_seconds))
+    stale_cutoff = now - timedelta(seconds=stale_seconds)
+    async with await new_session() as session:
+        rows = (
+            await session.execute(
+                sa.select(reservations_t.c.status, sa.func.count().label("count"))
+                .group_by(reservations_t.c.status),
+            )
+        ).mappings().all()
+        oldest_held = await session.scalar(
+            sa.select(sa.func.min(reservations_t.c.created)).where(
+                reservations_t.c.status == "held",
+            ),
+        )
+        stale_held = int(
+            await session.scalar(
+                sa.select(sa.func.count()).select_from(reservations_t).where(
+                    reservations_t.c.status == "held",
+                    reservations_t.c.created < stale_cutoff,
+                ),
+            )
+            or 0
+        )
+        terminal_invariant_breaches = int(
+            await session.scalar(
+                sa.select(sa.func.count()).select_from(reservations_t).where(
+                    sa.or_(
+                        sa.and_(
+                            reservations_t.c.status == "settled",
+                            reservations_t.c.terminal_result.is_(None),
+                        ),
+                        sa.and_(
+                            reservations_t.c.status != "settled",
+                            reservations_t.c.terminal_result.is_not(None),
+                        ),
+                    ),
+                ),
+            )
+            or 0
+        )
+    counts = {str(row["status"]): int(row["count"]) for row in rows}
+    oldest_seconds = None
+    if oldest_held is not None:
+        if oldest_held.tzinfo is None:
+            oldest_held = oldest_held.replace(tzinfo=UTC)
+        oldest_seconds = max(0, int((now - oldest_held).total_seconds()))
+    return {
+        "held": counts.get("held", 0),
+        "settled_replayable": counts.get("settled", 0),
+        "released": counts.get("released", 0),
+        "stale_held": stale_held,
+        "oldest_held_seconds": oldest_seconds,
+        "terminal_invariant_breaches": terminal_invariant_breaches,
+        "recovery": {
+            "held": "automatic stale sweep releases the reservation",
+            "settled": "queue reclaim replays the committed result without GPU dispatch",
+            "validator_delivery": "validator node journal retries or operator retry-dead",
+        },
     }

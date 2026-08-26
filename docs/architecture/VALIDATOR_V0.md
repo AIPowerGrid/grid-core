@@ -126,10 +126,12 @@ the node's local pHash/decode scorer.
 
 The targeted probe is isolated from customer economics: it never reserves or
 settles demand credits, rewards a validator, grants evidence authority, or
-applies a worker strike. Candidate migration `0026` adds a default-off worker
+applies a worker strike. Candidate migration `0027` adds a default-off worker
 compensation rail for text audits. In that mode only reviewed validator wallets
 receive assignments; each GPU stage reserves from a durable daily den budget
-and atomically commits the ordinary worker ledger row before DONE/ACK.
+subject to global hourly, per-validator daily, per-worker daily, and per-job
+caps. It atomically commits the ordinary worker ledger row and replayable
+synthetic terminal result before DONE/ACK.
 
 It still consumes worker capacity. Core therefore creates at most one new text
 probe group per worker/model per configured interval (one hour by default,
@@ -192,6 +194,8 @@ upgraded to authoritative by inference.
 Alembic `0026` adds default-unreviewed operator grouping and qualification
 state. Deploy it before the independence-aware allocator. It changes no existing
 evidence verdict, routing, reward, payout, bond, strike, or slashing behavior.
+Alembic `0027` adds default-off paid-audit budgets, reservations, and
+payout-bound terminal replay. It remains a separately reviewed economic pilot.
 
 Finalized assignment and group rows are operational state and are pruned after
 90 days by default. Signed attestation rows remain the durable evidence record;

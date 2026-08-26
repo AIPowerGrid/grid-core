@@ -202,6 +202,11 @@ async def test_paid_validator_probe_commits_before_ordinary_den_ack(monkeypatch)
         order.append(("done", (args, kwargs)))
 
     monkeypatch.setattr(worker_ws, "_handle_worker_generation", generation)
+    monkeypatch.setattr(
+        worker_ws.validator_audits,
+        "settled_result",
+        lambda _job_id: _async_result(None),
+    )
     monkeypatch.setattr(worker_ws.validator_audits, "record_and_settle", settle)
     monkeypatch.setattr(worker_ws.token_stream, "publish_done", publish_done)
     monkeypatch.setattr(worker_ws.signing, "verify_worker_sig", lambda *_args: None)
@@ -261,6 +266,11 @@ async def test_paid_validator_probe_invalid_settlement_is_not_acked(monkeypatch,
     monkeypatch.setattr(worker_ws, "_handle_worker_generation", generation)
     monkeypatch.setattr(
         worker_ws.validator_audits,
+        "settled_result",
+        lambda _job_id: _async_result(None),
+    )
+    monkeypatch.setattr(
+        worker_ws.validator_audits,
         "record_and_settle",
         lambda **_kwargs: _async_result((settle_status, 0.0)),
     )
@@ -276,6 +286,63 @@ async def test_paid_validator_probe_invalid_settlement_is_not_acked(monkeypatch,
     )
     assert errors
     assert len(ws.sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_paid_validator_probe_replays_committed_result_without_gpu_dispatch(monkeypatch):
+    ws = _WebSocket()
+    job_id = str(uuid.uuid4())
+    job = {
+        "job_id": job_id,
+        "payload": {
+            "prompt": "synthetic request",
+            "_validator_probe": True,
+            "_validator_assignment_id": "asg-replay",
+            "_validator_probe_group_id": "prg-replay",
+            "_validator_grid_nonce": "nonce-replay",
+            "_validator_paid_audit": True,
+        },
+    }
+    terminal = {
+        "worker_id": str(uuid.uuid4()),
+        "grid_meta": {},
+        "full_text": "durable answer",
+        "full_reasoning": "",
+        "tool_calls": [],
+        "usage": {"completion_tokens": 3},
+        "finish_reason": "stop",
+    }
+    published = []
+
+    async def generation(*_args):
+        raise AssertionError("a settled audit must not reach the GPU again")
+
+    async def publish_done(*args, **kwargs):
+        published.append((args, kwargs))
+
+    monkeypatch.setattr(worker_ws, "_handle_worker_generation", generation)
+    monkeypatch.setattr(
+        worker_ws.validator_audits,
+        "settled_result",
+        lambda _job_id: _async_result((terminal, 1.5)),
+    )
+    monkeypatch.setattr(worker_ws.token_stream, "publish_done", publish_done)
+
+    assert await worker_ws._handle_validator_probe(
+        ws,
+        job,
+        "model-a",
+        str(uuid.uuid4()),
+        {"name": "rig-a"},
+    )
+    assert ws.sent == []
+    assert published[0][0][1] == "durable answer"
+    assert published[0][1]["grid"] == {
+        "worker_id": terminal["worker_id"],
+        "assignment_id": "asg-replay",
+        "grid_nonce": "nonce-replay",
+        "economic_effect": "worker_compensated_audit",
+    }
 
 
 async def _async_result(value):

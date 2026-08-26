@@ -13,6 +13,8 @@ executes an immutable release selected through `/home/aipg/current`.
 - `README.md` - deploy/cutover/runbook notes.
 - `DEMAND_BILLING_RUNBOOK.md` - dark deploy, allowlisted canary, alert,
   rollback, and staged demand-charging procedure.
+- `VALIDATOR_PAID_AUDIT_RUNBOOK.md` - default-off migration, scoped-budget,
+  supervised worker-compensation canary, recovery, and rollback procedure.
 - `nginx/aipg-api.conf` - Grid routes, restricted metrics, public docs/health,
   and static `410 Gone` responses for retired API paths.
 - `systemd/aipg-gridapi.service` - uvicorn Grid API unit.
@@ -69,10 +71,11 @@ executes an immutable release selected through `/home/aipg/current`.
   rewards, strikes, or slashing.
 - Apply Alembic `0024` before code that issues media assignments; it adds the
   group execution lease and shared frozen-witness columns read by that path.
-- Apply Alembic `0025` before any code that reads assignment compensation or
+- Apply Alembic `0026` before any code that reads assignment compensation or
   enables paid text audits. Keep `VALIDATOR_PAID_AUDIT_ENABLED=0` unless the
-  reviewed wallet cohort, positive daily/per-job den caps, Postgres migration,
-  stale-hold sweeper, and supervised settlement/ACK canary are all proven.
+  reviewed wallet cohort, positive global daily/hourly, per-validator daily,
+  per-worker daily, and per-job den caps, Postgres migration, stale-hold
+  sweeper, replay path, and supervised settlement/ACK canary are all proven.
 - `VALIDATOR_MEDIA_PROBE_ENABLED` is not a standalone launch switch. Keep it off
   until the reviewed bond contract/verifier/minimum, finalized reference sync,
   governed deterministic recipe/model digest, independent operators, immutable

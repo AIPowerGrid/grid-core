@@ -23,6 +23,7 @@ from grid_api import auth, database, safe_logging
 from grid_api.services import recipes, validator_audits, validator_references
 from grid_api.services import validators as validators_svc
 from grid_api.v2.schema import accounts as accounts_t
+from grid_api.v2.schema import ledger as ledger_t
 from grid_api.v2.schema import metadata as v2_metadata
 from grid_api.v2.schema import validator_assignments as assignments_t
 from grid_api.v2.schema import validator_attestations as attestations_t
@@ -108,6 +109,9 @@ async def test_concurrent_paid_audit_reserves_cannot_exceed_daily_den(pg, monkey
             validator_paid_audit_enabled=True,
             validator_paid_audit_wallets=wallet,
             validator_paid_audit_daily_den=30,
+            validator_paid_audit_hourly_den=30,
+            validator_paid_audit_per_validator_daily_den=30,
+            validator_paid_audit_per_worker_daily_den=30,
             validator_paid_audit_max_den_per_job=10,
             validator_paid_audit_stale_seconds=3600,
         ),
@@ -135,6 +139,118 @@ async def test_concurrent_paid_audit_reserves_cannot_exceed_daily_den(pg, monkey
         "spent_den": 0.0,
         "remaining_den": 0.0,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ("hourly", "validator", "worker"))
+async def test_concurrent_paid_audit_scoped_caps_are_atomic(pg, monkeypatch, scope):
+    wallets = [f"0x{index + 100:040x}" for index in range(20)]
+    shared_worker = str(uuid.uuid4())
+    limits = {
+        "validator_paid_audit_daily_den": 200,
+        "validator_paid_audit_hourly_den": 200,
+        "validator_paid_audit_per_validator_daily_den": 200,
+        "validator_paid_audit_per_worker_daily_den": 200,
+    }
+    limits[f"validator_paid_audit_{scope}_den" if scope == "hourly" else (
+        "validator_paid_audit_per_validator_daily_den"
+        if scope == "validator"
+        else "validator_paid_audit_per_worker_daily_den"
+    )] = 30
+    monkeypatch.setattr(
+        validator_audits,
+        "get_settings",
+        lambda: SimpleNamespace(
+            validator_paid_audit_enabled=True,
+            validator_paid_audit_wallets=",".join(wallets),
+            validator_paid_audit_max_den_per_job=10,
+            validator_paid_audit_stale_seconds=3600,
+            **limits,
+        ),
+    )
+
+    async def attempt(index):
+        wallet = wallets[0] if scope == "validator" else wallets[index]
+        worker_id = shared_worker if scope == "worker" else str(uuid.uuid4())
+        try:
+            return await validator_audits.reserve(
+                job_id=str(uuid.uuid4()),
+                assignment_id=f"asg_{uuid.uuid4().hex}",
+                probe_group_id=f"prg_{uuid.uuid4().hex}",
+                worker_id=worker_id,
+                validator_wallet=wallet,
+            )
+        except validator_audits.AuditBudgetError:
+            return "rejected"
+
+    results = await asyncio.gather(*(attempt(index) for index in range(20)))
+    assert results.count("held") == 3
+    assert results.count("rejected") == 17
+
+
+@pytest.mark.asyncio
+async def test_concurrent_paid_audit_terminal_commits_once_with_replay(pg, monkeypatch):
+    wallet = "0x" + "a" * 40
+    monkeypatch.setattr(
+        validator_audits,
+        "get_settings",
+        lambda: SimpleNamespace(
+            validator_paid_audit_enabled=True,
+            validator_paid_audit_wallets=wallet,
+            validator_paid_audit_daily_den=100,
+            validator_paid_audit_hourly_den=100,
+            validator_paid_audit_per_validator_daily_den=100,
+            validator_paid_audit_per_worker_daily_den=100,
+            validator_paid_audit_max_den_per_job=10,
+            validator_paid_audit_stale_seconds=3600,
+        ),
+    )
+    job_id = str(uuid.uuid4())
+    worker_id = str(uuid.uuid4())
+    args = {
+        "job_id": job_id,
+        "assignment_id": f"asg_{uuid.uuid4().hex}",
+        "probe_group_id": f"prg_{uuid.uuid4().hex}",
+        "worker_id": worker_id,
+        "validator_wallet": wallet,
+    }
+    terminal = {
+        "worker_id": worker_id,
+        "grid_meta": {},
+        "full_text": "durable synthetic output",
+        "full_reasoning": "",
+        "tool_calls": [],
+        "usage": {"completion_tokens": 3},
+        "finish_reason": "stop",
+    }
+    ledger_values = {
+        "job_id": job_id,
+        "worker_id": worker_id,
+        "wallet": "0x" + "b" * 40,
+        "model": "model-a",
+        "job_type": "text",
+        "den": 4.5,
+        "output_units": 3,
+        "prompt_hash": "c" * 64,
+        "result_hash": "d" * 64,
+    }
+    await validator_audits.reserve(**args)
+
+    results = await asyncio.gather(
+        *(
+            validator_audits.record_and_settle(
+                job_id=job_id,
+                ledger_values=ledger_values,
+                terminal_result=terminal,
+            )
+            for _ in range(10)
+        )
+    )
+    assert results.count(("settled", 4.5)) == 1
+    assert results.count(("duplicate", 4.5)) == 9
+    assert await validator_audits.settled_result(job_id) == (terminal, 4.5)
+    async with await database.new_session() as session:
+        assert await session.scalar(sa.select(sa.func.count()).select_from(ledger_t)) == 1
 
 
 def _workers():

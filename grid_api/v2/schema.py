@@ -916,6 +916,9 @@ validator_audit_reservations = sa.Table(
     ),
     sa.Column("reserved_den", sa.Numeric(24, 8), nullable=False),
     sa.Column("settled_den", sa.Numeric(24, 8), nullable=True),
+    # Synthetic probe output required to replay DONE after payout committed but
+    # before the in-memory subscriber observed it. Never stores customer work.
+    sa.Column("terminal_result", PortableJSON, nullable=True),
     sa.Column("status", sa.String(16), nullable=False, default="held", index=True),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
     sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
@@ -937,6 +940,21 @@ validator_audit_reservations = sa.Table(
         "(status IN ('settled', 'released') AND settled_den IS NOT NULL)",
         name="ck_grid_validator_audit_terminal_amount",
     ),
+    sa.CheckConstraint(
+        "(status = 'settled' AND terminal_result IS NOT NULL) OR "
+        "(status != 'settled' AND terminal_result IS NULL)",
+        name="ck_grid_validator_audit_terminal_result",
+    ),
+)
+sa.Index(
+    "ix_grid_validator_audit_reservations_wallet_day",
+    validator_audit_reservations.c.validator_wallet,
+    validator_audit_reservations.c.budget_day,
+)
+sa.Index(
+    "ix_grid_validator_audit_reservations_worker_day",
+    validator_audit_reservations.c.worker_id,
+    validator_audit_reservations.c.budget_day,
 )
 
 # Signed validator reports about probe outcomes. V0 stores these as audit
