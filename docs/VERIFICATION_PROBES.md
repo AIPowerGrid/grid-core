@@ -119,7 +119,9 @@ The rest require a v2 account API key and are evidence-only:
   evidence only when it matches the Grid-issued assignment, nonce, and evidence
   hash.
 - `GET /v1/validator/scorecards` — aggregate worker/model evidence without raw
-  payloads, nonces, signatures, account IDs, or validator identities.
+  payloads, nonces, signatures, account IDs, or validator identities. Objective
+  text votes include Core-match/disagreement counts; media and preview verdicts
+  remain labeled validator opinion.
 - `GET /v1/validator/assignments/health` — assignment and quorum lifecycle
   health plus privacy-preserving agreement, dispute, coverage, and software
   version aggregates. It does not claim registered accounts are independent
@@ -145,6 +147,9 @@ default while retaining signed attestations as the durable evidence record.
 Completed envelopes exist only as operational crash recovery: maximum 512 KiB,
 assignment-owner only, unavailable after that validator's authoritative vote,
 and removed with the assignment machinery.
+Workers advertising multiple text models rotate toward the least recently
+covered model. Existing unfilled groups are joined before replacement groups,
+and one validator cannot open duplicate groups for the same blocked model.
 
 Text challenge families are selected cryptographically rather than from worker
 ordering. Current candidate families are exact instruction, generated

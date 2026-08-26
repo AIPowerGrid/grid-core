@@ -145,7 +145,9 @@ transport, accounts, stats, health/metrics.
   nonces, signatures, account IDs, or validator identities from scorecard routes.
   They must expose the evidence dimension and whether it is quality-eligible;
   current generated canaries must return `quality_eligible=false` and no quality
-  score.
+  score. They must also distinguish objective assignment votes cross-checked
+  against Core's independently computed verdict from validator-only opinions.
+  A disagreement remains evidence, not a hidden Core-verified result.
 - Targeted validator probes must be hard-targeted to the assigned worker and
   must not bill users, pay den, write worker ledger rows, or strike workers.
   Worker-visible job IDs and payloads must not reveal validator markers,

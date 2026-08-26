@@ -1605,11 +1605,15 @@ async def issue_assignments(
                 continue
             if modality not in (worker.get("job_types") or ["text"]):
                 continue
-            models = [m for m in (worker.get("models") or []) if isinstance(m, str) and m]
+            models = list(dict.fromkeys(
+                m for m in (worker.get("models") or []) if isinstance(m, str) and m
+            ))
             if not models:
                 continue
-            model = models[0]
-            if (worker_id, model) in existing_keys:
+            candidate_models = [
+                model for model in models if (worker_id, model) not in existing_keys
+            ]
+            if not candidate_models:
                 continue
             eligible_challenge_kinds = _worker_eligible_text_challenges(
                 challenge_kinds,
@@ -1621,7 +1625,7 @@ async def issue_assignments(
             if session.bind and session.bind.dialect.name == "postgresql":
                 lock_key = int.from_bytes(
                     hashlib.sha256(
-                        f"validator-group:{worker_id}:{model}:{modality}".encode()
+                        f"validator-worker:{worker_id}:{modality}".encode()
                     ).digest()[:8],
                     byteorder="big",
                     signed=True,
@@ -1636,7 +1640,7 @@ async def issue_assignments(
                     sa.select(probe_groups_t)
                     .where(
                         probe_groups_t.c.target_worker_id == worker_id,
-                        probe_groups_t.c.model == model,
+                        probe_groups_t.c.model.in_(candidate_models),
                         probe_groups_t.c.modality == modality,
                         probe_groups_t.c.expires >= now,
                         probe_groups_t.c.quorum_status != "finalized",
@@ -1645,7 +1649,8 @@ async def issue_assignments(
                 )
             ).mappings().all()
             group = None
-            unfilled_group_exists = False
+            model = None
+            blocked_models: set[str] = set()
             for candidate in candidate_groups:
                 if candidate["capability"] not in supported_capabilities:
                     continue
@@ -1664,7 +1669,6 @@ async def issue_assignments(
                 )
                 if assigned_count >= int(candidate["target_validator_count"]):
                     continue
-                unfilled_group_exists = True
                 already_assigned = await session.scalar(
                     sa.select(sa.func.count())
                     .select_from(assignments_t)
@@ -1675,20 +1679,55 @@ async def issue_assignments(
                 )
                 if not already_assigned:
                     group = candidate
+                    model = str(candidate["model"])
                     break
+                blocked_models.add(str(candidate["model"]))
 
             # Do not let one fast validator manufacture many nominally shared
-            # groups while the current group is still waiting for peers.
-            if group is None and unfilled_group_exists:
-                continue
+            # groups for the same model while its current group waits for peers.
+            # It may still cover another model advertised by the same worker.
 
             if group is None:
-                if await _text_group_cooldown_active(
-                    session,
-                    worker_id=worker_id,
-                    model=model,
-                    now=now,
-                ):
+                coverage_rows = (
+                    await session.execute(
+                        sa.select(
+                            probe_groups_t.c.model,
+                            sa.func.max(probe_groups_t.c.created).label("last_created"),
+                        )
+                        .where(
+                            probe_groups_t.c.target_worker_id == worker_id,
+                            probe_groups_t.c.modality == modality,
+                            probe_groups_t.c.model.in_(candidate_models),
+                        )
+                        .group_by(probe_groups_t.c.model)
+                    )
+                ).all()
+                last_created = {
+                    str(row[0]): _aware(row[1]).timestamp()
+                    for row in coverage_rows
+                    if row[1] is not None
+                }
+                advertised_order = {name: index for index, name in enumerate(models)}
+                ordered_models = sorted(
+                    candidate_models,
+                    key=lambda name: (
+                        last_created.get(name, float("-inf")),
+                        advertised_order[name],
+                    ),
+                )
+                for candidate_model in ordered_models:
+                    if candidate_model in blocked_models:
+                        continue
+                    if await _text_group_cooldown_active(
+                        session,
+                        worker_id=worker_id,
+                        model=candidate_model,
+                        now=now,
+                    ):
+                        continue
+                    model = candidate_model
+                    break
+                if model is None:
                     continue
                 challenge = _make_text_challenge(secrets.choice(eligible_challenge_kinds))
                 group_id = f"prg_{uuid4().hex}"
@@ -2926,6 +2965,31 @@ async def scorecards(
     healthy = sa.func.sum(sa.case((attestations_t.c.verdict == "healthy", 1), else_=0))
     slow = sa.func.sum(sa.case((attestations_t.c.verdict == "slow", 1), else_=0))
     failed = sa.func.sum(sa.case((attestations_t.c.verdict == "failed", 1), else_=0))
+    objective = assignments_t.c.probe_verdict.in_(tuple(sorted(VALID_VERDICTS)))
+    core_matched = sa.func.sum(
+        sa.case(
+            (
+                sa.and_(
+                    objective,
+                    attestations_t.c.verdict == assignments_t.c.probe_verdict,
+                ),
+                1,
+            ),
+            else_=0,
+        )
+    )
+    core_disagreed = sa.func.sum(
+        sa.case(
+            (
+                sa.and_(
+                    objective,
+                    attestations_t.c.verdict != assignments_t.c.probe_verdict,
+                ),
+                1,
+            ),
+            else_=0,
+        )
+    )
 
     q = (
         sa.select(
@@ -2939,10 +3003,16 @@ async def scorecards(
             healthy.label("healthy"),
             slow.label("slow"),
             failed.label("failed"),
+            core_matched.label("core_matched"),
+            core_disagreed.label("core_disagreed"),
             sa.func.avg(attestations_t.c.latency_ms).label("avg_latency_ms"),
             sa.func.avg(attestations_t.c.score).label("avg_score"),
             sa.func.min(attestations_t.c.created).label("first_seen"),
             sa.func.max(attestations_t.c.created).label("last_seen"),
+        )
+        .outerjoin(
+            assignments_t,
+            assignments_t.c.id == attestations_t.c.assignment_id,
         )
         .where(attestations_t.c.created >= cutoff)
         .group_by(
@@ -2972,6 +3042,15 @@ async def scorecards(
         failures = int(row["failed"] or 0)
         healthy_count = int(row["healthy"] or 0)
         slow_count = int(row["slow"] or 0)
+        matched_count = int(row["core_matched"] or 0)
+        disagreed_count = int(row["core_disagreed"] or 0)
+        opinion_count = max(0, total - matched_count - disagreed_count)
+        if matched_count + disagreed_count == total and total:
+            verdict_basis = "objective_core_cross_check"
+        elif opinion_count == total:
+            verdict_basis = "validator_opinion"
+        else:
+            verdict_basis = "mixed"
         subject_type = "worker" if row["worker_id"] else "model"
         subject_id = row["worker_id"] or row["model"] or "unknown"
         items.append({
@@ -2984,6 +3063,12 @@ async def scorecards(
             "score_dimension": _score_dimension(row["modality"], row["capability"]),
             "quality_eligible": _quality_eligible(row["modality"], row["capability"]),
             "quality_score": None,
+            "verdict_verification": {
+                "basis": verdict_basis,
+                "core_matched": matched_count,
+                "core_disagreed": disagreed_count,
+                "validator_opinion": opinion_count,
+            },
             "authority": row["authority"],
             "quorum_status": row["quorum_status"],
             "total": total,
