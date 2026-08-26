@@ -146,7 +146,15 @@ IDs, validator identities, private challenge policies, or reference outputs.
 Aggregate network health includes completed assignments, vote agreement and
 dispute rates, worker/model coverage, and bounded software-version cohorts.
 Registered, fresh, and participating counts remain separate from independently
-verified operators; the latter remains zero until external review exists.
+verified operators. Alembic `0026` and the maintainer-only review tool record an
+opaque common-control group after off-platform review. Qualification requires at
+least 72 hours and 80% of five-minute heartbeat samples; reviews expire after 30
+days by default. Every control group counts once and may occupy only one seat in
+a probe group. Public health exposes distinct verified and participating group
+counts only; group ids and review references remain private.
+Stored preview groups continue to use distinct-registration acceptance. The
+health API reports reviewed independent quorum separately and explicitly says
+it is not yet required for acceptance; neither signal has economic authority.
 
 ## Schema And Deployment
 
@@ -160,6 +168,9 @@ validator and group. Alembic `0025` adds the bounded completed-probe result used
 for validator crash recovery. Apply all migrations before deploying replay-aware
 validator nodes. Existing legacy evidence may remain unbound and must never be
 upgraded to authoritative by inference.
+Alembic `0026` adds default-unreviewed operator grouping and qualification
+state. Deploy it before the independence-aware allocator. It changes no existing
+evidence verdict, routing, reward, payout, bond, strike, or slashing behavior.
 
 Finalized assignment and group rows are operational state and are pruned after
 90 days by default. Signed attestation rows remain the durable evidence record;
@@ -168,8 +179,8 @@ the pruning job does not delete them.
 ## Next Authority Gate
 
 Before evidence can affect routing or rewards, the network must prove multiple
-independently operated nodes in production, add self-validation and
-correlated-operator controls, define dispute windows, and make evidence
+independently operated nodes in production, complete self-validation controls,
+define dispute windows, and make evidence
 replayable end to end. Core result replay closes only the Core-to-validator
 delivery gap; nodes still need a durable assignment journal and operator-visible
 dead-letter recovery. Slashing requires a separate objective-fraud policy and contract

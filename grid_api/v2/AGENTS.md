@@ -73,8 +73,13 @@ snapshot pool.
 - `grid_validators` binds one normalized signing wallet to one canonical account
   and records capabilities, version, and heartbeat. Assignment and attestation
   `validator_id` foreign keys preserve attribution; account uniqueness prevents
-  identity rotation. Group/validator uniqueness on assignments and
-  attestations prevents duplicate membership or votes.
+  identity rotation. Its opaque `operator_group_id` is maintainer-reviewed
+  correlated-control metadata: registrations in one group count once and may
+  not occupy multiple seats in one probe group. Candidate qualification uses
+  bounded heartbeat samples; verified reviews expire. Group identifiers and
+  review references are never public. Group/validator uniqueness on assignments
+  and attestations remains the final database guard against duplicate identity
+  membership or votes.
 - `grid_validator_reference_workers` is derived only from finalized Base bond
   sync plus non-economic quality review. Active selection requires fresh bond,
   quality, worker-presence, account, and payout-wallet evidence; no worker may
