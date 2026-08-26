@@ -62,6 +62,10 @@ jobs:
         run: >-
           uvx --from pip-audit==2.9.0 pip-audit
           -r requirements-grid.lock --require-hashes --no-deps --disable-pip
+      - name: Validator anti-gaming contract
+        run: >-
+          python -m pytest
+          grid_api/routers/tests/test_validator_anti_gaming.py -q
       - name: Retired runtime gate
         run: python scripts/check_retired_runtime.py
       - name: Validate operations scripts

@@ -143,6 +143,9 @@ transport, accounts, stats, health/metrics.
   result.
 - Validator scorecards must aggregate evidence only. Do not expose raw payloads,
   nonces, signatures, account IDs, or validator identities from scorecard routes.
+- Public-template validator probes are adversarially reproducible by parsers and
+  probe-aware model switching. Keep the hostile-worker contract test in CI and
+  never mark these generated probes as quality-eligible.
   They must expose the evidence dimension and whether it is quality-eligible;
   current generated canaries must return `quality_eligible=false` and no quality
   score. They must also distinguish objective assignment votes cross-checked
