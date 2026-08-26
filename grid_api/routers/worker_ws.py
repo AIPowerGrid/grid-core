@@ -1127,7 +1127,14 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
     paid_audit = payload.get("_validator_paid_audit") is True
     if paid_audit:
         try:
-            replay = await validator_audits.settled_result(job_id)
+            replay = await validator_audits.settled_result(
+                job_id,
+                assignment_id=str(payload.get("_validator_assignment_id") or ""),
+                probe_group_id=str(payload.get("_validator_probe_group_id") or ""),
+                grid_nonce=str(payload.get("_validator_grid_nonce") or ""),
+                worker_id=worker_id,
+                model=selected_model,
+            )
         except Exception:
             logger.critical(
                 "Paid audit replay lookup failed for job %s; not dispatching",
@@ -1244,6 +1251,9 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
         }
         settle_result, paid_den = await validator_audits.record_and_settle(
             job_id=job_id,
+            assignment_id=str(payload.get("_validator_assignment_id") or ""),
+            probe_group_id=str(payload.get("_validator_probe_group_id") or ""),
+            grid_nonce=str(payload.get("_validator_grid_nonce") or ""),
             terminal_result=terminal_result,
             ledger_values=dict(
                 job_id=job_id,
@@ -1274,7 +1284,14 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
             return True
 
         if settle_result == "duplicate":
-            replay = await validator_audits.settled_result(job_id)
+            replay = await validator_audits.settled_result(
+                job_id,
+                assignment_id=str(payload.get("_validator_assignment_id") or ""),
+                probe_group_id=str(payload.get("_validator_probe_group_id") or ""),
+                grid_nonce=str(payload.get("_validator_grid_nonce") or ""),
+                worker_id=worker_id,
+                model=selected_model,
+            )
             if replay is None:
                 await token_stream.publish_error(job_id, "Audit recovery failed; please retry.")
                 return False

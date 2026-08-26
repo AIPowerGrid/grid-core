@@ -53,7 +53,9 @@ def upgrade() -> None:
         sa.Column("job_id", sa.Uuid(), primary_key=True),
         sa.Column("assignment_id", sa.String(96), nullable=False),
         sa.Column("probe_group_id", sa.String(96), nullable=False),
+        sa.Column("grid_nonce", sa.String(128), nullable=False),
         sa.Column("worker_id", sa.Uuid(), nullable=False),
+        sa.Column("model", sa.String(255), nullable=False),
         sa.Column("validator_wallet", sa.String(42), nullable=False),
         sa.Column(
             "budget_day",

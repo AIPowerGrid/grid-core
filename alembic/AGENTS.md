@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current head: `0026`
+- `versions/` - ordered migration revisions. Current head: `0027`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -30,7 +30,7 @@ production database match the Grid-owned schema contracts without relying on
   `0026` adds opaque operator groups, expiring independence-review
   state, and bounded qualification heartbeat samples; `0027` adds the
   snapshotted assignment compensation mode plus durable audit-den budgets and
-  per-stage reservations).
+  per-stage reservations bound to assignment, group, nonce, worker, and model).
 
 ## Local Contracts
 

@@ -71,7 +71,7 @@ executes an immutable release selected through `/home/aipg/current`.
   rewards, strikes, or slashing.
 - Apply Alembic `0024` before code that issues media assignments; it adds the
   group execution lease and shared frozen-witness columns read by that path.
-- Apply Alembic `0026` before any code that reads assignment compensation or
+- Apply Alembic `0027` before any code that reads assignment compensation or
   enables paid text audits. Keep `VALIDATOR_PAID_AUDIT_ENABLED=0` unless the
   reviewed wallet cohort, positive global daily/hourly, per-validator daily,
   per-worker daily, and per-job den caps, Postgres migration, stale-hold
