@@ -73,7 +73,8 @@ transport, accounts, stats, health/metrics.
   payout totals, current component incidents, and decentralization advisories).
 - `validator.py` - validator assignment-bound evidence surface:
   `GET /v1/validator/capabilities`, signed linked-wallet registration/status/
-  heartbeat, `GET /v1/validator/assignments`,
+  heartbeat, signed self-suspension and linked replacement-wallet rotation,
+  `GET /v1/validator/assignments`,
   `POST /v1/validator/probe/{assignment_id}`,
   `POST /v1/validator/attest`, `GET /v1/validator/workers`,
   `GET /v1/validator/scorecards`, and
@@ -131,6 +132,11 @@ transport, accounts, stats, health/metrics.
   `validator.assignments`, `validator.probe`, `validator.attest`, and
   `validator.read`; never broaden them to inference or account-management
   authority.
+- Validator suspension requires a fresh signature from the currently registered
+  wallet. Rotation preserves the stable validator ID, requires the same
+  canonical account to link and sign with a different replacement wallet, and
+  cannot revive a maintainer-revoked registration. Ordinary signed registration
+  is the explicit resume path for a self-suspended validator.
 - Assignment-bound evidence must require a Grid-issued `assignment_id`,
   `grid_nonce`, and matching hard-targeted probe evidence hash before it is
   marked authoritative. Preview evidence may be stored, but must stay labeled

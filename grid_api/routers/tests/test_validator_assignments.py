@@ -476,6 +476,237 @@ async def test_registration_rejects_unlinked_wallet_unsigned_and_stale(db):
 
 
 @pytest.mark.asyncio
+async def test_signed_suspension_is_idempotent_and_registration_resumes(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id)
+    suspension = {
+        "suspension_schema": "aipg.validator.suspension.v1",
+        "validator_id": validator_id,
+        "validator": TEST_WALLET,
+        "ts": int(time.time()),
+    }
+
+    first = await validators_svc.suspend_validator(
+        account_id=account_id,
+        payload=suspension,
+        signature=_sign(suspension),
+    )
+    second = await validators_svc.suspend_validator(
+        account_id=account_id,
+        payload=suspension,
+        signature=_sign(suspension),
+    )
+
+    assert first["status"] == second["status"] == "suspended"
+    with pytest.raises(validators_svc.RegistrationError, match="active validator"):
+        await validators_svc.active_validator(
+            account_id=account_id,
+            signing_wallet=TEST_WALLET,
+        )
+    assert (await validators_svc.validator_for_account(account_id=account_id))["status"] == "suspended"
+
+    registration = {
+        "registration_schema": "aipg.validator.registration.v1",
+        "validator": TEST_WALLET,
+        "software_version": "0.1.0-test",
+        "capabilities": ["text.basic.v1"],
+        "ts": int(time.time()),
+    }
+    resumed = await validators_svc.register_validator(
+        account_id=account_id,
+        account_wallet=TEST_WALLET,
+        payload=registration,
+        signature=_sign(registration),
+    )
+    assert resumed["validator_id"] == validator_id
+    assert resumed["status"] == "active"
+    assert (await validators_svc.active_validator(
+        account_id=account_id,
+        signing_wallet=TEST_WALLET,
+    ))["id"] == validator_id
+
+
+@pytest.mark.asyncio
+async def test_suspension_requires_current_registered_wallet(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id)
+    other_key = "0x" + f"{8:064x}"
+    other_wallet = Account.from_key(other_key).address.lower()
+    suspension = {
+        "suspension_schema": "aipg.validator.suspension.v1",
+        "validator_id": validator_id,
+        "validator": other_wallet,
+        "ts": int(time.time()),
+    }
+
+    with pytest.raises(validators_svc.RegistrationError, match="registered wallet"):
+        await validators_svc.suspend_validator(
+            account_id=account_id,
+            payload=suspension,
+            signature=_sign(suspension, other_key),
+        )
+
+
+@pytest.mark.asyncio
+async def test_rotation_preserves_identity_and_is_idempotent(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id)
+    replacement_key = "0x" + f"{8:064x}"
+    replacement_wallet = Account.from_key(replacement_key).address.lower()
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(accounts_t)
+            .where(accounts_t.c.id == account_id)
+            .values(wallet=replacement_wallet)
+        )
+        await session.commit()
+    rotation = {
+        "rotation_schema": "aipg.validator.rotation.v1",
+        "validator_id": validator_id,
+        "previous_signing_wallet": TEST_WALLET,
+        "validator": replacement_wallet,
+        "software_version": "0.1.1-preview",
+        "capabilities": ["text.basic.v1", "text.code.v1"],
+        "ts": int(time.time()),
+    }
+    signature = _sign(rotation, replacement_key)
+
+    rotated = await validators_svc.rotate_validator(
+        account_id=account_id,
+        account_wallet=replacement_wallet,
+        payload=rotation,
+        signature=signature,
+    )
+    replayed = await validators_svc.rotate_validator(
+        account_id=account_id,
+        account_wallet=replacement_wallet,
+        payload=rotation,
+        signature=signature,
+    )
+
+    assert rotated["validator_id"] == validator_id
+    assert rotated["signing_wallet"] == replacement_wallet
+    assert rotated["rotated"] is True
+    assert replayed["rotated"] is False
+    with pytest.raises(validators_svc.RegistrationError, match="active validator"):
+        await validators_svc.active_validator(
+            account_id=account_id,
+            signing_wallet=TEST_WALLET,
+        )
+    current = await validators_svc.active_validator(
+        account_id=account_id,
+        signing_wallet=replacement_wallet,
+    )
+    assert current["id"] == validator_id
+    assert current["capabilities"] == ["text.basic.v1", "text.code.v1"]
+
+
+@pytest.mark.asyncio
+async def test_rotation_rejects_wrong_previous_or_unlinked_wallet(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id)
+    replacement_key = "0x" + f"{8:064x}"
+    replacement_wallet = Account.from_key(replacement_key).address.lower()
+    unrelated_wallet = Account.from_key("0x" + f"{9:064x}").address.lower()
+    rotation = {
+        "rotation_schema": "aipg.validator.rotation.v1",
+        "validator_id": validator_id,
+        "previous_signing_wallet": unrelated_wallet,
+        "validator": replacement_wallet,
+        "software_version": "0.1.1-preview",
+        "capabilities": ["text.basic.v1"],
+        "ts": int(time.time()),
+    }
+
+    with pytest.raises(validators_svc.RegistrationError, match="linked wallet"):
+        await validators_svc.rotate_validator(
+            account_id=account_id,
+            account_wallet=TEST_WALLET,
+            payload=rotation,
+            signature=_sign(rotation, replacement_key),
+        )
+
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(accounts_t)
+            .where(accounts_t.c.id == account_id)
+            .values(wallet=replacement_wallet)
+        )
+        await session.commit()
+    with pytest.raises(validators_svc.RegistrationError, match="previous signing wallet"):
+        await validators_svc.rotate_validator(
+            account_id=account_id,
+            account_wallet=replacement_wallet,
+            payload=rotation,
+            signature=_sign(rotation, replacement_key),
+        )
+
+
+@pytest.mark.asyncio
+async def test_revoked_registration_cannot_resume_suspend_or_rotate(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t)
+            .where(validators_t.c.id == validator_id)
+            .values(status="revoked")
+        )
+        await session.commit()
+    registration = {
+        "registration_schema": "aipg.validator.registration.v1",
+        "validator": TEST_WALLET,
+        "software_version": "0.1.0-test",
+        "capabilities": ["text.basic.v1"],
+        "ts": int(time.time()),
+    }
+    with pytest.raises(validators_svc.RegistrationError, match="revoked"):
+        await validators_svc.register_validator(
+            account_id=account_id,
+            account_wallet=TEST_WALLET,
+            payload=registration,
+            signature=_sign(registration),
+        )
+    suspension = {
+        "suspension_schema": "aipg.validator.suspension.v1",
+        "validator_id": validator_id,
+        "validator": TEST_WALLET,
+        "ts": int(time.time()),
+    }
+    with pytest.raises(validators_svc.RegistrationError, match="revoked"):
+        await validators_svc.suspend_validator(
+            account_id=account_id,
+            payload=suspension,
+            signature=_sign(suspension),
+        )
+    replacement_key = "0x" + f"{8:064x}"
+    replacement_wallet = Account.from_key(replacement_key).address.lower()
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(accounts_t)
+            .where(accounts_t.c.id == account_id)
+            .values(wallet=replacement_wallet)
+        )
+        await session.commit()
+    rotation = {
+        "rotation_schema": "aipg.validator.rotation.v1",
+        "validator_id": validator_id,
+        "previous_signing_wallet": TEST_WALLET,
+        "validator": replacement_wallet,
+        "software_version": "0.1.1-preview",
+        "capabilities": ["text.basic.v1"],
+        "ts": int(time.time()),
+    }
+    with pytest.raises(validators_svc.RegistrationError, match="revoked"):
+        await validators_svc.rotate_validator(
+            account_id=account_id,
+            account_wallet=replacement_wallet,
+            payload=rotation,
+            signature=_sign(rotation, replacement_key),
+        )
+
+
+@pytest.mark.asyncio
 async def test_validator_key_has_only_validator_scopes(db, monkeypatch):
     monkeypatch.setenv("GRID_SALT", "validator-test-salt")
     monkeypatch.setattr(auth, "_API_KEY_SALT", None)
@@ -2004,6 +2235,8 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["features"]["assignments"] is True
     assert body["features"]["targeted_probe"] is True
     assert body["features"]["quorum"] is True
+    assert body["features"]["self_suspension"] is True
+    assert body["features"]["signing_wallet_rotation"] is True
     assert body["features"]["validator_rewards"] is False
     assert body["features"]["score_dimensions"] is True
     assert body["features"]["unique_text_batch_challenges"] is True
@@ -2027,6 +2260,59 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["features"]["video_validation"] is False
     assert body["media_validation"]["image"]["economic_effect"] == "none"
     assert body["media_validation"]["video"]["economic_effect"] == "none"
+
+
+def test_validator_lifecycle_routes_require_scoped_account_and_forward_signatures(monkeypatch):
+    account_id = uuid.uuid4()
+    calls = []
+
+    async def fake_auth(_key, *, required_scope):
+        assert required_scope == "validator.attest"
+        return {"source": "v2", "account_id": account_id, "wallet": TEST_WALLET}
+
+    async def fake_suspend(**kwargs):
+        calls.append(("suspend", kwargs))
+        return {"validator_id": "val_test", "status": "suspended"}
+
+    async def fake_rotate(**kwargs):
+        calls.append(("rotate", kwargs))
+        return {"validator_id": "val_test", "status": "active", "rotated": True}
+
+    monkeypatch.setattr(validator_router.accounts_svc, "authenticate", fake_auth)
+    monkeypatch.setattr(validator_router.validators_svc, "suspend_validator", fake_suspend)
+    monkeypatch.setattr(validator_router.validators_svc, "rotate_validator", fake_rotate)
+    app = FastAPI()
+    app.state.limiter = limiter
+    app.include_router(validator_router.router)
+    envelope = {"payload": {"ts": 1}, "signature": "0x" + "11" * 65}
+
+    with TestClient(app) as client:
+        suspended = client.post(
+            "/v1/validator/suspend",
+            headers={"apikey": "k"},
+            json=envelope,
+        )
+        rotated = client.post(
+            "/v1/validator/rotate",
+            headers={"apikey": "k"},
+            json=envelope,
+        )
+
+    assert suspended.status_code == 200
+    assert rotated.status_code == 200
+    assert calls[0] == (
+        "suspend",
+        {"account_id": account_id, "payload": {"ts": 1}, "signature": envelope["signature"]},
+    )
+    assert calls[1] == (
+        "rotate",
+        {
+            "account_id": account_id,
+            "account_wallet": TEST_WALLET,
+            "payload": {"ts": 1},
+            "signature": envelope["signature"],
+        },
+    )
 
 
 @pytest.mark.asyncio
