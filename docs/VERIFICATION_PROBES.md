@@ -184,6 +184,15 @@ Before evidence affects routing, rewards, or slashing, audit jobs must use a
 broad production-shaped distribution and an ordinary bounded worker-payment
 path whose dispatch and terminal acknowledgment do not reveal probe status.
 
+The default-off sealed-assignment protocol removes another fingerprinting and
+collusion surface: polling returns only an opaque assignment id, public
+capability/lifecycle metadata, and a SHA-256 commitment. Target, model, nonce,
+policy, and challenge are disclosed only after the worker's terminal result;
+the node recomputes the commitment before signing. It is a staged compatibility
+feature, so updated nodes ship first and Core remains unsealed until the fleet is
+compatible. Sealing does not hide the prompt from the worker during execution
+and therefore does not satisfy the blind-quality gate by itself.
+
 ## Deployment status (2026-08-22)
 
 Coordinator-run probes remain live and evidence-only. Registered-validator

@@ -11,6 +11,14 @@ public prompt family. A worker controls its client and backend and can classify
 recognizable probes, answer them with a parser or specialist backend, and serve
 ordinary jobs with something weaker.
 
+Unsealed assignment polling also reveals the target, model, nonce, and challenge
+before the validator invokes the probe. A colluding validator can use that lead
+time to warn the target. The default-off sealed-assignment rollout replaces
+those fields with a SHA-256 commitment and reveals them only in the terminal
+probe response, after worker output. Nodes verify the disclosure before signing.
+This closes advance API disclosure, not worker-side prompt recognition or
+validator-controlled timing.
+
 ## Executable Baseline
 
 `grid_api/routers/tests/test_validator_anti_gaming.py` runs hostile workers
@@ -46,6 +54,10 @@ A future quality-eligible audit must satisfy all of these conditions:
    not published with the worker client.
 6. Results remain evidence-only until independently controlled validators and
    the dispute path have passed the production pilot.
+
+Sealed assignment support is required before this lane can be considered, but
+it is not sufficient. Scheduler-owned production-shaped audits, ordinary worker
+economics, and measured classifier resistance remain promotion gates.
 
 ## Promotion Gate
 

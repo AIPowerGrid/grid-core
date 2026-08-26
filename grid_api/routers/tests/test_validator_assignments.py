@@ -2486,12 +2486,14 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["features"]["validator_rewards"] is False
     assert body["features"]["score_dimensions"] is True
     assert body["features"]["unique_text_batch_challenges"] is True
+    assert body["features"]["sealed_assignments"] is False
     assert body["features"]["blind_quality"] is False
     assert body["features"]["worker_terminal_indistinguishable"] is False
     assert body["probe_policy"]["max_attempts"] >= 1
     assert body["probe_policy"]["lease_seconds"] > validators_svc.PROBE_TIMEOUT_SECONDS
     assert body["probe_policy"]["text_batch_scoring_policy"] == "text.generated.v8"
     assert body["probe_policy"]["challenge_instance"] == "unique_per_validator"
+    assert body["probe_policy"]["assignment_disclosure"] == "on_assignment_poll"
     assert body["probe_policy"]["quality_eligible"] is False
     assert body["probe_policy"]["worker_payload_hides_assignment"] is True
     assert body["probe_policy"]["worker_terminal_indistinguishable"] is False
@@ -2506,6 +2508,26 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["features"]["video_validation"] is False
     assert body["media_validation"]["image"]["economic_effect"] == "none"
     assert body["media_validation"]["video"]["economic_effect"] == "none"
+
+
+def test_validator_capabilities_expose_enabled_sealed_assignment_mode(monkeypatch):
+    app = FastAPI()
+    app.state.limiter = limiter
+    app.include_router(validator_router.router)
+    monkeypatch.setattr(
+        validator_router,
+        "get_settings",
+        lambda: SimpleNamespace(validator_sealed_assignments_enabled=True),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/v1/validator/capabilities")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["features"]["sealed_assignments"] is True
+    assert body["probe_policy"]["assignment_disclosure"] == "after_probe_completion"
+    assert body["economic_effect"] == "none"
 
 
 def test_validator_lifecycle_routes_require_scoped_account_and_forward_signatures(monkeypatch):

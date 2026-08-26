@@ -138,6 +138,14 @@ authority. A paid audit rail must first be stake/Sybil-gated, budgeted, and
 tested against a model-switching worker; simply reporting fake den would corrupt
 the payout contract.
 
+The default-off sealed-assignment compatibility mode also withholds target,
+model, nonce, policy, and challenge from `GET /v1/validator/assignments`. The
+poll response carries an opaque assignment id plus a SHA-256 commitment. After
+the worker completes, `POST /v1/validator/probe/{assignment_id}` discloses the
+committed fields and the node verifies the seal before signing. Deploy compatible
+nodes before enabling the Core flag. This reduces validator/worker pre-collusion
+but does not make the public challenge grammar blind, so authority remains none.
+
 ## Privacy
 
 Scorecards expose aggregate verdict counts and health only. They must not expose

@@ -53,6 +53,10 @@ class GridSettings(BaseSettings):
     # Assignment-bound media validation. This stays dark until every field is
     # explicitly configured against a reviewed, deployed WorkerRegistry and a
     # fresh finalized-block/quality sync has populated the reference pool.
+    # When enabled, assignment polling discloses only an opaque assignment id
+    # and a SHA-256 seal. Target, nonce, model, and challenge are revealed in
+    # the completed probe result, after the worker has already produced output.
+    validator_sealed_assignments_enabled: bool = False
     validator_media_probe_enabled: bool = False
     # Objective video container/timing/motion checks are independently gated.
     # This does not enable reference-based video fidelity scoring.
