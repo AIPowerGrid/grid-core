@@ -270,6 +270,11 @@ content sanitization, and reward settlement.
   one assignment and one authoritative attestation per shared probe group.
   Distinct registrations do not prove independent operators, and preview
   quorum has no economic authority.
+- A validator may self-suspend only with a fresh signature from its registered
+  wallet. Signing-wallet rotation is account-recovery, not a new validator: it
+  preserves the validator ID, requires a different replacement wallet already
+  linked to the same canonical account, and requires that wallet's fresh
+  signature. A revoked validator cannot rotate or self-reactivate.
 - Targeted validator probes use an atomic, bounded assignment lease. Concurrent
   calls cannot dispatch duplicate free inference; expired leases are
   reclaimable, and late results cannot overwrite the current attempt.

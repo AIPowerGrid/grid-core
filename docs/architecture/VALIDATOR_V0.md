@@ -32,6 +32,10 @@ operation remain rollout gates.
 5. Assignments and authoritative attestations carry the registered
    `validator_id` and `probe_group_id`; one canonical account may register one
    validator, and one validator may submit one authoritative vote per group.
+6. The operator may self-suspend with a fresh current-wallet signature. A lost
+   or replaced signing key is rotated only after the same canonical account
+   links and signs with a different replacement wallet; the stable validator
+   ID and its historical attribution do not change.
 
 The signing key proves control of the registered evidence identity. It does not
 prove validator stake, independent operation, correct execution, or future
@@ -43,7 +47,9 @@ economic eligibility.
 |---|---|---|
 | `GET /v1/validator/capabilities` | public | discover preview features and economic boundary |
 | `POST /v1/validator/register` | `validator.attest` | verify and activate linked signing identity |
-| `GET /v1/validator/registration` | `validator.read` | inspect active registration |
+| `GET /v1/validator/registration` | `validator.read` | inspect active or self-suspended registration |
+| `POST /v1/validator/suspend` | `validator.attest` | stop new work with a current-wallet signature |
+| `POST /v1/validator/rotate` | `validator.attest` | bind the stable validator ID to a newly linked, newly signed wallet |
 | `POST /v1/validator/heartbeat` | `validator.attest` | refresh version, capabilities, and liveness |
 | `GET /v1/validator/assignments` | `validator.assignments` | receive short-lived, node-bound work |
 | `POST /v1/validator/probe/{assignment_id}` | `validator.probe` | hard-target the assigned worker |
@@ -54,6 +60,10 @@ economic eligibility.
 
 Missing registration, assignment, probe, or attestation support fails closed.
 The public inference API and worker inventory are never alternate probe paths.
+Self-suspension is reversible by a fresh signed registration from the same
+wallet. Maintainer revocation is not: registration, suspension, and rotation
+all reject a revoked identity. Rotation does not rewrite historical evidence,
+and old in-flight assignments retain their old wallet binding until they expire.
 
 ## Evidence Invariants
 

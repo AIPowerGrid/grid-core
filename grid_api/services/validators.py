@@ -303,6 +303,7 @@ async def register_validator(
                     software_version=software_version,
                     capabilities=capabilities,
                     registration_signature=normalized_signature,
+                    status="active",
                     last_heartbeat=now,
                     updated=now,
                 ),
@@ -333,6 +334,185 @@ async def register_validator(
         "capabilities": capabilities,
         "status": "active",
         "created": created,
+        "last_heartbeat": now.isoformat(),
+        "economic_effect": "none",
+    }
+
+
+async def validator_for_account(
+    *,
+    account_id,
+    statuses: tuple[str, ...] = ("active", "suspended"),
+) -> dict[str, Any]:
+    """Return this account's registration without trusting its current wallet link."""
+    async with await new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(validators_t).where(
+                    validators_t.c.account_id == account_id,
+                    validators_t.c.status.in_(statuses),
+                ),
+            )
+        ).mappings().first()
+    if not row:
+        raise RegistrationError("validator registration required")
+    return dict(row)
+
+
+def _fresh_control_payload(
+    payload: dict[str, Any],
+    signature: str | None,
+    *,
+    schema_key: str,
+    schema_value: str,
+) -> tuple[str, str]:
+    if not isinstance(payload, dict) or _payload_size(payload) > MAX_PAYLOAD_BYTES:
+        raise RegistrationError("validator control payload must be a bounded object")
+    if payload.get(schema_key) != schema_value:
+        raise RegistrationError(f"unsupported validator {schema_key.removesuffix('_schema')} schema")
+    try:
+        wallet = _validator_wallet(payload)
+    except AttestationError as exc:
+        raise RegistrationError(str(exc)) from exc
+    normalized_signature = _normalize_signature(signature)
+    if not normalized_signature:
+        raise RegistrationError("validator control requires a wallet signature")
+    try:
+        signature_status = _signature_status(payload, normalized_signature)
+    except AttestationError as exc:
+        raise RegistrationError(str(exc)) from exc
+    if signature_status != "verified":
+        raise RegistrationError("validator control signature could not be verified")
+    signed_ts = _int(payload, "ts")
+    if signed_ts is None:
+        raise RegistrationError("payload.ts is required")
+    if abs(int(_now().timestamp()) - signed_ts) > REGISTRATION_MAX_CLOCK_SKEW_SECONDS:
+        raise RegistrationError("validator control timestamp is outside the allowed window")
+    return wallet, normalized_signature
+
+
+async def suspend_validator(
+    *,
+    account_id,
+    payload: dict[str, Any],
+    signature: str | None,
+) -> dict[str, Any]:
+    """Idempotently stop new work using a fresh current-wallet signature."""
+    wallet, _ = _fresh_control_payload(
+        payload,
+        signature,
+        schema_key="suspension_schema",
+        schema_value="aipg.validator.suspension.v1",
+    )
+    validator_id = _string(payload, "validator_id", 96)
+    if not validator_id:
+        raise RegistrationError("payload.validator_id is required")
+    now = _now()
+    async with await new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(validators_t)
+                .where(validators_t.c.account_id == account_id)
+                .with_for_update()
+            )
+        ).mappings().first()
+        if not row or row["id"] != validator_id:
+            raise RegistrationError("validator registration does not match this account")
+        if row["status"] == "revoked":
+            raise RegistrationError("validator registration is revoked")
+        if row["signing_wallet"] != wallet:
+            raise RegistrationError("suspension must be signed by the registered wallet")
+        if row["status"] != "suspended":
+            await session.execute(
+                sa.update(validators_t)
+                .where(validators_t.c.id == validator_id)
+                .values(status="suspended", updated=now)
+            )
+        await session.commit()
+    return {
+        "validator_id": validator_id,
+        "status": "suspended",
+        "economic_effect": "none",
+    }
+
+
+async def rotate_validator(
+    *,
+    account_id,
+    account_wallet: str | None,
+    payload: dict[str, Any],
+    signature: str | None,
+) -> dict[str, Any]:
+    """Replace a validator signing wallet after the account links the new wallet."""
+    wallet, normalized_signature = _fresh_control_payload(
+        payload,
+        signature,
+        schema_key="rotation_schema",
+        schema_value="aipg.validator.rotation.v1",
+    )
+    linked_wallet = (account_wallet or "").strip().lower()
+    if not linked_wallet or not _ADDR_RE.match(linked_wallet):
+        raise RegistrationError("validator account must have a linked replacement wallet")
+    if wallet != linked_wallet:
+        raise RegistrationError("replacement signing wallet must match the account's linked wallet")
+    validator_id = _string(payload, "validator_id", 96)
+    previous_wallet = _string(payload, "previous_signing_wallet", 42)
+    if not validator_id or not previous_wallet or not _ADDR_RE.match(previous_wallet):
+        raise RegistrationError("rotation requires validator_id and previous_signing_wallet")
+    previous_wallet = previous_wallet.lower()
+    if wallet == previous_wallet:
+        raise RegistrationError("replacement signing wallet must differ from the previous wallet")
+    software_version = _string(payload, "software_version", 64)
+    if not software_version:
+        raise RegistrationError("payload.software_version is required")
+    capabilities = _registration_capabilities(payload)
+    now = _now()
+    async with await new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(validators_t)
+                .where(validators_t.c.account_id == account_id)
+                .with_for_update()
+            )
+        ).mappings().first()
+        if not row or row["id"] != validator_id:
+            raise RegistrationError("validator registration does not match this account")
+        if row["status"] == "revoked":
+            raise RegistrationError("validator registration is revoked")
+        if row["signing_wallet"] == wallet and row["registration_signature"] == normalized_signature:
+            return {
+                "validator_id": validator_id,
+                "signing_wallet": wallet,
+                "status": row["status"],
+                "rotated": False,
+                "economic_effect": "none",
+            }
+        if row["signing_wallet"] != previous_wallet:
+            raise RegistrationError("previous signing wallet does not match the registration")
+        wallet_owner = await session.scalar(
+            sa.select(validators_t.c.id).where(validators_t.c.signing_wallet == wallet)
+        )
+        if wallet_owner and wallet_owner != validator_id:
+            raise RegistrationError("replacement signing wallet belongs to another validator")
+        await session.execute(
+            sa.update(validators_t)
+            .where(validators_t.c.id == validator_id)
+            .values(
+                signing_wallet=wallet,
+                software_version=software_version,
+                capabilities=capabilities,
+                registration_signature=normalized_signature,
+                status="active",
+                last_heartbeat=now,
+                updated=now,
+            )
+        )
+        await session.commit()
+    return {
+        "validator_id": validator_id,
+        "signing_wallet": wallet,
+        "status": "active",
+        "rotated": True,
         "last_heartbeat": now.isoformat(),
         "economic_effect": "none",
     }

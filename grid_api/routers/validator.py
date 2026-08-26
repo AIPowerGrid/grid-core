@@ -33,6 +33,8 @@ def _capabilities_payload() -> dict[str, Any]:
         "features": {
             "attest": True,
             "registration": True,
+            "self_suspension": True,
+            "signing_wallet_rotation": True,
             "heartbeat": True,
             "worker_inventory": True,
             "assignments": True,
@@ -97,6 +99,20 @@ def _capabilities_payload() -> dict[str, Any]:
                 "method": "POST",
                 "path": "/v1/validator/register",
                 "auth": "validator.attest + linked-wallet signature",
+                "economic_effect": "none",
+            },
+            "suspension": {
+                "enabled": True,
+                "method": "POST",
+                "path": "/v1/validator/suspend",
+                "auth": "validator.attest + current-wallet signature",
+                "economic_effect": "none",
+            },
+            "rotation": {
+                "enabled": True,
+                "method": "POST",
+                "path": "/v1/validator/rotate",
+                "auth": "validator.attest + linked replacement-wallet signature",
                 "economic_effect": "none",
             },
             "heartbeat": {
@@ -257,7 +273,10 @@ async def validator_registration(
     authorization: Optional[str] = Header(None),
 ):
     user = await _validator_user(apikey, authorization, required_scope="validator.read")
-    validator = await _active_validator(user)
+    try:
+        validator = await validators_svc.validator_for_account(account_id=user["account_id"])
+    except validators_svc.RegistrationError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
     return {
         "validator_id": validator["id"],
         "signing_wallet": validator["signing_wallet"],
@@ -267,6 +286,47 @@ async def validator_registration(
         "last_heartbeat": validator["last_heartbeat"].isoformat(),
         "economic_effect": "none",
     }
+
+
+@router.post("/v1/validator/suspend")
+@limiter.limit("5/minute")
+async def suspend_validator(
+    request: Request,
+    form: RegistrationForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Stop new assignments using a fresh registered-wallet signature."""
+    user = await _validator_user(apikey, authorization, required_scope="validator.attest")
+    try:
+        return await validators_svc.suspend_validator(
+            account_id=user["account_id"],
+            payload=form.payload,
+            signature=form.signature,
+        )
+    except validators_svc.RegistrationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/v1/validator/rotate")
+@limiter.limit("5/minute")
+async def rotate_validator(
+    request: Request,
+    form: RegistrationForm,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Bind the stable validator identity to the account's newly linked wallet."""
+    user = await _validator_user(apikey, authorization, required_scope="validator.attest")
+    try:
+        return await validators_svc.rotate_validator(
+            account_id=user["account_id"],
+            account_wallet=user.get("wallet"),
+            payload=form.payload,
+            signature=form.signature,
+        )
+    except validators_svc.RegistrationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/v1/validator/heartbeat")
