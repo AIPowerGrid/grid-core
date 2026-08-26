@@ -75,7 +75,13 @@ content sanitization, and reward settlement.
   pruned after the configured retention window; signed attestations remain the
   durable evidence record.
   New probes stop at assignment expiry; already-completed probes may deliver
-  only during the bounded attestation grace window.
+  only during the bounded attestation grace window. A completed assignment
+  commits a JSON-safe synthetic result envelope (maximum 512 KiB) in the same
+  state transition as `probe_status=completed`. Until that validator submits
+  its authoritative vote, assignment polling returns the assignment and the
+  targeted probe endpoint replays the stored envelope to that assignment's
+  account/validator owner. It must not redispatch the worker or increment the
+  attempt counter. Missing, oversized, or uncommitted results fail closed.
   Aggregate health may expose bounded counts, agreement/dispute rates,
   worker/model coverage, and software-version cohorts, but never validator
   identities. Independent-operator counts remain zero until externally
