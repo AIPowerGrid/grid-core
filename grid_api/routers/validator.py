@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..auth import extract_api_key
+from ..config import get_settings
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
 from ..services import validators as validators_svc
@@ -26,6 +27,9 @@ router = APIRouter()
 def _capabilities_payload() -> dict[str, Any]:
     media_policy = validators_svc.media_validation_policy()
     video_policy = validators_svc.video_validation_policy()
+    sealed_assignments = bool(
+        getattr(get_settings(), "validator_sealed_assignments_enabled", False),
+    )
     return {
         "validator_api_version": "v1-preview",
         "mode": "shared_quorum_preview",
@@ -44,6 +48,7 @@ def _capabilities_payload() -> dict[str, Any]:
             "quorum": True,
             "score_dimensions": True,
             "unique_text_batch_challenges": True,
+            "sealed_assignments": sealed_assignments,
             "blind_quality": False,
             "worker_terminal_indistinguishable": False,
             "image_fidelity": media_policy["enabled"],
@@ -71,6 +76,9 @@ def _capabilities_payload() -> dict[str, Any]:
             "attestation_grace_seconds": validators_svc.ATTESTATION_GRACE_SECONDS,
             "text_batch_scoring_policy": validators_svc._TEXT_BATCH_SCORING_POLICY,
             "challenge_instance": "unique_per_validator",
+            "assignment_disclosure": (
+                "after_probe_completion" if sealed_assignments else "on_assignment_poll"
+            ),
             "quality_eligible": False,
             "worker_payload_hides_assignment": True,
             "worker_terminal_indistinguishable": False,
@@ -182,6 +190,10 @@ def _capabilities_payload() -> dict[str, Any]:
             (
                 "Generated canaries are protocol/capability evidence, not blind quality evidence; "
                 "the zero-den terminal acknowledgment remains a retrospective probe fingerprint."
+            ),
+            (
+                "Sealed assignment mode withholds target, model, nonce, and challenge until the "
+                "worker has completed the probe; the returned disclosure must match its SHA-256 seal."
             ),
         ],
     }
@@ -360,8 +372,10 @@ async def validator_assignments(
 ):
     """Return Grid-issued assignments for this validator account.
 
-    Assignments are short-lived and carry a grid_nonce. An attestation only
-    becomes authoritative if it echoes both fields and matches the target.
+    Assignments are short-lived. In sealed mode polling returns a commitment,
+    while target, nonce, model, and challenge arrive only after probe completion.
+    An attestation becomes authoritative only if the disclosure verifies and
+    the signed evidence matches Core's stored assignment.
     """
     user = await _validator_user(apikey, authorization, required_scope="validator.assignments")
     validator = await _active_validator(user)

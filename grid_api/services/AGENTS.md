@@ -85,6 +85,13 @@ content sanitization, and reward settlement.
   targeted probe endpoint replays the stored envelope to that assignment's
   account/validator owner. It must not redispatch the worker or increment the
   attempt counter. Missing, oversized, or uncommitted results fail closed.
+  `VALIDATOR_SEALED_ASSIGNMENTS_ENABLED` is a staged compatibility gate. When
+  enabled, assignment polling returns only opaque lifecycle/capability fields
+  and a SHA-256 commitment; the completed probe response discloses target,
+  model, nonce, policy, and challenge. The public node must recompute that
+  commitment before signing. Keep the flag off until every participating node
+  supports both forms. A seal prevents advance API disclosure; it does not make
+  public prompt families indistinguishable or authorize economic effects.
   Aggregate health may expose bounded counts, agreement/dispute rates,
   worker/model coverage, and software-version cohorts, but never validator
   identities. Scorecards label objective text votes as Core-matched or
@@ -266,6 +273,10 @@ content sanitization, and reward settlement.
   not describe generated canaries as blind workload validation or proof of a
   model family. Protocol-conformance evidence must remain separate from
   capability and quality evidence.
+- Assignment polling must not disclose target, model, nonce, or challenge once
+  sealed mode is enabled. The terminal disclosure must be canonically committed
+  before execution and must remain identical on result replay. Do not remove
+  the unsealed response until the public validator fleet has upgraded.
 - Authoritative validator evidence requires a Grid-issued assignment id, nonce,
   and matching probe evidence hash. Preview/local evidence stays visible only as
   preview.
