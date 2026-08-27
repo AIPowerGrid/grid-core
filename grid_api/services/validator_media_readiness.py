@@ -102,7 +102,7 @@ async def inspect_media_readiness(
     )
     video_config_blockers = _without_gate_reasons(
         list(video_policy["reasons"]),
-        {"media probe master gate disabled", "video probe operator gate disabled"},
+        {"operator gate disabled", "video probe operator gate disabled"},
     )
     image_validators = _capability_counts(
         validator_rows,
@@ -111,7 +111,7 @@ async def inspect_media_readiness(
     )
     video_validators = _capability_counts(
         validator_rows,
-        "video.contract.v1",
+        "video.fidelity.v1",
         now=current,
     )
 
@@ -169,15 +169,54 @@ async def inspect_media_readiness(
             },
         )
 
-    video_models = [
-        {
-            "model": model,
-            "governed_recipes": len(entry["recipe_ids"]),
-            "online_candidates": len(entry["worker_ids"]),
-            "ready": bool(entry["worker_ids"]),
-        }
-        for model, entry in sorted(video_candidates.items())
-    ]
+    video_models: list[dict[str, Any]] = []
+    can_preview_video_references = not video_config_blockers
+    for model in sorted(video_candidates):
+        entry = video_candidates[model]
+        online_ids = sorted(entry["worker_ids"])
+        candidates_with_quorum = 0
+        selector_blockers: set[str] = set()
+        if can_preview_video_references:
+            for candidate_id in online_ids:
+                try:
+                    await validator_references.preview_reference_workers(
+                        session,
+                        model=model,
+                        modality="video",
+                        candidate_worker_id=candidate_id,
+                        online_model_worker_ids=online_ids,
+                        expected_chain_id=int(video_policy["chain_id"]),
+                        expected_bond_contract=str(video_policy["bond_contract"]),
+                        expected_verifier_version=str(
+                            video_policy["bond_verifier_version"]
+                        ),
+                        expected_facet_runtime_hash=str(
+                            video_policy["bond_facet_runtime_hash"]
+                        ),
+                        minimum_bond_raw=int(video_policy["minimum_bond_raw"]),
+                        minimum_quality_pass_rate=float(
+                            video_policy["minimum_quality_pass_rate"]
+                        ),
+                        now=current,
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                    validator_references.ReferencePoolUnavailable,
+                ) as exc:
+                    selector_blockers.add(str(exc))
+                else:
+                    candidates_with_quorum += 1
+        video_models.append(
+            {
+                "model": model,
+                "governed_recipes": len(entry["recipe_ids"]),
+                "online_candidates": len(online_ids),
+                "candidates_with_reference_quorum": candidates_with_quorum,
+                "ready": candidates_with_quorum > 0,
+                "selector_blockers": sorted(selector_blockers),
+            },
+        )
 
     image_blockers = list(image_config_blockers)
     if image_validators["fresh"] < REQUIRED_PREVIEW_VALIDATORS:
@@ -195,7 +234,9 @@ async def inspect_media_readiness(
     if video_validators["verified_independent"] < REQUIRED_PREVIEW_VALIDATORS:
         video_blockers.append("fewer than five verified independent video-capable validators")
     if not video_models:
-        video_blockers.append("no online worker serves a governed video contract recipe")
+        video_blockers.append("no online worker serves a governed deterministic video recipe")
+    elif not any(item["ready"] for item in video_models):
+        video_blockers.append("no video candidate has two eligible independent references")
 
     return {
         "checked_at": current.isoformat(),

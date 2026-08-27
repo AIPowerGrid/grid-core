@@ -142,11 +142,12 @@ content sanitization, and reward settlement.
   SHA-256 witnesses to every validator assignment. It requires an on-chain
   recipe id, deterministic metadata,
   governed model digest, explicit bond policy, and `image.fidelity.v1` validator
-  capability. The independent default-off `video.contract.v1` lane accepts only
-  governed text-to-video recipes with explicit prompt/seed/dimensions/timing,
-  hard-targets one candidate, freezes one MP4 witness, and checks objective
-  container/timing/motion properties. It does not claim model fidelity and has
-  no reference workers. Both lanes remain non-economic.
+  capability. The independent default-off `video.fidelity.v1` lane applies the
+  same bond, common-control, deterministic-recipe, model-digest, and two-reference
+  gates to text-to-video recipes with explicit prompt/seed/dimensions/timing. It
+  hard-targets one candidate plus two references, freezes three MP4 witnesses,
+  and requires reference agreement before candidate comparison. Both lanes
+  remain non-economic.
   `validator_bonds.py` owns the default-off Base cache refresh. It verifies all
   WorkerRegistry selectors route through the reviewed Grid Diamond to one
   code-pinned facet release at one mutually finalized block, requires two distinct

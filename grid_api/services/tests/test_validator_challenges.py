@@ -92,7 +92,7 @@ def test_group_challenge_generation_fails_closed_when_randomness_repeats(monkeyp
         ("text", "text.reasoning.multistep.v1", "capability"),
         ("text", "text.code.v1", "capability"),
         ("image", "image.fidelity.v1", "fidelity"),
-        ("video", "video.contract.v1", "protocol_conformance"),
+        ("video", "video.fidelity.v1", "fidelity"),
     ],
 )
 def test_current_probe_dimensions_are_never_quality(modality, capability, dimension):
