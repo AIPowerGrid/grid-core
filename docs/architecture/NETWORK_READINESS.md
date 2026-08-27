@@ -1,6 +1,6 @@
 # Network Readiness Ledger
 
-**Evidence snapshot:** 2026-08-27 UTC
+**Evidence snapshot:** 2026-08-27 19:06 UTC
 
 This is the durable status ledger for the Grid decentralization backlog. It
 separates source implementation, production deployment, public distribution,
@@ -22,26 +22,28 @@ production rollout, and a registered node does not prove independent control.
 
 At this snapshot:
 
-- production Core runs immutable commit `6015eca3` with Alembic `0029`;
-- `/v1/status/network` is live and reports seven connected workers, ten online
+- production Core runs immutable commit `407f2984` with Alembic `0030`;
+- `/v1/status/network` is live and reports eight connected workers, eleven online
   model entries, and every model below the three-worker redundancy target;
 - sealed shared-quorum text validation is live in `shared_quorum_preview` mode;
-- three active first-party validators run published `v0.1.0-preview.8` commit
-  `122f5565`; Core reports that immutable release tag for all three. Each node
-  passed checksum-gated staging, `check --no-probe`, an atomic symlink switch,
-  and a clean service restart. On the earlier preview.5 payload, after the
-  one-hour worker/model cooldown elapsed, the same fleet completed a healthy
-  3-of-5 16K-context group and a disputed token-limit group with three
-  authoritative votes apiece;
-- those validators share one operator and hypervisor, so verified independent
-  operator count remains zero;
+- four active validators report fresh heartbeats on `v0.1.0-preview.9`:
+  three first-party pilots and one external registration whose independent
+  control has not been reviewed. The first-party pilots share one operator;
+  verified independent operator count remains zero. Two suspended first-party
+  canaries also contributed within the 24-hour reporting window, so six
+  participating registrations must not be presented as six active operators;
 - validator rewards, validator stake, worker penalties from validator evidence,
   and Core federation are off;
 - charging remains a narrow allowlist canary rather than global;
 - compensated-audit schema and ordinary terminal support are deployed dark:
   both private audit tables contain zero rows, no scheduler/configuration can
-  create work, and existing validator probes remain economically inert; and
-- the four-platform `v0.1.0-preview.8` validator binary release and versioned
+  create work, and existing validator probes remain economically inert;
+- optional account pairing is deployed but disabled on Core and the matching
+  Console `db301013`; both pairing tables are empty. The matching node source
+  has passed native builds but is not in public preview.13. See
+  [VALIDATOR_ACCOUNT_PAIRING.md](VALIDATOR_ACCOUNT_PAIRING.md#2026-08-27-dark-deployment-evidence)
+  for backup/restore, migration, route checks, remaining gates and rollback; and
+- the four-platform `v0.1.0-preview.13` validator binary release and versioned
   multi-architecture GHCR image are published; macOS and Windows remain
   explicitly unsigned. The GHCR package is public and anonymously pullable on
   Linux x64 and ARM64. No production-capable
@@ -435,8 +437,8 @@ Scheduler crash/reclaim tests and held-out traffic-classifier gates remain
 required before any dark canary. The schema and terminal support were first
 deployed dark at production commit `d8a48f2a` / Alembic `0029`; both audit
 tables were empty after that startup. Runtime commit `df34ffd4` did not add a
-scheduler, migration, or economic gate. Runtime commit `6015eca3` also leaves
-the rail dark and both tables empty.
+scheduler, migration, or economic gate. Runtime commit `407f2984` also leaves
+the rail dark; both tables remained empty in the 19:06 UTC deployment check.
 
 ### 20. Private deterministic image validation - Ready dark
 
@@ -473,7 +475,7 @@ bonded references selected under the same fail-closed policy as image. Real
 LTX/workflow calibration, governed recipe publication, independent reference
 operators, prompt/key-event relevance, and media-enabled release-binary
 qualification remain open. No video evidence affects routing, rewards, strikes,
-bonds, or slashing. Production Core `6015eca3` advertises this capability with
+bonds, or slashing. Production Core `407f2984` advertises this capability with
 `enabled=false`; deployment does not satisfy any media rollout gate.
 
 ### 23. Rotating bonded references - Ready dark/External
