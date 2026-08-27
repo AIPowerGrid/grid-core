@@ -127,6 +127,11 @@ content sanitization, and reward settlement.
   fresh distinct worker-control groups across candidate and references,
   distinct accounts and payout wallets as defense in depth, row-locked recent-
   use rotation, and fail-closed insufficiency.
+  `validator_media_readiness.py` is the read-only rollout preflight. It uses the
+  selector's non-mutating preview to combine live recipes, workers, fresh
+  validator capabilities, externally reviewed operator independence, and
+  candidate-specific reference quorum into a redacted advisory report. A green
+  report never bypasses the transactional selector or grants economic authority.
   The default-off deterministic image lane calls it transactionally, runs one
   candidate plus two fixed references exactly once per shared probe group
   through hard-targeted ordinary UUID jobs, freezes worker uploads under

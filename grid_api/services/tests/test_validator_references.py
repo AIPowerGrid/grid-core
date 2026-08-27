@@ -190,6 +190,61 @@ async def test_selects_two_fresh_independent_online_references_and_updates_usage
 
 
 @pytest.mark.asyncio
+async def test_preview_applies_same_rules_without_updating_usage(session):
+    candidate = await _worker(session, 5)
+    refs = [await _worker(session, index) for index in range(6, 9)]
+    for ref in refs:
+        await _reference(session, ref)
+    await session.commit()
+
+    selected = await validator_references.preview_reference_workers(
+        session,
+        model=MODEL,
+        modality="image",
+        candidate_worker_id=candidate[0],
+        online_model_worker_ids=[candidate[0], *(ref[0] for ref in refs)],
+        now=NOW,
+        **BOND_POLICY,
+    )
+
+    assert len(selected) == 2
+    assert candidate[1] not in {item.account_id for item in selected}
+    usage = (
+        (
+            await session.execute(
+                sa.select(references_t.c.selection_count).where(
+                    references_t.c.worker_id.in_([item.worker_id for item in selected]),
+                ),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert usage == [0, 0]
+
+
+@pytest.mark.asyncio
+async def test_preview_fails_closed_when_independence_is_insufficient(session):
+    candidate = await _worker(session, 9)
+    shared_group = "opg_preview_shared_control"
+    refs = [await _worker(session, index, operator_group_id=shared_group) for index in (901, 902)]
+    for ref in refs:
+        await _reference(session, ref)
+    await session.commit()
+
+    with pytest.raises(validator_references.ReferencePoolUnavailable, match="found 1"):
+        await validator_references.preview_reference_workers(
+            session,
+            model=MODEL,
+            modality="image",
+            candidate_worker_id=candidate[0],
+            online_model_worker_ids=[candidate[0], *(ref[0] for ref in refs)],
+            now=NOW,
+            **BOND_POLICY,
+        )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "override",
     [
@@ -358,9 +413,7 @@ async def test_malformed_or_expired_reference_control_fails_closed(session, cont
     await _reference(session, good)
     await _reference(session, bad)
     await session.execute(
-        sa.update(controls_t)
-        .where(controls_t.c.worker_id == bad[0])
-        .values(**control_values),
+        sa.update(controls_t).where(controls_t.c.worker_id == bad[0]).values(**control_values),
     )
     await session.commit()
 
