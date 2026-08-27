@@ -1,9 +1,10 @@
 # Verification Probes — coordinator canaries → validator consensus
 
-**Status:** Coordinator canaries plus registered-validator assignments, targeted
-leases, and distinct-identity 3-of-5 quorum are production-live and evidence-only
-on Core `0d850e73` with Alembic through `0024`. Three first-party pilot nodes
-proved the protocol path on 2026-08-21, not independent operator control.
+**Status:** Coordinator canaries plus sealed registered-validator assignments,
+targeted leases, and distinct-identity 3-of-5 quorum are production-live and
+evidence-only on Core `e18b38f9` with Alembic through `0026`. Three first-party
+pilot nodes run published `v0.1.0-preview.2` and proved sealed disclosure plus
+healthy 3-of-5 tool-chain quorum on 2026-08-27, not independent operator control.
 Economic validator authority, rewards, staking, routing effects, and slashing
 are not live. Media assignments remain default-off.
 
@@ -28,7 +29,7 @@ We verify the same *fact* two ways, in order:
 | Trust model | centralized spot-check | preview: distinct signed identities; future: independent quorum + disputes |
 | Economic weight | **none** (evidence only) | preview: **none**; future: accepted-evidence reward / objective-fraud slash |
 | New assumptions | none | preview: signed assignment binding; future: operator independence, bonding, disputes |
-| Ships | live evidence-only | live evidence-only through `0024`; economic phase deferred |
+| Ships | live evidence-only | live evidence-only through `0026`; economic phase deferred |
 
 **Build order rationale:** we ARE a centralized coordinator today; a coordinator that
 spot-checks its own workers is coherent and needs nothing new. A validator network that
@@ -184,16 +185,16 @@ Before evidence affects routing, rewards, or slashing, audit jobs must use a
 broad production-shaped distribution and an ordinary bounded worker-payment
 path whose dispatch and terminal acknowledgment do not reveal probe status.
 
-The default-off sealed-assignment protocol removes another fingerprinting and
+The production-enabled sealed-assignment protocol removes another fingerprinting and
 collusion surface: polling returns only an opaque assignment id, public
 capability/lifecycle metadata, and a SHA-256 commitment. Target, model, nonce,
 policy, and challenge are disclosed only after the worker's terminal result;
 the node recomputes the commitment before signing. It is a staged compatibility
-feature, so updated nodes ship first and Core remains unsealed until the fleet is
-compatible. Sealing does not hide the prompt from the worker during execution
+feature; compatible nodes shipped before the Core flag was enabled. Sealing
+does not hide the prompt from the worker during execution
 and therefore does not satisfy the blind-quality gate by itself.
 
-## Deployment status (2026-08-22)
+## Deployment status (updated 2026-08-27)
 
 Coordinator-run probes remain live and evidence-only. Registered-validator
 assignments, shared probe groups, and 3-of-5 quorum are production-live as
