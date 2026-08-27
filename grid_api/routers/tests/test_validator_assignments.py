@@ -248,15 +248,29 @@ async def test_operator_review_requires_qualification_and_compare_and_swap(db):
         now=review_now,
     )
 
+    early_preview = await validator_operators.review_operator(
+        validator_id,
+        action="verify",
+        review_ref="review:test-verify-early",
+        apply=False,
+        now=review_now,
+    )
+    assert early_preview["proposed_status"] == "verified"
+    assert early_preview["eligible_to_apply"] is False
+    assert early_preview["blocking_reasons"] == [
+        "minimum qualification time has not elapsed",
+        "heartbeat sample coverage is below minimum",
+    ]
     with pytest.raises(
         validator_operators.OperatorReviewError,
-        match="qualification or heartbeat coverage",
+        match="minimum qualification time has not elapsed",
     ):
         await validator_operators.review_operator(
             validator_id,
             action="verify",
             review_ref="review:test-verify-early",
-            apply=False,
+            expected_digest=early_preview["current_digest"],
+            apply=True,
             now=review_now,
         )
 
@@ -288,6 +302,8 @@ async def test_operator_review_requires_qualification_and_compare_and_swap(db):
     )
     assert verify_preview["qualification"]["time_ready"] is True
     assert verify_preview["qualification"]["coverage_ready"] is True
+    assert verify_preview["eligible_to_apply"] is True
+    assert verify_preview["blocking_reasons"] == []
     applied = await validator_operators.review_operator(
         validator_id,
         action="verify",
