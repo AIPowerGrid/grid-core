@@ -562,7 +562,12 @@ def _register_image_recipe(*, deterministic=True, recipe_id=42):
     )
 
 
-def _register_video_recipe(*, recipe_id=84, include_fps=True):
+def _register_video_recipe(
+    *,
+    recipe_id=84,
+    include_fps=True,
+    deterministic=True,
+):
     recipes._BY_ROOT.clear()
     recipes._BY_ID.clear()
     recipes._BY_NAME.clear()
@@ -585,7 +590,8 @@ def _register_video_recipe(*, recipe_id=84, include_fps=True):
                 "engine": "comfyui",
                 "modelName": "Video Contract",
                 "jobType": "video",
-                "deterministic": False,
+                "deterministic": deterministic,
+                "modelDigest": "f" * 64,
                 "requiredModels": ["video-checkpoint"],
                 "vars": video_vars,
                 "clamps": {
@@ -602,6 +608,78 @@ def _register_video_recipe(*, recipe_id=84, include_fps=True):
             "4": {"inputs": {"seconds": 2, "fps": 8}},
         },
         recipe_id=recipe_id,
+    )
+
+
+async def _seed_video_worker(session, index, *, now):
+    account_id = uuid.uuid4()
+    worker_id = uuid.uuid4()
+    wallet = f"0x{index:040x}"
+    await session.execute(sa.insert(accounts_t).values(id=account_id, flags={}))
+    await session.execute(
+        sa.insert(workers_t).values(
+            id=worker_id,
+            account_id=account_id,
+            name=f"video-rig-{index}",
+            type="video",
+            wallet=wallet,
+            models=["video-checkpoint"],
+            capabilities={},
+            maintenance=False,
+            first_seen=now - timedelta(days=1),
+            last_seen=now,
+            jobs_completed=20,
+            den_earned=0,
+        )
+    )
+    await session.execute(
+        sa.insert(controls_t).values(
+            worker_id=worker_id,
+            account_id=account_id,
+            payout_wallet=wallet,
+            operator_group_id=f"opg_video_worker_{index:08d}",
+            status="verified",
+            reviewed_at=now - timedelta(days=1),
+            expires_at=now + timedelta(days=29),
+            review_ref=f"review:video-worker-{index}",
+            created=now - timedelta(days=1),
+            updated=now - timedelta(days=1),
+        )
+    )
+    return worker_id, account_id, wallet
+
+
+async def _seed_video_reference(session, worker, *, now):
+    worker_id, account_id, wallet = worker
+    await session.execute(
+        sa.insert(references_t).values(
+            worker_id=worker_id,
+            model="Video Contract",
+            modality="video",
+            account_id=account_id,
+            payout_wallet=wallet,
+            status="active",
+            status_reason="test fixture",
+            bond_contract="0x" + "a" * 40,
+            bond_chain_id=8453,
+            bond_finalized_block=123,
+            bond_finalized_block_hash="0x" + "d" * 64,
+            bond_facet_address="0x" + "e" * 40,
+            bond_facet_runtime_hash=BOND_RUNTIME_HASH,
+            bond_amount_raw=Decimal(10**18),
+            bond_active=True,
+            bond_slashed=False,
+            bond_verifier_version=VERIFIER,
+            bond_status_reason="active",
+            bond_verified_at=now,
+            quality_window_start=now - timedelta(days=1),
+            quality_window_end=now,
+            quality_pass_rate=0.99,
+            quality_reviewed_at=now,
+            selection_count=0,
+            created=now,
+            updated=now,
+        )
     )
 
 
@@ -2951,7 +3029,7 @@ async def test_image_assignment_requires_governed_recipe_and_bonded_references(d
 @pytest.mark.asyncio
 async def test_video_assignment_gate_is_fail_closed(db, monkeypatch):
     account_id = uuid.uuid4()
-    validator_id = await _register(account_id, capabilities=["video.contract.v1"])
+    validator_id = await _register(account_id, capabilities=["video.fidelity.v1"])
     monkeypatch.setattr(
         validators_svc,
         "get_settings",
@@ -2970,23 +3048,60 @@ async def test_video_assignment_gate_is_fail_closed(db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_video_contract_assignment_is_governed_targeted_and_shared(db, monkeypatch):
+async def test_video_fidelity_assignment_is_governed_targeted_and_shared(db, monkeypatch):
     account_id = uuid.uuid4()
-    validator_id = await _register(account_id, capabilities=["video.contract.v1"])
+    validator_id = await _register(account_id, capabilities=["video.fidelity.v1"])
     monkeypatch.setattr(
         validators_svc,
         "get_settings",
         lambda: _media_settings(enabled=True, video_enabled=True),
     )
-    worker_id = str(uuid.uuid4())
-    active = [{
-        "worker_id": worker_id,
-        "name": "video-rig-1",
-        "models": ["video-checkpoint"],
-        "job_types": ["video"],
-    }]
+    now = datetime.now(UTC)
+    async with await database.new_session() as session:
+        candidate = await _seed_video_worker(session, 21, now=now)
+        refs = [
+            await _seed_video_worker(session, 22, now=now),
+            await _seed_video_worker(session, 23, now=now),
+        ]
+        await session.commit()
+    active = [
+        {
+            "worker_id": str(worker[0]),
+            "name": f"video-rig-{index}",
+            "models": ["video-checkpoint"],
+            "job_types": ["video"],
+        }
+        for worker, index in zip([candidate, *refs], (21, 22, 23), strict=True)
+    ]
+
+    _register_video_recipe()
+    blocked = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=active,
+        limit=1,
+        modality="video",
+    )
+    assert blocked["assignments"] == []
+
+    async with await database.new_session() as session:
+        for reference in refs:
+            await _seed_video_reference(session, reference, now=now)
+        await session.commit()
 
     _register_video_recipe(include_fps=False)
+    blocked = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=active,
+        limit=1,
+        modality="video",
+    )
+    assert blocked["assignments"] == []
+
+    _register_video_recipe(deterministic=False)
     blocked = await validators_svc.issue_assignments(
         account_id=account_id,
         validator_id=validator_id,
@@ -3008,11 +3123,15 @@ async def test_video_contract_assignment_is_governed_targeted_and_shared(db, mon
     )
     assignment = issued["assignments"][0]
     challenge = assignment["challenge"]
-    assert assignment["target_worker_id"] == worker_id
-    assert assignment["capability"] == "video.contract.v1"
-    assert challenge["kind"] == "video.contract"
+    assert assignment["target_worker_id"] == str(candidate[0])
+    assert assignment["capability"] == "video.fidelity.v1"
+    assert challenge["kind"] == "video.fidelity"
     assert challenge["recipe_id"] == 84
-    assert challenge["reference_worker_ids"] == []
+    assert challenge["model_digest"] == "f" * 64
+    assert set(challenge["reference_worker_ids"]) == {
+        str(refs[0][0]),
+        str(refs[1][0]),
+    }
     assert challenge["parameters"] == {
         "seed": challenge["seed"],
         "width": 512,
@@ -3027,14 +3146,25 @@ async def test_video_contract_assignment_is_governed_targeted_and_shared(db, mon
 
     from grid_api.services import job_queue, token_stream
 
+    worker_ids_by_name = {
+        f"video-rig-{index}": str(worker[0])
+        for worker, index in zip([candidate, *refs], (21, 22, 23), strict=True)
+    }
     submitted = {}
+    fail_reference = {"enabled": True}
 
     async def capture_submit(stage_job_id, payload, models, **kwargs):
         submitted[stage_job_id] = {"payload": payload, "models": models, **kwargs}
 
     async def completed_events(stage_job_id, **_kwargs):
+        item = submitted[stage_job_id]
+        payload = item["payload"]
+        worker_id = worker_ids_by_name[item["hard_target_worker"]]
+        if payload["_validator_role"] == "reference" and fail_reference["enabled"]:
+            yield {"error": "reference unavailable", "code": 503}
+            return
         witness = {
-            "role": "candidate",
+            "role": payload["_validator_role"],
             "worker_id": worker_id,
             "url": f"https://media.example/validator/{stage_job_id}/0.mp4",
             "sha256": "e" * 64,
@@ -3055,6 +3185,26 @@ async def test_video_contract_assignment_is_governed_targeted_and_shared(db, mon
 
     monkeypatch.setattr(job_queue, "submit_job", capture_submit)
     monkeypatch.setattr(token_stream, "subscribe_tokens", completed_events)
+    failed = await validators_svc.probe_assignment(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=assignment["assignment_id"],
+    )
+    assert failed["status"] == "error"
+    assert failed["code"] == 503
+    async with await database.new_session() as session:
+        failed_group = (
+            await session.execute(
+                sa.select(probe_groups_t).where(
+                    probe_groups_t.c.id == assignment["probe_group_id"]
+                )
+            )
+        ).mappings().one()
+    assert failed_group["probe_status"] == "failed"
+    assert failed_group["probe_witnesses"] is None
+
+    fail_reference["enabled"] = False
+    submitted.clear()
     result = await validators_svc.probe_assignment(
         account_id=account_id,
         validator_id=validator_id,
@@ -3062,22 +3212,33 @@ async def test_video_contract_assignment_is_governed_targeted_and_shared(db, mon
     )
 
     assert result["status"] == "completed"
-    assert result["witnesses"][0]["content_type"] == "video/mp4"
-    assert result["witnesses"][0]["worker_id"] == worker_id
-    assert len(submitted) == 1
-    dispatched = next(iter(submitted.values()))
-    assert dispatched["job_type"] == "video"
-    assert dispatched["hard_target_worker"] == "video-rig-1"
-    assert dispatched["models"] == ["video-checkpoint"]
-    assert dispatched["payload"]["frames"] == 16
-    assert dispatched["payload"]["fps"] == 8
+    assert [item["role"] for item in result["witnesses"]] == [
+        "candidate",
+        "reference",
+        "reference",
+    ]
+    assert {item["worker_id"] for item in result["witnesses"]} == {
+        str(candidate[0]),
+        str(refs[0][0]),
+        str(refs[1][0]),
+    }
+    assert len(submitted) == 3
+    assert {item["hard_target_worker"] for item in submitted.values()} == {
+        "video-rig-21",
+        "video-rig-22",
+        "video-rig-23",
+    }
+    assert all(item["job_type"] == "video" for item in submitted.values())
+    assert all(item["models"] == ["video-checkpoint"] for item in submitted.values())
+    assert all(item["payload"]["frames"] == 16 for item in submitted.values())
+    assert all(item["payload"]["fps"] == 8 for item in submitted.values())
 
     second_key = "0x" + "03" * 32
     second_account = uuid.uuid4()
     second_validator = await _register(
         second_account,
         private_key=second_key,
-        capabilities=["video.contract.v1"],
+        capabilities=["video.fidelity.v1"],
     )
     second_wallet = Account.from_key(second_key).address.lower()
     second_issued = await validators_svc.issue_assignments(
@@ -3097,7 +3258,7 @@ async def test_video_contract_assignment_is_governed_targeted_and_shared(db, mon
     )
     assert reused["status"] == "completed"
     assert reused["witnesses"] == result["witnesses"]
-    assert len(submitted) == 1
+    assert len(submitted) == 3
 
 
 def test_media_group_witness_commitment_fails_closed(monkeypatch):

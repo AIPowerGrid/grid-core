@@ -2,9 +2,9 @@
 
 **Status:** accepted design; deterministic image assignment, hard-targeted
 three-worker execution, immutable Core witness hashing, and validator scoring
-are implemented dark. Core and the validator also implement a separately gated
-single-candidate `video.contract.v1` path. No production gate is enabled, and
-reference-based video fidelity remains disabled.
+are implemented dark. Core and the validator also implement a separately gated,
+three-worker deterministic `video.fidelity.v1` path. No production gate is
+enabled, and reference-based video fidelity remains disabled.
 
 This document defines the trust boundary for assignment-bound image and video
 validation. It deliberately does not enable production media assignments,
@@ -335,9 +335,10 @@ must not claim model-fidelity certification from pHash.
   statistic;
 - the output is not a repeated still or a truncated first-frame loop.
 
-`video.fidelity.v1` is reserved for governed deterministic or semi-deterministic
-recipes. It additionally compares the candidate's sampled keyframes and motion
-profile with two agreeing references. Prompt relevance remains a supporting
+Core issues `video.fidelity.v1` only for governed deterministic recipes. It
+compares the candidate's sampled keyframes and motion profile with two agreeing
+references. The validator retains `video.contract.v1` as a structural scorer,
+but Core does not issue that weaker lane. Prompt relevance remains a supporting
 signal unless the challenge encodes an objective event that can be measured.
 
 Validator binaries advertise image/video capabilities only when their optional
@@ -367,11 +368,13 @@ identity-bound, distinct worker-control groups. Any missing condition yields no
 image assignment.
 
 Video has an independent `VALIDATOR_VIDEO_PROBE_ENABLED=0` gate and also
-requires the media master gate, positive byte/timeout bounds, a validator
-advertising `video.contract.v1`, and an on-chain RecipeVault text-to-video recipe
-with explicit prompt, seed, width, height, seconds, and fps variables. It runs
-one candidate and commits one Core-frozen MP4. It does not select references or
-claim model fidelity. Missing or ambiguous timing metadata yields no assignment.
+requires every finalized bond, dual-RPC, worker-control, and reference-pool gate
+used by image, a validator advertising `video.fidelity.v1`, and an on-chain
+RecipeVault deterministic text-to-video recipe with a model digest and explicit
+prompt, seed, width, height, seconds, and fps variables. It runs one candidate
+plus two independent references and commits three Core-frozen MP4 witnesses.
+Missing or ambiguous timing, identity, bond, or reference metadata yields no
+assignment.
 
 ### Read-only rollout preflight
 

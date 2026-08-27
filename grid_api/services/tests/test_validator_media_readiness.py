@@ -72,7 +72,11 @@ def _image_policy(*, reasons=None):
 
 
 def _video_policy(*, reasons=None):
-    return {"enabled": not reasons, "reasons": reasons or []}
+    return {
+        **_image_policy(reasons=reasons),
+        "enabled": not reasons,
+        "reasons": reasons or [],
+    }
 
 
 @pytest.mark.asyncio
@@ -101,7 +105,7 @@ async def test_image_readiness_requires_independent_validator_and_reference_quor
     monkeypatch.setattr(
         validator_media_readiness.validators,
         "video_validation_policy",
-        lambda: _video_policy(reasons=["media probe master gate disabled"]),
+        lambda: _video_policy(reasons=["operator gate disabled"]),
     )
     monkeypatch.setattr(
         validator_media_readiness.validators,
@@ -153,6 +157,89 @@ async def test_image_readiness_requires_independent_validator_and_reference_quor
 
 
 @pytest.mark.asyncio
+async def test_video_readiness_requires_deterministic_reference_quorum(
+    monkeypatch,
+    session,
+):
+    for index in range(5):
+        await _validator(
+            session,
+            index,
+            capabilities=["video.fidelity.v1"],
+        )
+    await session.commit()
+    recipe = SimpleNamespace(model_name="ltx-video-deterministic", recipe_id=84)
+    workers = [
+        {
+            "worker_id": f"00000000-0000-0000-0000-0000000000{index}",
+            "models": [recipe.model_name],
+            "job_types": ["video"],
+        }
+        for index in range(20, 23)
+    ]
+
+    monkeypatch.setattr(
+        validator_media_readiness.validators,
+        "media_validation_policy",
+        lambda: _image_policy(reasons=["operator gate disabled"]),
+    )
+    monkeypatch.setattr(
+        validator_media_readiness.validators,
+        "video_validation_policy",
+        lambda: _video_policy(
+            reasons=["operator gate disabled", "video probe operator gate disabled"],
+        ),
+    )
+    monkeypatch.setattr(
+        validator_media_readiness.validators,
+        "image_validation_recipes_for_worker",
+        lambda worker: [],
+    )
+    monkeypatch.setattr(
+        validator_media_readiness.validators,
+        "video_validation_recipes_for_worker",
+        lambda worker: [recipe],
+    )
+
+    calls = []
+
+    async def preview(session, **kwargs):
+        calls.append(kwargs)
+        return [SimpleNamespace(worker_id="ref-a"), SimpleNamespace(worker_id="ref-b")]
+
+    monkeypatch.setattr(
+        validator_media_readiness.validator_references,
+        "preview_reference_workers",
+        preview,
+    )
+
+    report = await validator_media_readiness.inspect_media_readiness(
+        session,
+        workers,
+        now=NOW,
+    )
+
+    assert report["video"]["ready_to_enable"] is True
+    assert report["video"]["assignment_gate_enabled"] is False
+    assert report["video"]["validators"] == {
+        "fresh": 5,
+        "verified_independent": 5,
+    }
+    assert report["video"]["models"] == [
+        {
+            "model": recipe.model_name,
+            "governed_recipes": 1,
+            "online_candidates": 3,
+            "candidates_with_reference_quorum": 3,
+            "ready": True,
+            "selector_blockers": [],
+        },
+    ]
+    assert len(calls) == 3
+    assert all(call["modality"] == "video" for call in calls)
+
+
+@pytest.mark.asyncio
 async def test_readiness_reports_config_and_independence_blockers(monkeypatch, session):
     for index in range(5):
         await _validator(session, index, group="opg_same_controller")
@@ -169,7 +256,7 @@ async def test_readiness_reports_config_and_independence_blockers(monkeypatch, s
         validator_media_readiness.validators,
         "video_validation_policy",
         lambda: _video_policy(
-            reasons=["media probe master gate disabled", "video probe operator gate disabled"],
+            reasons=["operator gate disabled", "video probe operator gate disabled"],
         ),
     )
     monkeypatch.setattr(

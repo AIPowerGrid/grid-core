@@ -886,25 +886,19 @@ def media_validation_policy() -> dict[str, Any]:
 
 
 def video_validation_policy() -> dict[str, Any]:
-    """Return the independent, fail-closed video-contract assignment gate."""
+    """Return the fail-closed deterministic video-fidelity assignment gate."""
     settings = get_settings()
-    reasons: list[str] = []
-    if not settings.validator_media_probe_enabled:
-        reasons.append("media probe master gate disabled")
+    media_policy = media_validation_policy()
+    reasons = list(media_policy["reasons"])
     if not settings.validator_video_probe_enabled:
         reasons.append("video probe operator gate disabled")
-    if settings.validator_media_max_output_bytes <= 0:
-        reasons.append("media byte limit is invalid")
-    if settings.validator_media_probe_timeout_seconds <= 0:
-        reasons.append("media probe timeout is invalid")
     return {
+        **media_policy,
         "enabled": not reasons,
         "modality": "video",
-        "capability": "video.contract.v1",
+        "capability": "video.fidelity.v1",
         "economic_effect": "none",
         "reasons": reasons,
-        "max_output_bytes": settings.validator_media_max_output_bytes,
-        "probe_timeout_seconds": settings.validator_media_probe_timeout_seconds,
     }
 
 
@@ -984,7 +978,7 @@ def image_validation_recipes_for_worker(worker: dict[str, Any]):
 
 
 def video_validation_recipes_for_worker(worker: dict[str, Any]):
-    """Return governed text-to-video recipes with an explicit timing contract."""
+    """Return deterministic governed video recipes with a timing contract."""
     from . import recipes
 
     advertised = {str(value) for value in (worker.get("models") or [])}
@@ -994,7 +988,9 @@ def video_validation_recipes_for_worker(worker: dict[str, Any]):
         required = set(recipe.required_models or [recipe.model_name])
         if (
             recipe.job_type == "video"
+            and recipe.deterministic
             and recipe.recipe_id is not None
+            and _SHA256_RE.fullmatch(recipe.model_digest)
             and required_inputs.issubset(recipe.vars)
             and "image" not in recipe.vars
             and required.issubset(advertised)
@@ -1042,7 +1038,10 @@ def _make_image_challenge(recipe, reference_worker_ids: list[str]) -> dict[str, 
     }
 
 
-def _make_video_challenge(recipe) -> dict[str, Any]:
+def _make_video_challenge(
+    recipe,
+    reference_worker_ids: list[str],
+) -> dict[str, Any]:
     from . import media
 
     fps = int(_probe_number(recipe, "fps", 8))
@@ -1072,16 +1071,17 @@ def _make_video_challenge(recipe) -> dict[str, Any]:
             parameters[name] = str(recipe.enums[name][0])
     return {
         "schema": "aipg.validator.media.challenge.v1",
-        "kind": "video.contract",
+        "kind": "video.fidelity",
         "modality": "video",
         "prompt": _make_video_prompt(),
         "seed": seed,
         "model": recipe.model_name,
+        "model_digest": recipe.model_digest,
         "recipe_id": recipe.recipe_id,
         "recipe_root": recipe.recipe_root,
         "parameters": parameters,
-        "reference_worker_ids": [],
-        "scoring_policy_id": "video.contract.v1",
+        "reference_worker_ids": reference_worker_ids,
+        "scoring_policy_id": "video.fidelity.v1",
     }
 
 
@@ -2500,7 +2500,9 @@ async def _issue_video_assignments(
     active_workers: list[dict[str, Any]],
     limit: int,
 ) -> dict[str, Any]:
-    """Allocate objective video-contract work only when every dark gate is live."""
+    """Allocate deterministic video-fidelity work only when every gate is live."""
+    from . import validator_references
+
     policy = video_validation_policy()
     if not policy["enabled"]:
         raise AssignmentError("video validator assignments are not enabled")
@@ -2523,8 +2525,8 @@ async def _issue_video_assignments(
         if not validator_row:
             raise AssignmentError("active validator registration required")
         supported = {str(value) for value in (validator_row["capabilities"] or [])}
-        if "video.contract.v1" not in supported:
-            raise AssignmentError("validator has no supported video contract capability")
+        if "video.fidelity.v1" not in supported:
+            raise AssignmentError("validator has no supported video fidelity capability")
         await _finalize_due_assignments(session)
 
         own_worker_ids = {
@@ -2587,7 +2589,7 @@ async def _issue_video_assignments(
                             probe_groups_t.c.target_worker_id == worker_id,
                             probe_groups_t.c.model == recipe.model_name,
                             probe_groups_t.c.modality == "video",
-                            probe_groups_t.c.capability == "video.contract.v1",
+                            probe_groups_t.c.capability == "video.fidelity.v1",
                             probe_groups_t.c.expires >= now,
                             probe_groups_t.c.quorum_status != "finalized",
                         ).order_by(probe_groups_t.c.created.asc())
@@ -2619,7 +2621,39 @@ async def _issue_video_assignments(
                     continue
 
                 if group is None:
-                    challenge = _make_video_challenge(recipe)
+                    required = set(recipe.required_models or [recipe.model_name])
+                    online_ids = [
+                        str(item.get("worker_id") or item.get("id") or "")
+                        for item in active_workers
+                        if "video" in (item.get("job_types") or [])
+                        and required.issubset(
+                            {str(value) for value in (item.get("models") or [])}
+                        )
+                    ]
+                    try:
+                        references = await validator_references.select_reference_workers(
+                            session,
+                            model=recipe.model_name,
+                            modality="video",
+                            candidate_worker_id=worker_id,
+                            online_model_worker_ids=online_ids,
+                            expected_chain_id=policy["chain_id"],
+                            expected_bond_contract=policy["bond_contract"],
+                            expected_verifier_version=policy["bond_verifier_version"],
+                            expected_facet_runtime_hash=policy[
+                                "bond_facet_runtime_hash"
+                            ],
+                            minimum_bond_raw=policy["minimum_bond_raw"],
+                            minimum_quality_pass_rate=policy[
+                                "minimum_quality_pass_rate"
+                            ],
+                        )
+                    except validator_references.ReferencePoolUnavailable:
+                        continue
+                    challenge = _make_video_challenge(
+                        recipe,
+                        [str(reference.worker_id) for reference in references],
+                    )
                     group_id = f"prg_{uuid4().hex}"
                     group_values = {
                         "id": group_id,
@@ -2627,9 +2661,9 @@ async def _issue_video_assignments(
                         "target_worker_name": worker_name,
                         "model": recipe.model_name,
                         "modality": "video",
-                        "capability": "video.contract.v1",
-                        "canary_kind": "video.contract",
-                        "scoring_policy_id": "video.contract.v1",
+                        "capability": "video.fidelity.v1",
+                        "canary_kind": "video.fidelity",
+                        "scoring_policy_id": "video.fidelity.v1",
                         "challenge": challenge,
                         "challenge_hash": _hash_obj({
                             "group_id": group_id,
@@ -2662,9 +2696,9 @@ async def _issue_video_assignments(
                     "target_worker_name": worker_name,
                     "model": recipe.model_name,
                     "modality": "video",
-                    "capability": "video.contract.v1",
-                    "canary_kind": "video.contract",
-                    "scoring_policy_id": "video.contract.v1",
+                    "capability": "video.fidelity.v1",
+                    "canary_kind": "video.fidelity",
+                    "scoring_policy_id": "video.fidelity.v1",
                     "challenge": challenge,
                     "status": "pending",
                     "quorum_status": "pending",
@@ -3817,7 +3851,7 @@ def _validated_media_witnesses(
         ("candidate", str(row["target_worker_id"])),
         *(("reference", worker_id) for worker_id in reference_ids),
     ]
-    expected_count = 3 if modality == "image" else 1 if modality == "video" else 0
+    expected_count = 3 if modality in {"image", "video"} else 0
     if (
         not isinstance(raw_witnesses, list)
         or len(raw_witnesses) != expected_count
@@ -4153,7 +4187,15 @@ async def _probe_image_assignment(
                     "code": 502,
                     "economic_effect": "none",
                 }
-            if any(result.get("status") != "completed" for result in results):
+            failed_result = next(
+                (
+                    result
+                    for result in results
+                    if result.get("status") != "completed"
+                ),
+                None,
+            )
+            if failed_result is not None:
                 await _fail_media_group(group_id=group_id, owner_job_id=job_id)
                 await _mark_probe(job_id, "failed")
                 return {
@@ -4265,19 +4307,27 @@ async def _probe_video_assignment(
     assignment_id: str,
     job_id: str,
 ) -> dict[str, Any]:
-    """Execute one objective video-contract witness or reuse the group result."""
+    """Execute one three-worker video-fidelity set or reuse the group result."""
     from . import recipes
 
     challenge = row["challenge"] or {}
-    if challenge.get("reference_worker_ids") not in (None, []):
+    reference_ids = [
+        str(value) for value in (challenge.get("reference_worker_ids") or [])
+    ]
+    if (
+        len(reference_ids) != 2
+        or len({str(row["target_worker_id"]), *reference_ids}) != 3
+    ):
         await _mark_probe(job_id, "failed")
-        raise AssignmentError("video contract assignment cannot name reference workers")
+        raise AssignmentError("video assignment reference set is malformed")
     recipe = recipes.get_recipe(str(challenge.get("recipe_root") or ""))
     if (
         recipe is None
         or recipe.job_type != "video"
+        or not recipe.deterministic
         or recipe.recipe_id != challenge.get("recipe_id")
         or recipe.model_name != row["model"]
+        or recipe.model_digest != challenge.get("model_digest")
         or not {"prompt", "seed", "width", "height", "seconds", "fps"}.issubset(
             recipe.vars
         )
@@ -4285,6 +4335,26 @@ async def _probe_video_assignment(
     ):
         await _mark_probe(job_id, "failed")
         raise AssignmentError("video assignment recipe is no longer authoritative")
+
+    try:
+        from uuid import UUID
+
+        reference_uuid_values = [UUID(value) for value in reference_ids]
+    except ValueError as exc:
+        await _mark_probe(job_id, "failed")
+        raise AssignmentError("video assignment reference identity is invalid") from exc
+    async with await new_session() as session:
+        reference_rows = (
+            await session.execute(
+                sa.select(workers_t.c.id, workers_t.c.name).where(
+                    workers_t.c.id.in_(reference_uuid_values)
+                )
+            )
+        ).all()
+    names = {str(worker_id): str(name) for worker_id, name in reference_rows}
+    if set(names) != set(reference_ids):
+        await _mark_probe(job_id, "failed")
+        raise AssignmentError("video assignment reference worker is unavailable")
 
     parameters = challenge.get("parameters") or {}
     inputs = {
@@ -4333,15 +4403,31 @@ async def _probe_video_assignment(
             group = observed
             break
         if state == "claimed":
+            stages = [
+                (
+                    "candidate",
+                    str(row["target_worker_id"]),
+                    str(row["target_worker_name"]),
+                    job_id,
+                ),
+                ("reference", reference_ids[0], names[reference_ids[0]], str(uuid4())),
+                ("reference", reference_ids[1], names[reference_ids[1]], str(uuid4())),
+            ]
             try:
-                result = await _run_targeted_video_stage(
-                    row=row,
-                    assignment_id=assignment_id,
-                    job_id=job_id,
-                    worker_id=str(row["target_worker_id"]),
-                    worker_name=str(row["target_worker_name"]),
-                    challenge=challenge,
-                    resolved=resolved,
+                results = await asyncio.gather(
+                    *(
+                        _run_targeted_video_stage(
+                            row=row,
+                            assignment_id=assignment_id,
+                            job_id=stage_job_id,
+                            role=role,
+                            worker_id=worker_id,
+                            worker_name=worker_name,
+                            challenge=challenge,
+                            resolved=resolved,
+                        )
+                        for role, worker_id, worker_name, stage_job_id in stages
+                    )
                 )
             except Exception as exc:
                 logger.error(
@@ -4360,7 +4446,15 @@ async def _probe_video_assignment(
                     "code": 502,
                     "economic_effect": "none",
                 }
-            if result.get("status") != "completed":
+            failed_result = next(
+                (
+                    result
+                    for result in results
+                    if result.get("status") != "completed"
+                ),
+                None,
+            )
+            if failed_result is not None:
                 await _fail_media_group(group_id=group_id, owner_job_id=job_id)
                 await _mark_probe(job_id, "failed")
                 return {
@@ -4369,11 +4463,14 @@ async def _probe_video_assignment(
                     "assignment_id": assignment_id,
                     "job_id": job_id,
                     "message": "video probe was inconclusive",
-                    "code": int(result.get("code") or 502),
+                    "code": int(failed_result.get("code") or 502),
                     "economic_effect": "none",
                 }
             try:
-                fresh_witnesses = _validated_media_witnesses(row, [result["witness"]])
+                fresh_witnesses = _validated_media_witnesses(
+                    row,
+                    [result["witness"] for result in results],
+                )
                 group = await _complete_media_group(
                     group_id=group_id,
                     owner_job_id=job_id,
@@ -4564,6 +4661,7 @@ async def _run_targeted_video_stage(
     row: dict[str, Any],
     assignment_id: str,
     job_id: str,
+    role: str,
     worker_id: str,
     worker_name: str,
     challenge: dict[str, Any],
@@ -4598,7 +4696,7 @@ async def _run_targeted_video_stage(
         "_validator_assignment_id": assignment_id,
         "_validator_probe_group_id": row["probe_group_id"],
         "_validator_grid_nonce": row["grid_nonce"],
-        "_validator_role": "candidate",
+        "_validator_role": role,
     }
     route_models = resolved.get("required_models") or [row["model"]]
     try:
@@ -4642,7 +4740,7 @@ async def _run_targeted_video_stage(
             except (KeyError, TypeError, ValueError, json.JSONDecodeError):
                 return {"status": "error", "code": 502}
             if (
-                committed["role"] != "candidate"
+                committed["role"] != role
                 or committed["worker_id"] != worker_id
                 or grid.get("worker_id") != worker_id
                 or grid.get("assignment_id") != assignment_id
@@ -4842,9 +4940,9 @@ async def _claim_probe_lease(
         if row["modality"] == "video":
             if (
                 not video_validation_policy()["enabled"]
-                or row["capability"] != "video.contract.v1"
+                or row["capability"] != "video.fidelity.v1"
                 or challenge.get("schema") != "aipg.validator.media.challenge.v1"
-                or challenge.get("kind") != "video.contract"
+                or challenge.get("kind") != "video.fidelity"
             ):
                 await _mark_probe(job_id, "failed")
                 raise AssignmentError("video probe gate is not authoritative")
