@@ -209,6 +209,10 @@ recovery identity. Never use it to authenticate validator work or change
 payout ownership. Keep `VALIDATOR_PAIRING_ENABLED=0` until Console, local-app
 consent, and platform end-to-end qualification ship together. See
 `docs/architecture/VALIDATOR_ACCOUNT_PAIRING.md` for the full route contract.
+The separate expiring `VALIDATOR_PAIRING_CANARY_ACCOUNTS` pilot permits only
+configured canonical node/human accounts while public availability stays false.
+It is an extra service-layer restriction, never an authentication bypass. Empty,
+expired or out-of-scope pilots return 503 without revealing membership.
 
 ## Work Guidance
 

@@ -53,6 +53,11 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - **Media capabilities:** `/v1/status/models` publishes generation modes derived
   from approved recipe variants. A connected checkpoint alone does not authorize
   `img2img` or `img2video`; the corresponding recipe must declare an image input.
+- **Pairing rollout:** `config.py` validates a private pilot of at most ten
+  canonical account UUIDs with an explicit timezone-aware deadline no more than
+  24 hours ahead at startup. Expiry is enforced on requests, including after
+  transaction-lock waits. Defaults admit nobody; public availability still
+  follows only `VALIDATOR_PAIRING_ENABLED`. Settings errors must not print inputs.
 
 ## Work Guidance
 

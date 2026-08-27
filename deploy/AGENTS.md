@@ -57,6 +57,14 @@ executes an immutable release selected through `/home/aipg/current`.
   node-app consent flows first. The audience and approval URL must be explicit
   HTTPS values. Rollback disables the flag and preserves node identities and
   association tables. This gate never activates validator economics.
+  A supervised pilot may keep that global flag off and set
+  `VALIDATOR_PAIRING_CANARY_ACCOUNTS` (JSON array, maximum ten canonical UUIDs)
+  plus `VALIDATOR_PAIRING_CANARY_UNTIL` (timezone-aware ISO deadline, at most
+  24 hours ahead at startup). Include both the test node and test human accounts.
+  Public capability advertisement remains false. Remove test links before
+  expiry, then clear the allowlist; an expired pilot retains links but cannot
+  read or remove them until deliberately reauthorized. Keep IDs private. Full
+  rollback clears the pilot as well as disabling the global flag.
 - `GRID_SIWE_ALLOWED_DOMAINS` is the exact frontend authority allowlist for
   wallet-login challenges. Keep `GRID_LEGACY_SIWE_VERIFY_ENABLED=0`; it is an
   emergency client-migration switch, not a permanent compatibility mode.

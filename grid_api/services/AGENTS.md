@@ -60,6 +60,12 @@ content sanitization, and reward settlement.
   schema, including on failure; they must not drop shared Grid tables. A real-PG
   sentinel test proves unrelated data survives fixture cleanup. Keep the test
   database disposable despite this additional isolation.
+  When the global flag is off, an unexpired configured pilot must include both
+  canonical accounts. Node locks precede the availability/expiry recheck;
+  existing links and pending approvals cannot bypass scope changes. Private
+  listing filters out non-pilot nodes. Expiry blocks access but never mutates
+  keys, balances, wallets, registration or stored links. Auth, fresh proof and
+  node consent remain mandatory even for pilot accounts.
 - **Validation evidence:** `validators.py` verifies one linked-wallet validator
   registration per canonical account, builds shared probe batches, binds one
   assignment and authoritative vote per registered validator/group, and
