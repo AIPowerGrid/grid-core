@@ -76,6 +76,11 @@ executes an immutable release selected through `/home/aipg/current`.
   media candidates/references under the independent-control policy. It adds the
   private identity-bound review table and intentionally backfills no trust;
   verify the table remains empty after a dark deployment.
+- Apply Alembic `0029` before any compensated-audit reservation caller is
+  deployed. A dark migration must leave both audit tables empty and create no
+  counters, jobs, ledger rows, or worker acknowledgements. Schema presence is
+  not permission to enable scheduling; the atomic worker-terminal integration
+  and explicit default-off configuration gates are separate reviewed work.
 - `VALIDATOR_MEDIA_PROBE_ENABLED` is not a standalone launch switch. Keep it off
   until the reviewed bond contract/verifier/minimum, finalized reference sync,
   governed deterministic recipe/model digest, independent operators, immutable

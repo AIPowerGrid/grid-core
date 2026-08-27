@@ -375,12 +375,16 @@ Those are future depth, not substitutes for live proof of the implemented
 capability set. Production enablement still requires hard-targeted acceptance
 and negative canaries against representative text backends.
 
-The separate compensated blind-audit rail now has an accepted implementation
-contract in `PAID_VALIDATOR_AUDITS.md`, but no schema, budget reservation,
-ordinary terminal integration, or dispatch code exists. Existing probes remain
-unpaid and worker-fingerprintable; they cannot become quality evidence by
-configuration. The paid rail must land as a separately reviewed money-path
-change and pass PostgreSQL budget/terminal races before any dark canary.
+The separate compensated blind-audit rail has an accepted implementation
+contract in `PAID_VALIDATOR_AUDITS.md`. Source now includes Alembic `0029`,
+private audit/counter tables, and an unreferenced lifecycle service. SQLite
+lifecycle tests and real PostgreSQL 16 cap, same-job, and settle/release races
+pass. No scheduler, dispatch caller, ordinary payout-ledger terminal, sweeper,
+runtime flag, or validator scoring integration exists, so the foundation cannot
+issue or pay for work. Existing probes remain unpaid and worker-fingerprintable;
+they cannot become quality evidence by configuration. Atomic worker payout plus
+audit settlement, queue-reclaim tests, and traffic-indistinguishability gates
+remain required before any dark canary.
 
 ### 20. Private deterministic image validation - Ready dark
 
