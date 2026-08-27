@@ -60,6 +60,12 @@ REVIEWED_WORKER_REGISTRY_RUNTIMES = {
     "worker-registry-v2-957685a": (
         "0x10cb9fb1b441747142df35545d69e705e81543516937c7a7b08c3df2ccbb5db2"
     ),
+    # Current cooldown-backed candidate introduced by aipg-smart-contracts
+    # 7d7a2e8. Its deployment proof separately verifies the live six-selector
+    # legacy cut, AppStorage preservation, and exact runtime before any send.
+    "worker-registry-v2-7d7a2e8": (
+        "0x359fb8372a292a77fe76d156bbda39b35c3170f1ff0edaa1874ea8b87ee3af78"
+    ),
 }
 
 _BOND_SYNC_LOCK_KEY = 0x4150494756424F4E  # "AIPGVBON"

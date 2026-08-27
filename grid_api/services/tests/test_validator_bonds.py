@@ -31,6 +31,21 @@ BLOCK_HASH = "0x" + "4" * 64
 MODEL = "krea-2-turbo"
 VERIFIER = "worker-registry-v2-957685a"
 REVIEWED_RUNTIME_HASH = validator_bonds.reviewed_runtime_hash(VERIFIER)
+CURRENT_VERIFIER = "worker-registry-v2-7d7a2e8"
+CURRENT_RUNTIME_HASH = (
+    "0x359fb8372a292a77fe76d156bbda39b35c3170f1ff0edaa1874ea8b87ee3af78"
+)
+
+
+def test_reviewed_verifier_labels_pin_distinct_exact_runtimes():
+    assert validator_bonds.REVIEWED_WORKER_REGISTRY_RUNTIMES == {
+        VERIFIER: REVIEWED_RUNTIME_HASH,
+        CURRENT_VERIFIER: CURRENT_RUNTIME_HASH,
+    }
+    assert validator_bonds.reviewed_runtime_hash(CURRENT_VERIFIER) == CURRENT_RUNTIME_HASH
+    assert validator_bonds.reviewed_runtime_hash(f" {CURRENT_VERIFIER} ") == CURRENT_RUNTIME_HASH
+    assert validator_bonds.reviewed_runtime_hash("worker-registry-v2-unreviewed") is None
+    assert CURRENT_RUNTIME_HASH != REVIEWED_RUNTIME_HASH
 
 
 class _Call:
