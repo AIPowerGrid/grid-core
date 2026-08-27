@@ -21,6 +21,10 @@ validation, worker incentives, and trust boundaries.
   economic gates.
 - `VALIDATOR_ANTI_GAMING.md` - executable hostile-worker baseline, public-probe
   limitations, blind-audit contract, and the quality-evidence promotion gate.
+- `VALIDATOR_ACCOUNT_PAIRING.md` - default-off, two-party association of an
+  enrolled node with a human account, without identity merges, key transfer,
+  payout changes, or trust grants. Core implementation is under review;
+  Console and local-app integration plus live platform proof remain required.
 - `PAID_VALIDATOR_AUDITS.md` - accepted, partially implemented design for
   bounded scheduler-owned audits. Schema, budgets, ordinary atomic payout, and
   recovery exist dark; scheduling, scoring, and classifier gates remain absent.
