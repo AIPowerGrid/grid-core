@@ -1,11 +1,12 @@
 # Validator Account Pairing
 
-Status: Core implementation reviewed with the matching Console and local app,
-default off and not deployed. Cross-repo implementations are tracked in
+Status: Core `407f2984` / Alembic `0030` and Console `db301013` deployed dark
+on 2026-08-27. Pairing remains disabled. The matching local app is merged and
+native-build tested, but not in the public preview.13 release. Implementations are tracked in
 [Core #58](https://github.com/AIPowerGrid/grid-core/pull/58),
 [Console #21](https://github.com/AIPowerGrid/grid-frontend/pull/21), and
 [validator #54](https://github.com/AIPowerGrid/grid-validator/pull/54).
-Nothing here is a production rollout or validator economic activation.
+Deployment does not enable pairing or validator economic authority.
 
 ## Decision
 
@@ -153,6 +154,43 @@ rejected. Non-pairing tables remain unchanged apart from authentication telemetr
 SQLite, a local nonce fixture and loopback HTTP are explicit test boundaries;
 Core's separate PostgreSQL CI covers transition races and migration/restore.
 
-Remaining: merged/released clients, dark deployment and migration, supervised
-association/removal, and both-platform live pairing proof. This Core change alone
-does not close onboarding or the five-independent-operator qualification.
+### 2026-08-27 Dark Deployment Evidence
+
+Core cutover completed at 19:00:27 UTC on immutable
+`407f29841988fd253afe867a1f5a07e23349219e`. A fresh Python 3.12 environment
+installed the reviewed hash-locked wheels and passed `pip check`. A checksummed
+71,594,030-byte production backup was restored into an isolated scratch database;
+upgrade from `0029` to `0030` and `alembic check` passed before the production
+migration. The scratch database was removed. Production also passed the drift
+check. Environment contents and payout/backup timer configuration were unchanged.
+
+The matching Console deployment is `db3010132770385e454a0def9d96164808ce896f`.
+Anonymous access to its node list returns 401; the approval page redirects to
+login preserving its callback and sends no-referrer and framing protections.
+This is deployed-route protection evidence, not a completed human pairing.
+
+At 19:06 UTC, public health and network status reported the exact Core commit,
+eight connected workers and four fresh validator heartbeats. Pairing remained
+advertised as false and its node API returned 503. Both new pairing tables and
+both paid-audit tables were empty. A suspended test node could read its own
+registration; active-only scorecard/assignment-health reads correctly returned
+403. No node was resumed for this check. Media issuance and validator economic
+authority remained off; demand charging remained allowlisted.
+
+Core CI [33104966047](https://github.com/AIPowerGrid/grid-core/actions/runs/33104966047)
+and Console CI [33104970629](https://github.com/AIPowerGrid/grid-frontend/actions/runs/33104970629)
+passed on those exact commits. Validator source `5de518b0` passed all four
+native build/clean-install targets in
+[33105488747](https://github.com/AIPowerGrid/grid-validator/actions/runs/33105488747);
+its downloaded payload passed manifest/checksum verification. This is a
+build-only candidate, not a published release or release-provenance attestation.
+
+Rollback retains Core `6015eca3` and Console deployment
+`grid-frontend-edh2yzth5-ai-power-grids-projects.vercel.app`. Disable pairing
+before any application rollback; retain additive `0030` tables and all node
+configurations. No database downgrade or new identity is required.
+
+Remaining: Windows/Linux live pairing journeys, a reviewed immutable client
+release, and supervised association/removal before public enablement. These
+deployment checks do not close ordinary-user Windows onboarding or the
+five-independent-operator qualification.
