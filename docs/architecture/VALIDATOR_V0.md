@@ -20,6 +20,14 @@ model quality. Independent
 operators, correlated-control defenses, dispute windows, and adversarial
 operation remain rollout gates.
 
+Production runs Core `e18b38f9` at Alembic `0026` with sealed assignment
+polling enabled. Three first-party nodes run published
+`v0.1.0-preview.2` commit `1472677d`. A 2026-08-27 canary proved that the poll
+withheld target/model/nonce/challenge data, all three terminal disclosures
+matched their seals, and one tool-chain group reached healthy 3-of-5 quorum
+without creating credit, reservation, den, or worker-ledger rows. This remains
+first-party protocol evidence, not independent operator proof.
+
 ## Identity
 
 1. A user links a verified Base wallet to a canonical Grid account.
@@ -138,12 +146,13 @@ authority. A paid audit rail must first be stake/Sybil-gated, budgeted, and
 tested against a model-switching worker; simply reporting fake den would corrupt
 the payout contract.
 
-The default-off sealed-assignment compatibility mode also withholds target,
+The sealed-assignment compatibility mode also withholds target,
 model, nonce, policy, and challenge from `GET /v1/validator/assignments`. The
 poll response carries an opaque assignment id plus a SHA-256 commitment. After
 the worker completes, `POST /v1/validator/probe/{assignment_id}` discloses the
-committed fields and the node verifies the seal before signing. Deploy compatible
-nodes before enabling the Core flag. This reduces validator/worker pre-collusion
+committed fields and the node verifies the seal before signing. Production
+enabled the Core flag only after all first-party nodes ran compatible binaries.
+This reduces validator/worker pre-collusion
 but does not make the public challenge grammar blind, so authority remains none.
 
 ## Privacy
