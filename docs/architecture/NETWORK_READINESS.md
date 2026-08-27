@@ -439,7 +439,7 @@ seeds remain only in tests and illustrative documentation, not the live
 challenge generator. Live prompt banks, golden pHashes, answer keys, and
 private thresholds are forbidden from public binaries and repos.
 
-### 22. Video validation lanes - Partial/Dark
+### 22. Video validation lanes - Ready dark/External
 
 The validator source has fail-closed `video.contract.v1` and
 `video.fidelity.v1` scorers: authenticated MP4/WebM witnesses are decoded in a
@@ -449,13 +449,14 @@ per-frame pHashes plus a lightweight motion profile only after two references
 agree. Malformed assignments, unsafe fetches, local decoder timeouts, and
 reference decode failures/disagreement are inconclusive; authenticated
 malformed candidate bytes may fail. Core now has a separately gated,
-default-off `video.contract.v1` assignment and hard-targeted MP4 witness path.
-It requires a governed text-to-video recipe with explicit dimensions and timing;
-it uses no references and makes no model-fidelity claim. Real LTX/workflow
-calibration, governed recipe publication, prompt/key-event relevance, and
-media-enabled release-binary qualification remain open. Reference-based
-`video.fidelity.v1` remains disabled. No video evidence affects routing,
-rewards, strikes, bonds, or slashing.
+default-off `video.fidelity.v1` assignment and three-worker hard-targeted MP4
+witness path. It requires a governed deterministic text-to-video recipe with a
+model digest and explicit dimensions/timing, plus two independently controlled,
+bonded references selected under the same fail-closed policy as image. Real
+LTX/workflow calibration, governed recipe publication, independent reference
+operators, prompt/key-event relevance, and media-enabled release-binary
+qualification remain open. No video evidence affects routing, rewards, strikes,
+bonds, or slashing.
 
 ### 23. Rotating bonded references - Ready dark/External
 
