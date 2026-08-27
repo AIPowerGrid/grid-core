@@ -72,6 +72,10 @@ executes an immutable release selected through `/home/aipg/current`.
 - Apply Alembic `0027` before starting the bond-sync loop or selecting bonded
   references. It adds the finalized block/facet proofs and durable sync cursor;
   deploying the code first will fail and must not be attempted.
+- Apply Alembic `0028` before reviewing worker common-control groups or selecting
+  media candidates/references under the independent-control policy. It adds the
+  private identity-bound review table and intentionally backfills no trust;
+  verify the table remains empty after a dark deployment.
 - `VALIDATOR_MEDIA_PROBE_ENABLED` is not a standalone launch switch. Keep it off
   until the reviewed bond contract/verifier/minimum, finalized reference sync,
   governed deterministic recipe/model digest, independent operators, immutable
