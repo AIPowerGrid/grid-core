@@ -43,8 +43,10 @@ non-deterministic model, GPU ownership, or operator independence by itself.
 6. Validators download only from operator-configured HTTPS origins, disable
    redirects, enforce byte/time/content-type bounds, recompute SHA-256, and
    reject any mismatch before decoding.
-7. Reference workers are bonded, recently verified, and controlled by distinct
-   accounts and payout wallets. The candidate cannot be its own reference.
+7. Candidate and reference workers each require a fresh, identity-bound,
+   maintainer-reviewed common-control record. Their three opaque control groups
+   must be distinct; distinct accounts and payout wallets remain defense in
+   depth. The candidate cannot be its own reference.
 8. At least two references must agree before the candidate is compared. A
    reference disagreement is `inconclusive`, never a candidate failure.
 9. Reference selection rotates per group. No worker, wallet, account, host, or
@@ -59,6 +61,7 @@ flowchart LR
     C[Core challenge generator] --> G[Immutable probe group]
     B[Background Base bond sync] --> P[Eligible reference pool]
     Q[Historical non-economic quality] --> P
+    W[Private common-control review] --> P
     P --> R[Rotating reference selection]
     G --> X[Candidate hard-targeted media job]
     G --> R
@@ -103,7 +106,7 @@ block, minimum bond, active status, and non-slashed status. A stale, missing, or
 ambiguous bond snapshot removes the worker from selection without affecting
 ordinary production routing.
 
-Migrations `0023` and `0027`, `services/validator_references.py`, and the default-off
+Migrations `0023`, `0027`, and `0028`, `services/validator_references.py`, and the default-off
 `services/validator_bonds.py` background loop implement the durable record,
 finalized bond refresh, and fail-closed identity/freshness/rotation selector.
 The sync queries two distinct Base RPC providers, pins both to their newest
@@ -128,6 +131,27 @@ runtime, minimum bond, and quality threshold as assignment selection. The tool
 cannot write positive bond evidence. A worker identity change pauses the row,
 clears stale cached proof, and requires another chain sync; revocation is
 terminal.
+
+### Common-control review
+
+`grid_worker_control_reviews` is a separate private record keyed by worker id.
+It snapshots the current account and payout wallet, assigns one opaque `opg_*`
+group for common practical control, records a non-sensitive review reference,
+and expires. It is deliberately separate from model/modality quality and bond
+state: one operator controls a worker across every recipe it serves.
+
+Use `scripts/review_worker_control.py` in preview mode, inspect the identity and
+proposed group, then apply only with the exact returned digest. Every worker
+under common control receives the same group even if it uses another account,
+wallet, host, or company label. Group ids and review references must contain no
+names, emails, hostnames, IP addresses, wallets, or private notes. They are not
+returned by assignment, scorecard, or public-health APIs.
+
+Migration `0028` intentionally performs no eligibility backfill. A missing,
+expired, rejected, revoked, future-dated, or identity-mismatched review fails
+closed. Reference activation requires a fresh matching review, and group
+creation locks the selected review state transactionally. The record does not
+change routing, payout, rewards, bonds, strikes, or slashing.
 
 `0027` also adds one durable sync cursor per `(chain_id, bond_contract)`. Core
 anchors every later provider read to the previously accepted finalized block
@@ -218,13 +242,16 @@ group.
 
 1. Start from active, fresh, bond-verified records matching model and modality.
 2. Join live worker state; an offline reference is ineligible for a new group.
-3. Exclude the candidate worker, candidate account, and candidate payout wallet.
-4. Exclude references sharing an account or payout wallet with one another.
-5. Require at least two eligible references and use `secrets.SystemRandom` to
+3. Require a fresh identity-bound control review for the candidate and every
+   possible reference.
+4. Exclude the candidate worker, account, payout wallet, and control group.
+5. Exclude references sharing a control group, account, or payout wallet with
+   one another.
+6. Require at least two eligible references and use `secrets.SystemRandom` to
    sample without replacement.
-6. Apply a bounded recent-use penalty before random selection so the same pair
+7. Apply a bounded recent-use penalty before random selection so the same pair
    cannot dominate successive groups.
-7. Persist the selection. Never replace one reference silently after any output
+8. Persist the selection. Never replace one reference silently after any output
    exists; fail the group as inconclusive and create a new group.
 
 IP diversity may be monitored as a weak operational signal, but IP address is
@@ -331,7 +358,9 @@ address, verifier version, positive minimum bond, bounded quality threshold,
 positive object-size/timeout limits, a registered validator advertising
 `image.fidelity.v1`, an on-chain RecipeVault recipe id, deterministic metadata,
 a 32-byte `modelDigest`, exact prompt/seed/width/height controls, and two fresh
-independent references. Any missing condition yields no image assignment.
+independent references. Candidate and references must also have three fresh,
+identity-bound, distinct worker-control groups. Any missing condition yields no
+image assignment.
 
 Video has an independent `VALIDATOR_VIDEO_PROBE_ENABLED=0` gate and also
 requires the media master gate, positive byte/timeout bounds, a validator
@@ -353,7 +382,8 @@ All gates are required before an operator enables production image assignments:
   verified local node plus a second provider) agreeing on one mutually finalized
   block hash and bond snapshot before the cache is production-authoritative;
 - at least three independently controlled bonded workers on each validated
-  model, providing one candidate plus two references;
+  model, providing one candidate plus two references, with fresh reviewed
+  common-control records assigning three distinct opaque groups;
 - reference-pool schema, rotation, independence, and ambiguity tests on real
   Postgres;
 - validator media-origin allowlist and redirect/size/MIME/hash defenses tested;

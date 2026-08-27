@@ -365,8 +365,11 @@ and negative canaries against representative text backends.
 Core generates private randomized prompts and seeds, dispatches one candidate
 and two rotating references, computes stored-object SHA-256 witnesses, and the
 node performs bounded fetch, structural, pHash, and reference-consensus checks.
-The path is fail-closed and production-disabled because the recipe and reference
-pool gates are not met.
+Migration `0028` and the private preview-first worker-control review now require
+three fresh identity-bound, distinct common-control groups across candidate and
+references; separate accounts and payout wallets remain defense in depth. The
+path is fail-closed and production-disabled because the recipe, contract,
+independent-worker, and reference-pool gates are not met.
 
 ### 21. Remove public fixed media challenges - Implemented
 
@@ -395,8 +398,9 @@ rewards, strikes, bonds, or slashing.
 
 ### 23. Rotating bonded references - Ready dark/External
 
-Core has a fail-closed finalized-bond snapshot cache and distinct
-account/wallet rotation selector. The eligible pool is empty because the
+Core has a fail-closed finalized-bond snapshot cache and a selector requiring
+three fresh distinct reviewed control groups plus distinct account/wallet
+identities. The eligible pool is empty because the
 reviewed cooldown-backed WorkerRegistry deployment and independent reference
 operators do not exist. A stacked Core candidate now verifies the Grid Diamond,
 all 16 WorkerRegistry selector routes, and the routed facet runtime at the newest
@@ -412,6 +416,9 @@ wallets and never scans the registry-wide append-only worker history;
 its loop and media assignment gate both default off. External contract review,
 facet deployment, live RPC/reorg canary evidence, and independent reference
 operators remain open. No permanent trusted worker is accepted as the oracle.
+Migration `0028` adds the separate expiring worker-control review and
+intentionally backfills no trust; it remains an undeployed dark candidate until
+the Core release carrying it passes migration/restore proof and deployment.
 
 ## Demand And Economics
 
@@ -608,7 +615,9 @@ retention is not off-host disaster recovery.
    probe-classifier, replay, and model-switching tests under that independent
    quorum before giving evidence any authority.
 4. Calibrate deterministic image fidelity with independently controlled bonded
-   references, then pilot video contract evidence with economic effects off.
+   references. Apply identity-bound control reviews to candidate and reference
+   workers, prove three distinct groups on real PostgreSQL, then pilot video
+   contract evidence with economic effects off.
 5. Recruit at least two independent serving operators per flagship model while
    completing the real media-manager qualification evidence.
 6. Expand charging only through reconciled allowlist stages.

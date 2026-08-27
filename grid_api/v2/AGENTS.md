@@ -8,8 +8,8 @@ identities/account aliases, promotional campaigns/grants, settlement
 epochs, per-asset revenue pots (`grid_revenue`), multi-asset payout legs
 (`grid_payout_legs`), registered validator identities plus shared probe-group/
 assignment/attestation evidence rows, bounded service clients plus their
-delegation audit events, and the fail-closed bonded media reference-worker
-snapshot pool.
+delegation audit events, private identity-bound media-worker control reviews,
+and the fail-closed bonded media reference-worker snapshot pool.
 
 ## Ownership
 
@@ -87,6 +87,14 @@ snapshot pool.
   reference eligibility. `grid_validator_bond_sync_state` is the durable
   authority-scoped finalized cursor and health record. A faulted cursor must
   invalidate its cached eligibility until a later exact sync recovers it.
+- `grid_worker_control_reviews` is the private maintainer-reviewed common-
+  control map for media workers. A verified row snapshots the current worker
+  account and payout wallet, carries one opaque `opg_*` group, and expires.
+  Candidate plus two references must have three fresh distinct groups; account
+  and wallet separation remains defense in depth. Identity drift, expiry,
+  rejection, revocation, or a missing row fails closed. Group ids and review
+  references never enter validator challenges or public APIs, and the table
+  grants no economic authority.
 - Account IDs are UUIDs. Quota identities such as `v2:<uuid>` are not DB foreign
   keys and must not be passed to credit ledger functions.
 - New columns need explicit migrations, tests, and backfill/default strategy for

@@ -339,6 +339,50 @@ workers = sa.Table(
 )
 
 
+# Maintainer-reviewed common-control metadata for media workers. This is a
+# private operational anti-Sybil record: group ids are opaque and never exposed
+# through validator assignments or public APIs. The identity snapshot makes a
+# wallet/account change fail closed until a fresh review is applied.
+worker_control_reviews = sa.Table(
+    "grid_worker_control_reviews",
+    metadata,
+    sa.Column(
+        "worker_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_workers.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column(
+        "account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("payout_wallet", sa.String(42), nullable=False, index=True),
+    sa.Column("operator_group_id", sa.String(96), nullable=True, index=True),
+    sa.Column("status", sa.String(16), nullable=False, index=True),
+    sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=False, index=True),
+    sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True, index=True),
+    sa.Column("review_ref", sa.String(128), nullable=False),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.CheckConstraint(
+        "status IN ('verified', 'rejected', 'revoked')",
+        name="ck_grid_worker_control_reviews_status",
+    ),
+    sa.CheckConstraint(
+        "(status = 'verified' AND operator_group_id IS NOT NULL AND expires_at IS NOT NULL) "
+        "OR (status IN ('rejected', 'revoked') AND expires_at IS NULL)",
+        name="ck_grid_worker_control_reviews_verified_fields",
+    ),
+    sa.CheckConstraint(
+        "expires_at IS NULL OR expires_at >= reviewed_at",
+        name="ck_grid_worker_control_reviews_expiry",
+    ),
+)
+
+
 # Bond and quality snapshots used only to select rotating media-validation
 # references. Bond fields are refreshed by the default-off finalized-block
 # synchronizer after two RPC providers agree and are never worker self-report.
