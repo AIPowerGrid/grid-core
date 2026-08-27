@@ -37,6 +37,7 @@ def _capabilities_payload() -> dict[str, Any]:
         "features": {
             "attest": True,
             "registration": True,
+            "account_pairing": bool(getattr(get_settings(), "validator_pairing_enabled", False)),
             "self_suspension": True,
             "signing_wallet_rotation": True,
             "heartbeat": True,

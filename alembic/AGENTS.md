@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current head: `0029`
+- `versions/` - ordered migration revisions. Current head: `0030`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -32,7 +32,9 @@ production database match the Grid-owned schema contracts without relying on
   WorkerRegistry block/facet proofs plus one authority-scoped sync cursor;
   `0028` adds private, expiring, identity-bound media-worker common-control
   reviews; `0029` adds the private compensated-audit job and hourly budget-
-  counter foundation, without enabling audit dispatch or worker payout).
+  counter foundation, without enabling audit dispatch or worker payout;
+  `0030` adds bounded validator/account pairing slots and signed visibility
+  associations, without moving node accounts or enabling any economics).
 
 ## Local Contracts
 
@@ -68,6 +70,10 @@ production database match the Grid-owned schema contracts without relying on
 - Apply `0029` before any code may reserve a compensated validator audit. The
   migration creates empty private state only: it backfills no budget, queues no
   work, and grants no validator or worker economic authority.
+- Apply `0030` before enabling optional validator-account pairing. The new
+  tables start empty, and existing validator/authentication paths do not query
+  them. Operational rollback is flag-off, not deleting identity configuration
+  or downgrading the database.
 - Migrations must be idempotent only where Alembic expects them to be; do not
   hide failed DDL with broad exception swallowing.
 - Economic constraints matter: unique `grid_ledger.job_id`, non-null credit refs

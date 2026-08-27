@@ -46,6 +46,14 @@ content sanitization, and reward settlement.
   manager/Console pairing in Redis. The manager creates the final API key and
   poll secret locally; Core stores only their hashes, installs only
   `worker.connect`, and removes the key expiry only after manager ACK.
+- **Validator account association:** `validator_pairing.py` owns optional,
+  non-economic visibility links from an enrolled node to a separate human
+  account. One ten-minute pairing slot per node, immutable browser approval,
+  signer-bound local confirmation, and one SQL transaction for the link and
+  terminal state. PostgreSQL locks the validator row and checks wall-clock
+  expiry after lock acquisition. Either party may remove the exact association;
+  old removal proofs cannot remove a later one. Retired accounts and rotated
+  signers require deliberate re-pairing, never alias-following or key transfer.
 - **Validation evidence:** `validators.py` verifies one linked-wallet validator
   registration per canonical account, builds shared probe batches, binds one
   assignment and authoritative vote per registered validator/group, and

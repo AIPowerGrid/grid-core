@@ -50,6 +50,14 @@ class GridSettings(BaseSettings):
     )
     worker_enrollment_ttl_seconds: int = 900
 
+    # Optional account visibility for an already-enrolled validator. This does
+    # not move the node account, issue keys, or grant economic authority.
+    validator_pairing_enabled: bool = False
+    validator_pairing_audience: str = "https://api.aipowergrid.io"
+    validator_pairing_console_url: str = (
+        "https://console.aipowergrid.io/dashboard/connect-validator"
+    )
+
     # Shared Base read endpoint. SecretStr prevents authenticated provider URLs
     # from appearing in settings reprs or operational logs.
     base_rpc_url: SecretStr | None = None
