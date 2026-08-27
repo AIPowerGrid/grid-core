@@ -1,6 +1,6 @@
 # Network Readiness Ledger
 
-**Evidence snapshot:** 2026-08-21 UTC
+**Evidence snapshot:** 2026-08-27 UTC
 
 This is the durable status ledger for the Grid decentralization backlog. It
 separates source implementation, production deployment, public distribution,
@@ -22,25 +22,28 @@ production rollout, and a registered node does not prove independent control.
 
 At this snapshot:
 
-- production Core runs immutable commit `0d850e73` with Alembic `0024`;
-- `/v1/status/network` is live and reports five connected workers, nine online
+- production Core runs immutable commit `e18b38f9` with Alembic `0026`;
+- `/v1/status/network` is live and reports seven connected workers, ten online
   model entries, and every model below the three-worker redundancy target;
-- shared-quorum text validation is live in `shared_quorum_preview` mode;
-- three active first-party validators on commit `16e05327` completed two fresh
-  3-of-5 groups with three distinct verified signatures and evidence
-  commitments per group;
+- sealed shared-quorum text validation is live in `shared_quorum_preview` mode;
+- three active first-party validators run published `v0.1.0-preview.2` commit
+  `1472677d`; a supervised sealed tool-chain group reached `accepted / healthy`
+  with three distinct verified signatures and matching disclosure commitments;
 - those validators share one operator and hypervisor, so verified independent
   operator count remains zero;
 - validator rewards, validator stake, worker penalties from validator evidence,
   and Core federation are off;
 - charging remains a narrow allowlist canary rather than global; and
-- no public validator binary release or production-capable media-manager
-  release exists. A benchmark-only media-manager qualification prerelease is
-  public, but it cannot enroll with the Grid or advertise capabilities.
+- the four-platform `v0.1.0-preview.2` validator binary release and versioned
+  multi-architecture GHCR image are published; macOS and Windows remain
+  explicitly unsigned. GHCR package visibility remains private until the
+  separate organization access change is completed. No production-capable
+  media-manager release exists. A benchmark-only media-manager qualification
+  prerelease is public, but it cannot enroll with the Grid or advertise
+  capabilities.
 
-Host verification on 2026-08-21 confirmed the immutable release and database
-revision above and found no scheduled database backup or off-host backup
-system. A supervised rehearsal at exact candidate `c73864ee` then created a
+Host verification on 2026-08-21 found no scheduled database backup or off-host
+backup system. A supervised rehearsal at exact candidate `c73864ee` then created a
 66,866,179-byte checksummed production snapshot, restored it into the guarded
 scratch database, upgraded `0019` through `0024`, passed `alembic current`,
 `heads`, and `check`, and removed the scratch database. The rehearsal first
@@ -60,11 +63,10 @@ separately above, while production migration lock duration remains unmeasured.
 
 ## Completed Rollout Evidence
 
-Core PR 21 and its security/documentation prerequisites are merged. The exact
-Core release `0d850e73` was deployed immutably, migrated through `0024`, and
-smoked with charging still restricted to the existing allowlist. Validator PRs
-2-6 are merged through `16e05327`; no release tag, binary, or container image
-was published.
+The first production-quorum rollout on 2026-08-21 used Core `0d850e73` through
+`0024` and validator `16e05327`. It was deployed immutably and smoked with
+charging restricted to the existing allowlist; no validator release artifact
+had been published at that earlier snapshot.
 
 Three separately keyed first-party nodes then completed two fresh shared text
 groups. Each group had three assignments, three distinct validators, three
@@ -77,6 +79,12 @@ Credit, reservation, den-event, payout, and worker-ledger row counts were
 unchanged across the probes. A direct join from every fresh probe job id to
 `grid_ledger.job_id` returned zero rows. Validator economics, staking, routing
 effects, strikes, and slashing remain disabled.
+
+On 2026-08-27, production advanced to Core `e18b38f9` through `0026`, enabled
+sealed polling after upgrading all three first-party nodes, and published
+validator `v0.1.0-preview.2` from `1472677d`. A supervised sealed tool-chain
+group reached `accepted / healthy` with three verified authoritative signatures
+and no matching credit, reservation, den-event, or worker-ledger rows.
 
 ## Immediate Validator Preview
 
@@ -110,24 +118,27 @@ capabilities, status, and heartbeat. Account and wallet uniqueness prevent
 identity multiplication inside one canonical account. Production reports three
 active heartbeat-fresh registrations.
 
-### 5. `grid-validator v0.1.0-preview` - Ready, unpublished
+### 5. `grid-validator v0.1.0-preview.2` - Implemented/published
 
-Four-platform binaries, multi-architecture Docker builds, checksums, a
-checksum-verifying installer, SPDX SBOM, and GitHub provenance workflows exist.
-Fresh build-only GitHub runs and an independent clean-download verification of
-the complete 85-package SPDX/checksum payload have passed. No tag, GitHub
-Release, or registry image has been published. Publication remains gated on
-platform signing, protected release approval, and clean-download verification;
-the Core rollout and authenticated canary are complete.
+The immutable prerelease publishes four-platform binaries, a versioned
+multi-architecture Docker image, checksums, checksum-verifying installers, an
+SPDX SBOM, and GitHub provenance. Protected release approval, clean installs on
+all four target platforms, complete-payload verification, and a fresh
+independent download/provenance check passed. macOS is not Developer ID signed
+or notarized and Windows is not Authenticode signed, so this remains an
+explicitly unsigned prerelease rather than a stable release. The GHCR package
+exists but is not yet anonymously pullable while organization package
+visibility remains private.
 
 ### 6. Validator onboarding - Implemented
 
 The public `/validate` page release-gates incomplete assets and independently
 requires the live Core `shared_quorum_preview`, 3-of-5, scoped, non-economic
-capability contract. A complete GitHub Release is still required to unlock
-downloads. The page links scoped key creation, documents health
+capability contract. The page links scoped key creation, documents health
 commands, and says there are no rewards, stake, slashing, or routing effects.
-The Console has registration/scorecard surfaces. Downloads remain closed.
+The Console has registration/scorecard surfaces. The GitHub Release download
+path is open; container quickstarts must continue to use a local build until
+anonymous GHCR access is verified.
 
 ### 7. Five to ten independent preview operators - External
 
@@ -137,11 +148,10 @@ quorum mechanics but count as one operator. No evidence currently proves five
 independent operators. Until that exists, public language must remain
 **distributed testing**, not decentralized validation.
 
-Core candidate code adds the missing privacy-safe registry: opaque common-control
+Core production code includes the privacy-safe registry: opaque common-control
 groups, rate-limited qualification samples, expiring reviews, one group per
-quorum seat, and aggregate-only health. This is source-ready but does not change
-the external status above until migration `0026` is dark-deployed and real
-operators complete qualification.
+quorum seat, and aggregate-only health. Migration `0026` is deployed, but the
+external status remains unmet until real operators complete qualification.
 
 ## Real Quorum
 
@@ -446,7 +456,7 @@ with `--require-hashes` from binary wheels only, the Core image base is
 digest-pinned, and release construction does not upgrade pip. CI regenerates
 the lock and runs `pip-audit` before tests. Core source also exposes a build
 commit in the status API and deploys immutable releases. Production reports the
-exact deployed commit `0d850e73`. GitHub immutable releases were
+exact deployed commit `e18b38f9`. GitHub immutable releases were
 enabled on 2026-08-21 for `grid-validator`, `grid-media-worker`, and
 `grid-inference-worker`; their future published GitHub release tags and assets
 cannot be replaced, and corrections require a new version. This setting does
@@ -468,7 +478,7 @@ Core source exposes privacy-safe worker/model redundancy, validator health,
 payout totals, charging posture, incidents, advisories, build commit, and
 architecture maturity. The public `/status` page is deployed and tested at
 desktop/mobile widths. Production `/v1/status/network` returns the live
-privacy-safe feed at build `0d850e73`.
+privacy-safe feed at build `e18b38f9`.
 
 ### 34. Trusted-partner Core federation - Deferred design
 
@@ -486,9 +496,9 @@ uses root-only storage, and applies bounded local retention. The restore tool
 accepts only local PostgreSQL, creates and drops only a generated
 `aipg_restore_proof_*` database, restores as the application owner, migrates
 with the exact immutable candidate, and requires `alembic current`, `heads`,
-and `check` agreement. Pull-request CI rehearses `0019` backup through `0024`
-restore on PostgreSQL 16 and proves a decoy non-Grid schema is excluded. The
-supervised production proof passed at exact candidate `c73864ee`; the generated
+and `check` agreement. Pull-request CI rehearses the supported migration chain
+on PostgreSQL 16 and proves a decoy non-Grid schema is excluded. The supervised
+production proof passed again at exact release `e18b38f9`; the generated
 scratch database was removed. The systemd units pass clean-environment
 verification, and `aipg-postgres-backup.timer` is enabled and active. Its first
 unattended scheduled run and an off-host copy/restore drill remain open. Local
