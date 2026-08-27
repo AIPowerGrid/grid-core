@@ -22,7 +22,7 @@ production rollout, and a registered node does not prove independent control.
 
 At this snapshot:
 
-- production Core runs immutable commit `d8a48f2a` with Alembic `0029`;
+- production Core runs immutable commit `df34ffd4` with Alembic `0029`;
 - `/v1/status/network` is live and reports seven connected workers, ten online
   model entries, and every model below the three-worker redundancy target;
 - sealed shared-quorum text validation is live in `shared_quorum_preview` mode;
@@ -171,6 +171,20 @@ assignments, and `410` for the retired v2 route. Both compensated-audit tables
 remained empty after startup. Charging stayed allowlist/global-off, validator
 economic effect stayed `none`, and payout/backup timers remained enabled and
 active. The deployment-window journal had no warning-or-higher entries.
+
+At 09:02 UTC, production advanced without a schema change to exact Core commit
+`df34ffd46e395798647f57a0ecdd026aa2d0152e`. The candidate used the reviewed
+hash-locked environment, and backup `grid-postgres-20260827T085937Z.dump`
+restored into a guarded scratch database at Alembic `0029` with no new upgrade
+operations. The cutover added only the privacy-safe validator cohort runbook
+and progress-reporting dry runs for the existing digest-bound operator review
+tool; incomplete verification still fails closed on apply. External health
+reported the exact commit after all seven workers reconnected. Three
+first-party preview.8 validators remained fresh and participating, with zero
+independently verified operators and validator economic effect `none`.
+Charging remained allowlist/global-off, payout and backup timers remained
+enabled and active, public route smokes passed, and the post-cutover API journal
+contained no warning-or-higher entries.
 
 The first-party fleet briefly advanced to preview.6 to prove the new
 account-private operator qualification response. Before the next rollout, an
@@ -402,9 +416,10 @@ flag, corpus selector, or validator scoring integration exists, so the rail
 cannot issue compensated work. Existing probes remain unpaid and worker-
 fingerprintable; they cannot become quality evidence by configuration.
 Scheduler crash/reclaim tests and held-out traffic-classifier gates remain
-required before any dark canary. The schema and terminal support are deployed
-dark at production commit `d8a48f2a` / Alembic `0029`; both audit tables were
-empty after startup.
+required before any dark canary. The schema and terminal support were first
+deployed dark at production commit `d8a48f2a` / Alembic `0029`; both audit
+tables were empty after that startup. Runtime commit `df34ffd4` did not add a
+scheduler, migration, or economic gate.
 
 ### 20. Private deterministic image validation - Ready dark
 
