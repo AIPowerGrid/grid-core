@@ -1,14 +1,16 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
+from uuid import UUID
 
-from pydantic import SecretStr
+from pydantic import AwareDatetime, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class GridSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     # PostgreSQL — reads the same env vars as the Flask app
     postgres_user: str = "postgres"
@@ -53,6 +55,9 @@ class GridSettings(BaseSettings):
     # Optional account visibility for an already-enrolled validator. This does
     # not move the node account, issue keys, or grant economic authority.
     validator_pairing_enabled: bool = False
+    # Private, time-bounded pilot; both node and human accounts must be listed.
+    validator_pairing_canary_accounts: list[UUID] = Field(default_factory=list, max_length=10, repr=False)
+    validator_pairing_canary_until: AwareDatetime | None = Field(default=None, repr=False)
     validator_pairing_audience: str = "https://api.aipowergrid.io"
     validator_pairing_console_url: str = (
         "https://console.aipowergrid.io/dashboard/connect-validator"
@@ -114,6 +119,15 @@ class GridSettings(BaseSettings):
     grid_alert_discord_webhook: SecretStr | None = None
     grid_alert_queue_size: int = 256
     grid_alert_dedupe_seconds: int = 300
+
+    @model_validator(mode="after")
+    def validate_pairing_canary(self):
+        until = self.validator_pairing_canary_until
+        if self.validator_pairing_canary_accounts and until is None:
+            raise ValueError("Validator pairing pilot requires an explicit expiry")
+        if until is not None and until > datetime.now(UTC) + timedelta(hours=24):
+            raise ValueError("Validator pairing pilot expiry must be within 24 hours")
+        return self
 
     @property
     def async_database_url(self) -> str:
