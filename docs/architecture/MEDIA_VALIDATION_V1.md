@@ -91,8 +91,9 @@ Core has a dark `grid_validator_reference_workers` record keyed by
 
 - worker, account, and payout-wallet attribution;
 - `active`, `paused`, or `revoked` status;
-- bond contract, chain id, finalized block, amount, active/slashed flags,
-  verifier version, and verification timestamp;
+- bond contract, chain id, finalized block/hash, routed facet address/runtime,
+  amount, active/slashed flags, verifier version, status reason, and
+  verification timestamp;
 - qualifying non-economic quality window and review timestamp;
 - creation/update timestamps and a reason for every status change.
 
@@ -102,14 +103,50 @@ block, minimum bond, active status, and non-slashed status. A stale, missing, or
 ambiguous bond snapshot removes the worker from selection without affecting
 ordinary production routing.
 
-Migration `0023` and `services/validator_references.py` implement the durable
-record and fail-closed identity/freshness/rotation selector. The dark image
+Migrations `0023` and `0027`, `services/validator_references.py`, and the default-off
+`services/validator_bonds.py` background loop implement the durable record,
+finalized bond refresh, and fail-closed identity/freshness/rotation selector.
+The sync queries two distinct Base RPC providers, pins both to their newest
+mutually finalized block, and requires exact agreement on that block hash and
+complete snapshot. For each source it verifies
+the configured Grid Diamond, requires all 16 reviewed WorkerRegistry selectors
+to resolve to one facet, pins that facet's runtime hash, and reads only the
+distinct payout wallets already present in the reviewed reference table at one
+finalized block. It never scans the registry-wide append-only worker history, so
+historical worker growth cannot exhaust the bounded reference sync. The sync
+updates only reference rows created by a separate review process; chain state
+alone never creates or activates a trusted reference. The dark image
 assignment path calls it in the same transaction that persists the immutable
 probe group. Insufficient or ambiguous references produce no assignment.
 
+The maintainer workflow is deliberately two-step and preview-first. Run
+`scripts/review_validator_reference.py --action review` to record a bounded
+quality window in a paused row, allow the background sync to attach the exact
+finalized chain proof, then preview and digest-apply `--action activate`.
+Activation uses the same configured chain, Diamond, code-reviewed verifier and
+runtime, minimum bond, and quality threshold as assignment selection. The tool
+cannot write positive bond evidence. A worker identity change pauses the row,
+clears stale cached proof, and requires another chain sync; revocation is
+terminal.
+
+`0027` also adds one durable sync cursor per `(chain_id, bond_contract)`. Core
+anchors every later provider read to the previously accepted finalized block
+hash, serializes multiple Core replicas with a PostgreSQL advisory transaction
+lock, and commits the cursor plus refreshed reference proofs atomically. RPC,
+route, runtime, snapshot, or finality-anchor disagreement immediately clears
+eligibility for that authority and marks the cursor faulted. A later exact
+two-provider sync can recover it. Rows attached to another registry are never
+updated or invalidated.
+
 The currently deployed WorkerRegistry does not yet provide the reviewed
-cooldown-backed bond contract required by this design. Until that facet and its
-sync are deployed and verified, the eligible reference pool is empty.
+cooldown-backed bond contract required by this design. The sync defaults off,
+its address/version configuration defaults empty, and no operator-supplied
+runtime hash is trusted. The reviewed candidate verifier is
+`worker-registry-v2-957685a`, pinned in Core to runtime hash
+`0x10cb9fb1b441747142df35545d69e705e81543516937c7a7b08c3df2ccbb5db2`.
+Until the
+facet is independently reviewed, cut, verified, and the sync is dark-canary
+proven, the eligible reference pool is empty.
 
 Migration `0024` adds the group execution lease, bounded attempt counter,
 frozen witness JSON, full-witness commitment, and completion timestamp. This
@@ -308,8 +345,13 @@ claim model fidelity. Missing or ambiguous timing metadata yields no assignment.
 All gates are required before an operator enables production image assignments:
 
 - reviewed cooldown-backed WorkerRegistry facet deployed and code-verified;
-- background bond sync with finalized-block, chain-id, code-address, freshness,
-  and reorg tests;
+- background bond sync with finalized-block, chain-id, Diamond selector-route,
+  code-pinned facet runtime, durable block-hash anchor, multi-replica lock,
+  bounded reviewed-wallet reads, immediate fault invalidation, recovery,
+  freshness, stale-write, and reorg/finality tests;
+- at least two independently operated Base RPC sources (or one independently
+  verified local node plus a second provider) agreeing on one mutually finalized
+  block hash and bond snapshot before the cache is production-authoritative;
 - at least three independently controlled bonded workers on each validated
   model, providing one candidate plus two references;
 - reference-pool schema, rotation, independence, and ambiguity tests on real

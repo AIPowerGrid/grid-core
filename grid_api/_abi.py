@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Contract ABIs + helpers for on-chain reads (RecipeVault, …).
+"""Contract ABIs and helpers for RecipeVault and WorkerRegistry reads.
 
-The shipped ABI file (`abis/RecipeVault.json`) is human-readable (ethers-style
-strings); web3.py needs JSON ABI, so the read functions we call are provided here
-as JSON, hand-transcribed from that file's signatures. The full human-readable
-ABI is still loaded for reference / future use.
+The shipped RecipeVault ABI is human-readable (ethers-style strings); web3.py
+needs JSON ABI, so the read functions Core calls are provided here as JSON.
+WorkerRegistry exposes only the reviewed read surface used by the finalized
+bond synchronizer.
 """
 
 import gzip
@@ -49,6 +49,55 @@ RECIPEVAULT_ABI = [
      "inputs": [{"name": "recipeId", "type": "uint256"}], "outputs": [_RECIPE_TUPLE]},
     {"type": "function", "name": "getRecipeByRoot", "stateMutability": "view",
      "inputs": [{"name": "recipeRoot", "type": "bytes32"}], "outputs": [_RECIPE_TUPLE]},
+]
+
+_WORKER_TUPLE = {
+    "name": "",
+    "type": "tuple",
+    "components": [
+        {"name": "workerAddress", "type": "address"},
+        {"name": "bondAmount", "type": "uint256"},
+        {"name": "totalJobsCompleted", "type": "uint256"},
+        {"name": "totalRewardsEarned", "type": "uint256"},
+        {"name": "registeredAt", "type": "uint256"},
+        {"name": "isActive", "type": "bool"},
+        {"name": "isSlashed", "type": "bool"},
+        {"name": "unbondingAt", "type": "uint256"},
+    ],
+}
+
+# Minimal read ABI for the reviewed cooldown-backed WorkerRegistry facet through
+# the Grid Diamond. Core verifies selector routing and facet runtime bytecode
+# before trusting any returned bond state.
+WORKER_REGISTRY_ABI = [
+    {
+        "type": "function",
+        "name": "moduleAddress",
+        "stateMutability": "view",
+        "inputs": [{"name": "selector", "type": "bytes4"}],
+        "outputs": [{"name": "", "type": "address"}],
+    },
+    {
+        "type": "function",
+        "name": "getWorkerCount",
+        "stateMutability": "view",
+        "inputs": [],
+        "outputs": [{"name": "", "type": "uint256"}],
+    },
+    {
+        "type": "function",
+        "name": "getWorkerAt",
+        "stateMutability": "view",
+        "inputs": [{"name": "index", "type": "uint256"}],
+        "outputs": [{"name": "", "type": "address"}],
+    },
+    {
+        "type": "function",
+        "name": "getWorker",
+        "stateMutability": "view",
+        "inputs": [{"name": "worker", "type": "address"}],
+        "outputs": [_WORKER_TUPLE],
+    },
 ]
 
 

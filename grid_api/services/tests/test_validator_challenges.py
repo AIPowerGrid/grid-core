@@ -51,6 +51,37 @@ def test_template_specific_echo_solver_earns_protocol_evidence_not_quality():
     assert validators._quality_eligible("text", challenge["capability"]) is False
 
 
+def test_group_challenge_generation_retries_prompt_or_answer_collisions(monkeypatch):
+    challenges = iter([
+        {"prompt": "new prompt", "expected_hash": "same"},
+        {"prompt": "old prompt", "expected_hash": "new"},
+        {"prompt": "unique prompt", "expected_hash": "unique"},
+    ])
+    monkeypatch.setattr(validators, "_make_text_challenge", lambda _kind: next(challenges))
+
+    generated = validators._make_unique_text_challenge(
+        "math.add",
+        [{"prompt": "old prompt", "expected_hash": "same"}],
+    )
+
+    assert generated == {"prompt": "unique prompt", "expected_hash": "unique"}
+
+
+def test_group_challenge_generation_fails_closed_when_randomness_repeats(monkeypatch):
+    monkeypatch.setattr(
+        validators,
+        "_make_text_challenge",
+        lambda _kind: {"prompt": "old prompt", "expected_hash": "same"},
+    )
+
+    with pytest.raises(validators.AssignmentError, match="unique text challenge"):
+        validators._make_unique_text_challenge(
+            "math.add",
+            [{"prompt": "old prompt", "expected_hash": "same"}],
+            max_attempts=2,
+        )
+
+
 @pytest.mark.parametrize(
     ("modality", "capability", "dimension"),
     [
