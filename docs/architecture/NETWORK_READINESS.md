@@ -26,9 +26,10 @@ At this snapshot:
 - `/v1/status/network` is live and reports seven connected workers, ten online
   model entries, and every model below the three-worker redundancy target;
 - sealed shared-quorum text validation is live in `shared_quorum_preview` mode;
-- three active first-party validators run published `v0.1.0-preview.2` commit
-  `1472677d`; a supervised sealed tool-chain group reached `accepted / healthy`
-  with three distinct verified signatures and matching disclosure commitments;
+- three active first-party validators run published `v0.1.0-preview.3` commit
+  `7ba18a52`; Core reports that immutable release tag for all three. A fresh
+  post-upgrade echo group reached `accepted / healthy` with three distinct
+  votes, in addition to the earlier sealed tool-chain canary;
 - those validators share one operator and hypervisor, so verified independent
   operator count remains zero;
 - validator rewards, validator stake, worker penalties from validator evidence,
@@ -85,6 +86,16 @@ sealed polling after upgrading all three first-party nodes, and published
 validator `v0.1.0-preview.2` from `1472677d`. A supervised sealed tool-chain
 group reached `accepted / healthy` with three verified authoritative signatures
 and no matching credit, reservation, den-event, or worker-ledger rows.
+
+Later on 2026-08-27, the three nodes rolled one at a time to the exact
+provenance-verified Linux x64 `v0.1.0-preview.3` artifact from `7ba18a52`.
+Each staged executable matched SHA-256
+`56e8b666d57eaf33137c9874033ea5816fa3c11d56dcd2f4d301927a12cce220`.
+Every node passed `check --no-probe` before its atomic symlink switch and
+service restart. Core then reported three fresh, participating validators all
+running `v0.1.0-preview.3`; a new echo group moved from pending to accepted
+with three healthy votes. Public status continued to report validator economic
+effect `none`, staking not required, and zero verified independent operators.
 
 ## Immediate Validator Preview
 
@@ -508,25 +519,22 @@ retention is not off-host disaster recovery.
 
 ## Next Controlled Sequence
 
-1. Roll the three first-party nodes to exact `v0.1.0-preview.3`, verify Core
-   reports that immutable release identity, and retain assignment/quorum/error
-   metrics without enabling economic authority.
-2. Observe the three-node first-party pilot for at least 72 hours, retain
+1. Observe the three-node first-party pilot for at least 72 hours, retain
    assignment/quorum/error metrics, and investigate the unanimous
    `deepseek-v4-flash-nvfp4` tool-chain failure before changing scoring or worker
    claims.
-3. Prove the first unattended backup timer run, copy an encrypted snapshot
+2. Prove the first unattended backup timer run, copy an encrypted snapshot
    off-host, and perform an off-host restore drill.
-4. Qualify 5-10 independent validator operators through the documented 72-hour
+3. Qualify 5-10 independent validator operators through the documented 72-hour
    no-reward window, then continue measuring the cohort. Run template-solver,
    probe-classifier, replay, and model-switching tests under that independent
    quorum before giving evidence any authority.
-5. Calibrate deterministic image fidelity with independently controlled bonded
+4. Calibrate deterministic image fidelity with independently controlled bonded
    references, then pilot video contract evidence with economic effects off.
-6. Recruit at least two independent serving operators per flagship model while
+5. Recruit at least two independent serving operators per flagship model while
    completing the real media-manager qualification evidence.
-7. Expand charging only through reconciled allowlist stages.
-8. Resolve owner-worker exclusion before any intentional no-payout internal
+6. Expand charging only through reconciled allowlist stages.
+7. Resolve owner-worker exclusion before any intentional no-payout internal
    fleet participates in a payout denominator.
 
 Stable validator releases remain blocked on macOS Developer ID/notarization and

@@ -3,8 +3,10 @@
 **Status:** Coordinator canaries plus sealed registered-validator assignments,
 targeted leases, and distinct-identity 3-of-5 quorum are production-live and
 evidence-only on Core `e18b38f9` with Alembic through `0026`. Three first-party
-pilot nodes run published `v0.1.0-preview.2` and proved sealed disclosure plus
-healthy 3-of-5 tool-chain quorum on 2026-08-27, not independent operator control.
+pilot nodes run published `v0.1.0-preview.3` and report that immutable release
+identity to Core. They proved sealed disclosure, healthy 3-of-5 tool-chain
+quorum, and a fresh healthy post-upgrade echo quorum on 2026-08-27, not
+independent operator control.
 Economic validator authority, rewards, staking, routing effects, and slashing
 are not live. Media assignments remain default-off.
 
