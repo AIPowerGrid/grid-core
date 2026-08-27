@@ -2,10 +2,13 @@
 
 ## Status
 
-Accepted implementation contract. The schema, Alembic `0029`, and an
-unreferenced budget lifecycle service are implemented in source and remain
-dark. Scheduler, dispatch, queue/worker transport, payout-ledger terminal,
-sweeper, configuration flags, and validator scoring integration do not exist.
+Accepted implementation contract. The schema, Alembic `0029`, four-scope budget
+lifecycle, ordinary payout-ledger terminal, exclusive demand/audit locking, and
+ledger-aware expiry recovery are implemented in source and remain dark. The
+worker terminal treats a pre-existing audit hold as ordinary paid text, media,
+or passthrough work. No scheduler, dispatch caller, configuration flag, corpus
+selector, or validator scoring integration exists, so Core still cannot create
+compensated audit traffic.
 
 Current assignment-bound probes remain economically inert and return a
 worker-visible `den: 0` terminal acknowledgement. They measure protocol
@@ -15,8 +18,10 @@ to quality evidence.
 
 The implemented foundation proves atomic reservation across global, worker,
 reviewed-validator, and validator/worker-pair UTC-hour counters; exactly-once
-settle/release movement; demand-reservation exclusion; and real PostgreSQL cap,
-same-job, and settle/release races. It cannot issue or pay for work by itself.
+settle/release movement; demand-reservation exclusion; payout-plus-budget atomic
+commit; ledger-aware recovery; identical ordinary versus audit worker frames and
+nonzero acknowledgements; and real PostgreSQL cap, same-job, dual-hold, terminal,
+and settle/release races. It cannot issue work by itself.
 
 ## Purpose
 
@@ -210,6 +215,13 @@ Before merge:
 - migration fresh-upgrade, production-shaped upgrade, downgrade, and schema
   drift checks.
 
+The source foundation and atomic-terminal changes cover the lifecycle,
+PostgreSQL budget/terminal races, dual-hold rejection, rollback, expiry,
+text/image/video settlement, and worker-message equality items. Scheduler queue
+creation, scheduler-specific reclaim/crash tests, and held-out traffic classifier
+evaluation remain gates for the later dispatch change; they are not bypassed by
+the presence of terminal support.
+
 Before production canary:
 
 - complete Core CI, dependency, CodeQL, secret, and infrastructure scans;
@@ -221,9 +233,11 @@ Before production canary:
 
 ## Rollout Gates
 
-1. Merge schema/service tests with dispatch disabled. The source foundation for
-   this gate is complete; runtime wiring is still absent.
-2. Dark-deploy and verify empty tables plus zero counters.
+1. Merge schema, budget, atomic-terminal, recovery, and worker-transport tests
+   with scheduling disabled. The source foundation for this gate is complete;
+   no dispatch caller exists.
+2. Dark-deploy `0029` and verify empty tables plus zero counters before starting
+   the terminal-aware runtime; code-first deployment would break ordinary jobs.
 3. Enable one reviewed first-party canary validator with tiny budgets; keep blind
    quality false and treat all results as operational evidence.
 4. Reconcile each canary job against budget counters, worker ledger, payout

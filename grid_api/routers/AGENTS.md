@@ -31,6 +31,10 @@ transport, accounts, stats, health/metrics.
   Assignment-bound image/video probes branch before ordinary media settlement: they
   strip all `_validator_*` metadata, freeze the uploaded object through Core,
   acknowledge with `den: 0`, and never touch customer or worker economics.
+  The separate compensated-audit hold, when present for an ordinary job UUID,
+  settles through the exact text/media/passthrough paid terminal: ordinary frame,
+  nonzero den acknowledgement, and no worker-visible audit marker. No scheduler
+  creates those jobs yet.
 - `accounts.py` - native Google/strict EIP-4361 SIWE auth, bounded service exchange, and
   default-off legacy dashboard/internal session creation,
   account profile (incl. resolved `payout{asset, aipg_bps, active, live_asset}`),
@@ -168,8 +172,11 @@ transport, accounts, stats, health/metrics.
   assignment/group IDs, or Grid nonces; evidence binding stays inside Core.
   The current terminal `den: 0` acknowledgment is a retrospective probe
   fingerprint. It is acceptable only while evidence has no economic authority;
-  routing/reward/slash activation requires a reviewed ordinary worker-payment
-  path for bounded audit work so terminal acknowledgments are indistinguishable.
+  the separate bounded compensated-audit terminal now has an ordinary worker-
+  payment shape, but remains unreachable without a scheduler. Existing probes
+  must not be silently converted into that rail. Routing/reward/slash activation
+  still requires the scheduler, held-out traffic-classifier gate, and independent
+  operator evidence.
 - A media witness is authoritative transport only after Core freezes the upload
   under a key the worker cannot write and hashes the frozen bytes. Worker-reported
   digests, mutable upload URLs, and self-declared model names are never evidence.
