@@ -81,6 +81,13 @@ compensated-audit jobs plus hourly budget counters.
   review references are never public. Group/validator uniqueness on assignments
   and attestations remains the final database guard against duplicate identity
   membership or votes.
+- `grid_validator_pairings` is one replaceable, expiring slot per registered
+  validator. `grid_validator_account_links` stores its current signed human-
+  account association and revocation time. These are private operational
+  metadata, never authentication identities, account aliases, payout ownership,
+  or independence reviews. Neither table replaces `grid_validators.account_id`.
+  The link and approved-to-linked transition commit together; no plaintext
+  credential is stored. Alembic `0030` creates both empty and backfills nothing.
 - `grid_validator_reference_workers` is derived only from finalized Base bond
   sync plus non-economic quality review. Active selection requires a finalized
   block hash, routed facet and exact reviewed runtime proof, fresh bond, quality,

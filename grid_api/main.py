@@ -37,6 +37,7 @@ from .routers import (
     styles,
     threed,
     validator,
+    validator_pairing,
     videos,
     worker_enrollment,
     worker_ws,
@@ -388,6 +389,7 @@ app.include_router(worker_enrollment.router)
 app.include_router(stats.router)
 app.include_router(styles.router)
 app.include_router(validator.router)
+app.include_router(validator_pairing.router)
 app.include_router(accounts.router)
 app.include_router(health.router)
 app.include_router(metrics.router)
