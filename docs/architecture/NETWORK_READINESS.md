@@ -22,8 +22,8 @@ production rollout, and a registered node does not prove independent control.
 
 At this snapshot:
 
-- production Core runs immutable commit `fabb767d` with Alembic `0027`;
-- `/v1/status/network` is live and reports seven connected workers, eight online
+- production Core runs immutable commit `43156ffd` with Alembic `0028`;
+- `/v1/status/network` is live and reports seven connected workers, ten online
   model entries, and every model below the three-worker redundancy target;
 - sealed shared-quorum text validation is live in `shared_quorum_preview` mode;
 - three active first-party validators run published `v0.1.0-preview.8` commit
@@ -140,6 +140,21 @@ check`, and removed the scratch database. Production then advanced to exact
 Core commit `fabb767df593c0f8240ea75d764297a962a64042` and Alembic `0027`.
 Health reported the matching commit, seven workers, operational API/Redis, and
 all validator economic gates unchanged.
+
+At 07:11 UTC, the Core `43156ffd` production candidate created checksummed
+backup `/var/lib/aipg-backup/grid-postgres-20260827T071134Z.dump`, restored it
+into a guarded scratch database, upgraded `0027` to `0028`, passed `alembic
+current` plus `alembic check`, and removed the scratch database. Production then
+advanced to exact Core commit
+`43156ffd11bc3baa311a589998df8ddd6594583a` and Alembic `0028`. External health
+and network status reported the matching immutable commit, seven workers, ten
+model entries, three heartbeat-fresh preview.8 validators, zero independently
+verified validators, allowlist charging with global charging off, and validator
+economic effect `none`. The new private worker-control table existed with zero
+rows: the migration backfilled no trust. Image/video validation and media bond
+sync remained disabled. The payout and PostgreSQL-backup timers remained
+enabled and active, and the API journal had no warning-or-higher entries from
+the deployment window.
 
 The first-party fleet briefly advanced to preview.6 to prove the new
 account-private operator qualification response. Before the next rollout, an
@@ -402,7 +417,7 @@ Core has a fail-closed finalized-bond snapshot cache and a selector requiring
 three fresh distinct reviewed control groups plus distinct account/wallet
 identities. The eligible pool is empty because the
 reviewed cooldown-backed WorkerRegistry deployment and independent reference
-operators do not exist. A stacked Core candidate now verifies the Grid Diamond,
+operators do not exist. Production Core now verifies the Grid Diamond,
 all 16 WorkerRegistry selector routes, and the routed facet runtime at the newest
 mutually finalized block shared by two agreeing RPC providers before atomically
 refreshing only independently reviewed rows. Migration `0027` persists the
@@ -417,8 +432,10 @@ its loop and media assignment gate both default off. External contract review,
 facet deployment, live RPC/reorg canary evidence, and independent reference
 operators remain open. No permanent trusted worker is accepted as the oracle.
 Migration `0028` adds the separate expiring worker-control review and
-intentionally backfills no trust; it remains an undeployed dark candidate until
-the Core release carrying it passes migration/restore proof and deployment.
+intentionally backfills no trust. It is deployed dark at Core `43156ffd`; the
+live table contained zero rows after migration, and media assignment plus bond
+sync gates remained off. Applying reviewed control groups and proving a real
+independent three-group reference cohort remain external rollout work.
 
 ## Demand And Economics
 
@@ -554,7 +571,7 @@ with `--require-hashes` from binary wheels only, the Core image base is
 digest-pinned, and release construction does not upgrade pip. CI regenerates
 the lock and runs `pip-audit` before tests. Core source also exposes a build
 commit in the status API and deploys immutable releases. Production reports the
-exact deployed commit `fabb767d`. GitHub immutable releases were
+exact deployed commit `43156ffd`. GitHub immutable releases were
 enabled on 2026-08-21 for `grid-validator`, `grid-media-worker`, and
 `grid-inference-worker`; their future published GitHub release tags and assets
 cannot be replaced, and corrections require a new version. This setting does
@@ -576,7 +593,7 @@ Core source exposes privacy-safe worker/model redundancy, validator health,
 payout totals, charging posture, incidents, advisories, build commit, and
 architecture maturity. The public `/status` page is deployed and tested at
 desktop/mobile widths. Production `/v1/status/network` returns the live
-privacy-safe feed at build `fabb767d`.
+privacy-safe feed at build `43156ffd`.
 
 ### 34. Trusted-partner Core federation - Deferred design
 
@@ -596,8 +613,8 @@ accepts only local PostgreSQL, creates and drops only a generated
 with the exact immutable candidate, and requires `alembic current`, `heads`,
 and `check` agreement. Pull-request CI rehearses the supported migration chain
 on PostgreSQL 16 and proves a decoy non-Grid schema is excluded. The supervised
-production proof passed again at exact release `fabb767d` through Alembic
-`0027`; the generated scratch database was removed. The systemd units pass clean-environment
+production proof passed again at exact release `43156ffd` through Alembic
+`0028`; the generated scratch database was removed. The systemd units pass clean-environment
 verification, and `aipg-postgres-backup.timer` is enabled and active. Its first
 unattended scheduled run and an off-host copy/restore drill remain open. Local
 retention is not off-host disaster recovery.
