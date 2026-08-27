@@ -634,9 +634,84 @@ async def test_registration_is_wallet_bound_signed_and_idempotent(db):
     assert first["created"] is True
     assert second["created"] is False
     assert second["validator_id"] == first["validator_id"]
+    assert second["operator_qualification"]["status"] == "unreviewed"
+    assert second["operator_qualification"]["heartbeat_samples"] == 0
+    assert second["operator_qualification"]["independent_vote_eligible"] is False
+    assert "operator_group_id" not in json.dumps(second)
+    assert "independence_review_ref" not in json.dumps(second)
     async with await database.new_session() as session:
         count = await session.scalar(sa.select(sa.func.count()).select_from(validators_t))
     assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_registration_view_exposes_own_qualification_without_control_metadata(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id)
+    now = datetime.now(UTC)
+    started = now - timedelta(hours=72)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t)
+            .where(validators_t.c.id == validator_id)
+            .values(
+                operator_group_id="opg_private_control_01",
+                independence_status="candidate",
+                qualification_started_at=started,
+                heartbeat_sample_count=700,
+                last_heartbeat_sampled_at=now,
+                last_heartbeat=now,
+                independence_review_ref="private:review-ticket",
+            )
+        )
+        await session.commit()
+    row = await validators_svc.validator_for_account(account_id=account_id)
+    body = validators_svc.validator_registration_payload(row, now=now)
+
+    qualification = body["operator_qualification"]
+    assert qualification["status"] == "candidate"
+    assert qualification["time_ready"] is True
+    assert qualification["coverage_ready"] is True
+    assert qualification["heartbeat_fresh"] is True
+    assert qualification["review_current"] is False
+    assert qualification["independent_vote_eligible"] is False
+    encoded = json.dumps(body)
+    assert "opg_private_control_01" not in encoded
+    assert "private:review-ticket" not in encoded
+
+
+@pytest.mark.asyncio
+async def test_registration_view_eligibility_matches_independent_quorum_predicate(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id)
+    now = datetime.now(UTC)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t)
+            .where(validators_t.c.id == validator_id)
+            .values(
+                operator_group_id="opg_verified_control_01",
+                independence_status="verified",
+                qualification_started_at=now - timedelta(hours=73),
+                heartbeat_sample_count=876,
+                last_heartbeat_sampled_at=now,
+                last_heartbeat=now - timedelta(minutes=12),
+                independence_reviewed_at=now - timedelta(days=1),
+                independence_expires_at=now + timedelta(days=29),
+                independence_review_ref="private:verified-review",
+            )
+        )
+        await session.commit()
+    row = await validators_svc.validator_for_account(account_id=account_id)
+    body = validators_svc.validator_registration_payload(row, now=now)
+
+    qualification = body["operator_qualification"]
+    assert qualification["review_current"] is True
+    assert qualification["heartbeat_fresh"] is True
+    assert qualification["independent_vote_eligible"] is True
+    encoded = json.dumps(body)
+    assert "opg_verified_control_01" not in encoded
+    assert "private:verified-review" not in encoded
 
 
 @pytest.mark.asyncio
