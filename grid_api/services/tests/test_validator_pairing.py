@@ -162,6 +162,18 @@ async def test_two_party_lifecycle_preserves_identity_credit_and_ownership(state
 
 
 @pytest.mark.asyncio
+async def test_account_list_timestamps_are_timezone_aware(state):
+    s = state
+    await _confirmed(s)
+    async with s.factory() as session:
+        await session.execute(sa.update(db.validators).where(db.validators.c.id == s.node).values(last_heartbeat=NOW))
+        await session.commit()
+    row = (await pairing.list_for_account(operator_account_id=s.operator))["nodes"][0]
+    assert row["linked_at"] == NOW
+    assert row["last_heartbeat"] == NOW
+
+
+@pytest.mark.asyncio
 async def test_approval_is_immutable_and_never_creates_association_alone(state):
     s = state
     approved = await _approved(s)

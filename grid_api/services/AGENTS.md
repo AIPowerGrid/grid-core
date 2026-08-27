@@ -54,6 +54,8 @@ content sanitization, and reward settlement.
   expiry after lock acquisition. Either party may remove the exact association;
   old removal proofs cannot remove a later one. Retired accounts and rotated
   signers require deliberate re-pairing, never alias-following or key transfer.
+  Private-list timestamps are timezone-aware on every supported database, so
+  strict Console clients receive the same wire contract from SQLite and PostgreSQL.
 - **Validation evidence:** `validators.py` verifies one linked-wallet validator
   registration per canonical account, builds shared probe batches, binds one
   assignment and authoritative vote per registered validator/group, and

@@ -397,7 +397,13 @@ async def list_for_account(*, operator_account_id) -> dict:
             .mappings()
             .all()
         )
-        return {"nodes": [dict(row) for row in rows], "economic_effect": "none"}
+        return {
+            "nodes": [
+                {**row, "linked_at": _aware(row["linked_at"]), "last_heartbeat": _aware(row["last_heartbeat"])}
+                for row in rows
+            ],
+            "economic_effect": "none",
+        }
 
 
 async def unlink(*, validator_id, operator_account_id, pairing_id) -> dict:
