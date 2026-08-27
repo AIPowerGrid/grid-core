@@ -59,8 +59,14 @@ The hardened `aipg-postgres-backup.timer` is enabled, but its first observed
 unattended run failed on 2026-08-27 because the deployed backup script was not
 executable from the sandboxed unit: the process dropped DAC-bypass capabilities
 while retaining group `root`, so it could not traverse the private
-`aipg:aipg` release tree. No successful unattended or off-host backup system
-exists. A
+`aipg:aipg` release tree. Reviewed Core commit `1611a482` changed the
+one-shot's primary group to `aipg` while retaining UID 0 and the empty
+capability set. The exact reviewed unit was installed without restarting Core;
+a supervised systemd run at 04:58 UTC created a 70,267,719-byte backup, verified
+its checksum and archive table of contents, restored it into a guarded scratch
+database, passed Alembic `0026 (head)` plus `alembic check`, and dropped the
+scratch database. The next scheduled run remains the first unattended
+post-fix proof, and no off-host backup system exists. A
 separate PostgreSQL rehearsal upgraded `0019` to
 `0024` with 100,000 synthetic legacy assignments and 110,000 synthetic legacy
 attestations in place, preserved every row, completed locally in 0.66 seconds,
