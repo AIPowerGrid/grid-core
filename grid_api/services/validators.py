@@ -34,6 +34,7 @@ from ..v2.schema import validator_attestations as attestations_t
 from ..v2.schema import validator_probe_groups as probe_groups_t
 from ..v2.schema import validators as validators_t
 from ..v2.schema import workers as workers_t
+from . import validator_operators
 from .validator_bonds import reviewed_runtime_hash, rpc_sources_are_distinct
 
 logger = logging.getLogger("grid_api.validators")
@@ -117,6 +118,61 @@ def _hash_obj(obj: Any) -> str:
 
 def _hash_text(text: str) -> str:
     return hashlib.sha256((text or "").encode()).hexdigest()
+
+
+def validator_registration_payload(
+    row: dict[str, Any] | Any,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Return the account-private registration view without control metadata."""
+    state = dict(row)
+    current = now or _now()
+    qualification = validator_operators.qualification_metrics(state, now=current)
+    reviewed_at = state.get("independence_reviewed_at")
+    expires_at = state.get("independence_expires_at")
+    last_heartbeat = state.get("last_heartbeat")
+    aware_expires = _aware(expires_at) if expires_at else None
+    aware_heartbeat = _aware(last_heartbeat) if last_heartbeat else None
+    review_current = bool(
+        state.get("independence_status") == "verified"
+        and state.get("operator_group_id")
+        and reviewed_at
+        and aware_expires
+        and aware_expires >= current
+    )
+    heartbeat_fresh = bool(
+        aware_heartbeat
+        and aware_heartbeat
+        >= current - timedelta(seconds=VALIDATOR_HEARTBEAT_FRESH_SECONDS)
+    )
+    return {
+        "validator_id": state["id"],
+        "signing_wallet": state["signing_wallet"],
+        "software_version": state["software_version"],
+        "capabilities": list(state.get("capabilities") or []),
+        "status": state["status"],
+        "last_heartbeat": aware_heartbeat.isoformat() if aware_heartbeat else None,
+        "operator_qualification": {
+            "status": state.get("independence_status") or "unreviewed",
+            "started_at": (
+                _aware(state["qualification_started_at"]).isoformat()
+                if state.get("qualification_started_at")
+                else None
+            ),
+            **qualification,
+            "heartbeat_fresh": heartbeat_fresh,
+            "reviewed_at": _aware(reviewed_at).isoformat() if reviewed_at else None,
+            "expires_at": aware_expires.isoformat() if aware_expires else None,
+            "review_current": review_current,
+            "independent_vote_eligible": bool(
+                review_current
+                and heartbeat_fresh
+                and state["status"] == "active"
+            ),
+        },
+        "economic_effect": "none",
+    }
 
 
 def _attestation_hash(payload: dict[str, Any], signature: str | None) -> str:
@@ -302,6 +358,7 @@ async def register_validator(
             raise RegistrationError("validator registration is revoked")
         if existing:
             validator_id = existing["id"]
+            state = dict(existing)
             await session.execute(
                 sa.update(validators_t)
                 .where(validators_t.c.id == validator_id)
@@ -317,6 +374,20 @@ async def register_validator(
             created = False
         else:
             validator_id = f"val_{uuid4().hex}"
+            state = {
+                "id": validator_id,
+                "account_id": account_id,
+                "signing_wallet": wallet,
+                "operator_group_id": None,
+                "independence_status": "unreviewed",
+                "qualification_started_at": None,
+                "heartbeat_sample_count": 0,
+                "last_heartbeat_sampled_at": None,
+                "independence_reviewed_at": None,
+                "independence_expires_at": None,
+                "independence_review_ref": None,
+                "created": now,
+            }
             await session.execute(
                 sa.insert(validators_t).values(
                     id=validator_id,
@@ -332,16 +403,18 @@ async def register_validator(
                 ),
             )
             created = True
+        state.update(
+            software_version=software_version,
+            capabilities=capabilities,
+            registration_signature=normalized_signature,
+            status="active",
+            last_heartbeat=now,
+            updated=now,
+        )
         await session.commit()
     return {
-        "validator_id": validator_id,
-        "signing_wallet": wallet,
-        "software_version": software_version,
-        "capabilities": capabilities,
-        "status": "active",
+        **validator_registration_payload(state, now=now),
         "created": created,
-        "last_heartbeat": now.isoformat(),
-        "economic_effect": "none",
     }
 
 

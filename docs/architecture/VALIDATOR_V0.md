@@ -58,7 +58,7 @@ economic eligibility.
 |---|---|---|
 | `GET /v1/validator/capabilities` | public | discover preview features and economic boundary |
 | `POST /v1/validator/register` | `validator.attest` | verify and activate linked signing identity |
-| `GET /v1/validator/registration` | `validator.read` | inspect active or self-suspended registration |
+| `GET /v1/validator/registration` | `validator.read` | inspect active/self-suspended registration and account-private qualification progress |
 | `POST /v1/validator/suspend` | `validator.attest` | stop new work with a current-wallet signature |
 | `POST /v1/validator/rotate` | `validator.attest` | bind the stable validator ID to a newly linked, newly signed wallet |
 | `POST /v1/validator/heartbeat` | `validator.attest` | refresh version, capabilities, and liveness |
@@ -75,6 +75,12 @@ Self-suspension is reversible by a fresh signed registration from the same
 wallet. Maintainer revocation is not: registration, suspension, and rotation
 all reject a revoked identity. Rotation does not rewrite historical evidence,
 and old in-flight assignments retain their old wallet binding until they expire.
+The registration response includes the authenticated operator's own
+`operator_qualification`: review status, elapsed/minimum qualification time,
+sampled-heartbeat coverage, freshness, review expiry, and current independent
+vote eligibility. It never returns the opaque common-control group or private
+review reference. Operators can therefore monitor the 72-hour gate without
+turning private correlation data into a public identifier.
 
 ## Evidence Invariants
 

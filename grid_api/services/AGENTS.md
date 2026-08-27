@@ -105,6 +105,9 @@ content sanitization, and reward settlement.
   expiring maintainer review, and preview-first compare-and-swap transitions.
   A control group occupies at most one seat in any probe group. Public health
   exposes only distinct aggregate group counts, never group ids or review refs.
+  The account-authenticated registration view exposes that operator's own
+  qualification status, sampled-heartbeat progress, review expiry, and current
+  eligibility, but never its opaque control-group id or private review ref.
   Preview group acceptance still records distinct-registration quorum for
   compatibility; independent-operator quorum is a separate explicit signal and
   is not required for acceptance until a later reviewed authority gate.
