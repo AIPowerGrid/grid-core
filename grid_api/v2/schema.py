@@ -1031,9 +1031,9 @@ validator_attestations = sa.Table(
 
 
 # Private compensated-audit authorization state. These rows do not make an
-# audit live: no scheduler or worker terminal imports them until the separately
-# reviewed dispatch/settlement phase. Integer micro-den units authorize bounded
-# worker work without coupling protocol budgets to demand-side USD credits.
+# audit live: the ordinary worker terminal understands an existing hold, but no
+# scheduler can create one. Integer micro-den units authorize bounded worker work
+# without coupling protocol budgets to demand-side USD credits.
 validator_audit_budget_counters = sa.Table(
     "grid_validator_audit_budget_counters",
     metadata,

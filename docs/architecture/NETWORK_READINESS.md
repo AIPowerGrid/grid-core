@@ -377,14 +377,16 @@ and negative canaries against representative text backends.
 
 The separate compensated blind-audit rail has an accepted implementation
 contract in `PAID_VALIDATOR_AUDITS.md`. Source now includes Alembic `0029`,
-private audit/counter tables, and an unreferenced lifecycle service. SQLite
-lifecycle tests and real PostgreSQL 16 cap, same-job, and settle/release races
-pass. No scheduler, dispatch caller, ordinary payout-ledger terminal, sweeper,
-runtime flag, or validator scoring integration exists, so the foundation cannot
-issue or pay for work. Existing probes remain unpaid and worker-fingerprintable;
-they cannot become quality evidence by configuration. Atomic worker payout plus
-audit settlement, queue-reclaim tests, and traffic-indistinguishability gates
-remain required before any dark canary.
+private audit/counter tables, four-scope lifecycle, an ordinary payout-ledger
+terminal, exclusive demand/audit locking, and ledger-aware expiry recovery.
+SQLite lifecycle and worker-transport equality tests pass for text, image,
+video, and raw passthrough; real PostgreSQL 16 cap, same-job, dual-hold,
+terminal, and settle/release races pass. No scheduler, dispatch caller, runtime
+flag, corpus selector, or validator scoring integration exists, so the rail
+cannot issue compensated work. Existing probes remain unpaid and worker-
+fingerprintable; they cannot become quality evidence by configuration.
+Scheduler crash/reclaim tests and held-out traffic-classifier gates remain
+required before any dark canary.
 
 ### 20. Private deterministic image validation - Ready dark
 
