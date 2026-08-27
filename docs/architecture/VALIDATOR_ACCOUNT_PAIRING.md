@@ -1,14 +1,14 @@
 # Validator Account Pairing
 
-Status: Core `407f2984` / Alembic `0030` and Console `db301013` deployed dark
+Status: Core `f51875ce` / Alembic `0030` and Console `db301013` deployed dark
 on 2026-08-27. Pairing remains disabled. The matching local app is merged and
 native-build tested, but not in the public preview.13 release. Implementations are tracked in
 [Core #58](https://github.com/AIPowerGrid/grid-core/pull/58),
 [Console #21](https://github.com/AIPowerGrid/grid-frontend/pull/21), and
 [validator #54](https://github.com/AIPowerGrid/grid-validator/pull/54).
 Deployment does not enable pairing or validator economic authority.
-Source also supports an expiring account-scoped pilot; it is not present in that
-deployed Core revision and has not been activated.
+The deployed Core supports an expiring account-scoped pilot. Its allowlist is
+empty and the pilot has not been activated.
 
 ## Decision
 
@@ -189,7 +189,29 @@ rejected. Non-pairing tables remain unchanged apart from authentication telemetr
 SQLite, a local nonce fixture and loopback HTTP are explicit test boundaries;
 Core's separate PostgreSQL CI covers transition races and migration/restore.
 
-### 2026-08-27 Dark Deployment Evidence
+### 2026-08-27 21:07 UTC - Pilot-Capable Core Deployed Dark
+
+Core `f51875ce8fe550640008f1824625e2f5a071f88b` passed exact-commit CI
+([33112240756](https://github.com/AIPowerGrid/grid-core/actions/runs/33112240756)),
+secret scanning and CodeQL, then a fresh production-backup restore/schema proof.
+The 71,656,136-byte checksum-verified backup was restored into a generated
+scratch database, checked at Alembic `0030`, and the scratch database removed.
+The immutable candidate uses the same hash-locked dependencies as `407f2984`.
+
+Guarded cutover finished at 21:07:47 UTC. Public health reports the exact new
+commit and healthy Redis. Environment bytes, service units, Nginx configuration
+and payout/backup timer states are unchanged. The existing `0030` schema needed
+no production migration. Both pairing tables and the compensated-audit job
+table remain empty. Pairing, its pilot allowlist, media issuance, bond sync and
+validator economic authority remain disabled. This is deployment preparation
+for native qualification, not a passed pairing canary or public activation.
+
+Rollback is the previous immutable `407f29841988fd253afe867a1f5a07e23349219e`
+release, retaining the `0030` tables and node identities. Keep both global
+pairing and the scoped pilot off. Console remains `db301013`; public node
+downloads remain preview.13 and do not include the account-link client.
+
+### 2026-08-27 Initial Dark Deployment Evidence
 
 Core cutover completed at 19:00:27 UTC on immutable
 `407f29841988fd253afe867a1f5a07e23349219e`. A fresh Python 3.12 environment
