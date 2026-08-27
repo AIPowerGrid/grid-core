@@ -24,10 +24,10 @@ validation, worker incentives, and trust boundaries.
 - `VALIDATOR_ACCOUNT_PAIRING.md` - default-off, two-party association of an
   enrolled node with a human account, without identity merges, key transfer,
   payout changes, or trust grants. Core, Console and local-app implementations
-  have real cross-repo HTTP coverage. Core `407f2984` / `0030` and Console
+  have real cross-repo HTTP coverage. Core `f51875ce` / `0030` and Console
   `db301013` are deployed dark; client release and live platform qualification
   remain separate gates. Never describe the disabled API as available to operators.
-  A default-empty, expiring canonical-account pilot is available in source for
+  A default-empty, expiring canonical-account pilot is deployed dark for
   supervised native qualification; it is not enabled by the dark deployment.
 - `PAID_VALIDATOR_AUDITS.md` - accepted, partially implemented design for
   bounded scheduler-owned audits. Schema, budgets, ordinary atomic payout, and
