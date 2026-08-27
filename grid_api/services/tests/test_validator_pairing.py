@@ -20,11 +20,13 @@ from eth_account import Account
 from eth_account.messages import encode_defunct
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from grid_api import auth, database
+from grid_api.config import GridSettings
 from grid_api.ratelimit import limiter
 from grid_api.routers import validator_pairing as pairing_router
 from grid_api.services import accounts as accounts_svc
@@ -82,6 +84,9 @@ async def state(request, monkeypatch):
         monkeypatch.setattr(pairing, "new_session", new_session)
         monkeypatch.setattr(pairing, "_now", clock)
         settings = SimpleNamespace(
+            validator_pairing_enabled=True,
+            validator_pairing_canary_accounts=[],
+            validator_pairing_canary_until=None,
             validator_pairing_audience="https://api.example.test",
             validator_pairing_console_url="https://console.example.test/dashboard/connect-validator",
         )
@@ -506,14 +511,18 @@ async def test_signer_rotation_and_account_merge_do_not_transfer_association(sta
 
 
 @pytest.mark.asyncio
-async def test_http_flow_uses_real_scoped_keys_and_fresh_user_tokens(state, monkeypatch):
+@pytest.mark.parametrize("pilot", [False, True])
+async def test_http_flow_uses_real_scoped_keys_and_fresh_user_tokens(state, monkeypatch, pilot):
     s = state
     monkeypatch.setenv("GRID_USER_TOKEN_SIGNING_KEY", secrets.token_hex(32))
     monkeypatch.setenv("GRID_SALT", "pairing-test-only")
     monkeypatch.setattr(auth, "_API_KEY_SALT", None)
     monkeypatch.setattr(database, "_session_factory", s.factory)
     monkeypatch.setattr(limiter, "enabled", False)
-    s.settings.validator_pairing_enabled = True
+    s.settings.validator_pairing_enabled = not pilot
+    if pilot:
+        s.settings.validator_pairing_canary_accounts = [s.aid, s.operator]
+        s.settings.validator_pairing_canary_until = datetime.now(UTC) + timedelta(hours=1)
     monkeypatch.setattr(pairing_router, "get_settings", lambda: s.settings)
     node_key, ordinary_key, other_key = (accounts_svc.generate_api_key() for _ in range(3))
     async with s.factory() as session:
@@ -527,6 +536,7 @@ async def test_http_flow_uses_real_scoped_keys_and_fresh_user_tokens(state, monk
             )
         await session.commit()
     user_token = user_tokens.issue(s.operator, audience="grid-console", scopes=accounts_svc.SESSION_SCOPES, auth_method="google")
+    outside_token = user_tokens.issue(s.attacker, audience="grid-console", scopes=accounts_svc.SESSION_SCOPES, auth_method="google")
     stale_token = user_tokens.issue(
         s.operator, audience="grid-console", scopes=accounts_svc.SESSION_SCOPES, auth_method="google", now=int(time.time()) - 601,
     )
@@ -543,6 +553,10 @@ async def test_http_flow_uses_real_scoped_keys_and_fresh_user_tokens(state, monk
         assert created.status_code == 200 and created.headers["cache-control"] == "no-store"
         pid = created.json()["pairing_id"]
         account_path = f"/v1/account/validator-pairings/{pid}"
+        if pilot:
+            assert (await client.post(start, headers=headers(other_key))).status_code == 503
+            assert (await client.post(account_path + "/approve", headers=headers(outside_token))).status_code == 503
+            assert (await client.get("/v1/account/validators", headers=headers(outside_token))).status_code == 503
         assert (await client.get(account_path)).status_code == 401
         for credential in [node_key, ordinary_key, stale_token, unproved]:
             assert (await client.post(account_path + "/approve", headers=headers(credential))).status_code == 403
@@ -551,7 +565,8 @@ async def test_http_flow_uses_real_scoped_keys_and_fresh_user_tokens(state, monk
         payload = approved.json()["payload"]
         confirm_path = f"{start}/{pid}/confirm"
         signature = _sign(s.signer, payload)
-        assert (await client.post(confirm_path, headers=headers(other_key), json={"signature": signature})).status_code == 404
+        wrong_node = await client.post(confirm_path, headers=headers(other_key), json={"signature": signature})
+        assert wrong_node.status_code == (503 if pilot else 404)
         assert (
             await client.post(
                 confirm_path, headers=headers(node_key), json={"signature": signature, "operator_account_id": str(s.attacker)},
@@ -562,6 +577,7 @@ async def test_http_flow_uses_real_scoped_keys_and_fresh_user_tokens(state, monk
         assert mine.status_code == 200 and len(mine.json()["nodes"]) == 1
         assert (await client.get("/v1/account/validators", headers=headers(node_key))).status_code == 403
         s.settings.validator_pairing_enabled = False
+        s.settings.validator_pairing_canary_accounts = []
         assert (await client.post(start, headers=headers(node_key))).status_code == 503
 
 
@@ -600,3 +616,167 @@ async def test_router_database_failure_does_not_expose_driver_parameters():
         await pairing_router._call(failed)
     assert caught.value.status_code == 503
     assert "sensitive" not in caught.value.detail
+
+
+def _pilot(s, accounts=None, until=None):
+    s.settings.validator_pairing_enabled = False
+    s.settings.validator_pairing_canary_accounts = [s.aid, s.operator] if accounts is None else accounts
+    s.settings.validator_pairing_canary_until = until or NOW + timedelta(hours=1)
+
+
+@pytest.mark.parametrize("invalid", [
+    {"validator_pairing_canary_accounts": [str(uuid4())]},
+    {"validator_pairing_canary_accounts": ["not-an-account"]},
+    {"validator_pairing_canary_accounts": [str(uuid4()) for _ in range(11)]},
+    {"validator_pairing_canary_until": "2026-08-27T12:00:00"},
+    {"validator_pairing_canary_until": datetime.now(UTC) + timedelta(hours=25)},
+])
+def test_pilot_configuration_fails_closed(invalid):
+    with pytest.raises(ValidationError) as caught:
+        GridSettings(_env_file=None, **invalid)
+    for account_id in invalid.get("validator_pairing_canary_accounts", []):
+        assert account_id not in str(caught.value)
+
+
+def test_pilot_environment_is_typed_private_and_defaults_off(monkeypatch):
+    aid = uuid4()
+    until = datetime.now(UTC) + timedelta(hours=1)
+    settings = GridSettings(_env_file=None)
+    assert not settings.validator_pairing_enabled
+    assert settings.validator_pairing_canary_accounts == []
+    monkeypatch.setenv("VALIDATOR_PAIRING_CANARY_ACCOUNTS", json.dumps([str(aid)]))
+    monkeypatch.setenv("VALIDATOR_PAIRING_CANARY_UNTIL", until.isoformat())
+    settings = GridSettings(_env_file=None)
+    assert settings.validator_pairing_canary_accounts == [aid]
+    assert settings.validator_pairing_canary_until == until
+    assert str(aid) not in repr(settings)
+    monkeypatch.setattr(pairing, "get_settings", lambda: settings)
+    assert pairing.pilot_accounts(until - timedelta(seconds=1)) == {aid}
+    assert pairing.pilot_accounts(until) == frozenset()
+    assert pairing.pilot_accounts(until + timedelta(seconds=1)) == frozenset()
+
+
+def test_pilot_does_not_advertise_public_availability_or_private_members(monkeypatch):
+    from grid_api.routers import validator as validator_router
+    from grid_api.services import validators
+
+    aid = uuid4()
+    settings = GridSettings(
+        _env_file=None, validator_pairing_canary_accounts=[aid],
+        validator_pairing_canary_until=datetime.now(UTC) + timedelta(hours=1),
+    )
+    monkeypatch.setattr(validator_router, "get_settings", lambda: settings)
+    monkeypatch.setattr(validators, "get_settings", lambda: settings)
+    payload = validator_router._capabilities_payload()
+    assert payload["features"]["account_pairing"] is False
+    assert payload["economic_effect"] == "none"
+    assert str(aid) not in json.dumps(payload)
+
+
+@pytest.mark.asyncio
+async def test_pilot_two_party_lifecycle_preserves_non_pairing_state(state):
+    s = state
+    _pilot(s)
+    before = await _snapshot(s)
+    approved = await _confirmed(s)
+    link = await pairing.node_link(account_id=s.aid, wallet=s.wallet)
+    assert link["status"] == "linked"
+    assert (await pairing.list_for_account(operator_account_id=s.operator))["nodes"][0]["validator_id"] == s.node
+    payload = link["unlink_payload"]
+    await pairing.unlink_from_node(
+        account_id=s.aid, wallet=s.wallet, pairing_id=approved["pairing_id"],
+        issued_at=payload["issued_at"], signature=_sign(s.signer, payload),
+    )
+    assert (await pairing.list_for_account(operator_account_id=s.operator))["nodes"] == []
+    await _confirmed(s)
+    assert before == await _snapshot(s)
+
+
+@pytest.mark.asyncio
+async def test_pilot_requires_both_accounts_not_just_the_caller(state):
+    s = state
+    outside = await pairing.create(account_id=s.other_aid, wallet=s.other.address.lower())
+    _pilot(s)
+    before = await _snapshot(s)
+    with pytest.raises(pairing.PairingUnavailable):
+        await pairing.create(account_id=s.other_aid, wallet=s.other.address.lower())
+    for action in (pairing.inspect, pairing.approve):
+        with pytest.raises(pairing.PairingUnavailable):
+            await action(pairing_id=outside["pairing_id"], operator_account_id=s.operator)
+    inside = await pairing.create(account_id=s.aid, wallet=s.wallet)
+    for action in (pairing.inspect, pairing.approve):
+        with pytest.raises(pairing.PairingUnavailable):
+            await action(pairing_id=inside["pairing_id"], operator_account_id=s.attacker)
+    assert (await pairing.poll(account_id=s.aid, wallet=s.wallet))["status"] == "pending"
+    assert before == await _snapshot(s)
+
+
+@pytest.mark.asyncio
+async def test_pilot_removing_either_account_blocks_existing_links_and_confirmation(state):
+    s = state
+    approved = await _confirmed(s)
+    link = await pairing.node_link(account_id=s.aid, wallet=s.wallet)
+    payload = link["unlink_payload"]
+    before = await _snapshot(s)
+    _pilot(s, accounts=[s.aid])
+    for action in (pairing.poll, pairing.node_link, pairing.create):
+        with pytest.raises(pairing.PairingUnavailable):
+            await action(account_id=s.aid, wallet=s.wallet)
+    with pytest.raises(pairing.PairingUnavailable):
+        await pairing.confirm(
+            pairing_id=approved["pairing_id"], account_id=s.aid,
+            wallet=s.wallet, signature=_sign(s.signer, approved["payload"]),
+        )
+    with pytest.raises(pairing.PairingUnavailable):
+        await pairing.unlink_from_node(
+            account_id=s.aid, wallet=s.wallet, pairing_id=approved["pairing_id"],
+            issued_at=payload["issued_at"], signature=_sign(s.signer, payload),
+        )
+    _pilot(s, accounts=[s.operator])
+    assert (await pairing.list_for_account(operator_account_id=s.operator))["nodes"] == []
+    with pytest.raises(pairing.PairingUnavailable):
+        await pairing.unlink(validator_id=s.node, operator_account_id=s.operator, pairing_id=approved["pairing_id"])
+    assert before == await _snapshot(s)
+    s.settings.validator_pairing_enabled = True
+    assert (await pairing.node_link(account_id=s.aid, wallet=s.wallet))["status"] == "linked"
+
+
+@pytest.mark.asyncio
+async def test_pilot_expiry_disables_access_without_erasing_links(state):
+    s = state
+    approved = await _confirmed(s)
+    _pilot(s, until=NOW)
+    for action in (pairing.create, pairing.poll, pairing.node_link):
+        with pytest.raises(pairing.PairingUnavailable):
+            await action(account_id=s.aid, wallet=s.wallet)
+    with pytest.raises(pairing.PairingUnavailable):
+        await pairing.list_for_account(operator_account_id=s.operator)
+    async with s.factory() as session:
+        revoked = await session.scalar(
+            sa.select(db.validator_account_links.c.revoked_at)
+            .where(db.validator_account_links.c.pairing_id == approved["pairing_id"]),
+        )
+        assert revoked is None
+        assert await session.scalar(sa.select(sa.func.count()).select_from(db.validator_account_links)) == 1
+
+
+@pytest.mark.asyncio
+async def test_postgres_pilot_expiry_is_rechecked_after_lock_wait(state, monkeypatch):
+    s = state
+    if s.dialect != "postgresql":
+        pytest.skip("requires real row locks")
+    monkeypatch.setattr(pairing, "_now", s.original_clock)
+    _pilot(s, until=datetime.now(UTC) + timedelta(hours=1))
+    async with s.factory() as blocker:
+        await blocker.execute(sa.select(db.validators).where(db.validators.c.id == s.node).with_for_update())
+        task = asyncio.create_task(pairing.create(account_id=s.aid, wallet=s.wallet))
+        try:
+            await asyncio.sleep(0.1)
+            assert not task.done()
+            s.settings.validator_pairing_canary_until = datetime.now(UTC) - timedelta(seconds=1)
+        finally:
+            await blocker.rollback()
+    with pytest.raises(pairing.PairingUnavailable):
+        await task
+    async with s.factory() as session:
+        assert await session.scalar(sa.select(sa.func.count()).select_from(db.validator_pairings)) == 0

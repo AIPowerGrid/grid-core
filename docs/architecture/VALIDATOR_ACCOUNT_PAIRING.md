@@ -7,6 +7,8 @@ native-build tested, but not in the public preview.13 release. Implementations a
 [Console #21](https://github.com/AIPowerGrid/grid-frontend/pull/21), and
 [validator #54](https://github.com/AIPowerGrid/grid-validator/pull/54).
 Deployment does not enable pairing or validator economic authority.
+Source also supports an expiring account-scoped pilot; it is not present in that
+deployed Core revision and has not been activated.
 
 ## Decision
 
@@ -62,7 +64,9 @@ sign. This is an off-chain signature; no wallet transaction or gas is required.
 
 ## API Contract
 
-All endpoints are behind `VALIDATOR_PAIRING_ENABLED=0` by default. Node routes
+All endpoints are disabled by default. `VALIDATOR_PAIRING_ENABLED=1` is the
+public release gate; an explicitly configured expiring pilot can admit only
+designated accounts while it remains zero (see below). Node routes
 require the existing `validator.attest` scope and the current registered signer.
 Self-suspended nodes may pair; maintainer-revoked nodes cannot. Account approval
 and removal require `account.manage`, a Core-issued user token, and a Google/SIWE
@@ -128,6 +132,36 @@ off leaves old validators and inference paths unaffected.
 
 ## Rollout and Verification
 
+### Scoped Native Pilot
+
+Keep `VALIDATOR_PAIRING_ENABLED=0` during first-party native qualification.
+Set `VALIDATOR_PAIRING_CANARY_ACCOUNTS` to a JSON array of at most ten canonical
+account UUIDs and `VALIDATOR_PAIRING_CANARY_UNTIL` to an explicit timezone-aware
+ISO-8601 deadline, no more than 24 hours ahead at process startup. Include both
+the enrolled node accounts and the separate, non-funded human test accounts.
+An absent/empty list or expired deadline admits nobody; malformed configuration
+fails startup without printing its input values. Never put real account IDs in
+source, public reports or release artifacts.
+
+This is additional rollout restriction, not proof of ownership: existing keys,
+scopes, fresh Google/SIWE approval, comparison-code consent and registered-node
+signatures still apply. Both accounts are checked, including for existing links;
+an allowed human cannot inspect or approve an unlisted node. Private listing
+filters out unlisted nodes. PostgreSQL rechecks availability after node-lock
+waits, using its current wall clock. Out-of-scope requests return the same 503
+as disabled pairing. Public capabilities continue to advertise pairing false
+and never include pilot membership or its deadline.
+
+Remove test associations before the deadline, verify unchanged non-pairing
+state and ongoing evidence, then clear the allowlist. Expiry stops access; it
+does not unlink, revoke keys or stop nodes. If cleanup was interrupted, renew
+only the required pilot accounts/deadline to use normal authenticated removal.
+Do not directly delete rows. Full rollback clears the pilot list and disables
+the global flag. This pilot still requires an immutable reviewed Core deployment
+and qualified client artifacts; it is not permission to skip release gates.
+
+### Release Gates
+
 1. Review Core, Console and node changes together. Apply `0030` before enabling
    the routes. Deploy dark first; inspect the feature advertisement and empty
    tables. Do not enable pairing while clients are absent.
@@ -138,10 +172,11 @@ off leaves old validators and inference paths unaffected.
    `grid_api/services/tests/test_validator_pairing.py`; never point their
    disposable database setting at production. Run Alembic upgrade, drift check,
    downgrade to `0029`, and re-upgrade on scratch PostgreSQL and SQLite.
-4. Run a supervised association/unlink canary with existing non-funded test
+4. Run a scoped supervised association/unlink canary with existing non-funded test
    identities. Confirm balances, keys, wallets, independence reviews and normal
    evidence submission are unchanged before public enablement.
-5. Roll back by disabling `VALIDATOR_PAIRING_ENABLED`, then roll back code if
+5. Roll back by disabling `VALIDATOR_PAIRING_ENABLED` and clearing
+   `VALIDATOR_PAIRING_CANARY_ACCOUNTS`, then roll back code if
    needed. Retain the tables and node configurations. An explicit database
    downgrade discards only association state, but is not the operational rollback.
 
