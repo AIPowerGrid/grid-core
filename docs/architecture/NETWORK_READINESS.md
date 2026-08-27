@@ -34,10 +34,10 @@ At this snapshot:
 - validator rewards, validator stake, worker penalties from validator evidence,
   and Core federation are off;
 - charging remains a narrow allowlist canary rather than global; and
-- the four-platform `v0.1.0-preview.2` validator binary release and versioned
+- the four-platform `v0.1.0-preview.3` validator binary release and versioned
   multi-architecture GHCR image are published; macOS and Windows remain
-  explicitly unsigned. GHCR package visibility remains private until the
-  separate organization access change is completed. No production-capable
+  explicitly unsigned. The GHCR package is public and anonymously pullable on
+  Linux x64 and ARM64. No production-capable
   media-manager release exists. A benchmark-only media-manager qualification
   prerelease is public, but it cannot enroll with the Grid or advertise
   capabilities.
@@ -118,17 +118,19 @@ capabilities, status, and heartbeat. Account and wallet uniqueness prevent
 identity multiplication inside one canonical account. Production reports three
 active heartbeat-fresh registrations.
 
-### 5. `grid-validator v0.1.0-preview.2` - Implemented/published
+### 5. `grid-validator v0.1.0-preview.3` - Implemented/published
 
 The immutable prerelease publishes four-platform binaries, a versioned
 multi-architecture Docker image, checksums, checksum-verifying installers, an
 SPDX SBOM, and GitHub provenance. Protected release approval, clean installs on
 all four target platforms, complete-payload verification, and a fresh
-independent download/provenance check passed. macOS is not Developer ID signed
+independent download/provenance check passed. The release reports immutable tag
+`v0.1.0-preview.3` separately from Python package version `0.1.0`, so Core can
+distinguish reviewed preview payloads. macOS is not Developer ID signed
 or notarized and Windows is not Authenticode signed, so this remains an
-explicitly unsigned prerelease rather than a stable release. The GHCR package
-exists but is not yet anonymously pullable while organization package
-visibility remains private.
+explicitly unsigned prerelease rather than a stable release. Anonymous GHCR
+manifest verification proves both Linux x64 and ARM64 images plus provenance
+attestations are public. Prereleases do not publish `latest`.
 
 ### 6. Validator onboarding - Implemented
 
@@ -137,8 +139,8 @@ requires the live Core `shared_quorum_preview`, 3-of-5, scoped, non-economic
 capability contract. The page links scoped key creation, documents health
 commands, and says there are no rewards, stake, slashing, or routing effects.
 The Console has registration/scorecard surfaces. The GitHub Release download
-path is open; container quickstarts must continue to use a local build until
-anonymous GHCR access is verified.
+path and exact versioned GHCR image are public; neither path implies rewards,
+stake, slashing, or independent operation.
 
 ### 7. Five to ten independent preview operators - External
 
@@ -506,22 +508,30 @@ retention is not off-host disaster recovery.
 
 ## Next Controlled Sequence
 
-1. Observe the three-node first-party pilot for at least 72 hours, retain
+1. Roll the three first-party nodes to exact `v0.1.0-preview.3`, verify Core
+   reports that immutable release identity, and retain assignment/quorum/error
+   metrics without enabling economic authority.
+2. Observe the three-node first-party pilot for at least 72 hours, retain
    assignment/quorum/error metrics, and investigate the unanimous
    `deepseek-v4-flash-nvfp4` tool-chain failure before changing scoring or worker
    claims.
-2. Prove the first unattended backup timer run, copy an encrypted snapshot
+3. Prove the first unattended backup timer run, copy an encrypted snapshot
    off-host, and perform an off-host restore drill.
-3. Close `grid-validator` issue 1 with verified macOS Developer ID/notarization
-   and Windows Authenticode evidence, then publish the versioned validator
-   prerelease and Docker image, verify every clean-download checksum/provenance
-   artifact, and keep `latest` untouched.
-4. Qualify 5-10 independent validator operators and measure them for 30 days.
-5. Recruit at least two independent serving operators per flagship model while
+4. Qualify 5-10 independent validator operators through the documented 72-hour
+   no-reward window, then continue measuring the cohort. Run template-solver,
+   probe-classifier, replay, and model-switching tests under that independent
+   quorum before giving evidence any authority.
+5. Calibrate deterministic image fidelity with independently controlled bonded
+   references, then pilot video contract evidence with economic effects off.
+6. Recruit at least two independent serving operators per flagship model while
    completing the real media-manager qualification evidence.
-6. Expand charging only through reconciled allowlist stages.
-7. Resolve owner-worker exclusion before any intentional no-payout internal
+7. Expand charging only through reconciled allowlist stages.
+8. Resolve owner-worker exclusion before any intentional no-payout internal
    fleet participates in a payout denominator.
+
+Stable validator releases remain blocked on macOS Developer ID/notarization and
+Windows Authenticode, but platform signing is not a gate for the explicitly
+unsigned preview cohort.
 
 Do not collapse these into one launch switch. Each stage has a separate
 rollback boundary and produces evidence needed by the next stage.
