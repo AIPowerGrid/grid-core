@@ -289,15 +289,7 @@ async def validator_registration(
         validator = await validators_svc.validator_for_account(account_id=user["account_id"])
     except validators_svc.RegistrationError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
-    return {
-        "validator_id": validator["id"],
-        "signing_wallet": validator["signing_wallet"],
-        "software_version": validator["software_version"],
-        "capabilities": validator["capabilities"],
-        "status": validator["status"],
-        "last_heartbeat": validator["last_heartbeat"].isoformat(),
-        "economic_effect": "none",
-    }
+    return validators_svc.validator_registration_payload(validator)
 
 
 @router.post("/v1/validator/suspend")
