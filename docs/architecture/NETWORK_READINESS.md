@@ -375,6 +375,13 @@ Those are future depth, not substitutes for live proof of the implemented
 capability set. Production enablement still requires hard-targeted acceptance
 and negative canaries against representative text backends.
 
+The separate compensated blind-audit rail now has an accepted implementation
+contract in `PAID_VALIDATOR_AUDITS.md`, but no schema, budget reservation,
+ordinary terminal integration, or dispatch code exists. Existing probes remain
+unpaid and worker-fingerprintable; they cannot become quality evidence by
+configuration. The paid rail must land as a separately reviewed money-path
+change and pass PostgreSQL budget/terminal races before any dark canary.
+
 ### 20. Private deterministic image validation - Ready dark
 
 Core generates private randomized prompts and seeds, dispatches one candidate
