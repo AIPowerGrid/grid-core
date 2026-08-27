@@ -29,9 +29,9 @@ At this snapshot:
 - three active first-party validators run published `v0.1.0-preview.5` commit
   `07190da8`; Core reports that immutable release tag for all three. Each node
   passed checksum-gated staging, `check --no-probe`, an atomic symlink switch,
-  and a clean service restart. No fresh probe was issued during the
-  `preview.5` rollout window, so the latest post-upgrade workload proof remains
-  the earlier `preview.3` echo group with three distinct healthy votes;
+  and a clean service restart. After the one-hour worker/model cooldown elapsed,
+  the `preview.5` fleet completed a healthy 3-of-5 16K-context group and a
+  disputed token-limit group with three authoritative votes apiece;
 - those validators share one operator and hypervisor, so verified independent
   operator count remains zero;
 - validator rewards, validator stake, worker penalties from validator evidence,
@@ -55,8 +55,12 @@ extension state, and a schema-scoped archive collided with the scratch
 database's default `public` schema. Candidate commits `290c0375` and `c73864ee`
 scope archives to the Grid-owned schema, explicitly reset only the generated
 scratch schema, and make the PostgreSQL 16 restore proof a pull-request gate.
-The hardened `aipg-postgres-backup.timer` is enabled and active; its first
-unattended scheduled run remains pending, and no off-host backup system exists. A
+The hardened `aipg-postgres-backup.timer` is enabled, but its first observed
+unattended run failed on 2026-08-27 because the deployed backup script was not
+executable from the sandboxed unit: the process dropped DAC-bypass capabilities
+while retaining group `root`, so it could not traverse the private
+`aipg:aipg` release tree. No successful unattended or off-host backup system
+exists. A
 separate PostgreSQL rehearsal upgraded `0019` to
 `0024` with 100,000 synthetic legacy assignments and 110,000 synthetic legacy
 attestations in place, preserved every row, completed locally in 0.66 seconds,
@@ -106,10 +110,21 @@ Each archive matched SHA-256
 Every node passed `check --no-probe` before an atomic symlink switch and service
 restart; the prior release stayed available for rollback. Public status then
 reported three active, fresh, participating validators all on `preview.5`, zero
-verified independent operators, and validator economic effect `none`. No new
-assignment or authoritative vote appeared during the 90-second observation
-window, so this proves the release and recovery path but is not a fresh
-workload-round result.
+verified independent operators, and validator economic effect `none`. The
+initial 90-second observation window was quiet because the one-hour
+worker/model cooldown had not elapsed.
+
+At 04:48 UTC, polling created two fresh sealed `preview.5` groups as soon as
+that cooldown elapsed. The `gpt-oss-120b` 16K-context group reached
+`accepted / healthy` with three authoritative votes. The
+`deepseek-v4-flash-nvfp4` token-limit group reached `disputed` after one
+healthy and two failed votes, demonstrating that the aggregation path preserves
+real disagreement. Each group had three assignments, three validators, three
+Grid nonces, three evidence hashes, and three verified signatures. A direct
+join from all six probe job IDs found zero `grid_ledger`,
+`grid_credit_ledger`, `grid_reservations`, or `grid_den_events` rows.
+Validator economic effect remained `none`; the three nodes still share one
+operator and do not prove independent quorum.
 
 ## Immediate Validator Preview
 

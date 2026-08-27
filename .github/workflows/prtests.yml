@@ -71,6 +71,7 @@ jobs:
       - name: Validate operations scripts
         run: |
           bash -n scripts/backup_postgres.sh scripts/prove_postgres_restore.sh
+          grep -qx 'Group=aipg' deploy/systemd/aipg-postgres-backup.service
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client shellcheck
           shellcheck -x scripts/backup_postgres.sh scripts/prove_postgres_restore.sh deploy/bootstrap.sh

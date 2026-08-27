@@ -88,6 +88,11 @@ executes an immutable release selected through `/home/aipg/current`.
 - Do not enable the backup timer merely because its unit was installed. Run one
   backup, restore it into the generated scratch database, migrate with the exact
   candidate release, and inspect the proof first.
+- The backup one-shot stays UID 0 for its protected state directory and restore
+  tooling, but its primary group must be `aipg`. Its empty capability set
+  removes DAC bypass, while immutable releases live below `0750 aipg:aipg`
+  directories; changing the group back to `root` makes the unit unable to
+  execute its own versioned script.
 - If you rename Base/contract env vars, update `docs/`, `grid_api/services/*`,
   and any SDK examples in the same change.
 
@@ -98,6 +103,7 @@ executes an immutable release selected through `/home/aipg/current`.
 - `systemctl start aipg-postgres-backup.service` followed by
   `scripts/prove_postgres_restore.sh` on the target host before enabling its
   timer.
+- `grep -qx 'Group=aipg' deploy/systemd/aipg-postgres-backup.service`.
 - Local docs-only safety: `git diff --check`.
 
 ## Child DOX Index
