@@ -847,6 +847,43 @@ validators = sa.Table(
     sa.UniqueConstraint("account_id", "signing_wallet", name="uq_grid_validators_account_wallet"),
 )
 
+# Bounded pairing machinery: one replaceable slot per registered node, separate
+# from its durable current association. Neither table is an auth/credit owner.
+validator_pairings = sa.Table(
+    "grid_validator_pairings",
+    metadata,
+    sa.Column("validator_id", sa.String(96), sa.ForeignKey("grid_validators.id", ondelete="CASCADE"), primary_key=True),
+    sa.Column("id", sa.String(68), nullable=False, unique=True),
+    sa.Column("node_account_id", sa.Uuid, sa.ForeignKey("grid_accounts.id", ondelete="RESTRICT"), nullable=False),
+    sa.Column("signing_wallet", sa.String(42), nullable=False),
+    sa.Column("operator_account_id", sa.Uuid, sa.ForeignKey("grid_accounts.id", ondelete="RESTRICT"), nullable=True),
+    sa.Column("audience", sa.String(255), nullable=False),
+    sa.Column("status", sa.String(16), nullable=False),
+    sa.Column("comparison_code", sa.String(12), nullable=False),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint("status IN ('pending', 'approved', 'linked', 'cancelled')", name="ck_grid_validator_pairings_status"),
+    sa.CheckConstraint("expires_at > created", name="ck_grid_validator_pairings_expiry"),
+    sa.CheckConstraint("status NOT IN ('approved', 'linked') OR operator_account_id IS NOT NULL", name="ck_grid_validator_pairings_approval"),
+    sa.CheckConstraint("operator_account_id IS NULL OR operator_account_id != node_account_id", name="ck_grid_validator_pairings_distinct_accounts"),
+)
+
+validator_account_links = sa.Table(
+    "grid_validator_account_links",
+    metadata,
+    sa.Column("validator_id", sa.String(96), sa.ForeignKey("grid_validators.id", ondelete="CASCADE"), primary_key=True),
+    sa.Column("operator_account_id", sa.Uuid, sa.ForeignKey("grid_accounts.id", ondelete="RESTRICT"), nullable=False, index=True),
+    sa.Column("node_account_id", sa.Uuid, sa.ForeignKey("grid_accounts.id", ondelete="RESTRICT"), nullable=False),
+    sa.Column("signing_wallet", sa.String(42), nullable=False),
+    sa.Column("pairing_id", sa.String(68), nullable=False, unique=True),
+    sa.Column("payload", PortableJSON, nullable=False),
+    sa.Column("signature", sa.String(132), nullable=False),
+    sa.Column("linked_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+    sa.CheckConstraint("operator_account_id != node_account_id", name="ck_grid_validator_account_links_distinct_accounts"),
+    sa.CheckConstraint("revoked_at IS NULL OR revoked_at >= linked_at", name="ck_grid_validator_account_links_revocation"),
+)
+
 validator_probe_groups = sa.Table(
     "grid_validator_probe_groups",
     metadata,

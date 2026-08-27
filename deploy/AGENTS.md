@@ -52,6 +52,11 @@ executes an immutable release selected through `/home/aipg/current`.
   firewall/nginx impact.
 - `GRID_SALT` stays server-side. The developer console has no local DB/salt path
   and must not receive it.
+- `VALIDATOR_PAIRING_ENABLED` is a separate default-off account-visibility gate.
+  Apply Alembic `0030` before enablement and ship the matching Console and local
+  node-app consent flows first. The audience and approval URL must be explicit
+  HTTPS values. Rollback disables the flag and preserves node identities and
+  association tables. This gate never activates validator economics.
 - `GRID_SIWE_ALLOWED_DOMAINS` is the exact frontend authority allowlist for
   wallet-login challenges. Keep `GRID_LEGACY_SIWE_VERIFY_ENABLED=0`; it is an
   emergency client-migration switch, not a permanent compatibility mode.

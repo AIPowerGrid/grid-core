@@ -93,6 +93,14 @@ transport, accounts, stats, health/metrics.
   Health also exposes privacy-preserving network aggregates over a bounded
   `since_hours` window; never relabel registered validators as independently
   operated validators.
+- `validator_pairing.py` - default-off, two-party account association for an
+  already registered node. `/v1/validator/account-pairings*`,
+  `/v1/validator/account-pairing`, and `/v1/validator/account-link*` use the
+  existing validator key; `/v1/account/validator-pairings*` and
+  `/v1/account/validators*` require a Core user token. Approval/removal require
+  fresh Google/SIWE proof. Browser approval alone does not link: the current
+  node must sign the exact expiring account-bound payload. No account merges,
+  new credentials, wallet changes, control-group changes, or economic effects.
 - `styles.py` - `GET /v1/styles` for curated creative presets.
 - `health.py` - `GET /health`, including the immutable full release commit when
   the runtime can prove it from `GRID_BUILD_COMMIT` or a detached checkout.
@@ -195,6 +203,12 @@ transport, accounts, stats, health/metrics.
   when it derives that value from its authenticated server session. Never trust
   a browser-supplied account/user id: proof exchange may merge value-bearing
   accounts.
+
+Validator account pairing is optional visibility metadata, not an auth or
+recovery identity. Never use it to authenticate validator work or change
+payout ownership. Keep `VALIDATOR_PAIRING_ENABLED=0` until Console, local-app
+consent, and platform end-to-end qualification ship together. See
+`docs/architecture/VALIDATOR_ACCOUNT_PAIRING.md` for the full route contract.
 
 ## Work Guidance
 

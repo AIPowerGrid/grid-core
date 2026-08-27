@@ -25,6 +25,9 @@ for humans and agents.
 - `architecture/NETWORK_READINESS.md` - current implementation and rollout
   status for validator, worker-growth, economics, blockchain, and operations
   requirements.
+- `architecture/VALIDATOR_ACCOUNT_PAIRING.md` - optional existing-account
+  visibility links, two-party proof, expiry, privacy, recovery, and rollout
+  requirements. No association is an authentication or economic identity.
 
 ## Local Contracts
 
