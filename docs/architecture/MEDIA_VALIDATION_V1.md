@@ -248,7 +248,9 @@ group.
    possible reference.
 4. Exclude the candidate worker, account, payout wallet, and control group.
 5. Exclude references sharing a control group, account, or payout wallet with
-   one another.
+   one another. Repeat all three pairwise checks from the authoritative rows
+   after acquiring their transaction locks; a stale candidate snapshot cannot
+   establish independence.
 6. Require at least two eligible references and use `secrets.SystemRandom` to
    sample without replacement.
 7. Apply a bounded recent-use penalty before random selection so the same pair

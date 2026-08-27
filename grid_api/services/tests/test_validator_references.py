@@ -36,6 +36,32 @@ BOND_POLICY = {
 }
 
 
+class _FakeMappingsResult:
+    def __init__(self, *, one=None, rows=None):
+        self._one = one
+        self._rows = rows
+
+    def mappings(self):
+        return self
+
+    def one_or_none(self):
+        return self._one
+
+    def all(self):
+        return self._rows or []
+
+
+class _SequencedSession:
+    bind = None
+
+    def __init__(self, results):
+        self._results = list(results)
+
+    async def execute(self, _statement):
+        assert self._results, "unexpected selector query"
+        return self._results.pop(0)
+
+
 @pytest_asyncio.fixture
 async def session():
     engine = create_async_engine(
@@ -355,6 +381,79 @@ async def test_same_operator_cannot_fill_reference_quorum_with_distinct_identiti
             now=NOW,
             **BOND_POLICY,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("collision", ["account_id", "payout_wallet", "operator_group_id"])
+async def test_post_lock_independence_rejects_stale_initial_identity(collision, monkeypatch):
+    candidate_id = uuid4()
+    first_id = uuid4()
+    second_id = uuid4()
+    candidate_account = uuid4()
+    first_account = uuid4()
+    second_account = uuid4()
+    first_wallet = "0x" + "1" * 40
+    second_wallet = "0x" + "2" * 40
+    first_group = "opg_reference_alpha"
+    second_group = "opg_reference_beta"
+
+    initial_first = {
+        "worker_id": first_id,
+        "account_id": first_account,
+        "payout_wallet": first_wallet,
+        "operator_group_id": first_group,
+        "last_selected": None,
+        "selection_count": 0,
+    }
+    initial_second = {
+        "worker_id": second_id,
+        "account_id": second_account,
+        "payout_wallet": second_wallet,
+        "operator_group_id": second_group,
+        "last_selected": None,
+        "selection_count": 0,
+    }
+    locked_second = dict(initial_second)
+    locked_second[collision] = initial_first[collision]
+
+    session = _SequencedSession(
+        [
+            _FakeMappingsResult(
+                one={"account_id": candidate_account, "wallet": "0x" + "3" * 40},
+            ),
+            _FakeMappingsResult(
+                one={
+                    "account_id": candidate_account,
+                    "payout_wallet": "0x" + "3" * 40,
+                    "operator_group_id": "opg_candidate_control",
+                    "status": "verified",
+                    "reviewed_at": NOW - timedelta(days=1),
+                    "expires_at": NOW + timedelta(days=1),
+                },
+            ),
+            _FakeMappingsResult(rows=[initial_first, initial_second]),
+            _FakeMappingsResult(one=initial_first),
+            _FakeMappingsResult(one=locked_second),
+        ],
+    )
+    monkeypatch.setattr(
+        validator_references,
+        "_weighted_choice",
+        lambda rows, *, now: rows[0],
+    )
+
+    with pytest.raises(validator_references.ReferencePoolUnavailable, match="found 1"):
+        await validator_references.select_reference_workers(
+            session,
+            model=MODEL,
+            modality="image",
+            candidate_worker_id=candidate_id,
+            online_model_worker_ids=[candidate_id, first_id, second_id],
+            now=NOW,
+            **BOND_POLICY,
+        )
+
+    assert session._results == []
 
 
 @pytest.mark.asyncio
