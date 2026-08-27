@@ -22,22 +22,23 @@ production rollout, and a registered node does not prove independent control.
 
 At this snapshot:
 
-- production Core runs immutable commit `e18b38f9` with Alembic `0026`;
-- `/v1/status/network` is live and reports seven connected workers, ten online
+- production Core runs immutable commit `fabb767d` with Alembic `0027`;
+- `/v1/status/network` is live and reports seven connected workers, eight online
   model entries, and every model below the three-worker redundancy target;
 - sealed shared-quorum text validation is live in `shared_quorum_preview` mode;
-- three active first-party validators run published `v0.1.0-preview.5` commit
-  `07190da8`; Core reports that immutable release tag for all three. Each node
+- three active first-party validators run published `v0.1.0-preview.8` commit
+  `122f5565`; Core reports that immutable release tag for all three. Each node
   passed checksum-gated staging, `check --no-probe`, an atomic symlink switch,
-  and a clean service restart. After the one-hour worker/model cooldown elapsed,
-  the `preview.5` fleet completed a healthy 3-of-5 16K-context group and a
-  disputed token-limit group with three authoritative votes apiece;
+  and a clean service restart. On the earlier preview.5 payload, after the
+  one-hour worker/model cooldown elapsed, the same fleet completed a healthy
+  3-of-5 16K-context group and a disputed token-limit group with three
+  authoritative votes apiece;
 - those validators share one operator and hypervisor, so verified independent
   operator count remains zero;
 - validator rewards, validator stake, worker penalties from validator evidence,
   and Core federation are off;
 - charging remains a narrow allowlist canary rather than global; and
-- the four-platform `v0.1.0-preview.5` validator binary release and versioned
+- the four-platform `v0.1.0-preview.8` validator binary release and versioned
   multi-architecture GHCR image are published; macOS and Windows remain
   explicitly unsigned. The GHCR package is public and anonymously pullable on
   Linux x64 and ARM64. No production-capable
@@ -131,6 +132,35 @@ join from all six probe job IDs found zero `grid_ledger`,
 `grid_credit_ledger`, `grid_reservations`, or `grid_den_events` rows.
 Validator economic effect remained `none`; the three nodes still share one
 operator and do not prove independent quorum.
+
+At 05:20 UTC, the Core `fabb767d` production candidate created checksummed
+backup `/var/lib/aipg-backup/grid-postgres-20260827T052034Z.dump`, restored it
+into a guarded scratch database, upgraded `0026` to `0027`, passed `alembic
+check`, and removed the scratch database. Production then advanced to exact
+Core commit `fabb767df593c0f8240ea75d764297a962a64042` and Alembic `0027`.
+Health reported the matching commit, seven workers, operational API/Redis, and
+all validator economic gates unchanged.
+
+The first-party fleet briefly advanced to preview.6 to prove the new
+account-private operator qualification response. Before the next rollout, an
+independent artifact check found that preview.7's stamped installer confused
+its release default with its source-only sentinel; preview.7 was never deployed.
+Preview.8 separated those values and added a packaged installer test that runs
+without a version or asset override. Its immutable nine-asset release passed
+the complete payload verifier, GitHub provenance verification, a real macOS
+ARM64 no-version network install, and anonymous Linux AMD64/ARM64 GHCR
+inspection. The prerelease did not create `latest`.
+
+All three nodes then rolled one at a time to the exact Linux x64 preview.8
+artifact from `122f5565`, with SHA-256
+`8960993a2174162b192b11dfe0b82b086f6bf19c4d441ae6350a5907d33b03f6`.
+Every node passed `check --no-probe`, an atomic symlink switch, and a clean
+service restart. Public status reported three active, fresh, participating
+validators all on preview.8; zero verified independent operators; 288
+completed assignments; 259 authoritative votes; and economic effect `none`.
+Preview.6 remains installed on every host for rollback. No fresh assignment was
+issued for this packaging-only rollout, so the preview.5 16K/token-limit groups
+remain the latest workload proof.
 
 ## Immediate Validator Preview
 
@@ -517,7 +547,7 @@ with `--require-hashes` from binary wheels only, the Core image base is
 digest-pinned, and release construction does not upgrade pip. CI regenerates
 the lock and runs `pip-audit` before tests. Core source also exposes a build
 commit in the status API and deploys immutable releases. Production reports the
-exact deployed commit `e18b38f9`. GitHub immutable releases were
+exact deployed commit `fabb767d`. GitHub immutable releases were
 enabled on 2026-08-21 for `grid-validator`, `grid-media-worker`, and
 `grid-inference-worker`; their future published GitHub release tags and assets
 cannot be replaced, and corrections require a new version. This setting does
@@ -539,7 +569,7 @@ Core source exposes privacy-safe worker/model redundancy, validator health,
 payout totals, charging posture, incidents, advisories, build commit, and
 architecture maturity. The public `/status` page is deployed and tested at
 desktop/mobile widths. Production `/v1/status/network` returns the live
-privacy-safe feed at build `e18b38f9`.
+privacy-safe feed at build `fabb767d`.
 
 ### 34. Trusted-partner Core federation - Deferred design
 
@@ -559,18 +589,18 @@ accepts only local PostgreSQL, creates and drops only a generated
 with the exact immutable candidate, and requires `alembic current`, `heads`,
 and `check` agreement. Pull-request CI rehearses the supported migration chain
 on PostgreSQL 16 and proves a decoy non-Grid schema is excluded. The supervised
-production proof passed again at exact release `e18b38f9`; the generated
-scratch database was removed. The systemd units pass clean-environment
+production proof passed again at exact release `fabb767d` through Alembic
+`0027`; the generated scratch database was removed. The systemd units pass clean-environment
 verification, and `aipg-postgres-backup.timer` is enabled and active. Its first
 unattended scheduled run and an off-host copy/restore drill remain open. Local
 retention is not off-host disaster recovery.
 
 ## Next Controlled Sequence
 
-1. Observe the three-node first-party pilot for at least 72 hours, retain
-   assignment/quorum/error metrics, and investigate the unanimous
-   `deepseek-v4-flash-nvfp4` tool-chain failure before changing scoring or worker
-   claims.
+1. Recruit 5-10 unrelated preview operators, mark reviewed registrations as
+   candidates, and prove that they can complete self-service onboarding. The
+   three first-party nodes remain one control domain and cannot satisfy the
+   independent-operator gate.
 2. Prove the first unattended backup timer run, copy an encrypted snapshot
    off-host, and perform an off-host restore drill.
 3. Qualify 5-10 independent validator operators through the documented 72-hour
