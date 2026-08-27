@@ -22,10 +22,13 @@ operation remain rollout gates.
 
 Production runs Core `e18b38f9` at Alembic `0026` with sealed assignment
 polling enabled. Three first-party nodes run published
-`v0.1.0-preview.2` commit `1472677d`. A 2026-08-27 canary proved that the poll
+`v0.1.0-preview.3` commit `7ba18a52`, and Core reports that immutable release
+tag for all three registrations. A 2026-08-27 canary proved that the poll
 withheld target/model/nonce/challenge data, all three terminal disclosures
 matched their seals, and one tool-chain group reached healthy 3-of-5 quorum
-without creating credit, reservation, den, or worker-ledger rows. This remains
+without creating credit, reservation, den, or worker-ledger rows. A fresh echo
+group reached healthy 3-of-5 quorum after the rolling preview.3 upgrade while
+the public network status still reported economic effect `none`. This remains
 first-party protocol evidence, not independent operator proof.
 
 ## Identity
