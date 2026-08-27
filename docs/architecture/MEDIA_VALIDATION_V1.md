@@ -166,8 +166,10 @@ The currently deployed WorkerRegistry does not yet provide the reviewed
 cooldown-backed bond contract required by this design. The sync defaults off,
 its address/version configuration defaults empty, and no operator-supplied
 runtime hash is trusted. The reviewed candidate verifier is
-`worker-registry-v2-957685a`, pinned in Core to runtime hash
-`0x10cb9fb1b441747142df35545d69e705e81543516937c7a7b08c3df2ccbb5db2`.
+`worker-registry-v2-7d7a2e8`, pinned in Core to runtime hash
+`0x359fb8372a292a77fe76d156bbda39b35c3170f1ff0edaa1874ea8b87ee3af78`.
+The historical `worker-registry-v2-957685a` candidate remains recognized only
+with its distinct pinned runtime; verifier labels are not interchangeable.
 Until the
 facet is independently reviewed, cut, verified, and the sync is dark-canary
 proven, the eligible reference pool is empty.
