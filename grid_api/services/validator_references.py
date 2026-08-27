@@ -20,7 +20,9 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..v2.schema import validator_reference_workers as references_t
+from ..v2.schema import worker_control_reviews as controls_t
 from ..v2.schema import workers as workers_t
+from .worker_control_reviews import GROUP_RE, fresh_review_reasons
 
 VALID_MODALITIES = frozenset({"image", "video"})
 DEFAULT_BOND_MAX_AGE = timedelta(minutes=30)
@@ -171,6 +173,23 @@ async def select_reference_workers(
     if not candidate or candidate["account_id"] is None or not candidate_wallet:
         raise ReferencePoolUnavailable("candidate identity is incomplete")
 
+    control_query = sa.select(controls_t).where(controls_t.c.worker_id == candidate_id)
+    if session.bind and session.bind.dialect.name == "postgresql":
+        # Shared locks let concurrent validator groups inspect the same target
+        # while preventing a control-review rewrite until each assignment
+        # transaction has committed its frozen witness set.
+        control_query = control_query.with_for_update(of=controls_t, read=True)
+    candidate_control = (await session.execute(control_query)).mappings().one_or_none()
+    candidate_control_reasons = fresh_review_reasons(
+        dict(candidate_control) if candidate_control else None,
+        worker_account_id=candidate["account_id"],
+        worker_wallet=candidate_wallet,
+        now=current,
+    )
+    if candidate_control_reasons:
+        raise ReferencePoolUnavailable("candidate worker control review is unavailable")
+    candidate_operator_group = str(candidate_control["operator_group_id"])
+
     eligibility = (
         references_t.c.model == normalized_model,
         references_t.c.modality == normalized_modality,
@@ -197,6 +216,13 @@ async def select_reference_workers(
         references_t.c.quality_window_end <= current,
         references_t.c.quality_pass_rate >= minimum_quality_pass_rate,
         references_t.c.quality_reviewed_at >= current - quality_max_age,
+        controls_t.c.status == "verified",
+        controls_t.c.operator_group_id.isnot(None),
+        controls_t.c.operator_group_id != candidate_operator_group,
+        controls_t.c.reviewed_at <= current,
+        controls_t.c.expires_at >= current,
+        controls_t.c.account_id == references_t.c.account_id,
+        sa.func.lower(controls_t.c.payout_wallet) == sa.func.lower(references_t.c.payout_wallet),
         workers_t.c.account_id == references_t.c.account_id,
         sa.func.lower(workers_t.c.wallet) == sa.func.lower(references_t.c.payout_wallet),
         workers_t.c.maintenance.is_(False),
@@ -204,8 +230,9 @@ async def select_reference_workers(
         references_t.c.worker_id.in_(online_ids),
     )
     query = (
-        sa.select(references_t)
+        sa.select(references_t, controls_t.c.operator_group_id)
         .join(workers_t, workers_t.c.id == references_t.c.worker_id)
+        .join(controls_t, controls_t.c.worker_id == references_t.c.worker_id)
         .where(*eligibility)
         .order_by(
             references_t.c.last_selected.asc().nullsfirst(),
@@ -214,7 +241,11 @@ async def select_reference_workers(
         )
         .limit(MAX_CANDIDATE_ROWS)
     )
-    rows = [dict(row) for row in (await session.execute(query)).mappings().all()]
+    rows = [
+        dict(row)
+        for row in (await session.execute(query)).mappings().all()
+        if GROUP_RE.fullmatch(str(row["operator_group_id"] or ""))
+    ]
 
     selected: list[dict] = []
     remaining = rows
@@ -224,6 +255,7 @@ async def select_reference_workers(
             for row in remaining
             if all(
                 row["account_id"] != picked["account_id"] and str(row["payout_wallet"]).lower() != str(picked["payout_wallet"]).lower()
+                and row["operator_group_id"] != picked["operator_group_id"]
                 for picked in selected
             )
         ]
@@ -233,13 +265,14 @@ async def select_reference_workers(
         locked = (
             (
                 await session.execute(
-                    sa.select(references_t)
+                    sa.select(references_t, controls_t.c.operator_group_id)
                     .join(workers_t, workers_t.c.id == references_t.c.worker_id)
+                    .join(controls_t, controls_t.c.worker_id == references_t.c.worker_id)
                     .where(
                         *eligibility,
                         references_t.c.worker_id == candidate_row["worker_id"],
                     )
-                    .with_for_update(of=references_t, skip_locked=True),
+                    .with_for_update(of=[references_t, controls_t], skip_locked=True),
                 )
             )
             .mappings()
@@ -248,7 +281,10 @@ async def select_reference_workers(
         remaining = [row for row in remaining if row["worker_id"] != candidate_row["worker_id"]]
         if locked is None:
             continue
-        selected.append(dict(locked))
+        locked_row = dict(locked)
+        if not GROUP_RE.fullmatch(str(locked_row["operator_group_id"] or "")):
+            continue
+        selected.append(locked_row)
 
     if len(selected) != count:
         raise ReferencePoolUnavailable(

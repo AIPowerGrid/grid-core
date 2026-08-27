@@ -113,9 +113,14 @@ content sanitization, and reward settlement.
   is not required for acceptance until a later reviewed authority gate.
   The public network status surface uses only these redacted aggregates and
   never assignment rows.
-  `validator_references.py` owns the dark media reference selector: fresh
-  finalized bond + quality snapshots, online workers, distinct accounts and
-  payout wallets, row-locked recent-use rotation, and fail-closed insufficiency.
+  `worker_control_reviews.py` owns preview-first, digest-bound, expiring common-
+  control reviews for media workers. Its opaque `opg_*` groups are private,
+  identity-bound operational metadata and have no routing, payout, reward, or
+  slashing effect. `validator_references.py` owns the dark media reference
+  selector: fresh finalized bond + quality snapshots, online workers, three
+  fresh distinct worker-control groups across candidate and references,
+  distinct accounts and payout wallets as defense in depth, row-locked recent-
+  use rotation, and fail-closed insufficiency.
   The default-off deterministic image lane calls it transactionally, runs one
   candidate plus two fixed references exactly once per shared probe group
   through hard-targeted ordinary UUID jobs, freezes worker uploads under
@@ -142,9 +147,9 @@ content sanitization, and reward settlement.
   a verifier/runtime pair compiled into the Core release.
   `validator_reference_reviews.py` owns the preview-first, digest-bound human
   quality and status workflow. A new review starts paused and cannot activate
-  until its fresh chain proof exactly matches the live Core policy. Identity
-  drift forces a pause and clears cached proof fields; only the bond sync may
-  repopulate them. Revocation is terminal.
+  until its fresh chain proof and worker-control review exactly match the live
+  Core policy. Identity drift forces a pause and clears cached proof fields;
+  only the bond sync may repopulate them. Revocation is terminal.
 - **Model/media governance:** `recipes.py`, `recipe_import.py`, `styles.py`,
   `loras.py`, `model_registry.py`.
 - **Safety:** `sanitizer.py` - **secrets redactor only** (strips API keys/PGP from prompts).

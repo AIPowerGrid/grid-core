@@ -18,8 +18,10 @@ from web3 import Web3
 from ..config import GridSettings, get_settings
 from ..database import new_session
 from ..v2.schema import validator_reference_workers as references_t
+from ..v2.schema import worker_control_reviews as controls_t
 from ..v2.schema import workers as workers_t
 from .validator_bonds import reviewed_runtime_hash
+from .worker_control_reviews import fresh_review_reasons
 
 VALID_MODALITIES = frozenset({"image", "video"})
 VALID_ACTIONS = frozenset({"review", "activate", "pause", "revoke"})
@@ -56,6 +58,7 @@ def _digest(
     modality: str,
     worker_account_id: UUID,
     worker_wallet: str,
+    control_review: dict[str, Any] | None,
     policy: dict[str, Any],
 ) -> str:
     state: dict[str, Any] = {
@@ -64,6 +67,19 @@ def _digest(
         "modality": modality,
         "worker_account_id": worker_account_id,
         "worker_wallet": worker_wallet,
+        "worker_control_review": "missing" if control_review is None else {
+            key: control_review.get(key)
+            for key in (
+                "account_id",
+                "payout_wallet",
+                "operator_group_id",
+                "status",
+                "reviewed_at",
+                "expires_at",
+                "review_ref",
+                "updated",
+            )
+        },
         "activation_policy": policy,
         "reference": "missing" if row is None else {
             key: row.get(key)
@@ -240,6 +256,13 @@ async def review_reference(
             ref_query = ref_query.with_for_update()
         reference = (await session.execute(ref_query)).mappings().one_or_none()
         row = dict(reference) if reference else None
+        control_query = sa.select(controls_t).where(
+            controls_t.c.worker_id == normalized_worker_id,
+        )
+        if apply:
+            control_query = control_query.with_for_update()
+        control = (await session.execute(control_query)).mappings().one_or_none()
+        control_row = dict(control) if control else None
         current_digest = _digest(
             row,
             worker_id=normalized_worker_id,
@@ -247,6 +270,7 @@ async def review_reference(
             modality=normalized_modality,
             worker_account_id=account_id,
             worker_wallet=wallet,
+            control_review=control_row,
             policy=policy,
         )
         if apply and expected_digest != current_digest:
@@ -283,6 +307,14 @@ async def review_reference(
                     bond_verified_at=None,
                 )
         activation_reasons = _activation_reasons(prospective, now=current, policy=policy)
+        activation_reasons.extend(
+            fresh_review_reasons(
+                control_row,
+                worker_account_id=account_id,
+                worker_wallet=wallet,
+                now=current,
+            ),
+        )
         if identity_changed:
             activation_reasons.append("worker identity differs from reviewed identity")
         if normalized_action == "review":

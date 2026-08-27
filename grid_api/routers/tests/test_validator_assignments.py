@@ -25,9 +25,7 @@ from sqlalchemy.pool import StaticPool
 from grid_api import auth, database, safe_logging
 from grid_api.ratelimit import limiter
 from grid_api.routers import validator as validator_router
-from grid_api.services import recipes
-from grid_api.services import validator_bonds
-from grid_api.services import validator_operators
+from grid_api.services import recipes, validator_bonds, validator_operators
 from grid_api.services import validators as validators_svc
 from grid_api.v2.schema import (
     accounts as accounts_t,
@@ -49,6 +47,9 @@ from grid_api.v2.schema import (
 )
 from grid_api.v2.schema import (
     validators as validators_t,
+)
+from grid_api.v2.schema import (
+    worker_control_reviews as controls_t,
 )
 from grid_api.v2.schema import (
     workers as workers_t,
@@ -456,6 +457,20 @@ async def _seed_image_worker(session, index, *, now):
             jobs_completed=20,
             den_earned=0,
         )
+    )
+    await session.execute(
+        sa.insert(controls_t).values(
+            worker_id=worker_id,
+            account_id=account_id,
+            payout_wallet=wallet,
+            operator_group_id=f"opg_image_worker_{index:08d}",
+            status="verified",
+            reviewed_at=now - timedelta(days=1),
+            expires_at=now + timedelta(days=29),
+            review_ref=f"review:image-worker-{index}",
+            created=now - timedelta(days=1),
+            updated=now - timedelta(days=1),
+        ),
     )
     return worker_id, account_id, wallet
 

@@ -38,6 +38,9 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - `review_validator_reference.py` - preview-first, digest-bound quality review
   and activate/pause/revoke workflow for a media reference worker. It never
   fabricates bond evidence or grants economic authority.
+- `review_worker_control.py` - preview-first, digest-bound verify/reject/revoke
+  workflow for private media-worker common-control groups. It grants no
+  economic authority and never publishes the group.
 - `backup_postgres.sh` - root-only custom-format backup of the Grid-owned
   PostgreSQL schema with checksum, archive validation, locking, and bounded
   local retention. It excludes unrelated extension and legacy schemas.
@@ -82,6 +85,12 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   chain sync write a fresh exact bond proof, then preview/apply `--action
   activate`. Every apply requires the fresh preview digest. Identity drift
   invalidates cached proof and requires another sync; revocation is terminal.
+- Before activating a media reference or using a candidate, run
+  `review_worker_control.py --action verify` with the same opaque `opg_*` id for
+  every worker under common practical control. Preview first and apply only the
+  returned digest. Never place names, emails, hostnames, IPs, wallet addresses,
+  or private notes in the group id or review ref. Reviews expire and identity
+  drift fails closed; revocation is terminal.
 - Service-key rotation requires a new `--output` path on protected local
   storage. The tool writes and fsyncs the replacement before committing the
   rotation, removes the file if the database operation fails, and refuses to
