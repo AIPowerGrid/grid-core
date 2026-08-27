@@ -15,6 +15,7 @@ from grid_api.services import validator_references
 from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import metadata
 from grid_api.v2.schema import validator_reference_workers as references_t
+from grid_api.v2.schema import worker_control_reviews as controls_t
 from grid_api.v2.schema import workers as workers_t
 
 NOW = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
@@ -50,7 +51,16 @@ async def session():
     await engine.dispose()
 
 
-async def _worker(session, index, *, account_id=None, wallet=None, last_seen=NOW):
+async def _worker(
+    session,
+    index,
+    *,
+    account_id=None,
+    wallet=None,
+    last_seen=NOW,
+    control=True,
+    operator_group_id=None,
+):
     account_id = account_id or uuid4()
     wallet = wallet or f"0x{index:040x}"
     worker_id = uuid4()
@@ -75,6 +85,21 @@ async def _worker(session, index, *, account_id=None, wallet=None, last_seen=NOW
             den_earned=0,
         ),
     )
+    if control:
+        await session.execute(
+            sa.insert(controls_t).values(
+                worker_id=worker_id,
+                account_id=account_id,
+                payout_wallet=wallet,
+                operator_group_id=operator_group_id or f"opg_worker_{index:08d}",
+                status="verified",
+                reviewed_at=NOW - timedelta(days=1),
+                expires_at=NOW + timedelta(days=29),
+                review_ref=f"review:worker-{index}",
+                created=NOW - timedelta(days=1),
+                updated=NOW - timedelta(days=1),
+            ),
+        )
     return worker_id, account_id, wallet
 
 
@@ -243,6 +268,109 @@ async def test_same_payout_wallet_cannot_fill_reference_quorum(session):
             modality="image",
             candidate_worker_id=candidate[0],
             online_model_worker_ids=[candidate[0], first[0], second[0]],
+            now=NOW,
+            **BOND_POLICY,
+        )
+
+
+@pytest.mark.asyncio
+async def test_same_operator_cannot_fill_reference_quorum_with_distinct_identities(session):
+    candidate = await _worker(session, 26)
+    first = await _worker(
+        session,
+        27,
+        operator_group_id="opg_shared_reference_control",
+    )
+    second = await _worker(
+        session,
+        28,
+        operator_group_id="opg_shared_reference_control",
+    )
+    await _reference(session, first)
+    await _reference(session, second)
+    await session.commit()
+
+    with pytest.raises(validator_references.ReferencePoolUnavailable, match="found 1"):
+        await validator_references.select_reference_workers(
+            session,
+            model=MODEL,
+            modality="image",
+            candidate_worker_id=candidate[0],
+            online_model_worker_ids=[candidate[0], first[0], second[0]],
+            now=NOW,
+            **BOND_POLICY,
+        )
+
+
+@pytest.mark.asyncio
+async def test_candidate_and_references_require_fresh_distinct_control_reviews(session):
+    candidate_group = "opg_candidate_common_control"
+    candidate = await _worker(session, 29, operator_group_id=candidate_group)
+    same_operator = await _worker(session, 291, operator_group_id=candidate_group)
+    independent = await _worker(session, 292)
+    await _reference(session, same_operator)
+    await _reference(session, independent)
+    await session.commit()
+
+    with pytest.raises(validator_references.ReferencePoolUnavailable, match="found 1"):
+        await validator_references.select_reference_workers(
+            session,
+            model=MODEL,
+            modality="image",
+            candidate_worker_id=candidate[0],
+            online_model_worker_ids=[candidate[0], same_operator[0], independent[0]],
+            now=NOW,
+            **BOND_POLICY,
+        )
+
+    await session.rollback()
+    await session.execute(
+        sa.delete(controls_t).where(controls_t.c.worker_id == candidate[0]),
+    )
+    await session.commit()
+    with pytest.raises(
+        validator_references.ReferencePoolUnavailable,
+        match="candidate worker control review is unavailable",
+    ):
+        await validator_references.select_reference_workers(
+            session,
+            model=MODEL,
+            modality="image",
+            candidate_worker_id=candidate[0],
+            online_model_worker_ids=[candidate[0], same_operator[0], independent[0]],
+            now=NOW,
+            **BOND_POLICY,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "control_values",
+    [
+        {"operator_group_id": "malformed-control-group"},
+        {"expires_at": NOW - timedelta(seconds=1)},
+    ],
+)
+async def test_malformed_or_expired_reference_control_fails_closed(session, control_values):
+    candidate = await _worker(session, 293)
+    good = await _worker(session, 294)
+    bad = await _worker(session, 295)
+    await _reference(session, good)
+    await _reference(session, bad)
+    await session.execute(
+        sa.update(controls_t)
+        .where(controls_t.c.worker_id == bad[0])
+        .values(**control_values),
+    )
+    await session.commit()
+
+    with pytest.raises(validator_references.ReferencePoolUnavailable, match="found 1"):
+        await validator_references.select_reference_workers(
+            session,
+            model=MODEL,
+            modality="image",
+            candidate_worker_id=candidate[0],
+            online_model_worker_ids=[candidate[0], good[0], bad[0]],
             now=NOW,
             **BOND_POLICY,
         )

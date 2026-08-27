@@ -16,6 +16,7 @@ from grid_api.services import validator_reference_reviews
 from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import metadata
 from grid_api.v2.schema import validator_reference_workers as references_t
+from grid_api.v2.schema import worker_control_reviews as controls_t
 from grid_api.v2.schema import workers as workers_t
 
 NOW = datetime(2026, 8, 26, 15, 0, tzinfo=UTC)
@@ -73,6 +74,20 @@ async def _worker(factory):
                 last_seen=NOW,
                 jobs_completed=100,
                 den_earned=0,
+            ),
+        )
+        await session.execute(
+            sa.insert(controls_t).values(
+                worker_id=worker_id,
+                account_id=account_id,
+                payout_wallet=WALLET,
+                operator_group_id="opg_reference_review_test",
+                status="verified",
+                reviewed_at=NOW - timedelta(days=1),
+                expires_at=NOW + timedelta(days=29),
+                review_ref="review:control-001",
+                created=NOW - timedelta(days=1),
+                updated=NOW - timedelta(days=1),
             ),
         )
         await session.commit()
@@ -249,6 +264,57 @@ async def test_apply_rejects_stale_digest_and_identity_drift(database):
             **_review_kwargs(worker_id),
             expected_digest=preview["current_digest"],
             apply=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_activation_requires_fresh_identity_bound_control_review(database):
+    worker_id, _ = await _worker(database)
+    review_preview = await validator_reference_reviews.review_reference(
+        **_review_kwargs(worker_id),
+    )
+    await validator_reference_reviews.review_reference(
+        **_review_kwargs(worker_id),
+        expected_digest=review_preview["current_digest"],
+        apply=True,
+    )
+    async with database() as session:
+        await session.execute(
+            sa.update(references_t).values(
+                bond_contract="0x" + "2" * 40,
+                bond_chain_id=8453,
+                bond_finalized_block=123_456,
+                bond_finalized_block_hash="0x" + "3" * 64,
+                bond_facet_address="0x" + "4" * 40,
+                bond_facet_runtime_hash=RUNTIME_HASH,
+                bond_amount_raw=Decimal(10**18),
+                bond_active=True,
+                bond_slashed=False,
+                bond_verifier_version=VERIFIER,
+                bond_status_reason="active",
+                bond_verified_at=NOW,
+                updated=NOW,
+            ),
+        )
+        await session.execute(
+            sa.update(controls_t)
+            .where(controls_t.c.worker_id == worker_id)
+            .values(expires_at=NOW - timedelta(seconds=1)),
+        )
+        await session.commit()
+
+    with pytest.raises(
+        validator_reference_reviews.ReferenceReviewError,
+        match="not activation-ready.*expired",
+    ):
+        await validator_reference_reviews.review_reference(
+            worker_id,
+            model=MODEL,
+            modality="image",
+            action="activate",
+            review_ref="review:activate-control-expired",
+            now=NOW,
+            settings=_settings(),
         )
 
 

@@ -21,7 +21,7 @@ from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from grid_api import auth, database, safe_logging
-from grid_api.services import recipes, validator_bonds, validator_references
+from grid_api.services import recipes, validator_bonds, validator_references, worker_control_reviews
 from grid_api.services import validators as validators_svc
 from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import metadata as v2_metadata
@@ -30,6 +30,7 @@ from grid_api.v2.schema import validator_attestations as attestations_t
 from grid_api.v2.schema import validator_probe_groups as probe_groups_t
 from grid_api.v2.schema import validator_reference_workers as references_t
 from grid_api.v2.schema import validators as validators_t
+from grid_api.v2.schema import worker_control_reviews as controls_t
 from grid_api.v2.schema import workers as workers_t
 
 _PG = os.environ.get("VALIDATORS_TEST_DB_URL", "")
@@ -131,6 +132,20 @@ async def _seed_media_worker(session, index, *, now):
             last_seen=now,
             jobs_completed=100,
             den_earned=0,
+        ),
+    )
+    await session.execute(
+        sa.insert(controls_t).values(
+            worker_id=worker_id,
+            account_id=account_id,
+            payout_wallet=wallet,
+            operator_group_id=f"opg_pg_worker_{index:08d}",
+            status="verified",
+            reviewed_at=now - timedelta(days=1),
+            expires_at=now + timedelta(days=29),
+            review_ref=f"review:pg-worker-{index}",
+            created=now - timedelta(days=1),
+            updated=now - timedelta(days=1),
         ),
     )
     return worker_id, account_id, wallet
@@ -265,6 +280,72 @@ async def test_reference_bond_threshold_is_exact_at_uint_scale_on_postgres(pg):
         await session.commit()
 
     assert {item.worker_id for item in selected} == {references[0][0], references[1][0]}
+
+
+@pytest.mark.asyncio
+async def test_postgres_reference_pool_rejects_common_control_across_distinct_wallets(pg):
+    now = datetime.now(UTC)
+    async with await database.new_session() as session:
+        candidate = await _seed_media_worker(session, 151, now=now)
+        references = [
+            await _seed_media_worker(session, 152, now=now),
+            await _seed_media_worker(session, 153, now=now),
+        ]
+        for reference in references:
+            await _seed_reference(session, reference, now=now, bond_amount_raw=10**18)
+        await session.execute(
+            sa.update(controls_t)
+            .where(controls_t.c.worker_id.in_([item[0] for item in references]))
+            .values(operator_group_id="opg_pg_shared_control_01"),
+        )
+        await session.commit()
+
+    async with await database.new_session() as session:
+        with pytest.raises(validator_references.ReferencePoolUnavailable, match="found 1"):
+            await validator_references.select_reference_workers(
+                session,
+                candidate_worker_id=candidate[0],
+                online_model_worker_ids=[candidate[0], *(item[0] for item in references)],
+                now=now,
+                **_reference_policy(),
+            )
+
+
+@pytest.mark.asyncio
+async def test_postgres_worker_control_digest_allows_only_one_concurrent_review(pg):
+    now = datetime.now(UTC)
+    async with await database.new_session() as session:
+        worker = await _seed_media_worker(session, 175, now=now)
+        await session.commit()
+    preview = await worker_control_reviews.review_worker_control(
+        worker[0],
+        action="verify",
+        operator_group_id="opg_pg_reassigned_control_a",
+        review_ref="review:pg-control-race",
+        now=now,
+    )
+
+    async def apply(group_id):
+        return await worker_control_reviews.review_worker_control(
+            worker[0],
+            action="verify",
+            operator_group_id=group_id,
+            review_ref="review:pg-control-race",
+            expected_digest=preview["current_digest"],
+            apply=True,
+            now=now,
+        )
+
+    outcomes = await asyncio.gather(
+        apply("opg_pg_reassigned_control_a"),
+        apply("opg_pg_reassigned_control_b"),
+        return_exceptions=True,
+    )
+    assert sum(isinstance(item, dict) for item in outcomes) == 1
+    failures = [item for item in outcomes if isinstance(item, Exception)]
+    assert len(failures) == 1
+    assert isinstance(failures[0], worker_control_reviews.WorkerControlReviewError)
+    assert "state changed" in str(failures[0])
 
 
 @pytest.mark.asyncio
