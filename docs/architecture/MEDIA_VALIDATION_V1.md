@@ -243,6 +243,15 @@ deterministic fidelity support. The independent validator:
 SSIM or LPIPS may be added as separate capability-gated policies. They must not
 silently change the meaning of `image.fidelity.v1`.
 
+Consensus-affecting pHash, motion, and latency thresholds are immutable public
+constants of the scoring-policy version. They are not validator-operator
+configuration. Changing one requires a new policy id and a staged capability
+rollout. Local fetch, byte, decode-time, and process-memory limits remain
+operator configurable because exceeding them yields `inconclusive`, never a
+worker verdict. V1 fixes image pHash distance at 12 and image latency at 60
+seconds; video fidelity fixes frame pHash distance at 12 and mean motion delta
+at 8, while both V1 video policies classify latency above 120 seconds as slow.
+
 For non-deterministic image recipes, `image.contract.v1` checks decoding,
 dimensions, format, non-blank output, explicit seed transport, and latency. It
 must not claim model-fidelity certification from pHash.
