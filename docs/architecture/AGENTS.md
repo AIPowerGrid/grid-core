@@ -29,6 +29,9 @@ validation, worker incentives, and trust boundaries.
   remain separate gates. Never describe the disabled API as available to operators.
   A default-empty, expiring canonical-account pilot is deployed dark for
   supervised native qualification; it is not enabled by the dark deployment.
+  A disposable Linux ARM64 pilot passed live association, restart recovery,
+  both removal paths and unchanged non-pairing-state checks, then was disabled.
+  Windows pairing, public client release and human desktop proof remain open.
 - `PAID_VALIDATOR_AUDITS.md` - accepted, partially implemented design for
   bounded scheduler-owned audits. Schema, budgets, ordinary atomic payout, and
   recovery exist dark; scheduling, scoring, and classifier gates remain absent.

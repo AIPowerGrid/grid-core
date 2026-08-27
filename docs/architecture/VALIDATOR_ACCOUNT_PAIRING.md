@@ -7,8 +7,9 @@ native-build tested, but not in the public preview.13 release. Implementations a
 [Console #21](https://github.com/AIPowerGrid/grid-frontend/pull/21), and
 [validator #54](https://github.com/AIPowerGrid/grid-validator/pull/54).
 Deployment does not enable pairing or validator economic authority.
-The deployed Core supports an expiring account-scoped pilot. Its allowlist is
-empty and the pilot has not been activated.
+The deployed Core supports an expiring account-scoped pilot. A disposable Linux
+ARM64 lifecycle passed against production; its allowlist is empty again after
+cleanup. Windows pairing, human desktop proof and client release remain open.
 
 ## Decision
 
@@ -188,6 +189,41 @@ response is lost. Wrong owners, revoked node keys, stale proof and app tokens ar
 rejected. Non-pairing tables remain unchanged apart from authentication telemetry.
 SQLite, a local nonce fixture and loopback HTTP are explicit test boundaries;
 Core's separate PostgreSQL CI covers transition races and migration/restore.
+
+### 2026-08-27 - Linux Native Pairing Canary Completed, Pilot Removed
+
+The real unpublished Linux ARM64 binary from validator commit
+`35b4e04590daa7d5180af99aa3d0056090d3954a`, build
+[33115798738](https://github.com/AIPowerGrid/grid-validator/actions/runs/33115798738),
+completed a first-party production canary against Core `f51875ce` / `0030` and
+Console `db301013`. An ephemeral service override admitted only the fresh node
+and a separate unfunded Console account, with a two-hour expiry; the global
+pairing flag stayed off. The original production environment file was untouched.
+
+Real Console wallet authentication and separate local confirmation exercised
+request cancellation, origin rejection, both association-removal paths, stale
+local review rejection after restart and recovery after discarding a committed
+confirmation response. The automated test driver entered the Console code
+through the actual hidden TTY review. This is not a human browser/extension or
+Windows qualification claim. The node supplied two accepted reports before
+pairing and one after, with identical configuration bytes.
+
+Read-only PostgreSQL verification confirmed three stored verified signatures,
+unchanged accounts/identities, payout preferences, key ownership/scopes and
+independence reviews, with zero test money records or worker payouts. Expected
+authentication timestamps and final intentional key revocation were handled
+separately. The node is suspended, its only API key revoked, and no active
+association remains. The pairing tables retain completed/revoked test metadata;
+they are no longer empty. No historical economic record was modified.
+
+The ephemeral override was removed after cleanup, global and scoped pairing
+are off, and the public account-node endpoint returns 503. Base environment
+bytes and payout/backup timer states match their baseline. Media, bond sync,
+validator economics and paid/blind audit scheduling were never enabled.
+Public downloads remain preview.13, without pairing support. See the validator
+repository's `PRODUCTION_BASELINE.md` for the candidate hash, report digest and
+test limitations. Rollback remains flag-off with existing schema/identities
+preserved; no account merge or table deletion is required.
 
 ### 2026-08-27 21:07 UTC - Pilot-Capable Core Deployed Dark
 
