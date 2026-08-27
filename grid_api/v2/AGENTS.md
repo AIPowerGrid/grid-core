@@ -9,7 +9,8 @@ epochs, per-asset revenue pots (`grid_revenue`), multi-asset payout legs
 (`grid_payout_legs`), registered validator identities plus shared probe-group/
 assignment/attestation evidence rows, bounded service clients plus their
 delegation audit events, private identity-bound media-worker control reviews,
-and the fail-closed bonded media reference-worker snapshot pool.
+the fail-closed bonded media reference-worker snapshot pool, and private
+compensated-audit jobs plus hourly budget counters.
 
 ## Ownership
 
@@ -95,6 +96,14 @@ and the fail-closed bonded media reference-worker snapshot pool.
   rejection, revocation, or a missing row fails closed. Group ids and review
   references never enter validator challenges or public APIs, and the table
   grants no economic authority.
+- `grid_validator_audit_jobs` and `grid_validator_audit_budget_counters` are a
+  dark authorization foundation, not a live scheduler. One ordinary UUID job
+  may have at most one private audit row. Each hold consumes global, worker,
+  validator, and validator/worker-pair caps in integer units; counters freeze
+  their cap at first creation in each UTC-hour bucket. Demand and audit holds
+  are mutually exclusive. No runtime dispatch or terminal path may use these
+  tables until worker-ledger insertion and counter settlement commit in one
+  caller-owned transaction.
 - Account IDs are UUIDs. Quota identities such as `v2:<uuid>` are not DB foreign
   keys and must not be passed to credit ledger functions.
 - New columns need explicit migrations, tests, and backfill/default strategy for

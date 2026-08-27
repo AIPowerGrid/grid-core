@@ -28,6 +28,9 @@ content sanitization, and reward settlement.
   (splits, payout-asset + conversion-fee knobs, `worker_share_bps`),
   `canary_audit.py` (read-only account/job reconciliation for supervised
   demand-billing rollout),
+  `validator_audit_budgets.py` (unreferenced, default-dark compensated-audit
+  budget reservation and lifecycle foundation; no scheduler or worker-terminal
+  caller yet),
   `holdings.py` (cached on-chain AIPG balance + Chainlink ETH/USD),
   `deposits.py` (atomic Base funding receipts from verified account wallets
   plus USDC, bounded AIPG, and conversion-gated ETH claims),
@@ -167,6 +170,13 @@ content sanitization, and reward settlement.
   bounces. Stale jobs are reclaimed by the loop in `main.py`.
 - Money paths must stay idempotent and tested; value-moving credit ledger writes
   require non-null refs and must not overdraft under concurrency.
+- Compensated validator audits reserve integer work units against four locked
+  PostgreSQL scopes: global, worker, reviewed validator, and validator/worker
+  pair. The service must remain unimported by runtime dispatch until the same
+  transaction can append the ordinary worker payout ledger row and settle the
+  audit hold. Existing demand reservations and audit holds may never share a
+  job UUID. Validator registration alone is insufficient: a current independent
+  review, fresh heartbeat, and explicit signing-wallet allowlist are mandatory.
 - A successful Base funding claim atomically writes its immutable
   `grid_deposits` receipt and purchased-credit ledger movement. AIPG valuation
   must use a fresh operator epoch plus hard transaction/account/network caps;

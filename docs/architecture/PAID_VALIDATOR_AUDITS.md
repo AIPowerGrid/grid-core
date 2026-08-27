@@ -2,13 +2,21 @@
 
 ## Status
 
-Accepted implementation contract; not implemented or enabled.
+Accepted implementation contract. The schema, Alembic `0029`, and an
+unreferenced budget lifecycle service are implemented in source and remain
+dark. Scheduler, dispatch, queue/worker transport, payout-ledger terminal,
+sweeper, configuration flags, and validator scoring integration do not exist.
 
 Current assignment-bound probes remain economically inert and return a
 worker-visible `den: 0` terminal acknowledgement. They measure protocol
 conformance and capability only. This document defines the separate rail needed
 for production-shaped, compensated audits; it does not promote existing probes
 to quality evidence.
+
+The implemented foundation proves atomic reservation across global, worker,
+reviewed-validator, and validator/worker-pair UTC-hour counters; exactly-once
+settle/release movement; demand-reservation exclusion; and real PostgreSQL cap,
+same-job, and settle/release races. It cannot issue or pay for work by itself.
 
 ## Purpose
 
@@ -213,7 +221,8 @@ Before production canary:
 
 ## Rollout Gates
 
-1. Merge schema/service tests with dispatch disabled.
+1. Merge schema/service tests with dispatch disabled. The source foundation for
+   this gate is complete; runtime wiring is still absent.
 2. Dark-deploy and verify empty tables plus zero counters.
 3. Enable one reviewed first-party canary validator with tiny budgets; keep blind
    quality false and treat all results as operational evidence.
