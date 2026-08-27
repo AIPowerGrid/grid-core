@@ -180,17 +180,17 @@ async def _validator_bond_sync_loop():
 
 
 async def _recipe_sync_loop():
-    """Background task: refresh approved recipes from on-chain RecipeVault.
-    No-ops until RECIPEVAULT_ADDRESS/BASE_RPC_URL are set; curated local recipes
-    loaded at startup remain servable regardless. Interval via RECIPE_SYNC_SECONDS."""
-    import os
+    """Refresh a dual-RPC verified RecipeVault snapshot off the hot path."""
+    from .config import get_settings
+    from .safe_logging import error_type
     from .services.recipes import sync_from_recipevault
-    interval = int(os.getenv("RECIPE_SYNC_SECONDS", "600") or 600)
+
+    interval = max(60, get_settings().recipe_sync_seconds)
     while True:
         try:
             await sync_from_recipevault()
-        except Exception as e:
-            logger.error(f"Recipe sync loop error: {e}")
+        except Exception as exc:
+            logger.error("Recipe sync loop error_type=%s", error_type(exc))
         await asyncio.sleep(interval)
 
 
@@ -262,11 +262,12 @@ async def lifespan(app: FastAPI):
         await alerts.stop()
         raise
     reclaimer = asyncio.create_task(_stale_job_reclaimer())
-    # Media recipes: load curated local recipes now (servable immediately), then
-    # refresh from RecipeVault on an interval (no-op until BASE_RPC/addr configured).
+    # Media recipes: load curated local recipes now. Chain sync is an explicit,
+    # default-off, dual-RPC verified background authority.
     import os
-    from .services import recipes as _recipes
+
     from .services import loras as _loras
+    from .services import recipes as _recipes
     from .services import styles as _styles
     _base = os.path.dirname(os.path.dirname(__file__))
     _recipes.load_local_recipes(os.path.join(_base, "recipes"))

@@ -21,12 +21,19 @@ graph structure. Only recipes present in the cache (i.e. approved) can be resolv
 """
 
 import copy
+import hashlib
 import json
 import logging
 import os
+import re
 import secrets
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+from ..config import get_settings
+from ..safe_logging import error_type
 
 logger = logging.getLogger("grid_api.recipes")
 
@@ -60,16 +67,27 @@ _BY_NAME: dict[str, Recipe] = {}   # lowercased name -> Recipe
 # A model can have several recipes (e.g. a t2i and an i2i graph). modelName (lower)
 # -> [recipes]; resolve_for_model picks the variant by whether a source frame exists.
 _BY_MODEL: dict[str, list[Recipe]] = {}
+_LOCAL_RECIPES: dict[str, Recipe] = {}
+_ONCHAIN_RECIPES: dict[str, Recipe] = {}
+_ONCHAIN_MASKED_ROOTS: set[str] = set()
+_ONCHAIN_MASKED_NAMES: set[str] = set()
+_ONCHAIN_SYNCED_AT: float | None = None
+_ONCHAIN_FINALIZED_BLOCK: int | None = None
+_ONCHAIN_FINALIZED_BLOCK_HASH: str | None = None
+_CACHE_LOCK = threading.RLock()
 
 
 # ── registry ─────────────────────────────────────────────────────────────────
-def register_recipe(recipe_root: str, name: str, workflow: dict, *,
-                    recipe_id: Optional[int] = None) -> Recipe:
-    """Add/replace a recipe in the cache. `workflow` is the full stored graph,
-    including its `_grid` metadata block (which is split out here)."""
+def _recipe_from_workflow(
+    recipe_root: str,
+    name: str,
+    workflow: dict,
+    *,
+    recipe_id: Optional[int] = None,
+) -> Recipe:
     meta = dict(workflow.get("_grid") or {})
     spec = {k: v for k, v in workflow.items() if k != "_grid"}
-    r = Recipe(
+    return Recipe(
         recipe_root=recipe_root.lower(),
         recipe_id=recipe_id,
         name=name,
@@ -86,13 +104,106 @@ def register_recipe(recipe_root: str, name: str, workflow: dict, *,
         lora_inject=(meta.get("loraInject") or None),
         seed_max=int(meta.get("seedMax") or (2**53 - 1)),
     )
+
+
+def _index_recipe(r: Recipe) -> None:
     _BY_ROOT[r.recipe_root] = r
-    _BY_NAME[name.lower()] = r
-    if recipe_id is not None:
-        _BY_ID[recipe_id] = r
+    _BY_NAME[r.name.lower()] = r
+    if r.recipe_id is not None:
+        _BY_ID[r.recipe_id] = r
     bucket = _BY_MODEL.setdefault(r.model_name.lower(), [])
     bucket[:] = [x for x in bucket if x.recipe_root != r.recipe_root] + [r]
+
+
+def register_recipe(recipe_root: str, name: str, workflow: dict, *,
+                    recipe_id: Optional[int] = None) -> Recipe:
+    """Add/replace one process-local recipe.
+
+    Startup file loading and chain synchronization use staged source snapshots;
+    this direct helper remains for tests and explicit in-process registration.
+    """
+    r = _recipe_from_workflow(recipe_root, name, workflow, recipe_id=recipe_id)
+    with _CACHE_LOCK:
+        _index_recipe(r)
     return r
+
+
+def _rebuild_source_cache_locked() -> None:
+    """Rebuild all public indexes from local then verified on-chain sources."""
+    _BY_ROOT.clear()
+    _BY_ID.clear()
+    _BY_NAME.clear()
+    _BY_MODEL.clear()
+    combined = {
+        root: recipe
+        for root, recipe in _LOCAL_RECIPES.items()
+        if root not in _ONCHAIN_MASKED_ROOTS
+        and recipe.name.lower() not in _ONCHAIN_MASKED_NAMES
+    }
+    combined.update(_ONCHAIN_RECIPES)  # verified chain entries intentionally win collisions
+    for recipe in combined.values():
+        _index_recipe(recipe)
+
+
+def _replace_local_recipes(staged: dict[str, Recipe]) -> None:
+    with _CACHE_LOCK:
+        _LOCAL_RECIPES.clear()
+        _LOCAL_RECIPES.update(staged)
+        _rebuild_source_cache_locked()
+
+
+def _install_onchain_snapshot(staged: dict[str, Recipe], snapshot) -> None:
+    global _ONCHAIN_SYNCED_AT, _ONCHAIN_FINALIZED_BLOCK, _ONCHAIN_FINALIZED_BLOCK_HASH
+    with _CACHE_LOCK:
+        if _ONCHAIN_FINALIZED_BLOCK is not None:
+            if snapshot.finalized_block < _ONCHAIN_FINALIZED_BLOCK:
+                raise ValueError("RecipeVault snapshot would roll back finalized authority")
+            if (
+                snapshot.finalized_block == _ONCHAIN_FINALIZED_BLOCK
+                and snapshot.finalized_block_hash != _ONCHAIN_FINALIZED_BLOCK_HASH
+            ):
+                raise ValueError("RecipeVault finalized block hash changed at the installed height")
+        _ONCHAIN_RECIPES.clear()
+        _ONCHAIN_RECIPES.update(staged)
+        _ONCHAIN_MASKED_ROOTS.clear()
+        _ONCHAIN_MASKED_ROOTS.update(record.recipe_root.lower() for record in snapshot.records)
+        _ONCHAIN_MASKED_NAMES.clear()
+        _ONCHAIN_MASKED_NAMES.update(record.name.lower() for record in snapshot.records)
+        _ONCHAIN_SYNCED_AT = time.monotonic()
+        _ONCHAIN_FINALIZED_BLOCK = snapshot.finalized_block
+        _ONCHAIN_FINALIZED_BLOCK_HASH = snapshot.finalized_block_hash
+        _rebuild_source_cache_locked()
+
+
+def _clear_onchain_authority() -> None:
+    global _ONCHAIN_SYNCED_AT, _ONCHAIN_FINALIZED_BLOCK, _ONCHAIN_FINALIZED_BLOCK_HASH
+    with _CACHE_LOCK:
+        _ONCHAIN_RECIPES.clear()
+        _ONCHAIN_MASKED_ROOTS.clear()
+        _ONCHAIN_MASKED_NAMES.clear()
+        _ONCHAIN_SYNCED_AT = None
+        _ONCHAIN_FINALIZED_BLOCK = None
+        _ONCHAIN_FINALIZED_BLOCK_HASH = None
+        _rebuild_source_cache_locked()
+
+
+def _expire_stale_onchain_recipes() -> None:
+    """Drop stale chain authority while retaining reviewed local fallbacks."""
+    global _ONCHAIN_SYNCED_AT
+    max_stale = get_settings().recipevault_max_stale_seconds
+    if not 60 <= max_stale <= 86_400:
+        max_stale = 1800
+    with _CACHE_LOCK:
+        if (
+            _ONCHAIN_SYNCED_AT is not None
+            and time.monotonic() - _ONCHAIN_SYNCED_AT > max_stale
+        ):
+            _ONCHAIN_RECIPES.clear()
+            _ONCHAIN_SYNCED_AT = None
+            _rebuild_source_cache_locked()
+            logger.error(
+                "RecipeVault cache expired; chain-governed recipes failed closed"
+            )
 
 
 # File extensions that denote model weights (for worker preflight file checks).
@@ -121,25 +232,31 @@ def model_files(spec: dict) -> list[str]:
 
 def get_recipe(ref: str | int) -> Optional[Recipe]:
     """Look up by recipe_root (hex str), recipe_id (int/numeric str), or name."""
-    if isinstance(ref, int):
-        return _BY_ID.get(ref)
-    s = str(ref)
-    if s.lower() in _BY_ROOT:
-        return _BY_ROOT[s.lower()]
-    if s.isdigit() and int(s) in _BY_ID:
-        return _BY_ID[int(s)]
-    return _BY_NAME.get(s.lower())
+    _expire_stale_onchain_recipes()
+    with _CACHE_LOCK:
+        if isinstance(ref, int):
+            return _BY_ID.get(ref)
+        s = str(ref)
+        if s.lower() in _BY_ROOT:
+            return _BY_ROOT[s.lower()]
+        if s.isdigit() and int(s) in _BY_ID:
+            return _BY_ID[int(s)]
+        return _BY_NAME.get(s.lower())
 
 
 def list_recipes() -> list[Recipe]:
-    return list(_BY_ROOT.values())
+    _expire_stale_onchain_recipes()
+    with _CACHE_LOCK:
+        return list(_BY_ROOT.values())
 
 
 def recipes_for_model(ref: str | int) -> list[Recipe]:
     """All recipes serving a model (by modelName), else a single by-name/root/id hit."""
-    out = _BY_MODEL.get(str(ref).lower())
-    if out:
-        return list(out)
+    _expire_stale_onchain_recipes()
+    with _CACHE_LOCK:
+        out = _BY_MODEL.get(str(ref).lower())
+        if out:
+            return list(out)
     r = get_recipe(ref)
     return [r] if r else []
 
@@ -247,23 +364,26 @@ def load_local_recipes(dir_path: str) -> int:
     """Register curated recipes from local `*.json` files (each a {_grid, ...graph}).
     For v1 / pre-RecipeVault: drop a recipe in the dir and it's servable at startup.
     Returns the number loaded. Name comes from `_grid.name` (else the filename)."""
-    import os
     from .recipe_import import recipe_root
-    n = 0
+
+    staged: dict[str, Recipe] = {}
     if not os.path.isdir(dir_path):
         return 0
     for fn in sorted(os.listdir(dir_path)):
         if not fn.endswith(".json"):
             continue
         try:
-            wf = json.load(open(os.path.join(dir_path, fn)))
+            with open(os.path.join(dir_path, fn)) as recipe_file:
+                wf = json.load(recipe_file)
         except (ValueError, OSError):
             continue
         if not isinstance(wf, dict) or "_grid" not in wf:
             continue  # not a recipe (raw workflow / unrelated)
         name = (wf.get("_grid") or {}).get("name") or os.path.splitext(fn)[0]
-        register_recipe(recipe_root(wf), name, wf)
-        n += 1
+        root = recipe_root(wf)
+        staged[root.lower()] = _recipe_from_workflow(root, name, wf)
+    _replace_local_recipes(staged)
+    n = len(staged)
     logger.info("Loaded %d local recipe(s) from %s", n, dir_path)
     return n
 
@@ -467,47 +587,152 @@ def resolve_for_model(model: str, inputs: dict | None = None, *, has_source: boo
 
 # ── on-chain sync (off the hot path; no-op until configured) ──────────────────
 async def sync_from_recipevault() -> int:
-    """Pull approved recipes from RecipeVault into the cache. Returns count synced.
-    No-ops (returns 0) if BASE_RPC_URL / RECIPEVAULT_ADDRESS aren't set."""
-    addr = os.getenv("RECIPEVAULT_ADDRESS") or os.getenv("GRID_DIAMOND_ADDRESS")
-    rpc = os.getenv("BASE_RPC_URL")
-    if not addr or not rpc:
-        logger.info("RecipeVault not configured (RECIPEVAULT_ADDRESS/BASE_RPC_URL) — "
-                    "cache has %d seeded recipe(s)", len(_BY_ROOT))
+    """Atomically install one verified, public RecipeVault snapshot.
+
+    The feature is explicitly default-off. Missing configuration or any chain,
+    quorum, runtime, content, or policy error leaves the last-known-good cache
+    untouched.
+    """
+    settings = get_settings()
+    if not settings.recipevault_sync_enabled:
+        if _ONCHAIN_RECIPES or _ONCHAIN_MASKED_ROOTS:
+            _clear_onchain_authority()
         return 0
     try:
-        from web3 import Web3  # noqa: F401  (import-availability check only)
-    except Exception as e:
-        logger.warning("RecipeVault sync deps unavailable (%s) — cache unchanged", e)
-        return 0
-    try:
-        # web3 RPC is synchronous + does N sequential network round-trips; run it OFF the
-        # event loop or it stalls token streaming + worker dispatch for the whole sync.
         import asyncio
-        return await asyncio.to_thread(_sync_from_recipevault_blocking, addr, rpc)
-    except Exception as e:
-        logger.error("RecipeVault sync failed: %s", e)
+
+        return await asyncio.to_thread(_sync_from_recipevault_blocking, settings)
+    except Exception as exc:
+        logger.error("RecipeVault sync failed error_type=%s", error_type(exc))
+        _expire_stale_onchain_recipes()
         return 0
 
 
-def _sync_from_recipevault_blocking(addr: str, rpc: str) -> int:
-    """Synchronous web3 pull — MUST run via asyncio.to_thread (never on the loop)."""
-    from web3 import Web3
-    from .._abi import RECIPEVAULT_ABI, decompress_workflow
-    w3 = Web3(Web3.HTTPProvider(rpc))
-    c = w3.eth.contract(address=w3.to_checksum_address(addr), abi=RECIPEVAULT_ABI)
-    total = c.functions.totalRecipes().call()
-    n = 0
-    for rid in range(1, total + 1):
-        # getRecipe -> (recipeId, recipeRoot, workflowData, creator,
-        #               canCreateNFTs, isPublic, compression, createdAt, name, description)
-        rec = c.functions.getRecipe(rid).call()
-        recipe_id, recipe_root, workflow_data = rec[0], rec[1], rec[2]
-        compression, name = rec[6], rec[8]
-        root_hex = recipe_root.hex() if isinstance(recipe_root, (bytes, bytearray)) else str(recipe_root)
-        root_hex = root_hex if root_hex.startswith("0x") else "0x" + root_hex
-        workflow = json.loads(decompress_workflow(workflow_data, compression).decode("utf-8"))
-        register_recipe(root_hex, name, workflow, recipe_id=int(recipe_id))
-        n += 1
-    logger.info("RecipeVault sync: %d recipes cached", n)
-    return n
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("recipe JSON contains duplicate object keys")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite_number(value: str) -> None:
+    raise ValueError(f"recipe JSON contains non-finite number {value}")
+
+
+def _stage_onchain_recipes(snapshot) -> dict[str, Recipe]:
+    """Parse and policy-check the complete snapshot without mutating caches."""
+    from .recipe_import import recipe_root, validate_recipe
+
+    staged: dict[str, Recipe] = {}
+    ids: set[int] = set()
+    names: set[str] = set()
+    for record in snapshot.records:
+        if not record.is_public:
+            continue
+        if record.compression != 0:
+            raise ValueError("public governed recipes must be uncompressed")
+        raw = bytes(record.workflow_data)
+        workflow = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_nonfinite_number,
+        )
+        if not isinstance(workflow, dict):
+            raise ValueError("recipe JSON must be an object")
+        canonical = json.dumps(
+            workflow,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if raw != canonical:
+            raise ValueError("recipe bytes are not Core-canonical JSON")
+        computed_root = "0x" + hashlib.sha256(canonical).hexdigest()
+        if computed_root != record.recipe_root.lower() or recipe_root(workflow) != computed_root:
+            raise ValueError("recipe root does not commit to Core-canonical JSON")
+
+        meta = workflow.get("_grid")
+        if not isinstance(meta, dict):
+            raise ValueError("recipe is missing object _grid metadata")
+        if not isinstance(meta.get("vars"), dict):
+            raise ValueError("recipe vars must be an object")
+        if not isinstance(meta.get("clamps", {}), dict) or not isinstance(meta.get("enums", {}), dict):
+            raise ValueError("recipe clamps and enums must be objects")
+        if str(meta.get("engine") or "") != "comfyui":
+            raise ValueError("on-chain recipe engine is not supported")
+        if str(meta.get("jobType") or "") not in {"image", "video", "3d"}:
+            raise ValueError("on-chain recipe job type is not supported")
+        if not record.name or len(record.name) > 128 or meta.get("name") != record.name:
+            raise ValueError("on-chain and content recipe names must match")
+        model_name = meta.get("modelName")
+        if not isinstance(model_name, str) or not model_name.strip() or len(model_name) > 128:
+            raise ValueError("recipe modelName is required and bounded")
+        required_models = meta.get("requiredModels")
+        if (
+            not isinstance(required_models, list)
+            or not 1 <= len(required_models) <= 8
+            or any(not isinstance(item, str) or not item or len(item) > 128 for item in required_models)
+        ):
+            raise ValueError("recipe requiredModels must contain 1-8 bounded names")
+        deterministic = meta.get("deterministic") is True
+        model_digest = str(meta.get("modelDigest") or "").lower()
+        if deterministic and not re.fullmatch(r"[0-9a-f]{64}", model_digest):
+            raise ValueError("deterministic recipes require a governed modelDigest")
+        if record.can_create_nfts and not deterministic:
+            raise ValueError("NFT-enabled recipes must be deterministic")
+        problems = validate_recipe(workflow)
+        if problems:
+            raise ValueError("recipe failed structural validation")
+        if record.recipe_id <= 0 or record.recipe_id in ids:
+            raise ValueError("recipe ids must be positive and unique")
+        name_key = record.name.lower()
+        if name_key in names or computed_root in staged:
+            raise ValueError("recipe names and roots must be unique")
+        try:
+            recipe = _recipe_from_workflow(
+                computed_root,
+                record.name,
+                workflow,
+                recipe_id=record.recipe_id,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("recipe metadata cannot be normalized") from exc
+        ids.add(record.recipe_id)
+        names.add(name_key)
+        staged[computed_root] = recipe
+    return staged
+
+
+def _sync_from_recipevault_blocking(settings) -> int:
+    """Read, verify, stage, then atomically replace the on-chain source."""
+    from .recipe_vault_sync import read_quorum_recipe_snapshot, reviewed_runtime_hash
+
+    runtime_hash = reviewed_runtime_hash(settings.recipevault_verifier_version)
+    if runtime_hash is None:
+        raise ValueError("RecipeVault verifier version is not reviewed")
+    primary = settings.base_rpc_url.get_secret_value() if settings.base_rpc_url else ""
+    confirmation = (
+        settings.recipevault_confirmation_rpc_url.get_secret_value()
+        if settings.recipevault_confirmation_rpc_url
+        else ""
+    )
+    snapshot = read_quorum_recipe_snapshot(
+        rpc_url=primary,
+        confirmation_rpc_url=confirmation,
+        expected_chain_id=settings.recipevault_chain_id,
+        diamond_address=settings.recipevault_address,
+        expected_facet_runtime_hash=runtime_hash,
+        max_records=settings.recipevault_max_records,
+        max_workflow_bytes=settings.recipevault_max_workflow_bytes,
+        rpc_timeout_seconds=settings.recipevault_rpc_timeout_seconds,
+        max_finalized_age_seconds=settings.recipevault_max_finalized_age_seconds,
+    )
+    staged = _stage_onchain_recipes(snapshot)
+    _install_onchain_snapshot(staged, snapshot)
+    logger.info(
+        "RecipeVault sync installed %d public recipe(s) at finalized block %d",
+        len(staged),
+        snapshot.finalized_block,
+    )
+    return len(staged)

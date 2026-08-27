@@ -39,6 +39,13 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   Diamond address, all expected selector routes, and the Core-pinned facet
   runtime before one atomic cursor/reference refresh. PostgreSQL serializes
   replicas; any ambiguity invalidates only that authority's cached eligibility.
+- RecipeVault synchronization is an explicit default-off authority. It requires
+  two distinct Base RPC hosts to agree on one complete finalized snapshot, all
+  ten selectors to route to one Core-pinned facet runtime, and every public
+  workflow to match its Core-canonical SHA-256 commitment. Installation is
+  atomic and off the request path; stale chain state drops chain recipes while
+  retaining revocation tombstones, so a governed recipe cannot resurrect from a
+  local file. Never infer this authority from `GRID_DIAMOND_ADDRESS`.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
 - **Safety:** `services/sanitizer.py` is secret redaction, not a content safety
