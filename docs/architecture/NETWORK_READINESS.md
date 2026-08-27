@@ -26,16 +26,18 @@ At this snapshot:
 - `/v1/status/network` is live and reports seven connected workers, ten online
   model entries, and every model below the three-worker redundancy target;
 - sealed shared-quorum text validation is live in `shared_quorum_preview` mode;
-- three active first-party validators run published `v0.1.0-preview.3` commit
-  `7ba18a52`; Core reports that immutable release tag for all three. A fresh
-  post-upgrade echo group reached `accepted / healthy` with three distinct
-  votes, in addition to the earlier sealed tool-chain canary;
+- three active first-party validators run published `v0.1.0-preview.5` commit
+  `07190da8`; Core reports that immutable release tag for all three. Each node
+  passed checksum-gated staging, `check --no-probe`, an atomic symlink switch,
+  and a clean service restart. No fresh probe was issued during the
+  `preview.5` rollout window, so the latest post-upgrade workload proof remains
+  the earlier `preview.3` echo group with three distinct healthy votes;
 - those validators share one operator and hypervisor, so verified independent
   operator count remains zero;
 - validator rewards, validator stake, worker penalties from validator evidence,
   and Core federation are off;
 - charging remains a narrow allowlist canary rather than global; and
-- the four-platform `v0.1.0-preview.3` validator binary release and versioned
+- the four-platform `v0.1.0-preview.5` validator binary release and versioned
   multi-architecture GHCR image are published; macOS and Windows remain
   explicitly unsigned. The GHCR package is public and anonymously pullable on
   Linux x64 and ARM64. No production-capable
@@ -96,6 +98,18 @@ service restart. Core then reported three fresh, participating validators all
 running `v0.1.0-preview.3`; a new echo group moved from pending to accepted
 with three healthy votes. Public status continued to report validator economic
 effect `none`, staking not required, and zero verified independent operators.
+
+Later that day, the three nodes rolled one at a time to the exact
+provenance-verified Linux x64 `v0.1.0-preview.5` artifact from `07190da8`.
+Each archive matched SHA-256
+`d74e66c69f3b2ebef5b1ca6b4bb1b69cc2f1c1400cfc36f4ae095afaed0be0b7`.
+Every node passed `check --no-probe` before an atomic symlink switch and service
+restart; the prior release stayed available for rollback. Public status then
+reported three active, fresh, participating validators all on `preview.5`, zero
+verified independent operators, and validator economic effect `none`. No new
+assignment or authoritative vote appeared during the 90-second observation
+window, so this proves the release and recovery path but is not a fresh
+workload-round result.
 
 ## Immediate Validator Preview
 
