@@ -78,8 +78,10 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   policy, then apply with that preview's exact `current_digest`.
 - Validator operator review uses `review_validator_operator.py`: assign the
   same opaque `opg_*` id to every registration under common control, preview
-  every transition, and apply with that exact digest. Do not place names,
-  emails, hostnames, IPs, or private review notes in the group id or review ref.
+  every transition, inspect `eligible_to_apply` and `blocking_reasons`, and
+  apply with that exact digest. An incomplete verify preview reports progress;
+  the corresponding apply still fails closed. Do not place names, emails,
+  hostnames, IPs, or private review notes in the group id or review ref.
 - Media reference review is two-step: use `review_validator_reference.py` with
   `--action review` to create/update a paused quality row, let the default-off
   chain sync write a fresh exact bond proof, then preview/apply `--action

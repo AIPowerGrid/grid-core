@@ -170,6 +170,7 @@ async def review_operator(
             raise OperatorReviewError("validator review state changed; preview again")
 
         metrics = qualification_metrics(state, now=current)
+        blocking_reasons: list[str] = []
         values: dict[str, Any]
         if action == "candidate":
             group_id = operator_group_id or state["operator_group_id"]
@@ -189,12 +190,16 @@ async def review_operator(
         elif action == "verify":
             if state["independence_status"] != "candidate":
                 raise OperatorReviewError("only a candidate can be verified")
-            if not metrics["time_ready"] or not metrics["coverage_ready"]:
-                raise OperatorReviewError("72-hour qualification or heartbeat coverage is incomplete")
+            if not metrics["time_ready"]:
+                blocking_reasons.append("minimum qualification time has not elapsed")
+            if not metrics["coverage_ready"]:
+                blocking_reasons.append("heartbeat sample coverage is below minimum")
             if not _aware(state["last_heartbeat"]) or _aware(state["last_heartbeat"]) < (
                 current - timedelta(seconds=SAMPLE_INTERVAL_SECONDS * 2)
             ):
-                raise OperatorReviewError("candidate heartbeat is not fresh")
+                blocking_reasons.append("candidate heartbeat is not fresh")
+            if apply and blocking_reasons:
+                raise OperatorReviewError("; ".join(blocking_reasons))
             values = {
                 "independence_status": "verified",
                 "independence_reviewed_at": current,
@@ -221,6 +226,8 @@ async def review_operator(
             "proposed_status": values["independence_status"],
             "operator_group_id": values.get("operator_group_id", state["operator_group_id"]),
             "qualification": metrics,
+            "eligible_to_apply": not blocking_reasons,
+            "blocking_reasons": blocking_reasons,
             "activity": activity,
             "review_ref": review_ref,
             "economic_effect": "none",
