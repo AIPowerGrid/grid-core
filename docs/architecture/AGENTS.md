@@ -21,6 +21,9 @@ validation, worker incentives, and trust boundaries.
   economic gates.
 - `VALIDATOR_ANTI_GAMING.md` - executable hostile-worker baseline, public-probe
   limitations, blind-audit contract, and the quality-evidence promotion gate.
+- `PAID_VALIDATOR_AUDITS.md` - accepted but unimplemented design for bounded,
+  scheduler-owned audits that use ordinary worker payout semantics without
+  exposing validator markers or granting quality/economic authority.
 - `MEDIA_VALIDATION_V1.md` - accepted fail-closed image/video validation design:
   private challenges, cached bond eligibility, rotating references, Core object
   hashing, validator fetch defenses, dark validator-side modality scoring, and
