@@ -22,7 +22,7 @@ production rollout, and a registered node does not prove independent control.
 
 At this snapshot:
 
-- production Core runs immutable commit `df34ffd4` with Alembic `0029`;
+- production Core runs immutable commit `6015eca3` with Alembic `0029`;
 - `/v1/status/network` is live and reports seven connected workers, ten online
   model entries, and every model below the three-worker redundancy target;
 - sealed shared-quorum text validation is live in `shared_quorum_preview` mode;
@@ -185,6 +185,22 @@ independently verified operators and validator economic effect `none`.
 Charging remained allowlist/global-off, payout and backup timers remained
 enabled and active, public route smokes passed, and the post-cutover API journal
 contained no warning-or-higher entries.
+
+At 11:58 UTC, production advanced without a schema change to exact Core commit
+`6015eca3a5177c066048c3b6dc515ba86b257ee7`. The immutable candidate used the
+reviewed hash-locked Python 3.12 environment, passed `pip check`, and imported
+the default-off `video.fidelity.v1` policy. A fresh 70,730,625-byte checksummed
+production backup restored into a guarded scratch database, reported Alembic
+`0029`, passed `alembic check`, and removed the scratch database before
+cutover. External health reported the exact commit after all seven workers and
+all three preview.8 validators reconnected. The capability endpoint now reports
+the three-worker `video.fidelity.v1` lane, but image and video validation,
+reference/bond sync, RecipeVault sync, validator rewards, staking, routing
+authority, and slashing all remain disabled. Both compensated-audit tables
+remain empty, charging remains allowlist/global-off, payout and backup timers
+remain enabled and active, public route smokes return `200 / 401 / 410` as
+designed, and the deployment-window API journal contains no warning-or-higher
+entries. The prior `df34ffd4` release remains installed for rollback.
 
 The first-party fleet briefly advanced to preview.6 to prove the new
 account-private operator qualification response. Before the next rollout, an
@@ -419,7 +435,8 @@ Scheduler crash/reclaim tests and held-out traffic-classifier gates remain
 required before any dark canary. The schema and terminal support were first
 deployed dark at production commit `d8a48f2a` / Alembic `0029`; both audit
 tables were empty after that startup. Runtime commit `df34ffd4` did not add a
-scheduler, migration, or economic gate.
+scheduler, migration, or economic gate. Runtime commit `6015eca3` also leaves
+the rail dark and both tables empty.
 
 ### 20. Private deterministic image validation - Ready dark
 
@@ -456,7 +473,8 @@ bonded references selected under the same fail-closed policy as image. Real
 LTX/workflow calibration, governed recipe publication, independent reference
 operators, prompt/key-event relevance, and media-enabled release-binary
 qualification remain open. No video evidence affects routing, rewards, strikes,
-bonds, or slashing.
+bonds, or slashing. Production Core `6015eca3` advertises this capability with
+`enabled=false`; deployment does not satisfy any media rollout gate.
 
 ### 23. Rotating bonded references - Ready dark/External
 
