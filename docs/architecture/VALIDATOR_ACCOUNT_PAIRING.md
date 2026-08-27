@@ -1,8 +1,11 @@
 # Validator Account Pairing
 
-Status: Core implementation under review, default off. The Console and local
-operator-app integration are not implemented in this change. Nothing here is a
-production rollout or validator economic activation.
+Status: Core implementation reviewed with the matching Console and local app,
+default off and not deployed. Cross-repo implementations are tracked in
+[Core #58](https://github.com/AIPowerGrid/grid-core/pull/58),
+[Console #21](https://github.com/AIPowerGrid/grid-frontend/pull/21), and
+[validator #54](https://github.com/AIPowerGrid/grid-validator/pull/54).
+Nothing here is a production rollout or validator economic activation.
 
 ## Decision
 
@@ -141,6 +144,15 @@ off leaves old validators and inference paths unaffected.
    needed. Retain the tables and node configurations. An explicit database
    downgrade discards only association state, but is not the operational rollback.
 
-Remaining: Console page, local-app controls, both-platform live pairing proof,
-and supervised deployment. This Core change alone does not close the onboarding
-goal or the five-independent-operator qualification.
+Cross-repo verification on 2026-08-27: six validator integration tests passed
+against the actual Core HTTP handlers and built Next Console. They exercise real
+SIWE verification, scoped node keys, Console wallet callbacks/Auth.js sessions,
+two-sided approval, private listing, exact removal, and recovery after a committed
+response is lost. Wrong owners, revoked node keys, stale proof and app tokens are
+rejected. Non-pairing tables remain unchanged apart from authentication telemetry.
+SQLite, a local nonce fixture and loopback HTTP are explicit test boundaries;
+Core's separate PostgreSQL CI covers transition races and migration/restore.
+
+Remaining: merged/released clients, dark deployment and migration, supervised
+association/removal, and both-platform live pairing proof. This Core change alone
+does not close onboarding or the five-independent-operator qualification.
