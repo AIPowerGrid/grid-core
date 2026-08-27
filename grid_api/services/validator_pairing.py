@@ -50,6 +50,23 @@ class PairingConflict(PairingError):
     status_code = 409
 
 
+class PairingUnavailable(PairingError):
+    status_code = 503
+
+
+def pilot_accounts(now: datetime | None = None) -> frozenset[UUID]:
+    settings = get_settings()
+    until = settings.validator_pairing_canary_until
+    if until is None or until <= (now or datetime.now(UTC)):
+        return frozenset()
+    return frozenset(settings.validator_pairing_canary_accounts)
+
+
+def _require_available(account_id, now: datetime) -> None:
+    if not get_settings().validator_pairing_enabled and _uuid(account_id) not in pilot_accounts(now):
+        raise PairingUnavailable("Validator account pairing is not enabled")
+
+
 def _uuid(value) -> UUID:
     try:
         return UUID(str(value))
@@ -88,6 +105,7 @@ def _settings() -> tuple[str, str]:
 
 async def _canonical_account(session, account_id) -> UUID:
     aid = _uuid(account_id)
+    _require_available(aid, await _now(session))
     exists = await session.scalar(sa.select(accounts.c.id).where(accounts.c.id == aid))
     retired = await session.scalar(
         sa.select(account_aliases.c.source_account_id).where(account_aliases.c.source_account_id == aid),
@@ -113,7 +131,7 @@ async def _node(session, *, account_id=None, wallet=None, validator_id=None):
 
 
 async def _slot(session, node):
-    return (
+    row = (
         (
             await session.execute(
                 sa.select(pairings).where(pairings.c.validator_id == node["id"]),
@@ -122,6 +140,9 @@ async def _slot(session, node):
         .mappings()
         .first()
     )
+    if row and row["operator_account_id"]:
+        _require_available(row["operator_account_id"], await _now(session))
+    return row
 
 
 async def _live_link(session, node):
@@ -144,6 +165,8 @@ async def _live_link(session, node):
         .mappings()
         .first()
     )
+    if row:
+        _require_available(row["operator_account_id"], await _now(session))
     return row
 
 
@@ -366,6 +389,10 @@ async def cancel(*, pairing_id, account_id, wallet) -> dict:
 async def list_for_account(*, operator_account_id) -> dict:
     async with await new_session() as session:
         aid = await _canonical_account(session, operator_account_id)
+        node_filter = (
+            sa.true() if get_settings().validator_pairing_enabled
+            else links.c.node_account_id.in_(pilot_accounts(await _now(session)))
+        )
         rows = (
             (
                 await session.execute(
@@ -380,6 +407,7 @@ async def list_for_account(*, operator_account_id) -> dict:
                     )
                     .join(validators, validators.c.id == links.c.validator_id)
                     .where(
+                        node_filter,
                         links.c.operator_account_id == aid,
                         links.c.revoked_at.is_(None),
                         links.c.signing_wallet == validators.c.signing_wallet,
@@ -426,6 +454,7 @@ async def unlink(*, validator_id, operator_account_id, pairing_id) -> dict:
         )
         if not row:
             raise PairingNotFound("Association not found or has changed")
+        _require_available(row["node_account_id"], await _now(session))
         if not row["revoked_at"]:
             await session.execute(sa.update(links).where(links.c.validator_id == validator_id).values(revoked_at=await _now(session)))
             await session.execute(sa.update(pairings).where(pairings.c.id == pairing_id).values(status="cancelled"))
@@ -481,6 +510,7 @@ async def unlink_from_node(*, account_id, wallet, pairing_id, issued_at, signatu
         if not link:
             raise PairingNotFound("Association not found or has changed")
         now = await _now(session)
+        _require_available(link["operator_account_id"], now)
         age = int(now.timestamp()) - issued_at
         if age < 0 or age >= TTL_SECONDS:
             raise PairingConflict("Unlink proof expired; refresh the association first")

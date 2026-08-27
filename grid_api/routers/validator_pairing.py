@@ -34,7 +34,7 @@ class NodeUnlinkForm(UnlinkForm):
 def _enabled(response: Response):
     response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
-    if not get_settings().validator_pairing_enabled:
+    if not get_settings().validator_pairing_enabled and not pairing.pilot_accounts():
         raise HTTPException(503, detail="Validator account pairing is not enabled")
 
 
