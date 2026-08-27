@@ -118,14 +118,14 @@ def _capabilities_payload() -> dict[str, Any]:
                 "method": "POST",
                 "path": "/v1/validator/register",
                 "auth": "validator.attest + linked-wallet signature",
-                "economic_effect": worker_effect,
+                "economic_effect": "none",
             },
             "suspension": {
                 "enabled": True,
                 "method": "POST",
                 "path": "/v1/validator/suspend",
                 "auth": "validator.attest + current-wallet signature",
-                "economic_effect": worker_effect,
+                "economic_effect": "none",
             },
             "rotation": {
                 "enabled": True,
@@ -146,14 +146,14 @@ def _capabilities_payload() -> dict[str, Any]:
                 "method": "GET",
                 "path": "/v1/validator/assignments",
                 "auth": "validator.assignments",
-                "economic_effect": "none",
+                "economic_effect": worker_effect,
             },
             "targeted_probe": {
                 "enabled": True,
                 "method": "POST",
                 "path": "/v1/validator/probe/{assignment_id}",
                 "auth": "validator.probe",
-                "economic_effect": "none",
+                "economic_effect": worker_effect,
             },
             "attest": {
                 "enabled": True,
