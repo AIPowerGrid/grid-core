@@ -13,6 +13,9 @@ executes an immutable release selected through `/home/aipg/current`.
 - `README.md` - deploy/cutover/runbook notes.
 - `DEMAND_BILLING_RUNBOOK.md` - dark deploy, allowlisted canary, alert,
   rollback, and staged demand-charging procedure.
+- `VALIDATOR_COHORT_RUNBOOK.md` - privacy-safe intake, opaque common-control
+  review, 72-hour qualification, verification, expiry, and incident handling
+  for independent preview operators.
 - `nginx/aipg-api.conf` - Grid routes, restricted metrics, public docs/health,
   and static `410 Gone` responses for retired API paths.
 - `systemd/aipg-gridapi.service` - uvicorn Grid API unit.

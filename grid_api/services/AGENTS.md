@@ -106,6 +106,9 @@ content sanitization, and reward settlement.
   proof. `validator_operators.py` owns the review state: an opaque control group,
   at least 72 hours of qualification, rate-limited heartbeat coverage, an
   expiring maintainer review, and preview-first compare-and-swap transitions.
+  A verify preview reports current qualification metrics and every blocking
+  reason even before the gate is satisfied; an apply remains fail-closed until
+  all blockers clear and requires that preview's exact state digest.
   A control group occupies at most one seat in any probe group. Public health
   exposes only distinct aggregate group counts, never group ids or review refs.
   The account-authenticated registration view exposes that operator's own

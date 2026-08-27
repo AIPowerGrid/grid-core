@@ -16,6 +16,12 @@ fleet, legacy SQL cron jobs, or polling API.
 This file documents updates to the existing managed host. It does not authorize
 deploying from an agent or moving money.
 
+Specialized procedures:
+
+- [Demand billing](DEMAND_BILLING_RUNBOOK.md) - charging rollout and rollback.
+- [Validator cohort](VALIDATOR_COHORT_RUNBOOK.md) - private maintainer review
+  and 72-hour independent-operator qualification.
+
 ## Preflight
 
 1. Confirm the target commit is reviewed and `origin/main` is the intended
