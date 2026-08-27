@@ -3,9 +3,9 @@
 
 """Private budget authorization for compensated validator audits.
 
-This module is deliberately not imported by the scheduler, worker transport,
-or settlement runtime. It establishes the durable, concurrency-safe money
-boundary that a later reviewed dispatch phase can call.
+The ordinary worker terminal and recovery sweeper import this module so payout
+and budget movement share one transaction. No scheduler imports it yet, so the
+rail remains unable to create or dispatch compensated work.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from typing import Any
 
 import sqlalchemy as sa
@@ -24,6 +25,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import new_session
+from ..v2.schema import ledger as ledger_t
 from ..v2.schema import reservations as demand_reservations_t
 from ..v2.schema import validator_audit_budget_counters as counters_t
 from ..v2.schema import validator_audit_jobs as audits_t
@@ -32,6 +34,7 @@ from ..v2.schema import workers as workers_t
 from .validators import VALIDATOR_HEARTBEAT_FRESH_SECONDS
 
 MAX_UNITS = 9_000_000_000_000_000_000
+UNITS_PER_DEN = 1_000_000
 MAX_TTL_SECONDS = 24 * 60 * 60
 _AUDIT_ID_RE = re.compile(r"^aud_[A-Za-z0-9_-]{8,88}$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -88,6 +91,22 @@ def _bounded_units(value: int, name: str) -> int:
     return value
 
 
+def den_to_units(value: int | float | Decimal | str) -> int:
+    """Convert ordinary den to integer micro-den with explicit ceiling.
+
+    Authorization always rounds against the Grid: any positive fractional unit
+    consumes one whole unit, and float binary artifacts never enter PostgreSQL.
+    """
+    try:
+        den = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise AuditBudgetError("den must be a finite positive number") from exc
+    if not den.is_finite() or den <= 0:
+        raise AuditBudgetError("den must be a finite positive number")
+    units = int((den * UNITS_PER_DEN).to_integral_value(rounding=ROUND_CEILING))
+    return _bounded_units(units, "den units")
+
+
 def _bounded_text(value: str, name: str, limit: int) -> str:
     normalized = str(value or "").strip()
     if not normalized or len(normalized) > limit:
@@ -137,12 +156,16 @@ def _counter_specs(row: Mapping[str, Any]) -> list[tuple[str, str]]:
     return sorted(keys.items())
 
 
-async def _job_lock(session: AsyncSession, job_id: uuid.UUID) -> None:
+async def lock_job_in_session(session: AsyncSession, job_id: uuid.UUID | str) -> None:
+    """Serialize every demand/audit reserve and terminal for one ordinary UUID."""
+    lock_subject = str(job_id or "").strip()
+    if not lock_subject:
+        raise AuditBudgetError("job_id is required")
     bind = session.get_bind()
     if bind.dialect.name != "postgresql":
         return
     lock_key = int.from_bytes(
-        hashlib.sha256(f"validator-audit:{job_id}".encode()).digest()[:8],
+        hashlib.sha256(f"validator-audit:{lock_subject}".encode()).digest()[:8],
         byteorder="big",
         signed=True,
     )
@@ -150,6 +173,46 @@ async def _job_lock(session: AsyncSession, job_id: uuid.UUID) -> None:
         sa.text("SELECT pg_advisory_xact_lock(:lock_key)"),
         {"lock_key": lock_key},
     )
+
+
+async def audit_for_job_in_session(
+    session: AsyncSession,
+    job_id: uuid.UUID | str,
+    *,
+    for_update: bool = False,
+):
+    """Return private audit state for an ordinary UUID in the caller's txn."""
+    job_uuid = _as_uuid(job_id, "job_id")
+    query = sa.select(audits_t).where(audits_t.c.job_id == job_uuid)
+    if for_update:
+        query = query.with_for_update()
+    return (await session.execute(query)).mappings().one_or_none()
+
+
+async def maybe_audit_for_job_in_session(
+    session: AsyncSession,
+    job_id: uuid.UUID | str,
+    *,
+    for_update: bool = False,
+):
+    """Compatibility lookup: opaque legacy demand ids can never be audit ids."""
+    try:
+        return await audit_for_job_in_session(session, job_id, for_update=for_update)
+    except AuditBudgetError:
+        return None
+
+
+async def assert_no_audit_in_session(session: AsyncSession, job_id: uuid.UUID | str) -> None:
+    """Enforce the demand/audit exclusive-or under the shared UUID lock."""
+    await lock_job_in_session(session, job_id)
+    try:
+        job_uuid = _as_uuid(job_id, "job_id")
+    except AuditBudgetError:
+        # Audit jobs are UUID-only, so an opaque legacy demand id cannot collide
+        # with the audit table even though it still receives a stable lock key.
+        return
+    if await audit_for_job_in_session(session, job_uuid, for_update=True):
+        raise AuditBudgetError("job_id already has a compensated-audit reservation")
 
 
 def _counter_insert(session: AsyncSession):
@@ -243,18 +306,8 @@ async def reserve_audit(
 
     async with await new_session() as session:
         try:
-            await _job_lock(session, job_uuid)
-            existing = (
-                (
-                    await session.execute(
-                        sa.select(audits_t)
-                        .where(audits_t.c.job_id == job_uuid)
-                        .with_for_update(),
-                    )
-                )
-                .mappings()
-                .one_or_none()
-            )
+            await lock_job_in_session(session, job_uuid)
+            existing = await audit_for_job_in_session(session, job_uuid, for_update=True)
             if existing:
                 if not _same_contract(
                     existing,
@@ -287,9 +340,7 @@ async def reserve_audit(
             validator = (
                 (
                     await session.execute(
-                        sa.select(validators_t)
-                        .where(validators_t.c.id == validator_id)
-                        .with_for_update(),
+                        sa.select(validators_t).where(validators_t.c.id == validator_id).with_for_update(),
                     )
                 )
                 .mappings()
@@ -308,9 +359,7 @@ async def reserve_audit(
                     bool(reviewed_at),
                     bool(review_expires and review_expires >= current),
                     bool(
-                        heartbeat
-                        and heartbeat
-                        >= current - timedelta(seconds=VALIDATOR_HEARTBEAT_FRESH_SECONDS),
+                        heartbeat and heartbeat >= current - timedelta(seconds=VALIDATOR_HEARTBEAT_FRESH_SECONDS),
                     ),
                     str(validator["signing_wallet"]).lower() in allowlist,
                 ),
@@ -430,16 +479,8 @@ async def reserve_audit(
 
 
 async def _locked_audit(session: AsyncSession, job_uuid: uuid.UUID):
-    await _job_lock(session, job_uuid)
-    return (
-        (
-            await session.execute(
-                sa.select(audits_t).where(audits_t.c.job_id == job_uuid).with_for_update(),
-            )
-        )
-        .mappings()
-        .one_or_none()
-    )
+    await lock_job_in_session(session, job_uuid)
+    return await audit_for_job_in_session(session, job_uuid, for_update=True)
 
 
 async def _locked_counters(session: AsyncSession, row: Mapping[str, Any]):
@@ -471,12 +512,20 @@ async def settle_audit_in_session(
     *,
     job_id: uuid.UUID | str,
     actual_units: int,
+    worker_id: uuid.UUID | str,
+    model: str,
+    modality: str,
+    request_hash: str,
     result_hash: str,
     now: datetime | None = None,
 ) -> str:
     """Settle an audit inside the caller's transaction; never commits."""
     job_uuid = _as_uuid(job_id, "job_id")
     actual_units = _bounded_units(actual_units, "actual_units")
+    worker_uuid = _as_uuid(worker_id, "worker_id")
+    model = _bounded_text(model, "model", 255)
+    modality = _bounded_text(modality, "modality", 16).lower()
+    request_hash = _sha256(request_hash, "request_hash")
     result_hash = _sha256(result_hash, "result_hash")
     current = _aware(now or _now())
     assert current is not None
@@ -493,6 +542,12 @@ async def settle_audit_in_session(
             return "stale_no_payout"
         if row["status"] not in _ACTIVE:
             raise AuditBudgetError("audit is not settleable")
+        if row["target_worker_id"] != worker_uuid:
+            raise AuditBudgetError("audit terminal worker does not match its reservation")
+        if row["model"] != model or row["modality"] != modality:
+            raise AuditBudgetError("audit terminal model or modality does not match its reservation")
+        if row["request_hash"] != request_hash:
+            raise AuditBudgetError("audit terminal request commitment does not match its reservation")
         reserved = int(row["reserved_units"])
         if actual_units > reserved:
             raise AuditBudgetError("actual_units exceeds the audit reservation")
@@ -531,6 +586,63 @@ async def settle_audit_in_session(
         return "settled"
 
 
+async def release_audit_in_session(
+    session: AsyncSession,
+    *,
+    job_id: uuid.UUID | str,
+    failure_code: str,
+    now: datetime | None = None,
+) -> str:
+    """Return an active audit hold in the caller's transaction; never commits."""
+    job_uuid = _as_uuid(job_id, "job_id")
+    failure_code = _bounded_text(failure_code, "failure_code", 64)
+    current = _aware(now or _now())
+    assert current is not None
+    async with session.begin_nested():
+        row = await _locked_audit(session, job_uuid)
+        if not row:
+            return "no_audit"
+        if row["status"] == "settled":
+            return "settled"
+        if row["status"] == "released":
+            return "duplicate"
+        if row["status"] == "manual_review":
+            return "manual_review"
+        if row["status"] not in _ACTIVE:
+            raise AuditBudgetError("audit is not releasable")
+        reserved = int(row["reserved_units"])
+        counters = await _locked_counters(session, row)
+        if any(int(counter["reserved_units"]) < reserved for counter in counters):
+            raise AuditBudgetError("audit budget counter is inconsistent")
+        for scope, scope_key in _counter_specs(row):
+            result = await session.execute(
+                sa.update(counters_t)
+                .where(
+                    counters_t.c.bucket_start == row["budget_bucket_start"],
+                    counters_t.c.scope == scope,
+                    counters_t.c.scope_key == scope_key,
+                    counters_t.c.reserved_units >= reserved,
+                )
+                .values(
+                    reserved_units=counters_t.c.reserved_units - reserved,
+                    updated=current,
+                ),
+            )
+            if result.rowcount != 1:
+                raise AuditBudgetError("audit budget release lost its counter lock")
+        await session.execute(
+            sa.update(audits_t)
+            .where(audits_t.c.job_id == job_uuid, audits_t.c.status.in_(_ACTIVE))
+            .values(
+                status="released",
+                failure_code=failure_code,
+                terminal_at=current,
+                updated=current,
+            ),
+        )
+        return "released"
+
+
 async def release_audit(
     *,
     job_id: uuid.UUID | str,
@@ -538,59 +650,133 @@ async def release_audit(
     now: datetime | None = None,
 ) -> str:
     """Return an active audit hold exactly once in an owned transaction."""
-    job_uuid = _as_uuid(job_id, "job_id")
-    failure_code = _bounded_text(failure_code, "failure_code", 64)
+    async with await new_session() as session:
+        try:
+            result = await release_audit_in_session(
+                session,
+                job_id=job_id,
+                failure_code=failure_code,
+                now=now,
+            )
+            await session.commit()
+            return result
+        except Exception:
+            await session.rollback()
+            raise
+
+
+async def _manual_review_in_session(
+    session: AsyncSession,
+    row: Mapping[str, Any],
+    *,
+    failure_code: str,
+    now: datetime,
+) -> None:
+    await session.execute(
+        sa.update(audits_t)
+        .where(audits_t.c.job_id == row["job_id"], audits_t.c.status.in_(_ACTIVE))
+        .values(
+            status="manual_review",
+            failure_code=failure_code[:64],
+            terminal_at=now,
+            updated=now,
+        ),
+    )
+
+
+async def reconcile_duplicate_terminal(
+    *,
+    job_id: uuid.UUID | str,
+    now: datetime | None = None,
+) -> str:
+    """Classify a duplicate ledger terminal without releasing an audit hold."""
+    try:
+        job_uuid = _as_uuid(job_id, "job_id")
+    except AuditBudgetError:
+        # Compensated audits are UUID-only. A duplicate payout row for an opaque
+        # legacy demand id therefore cannot conflict with an audit hold.
+        return "duplicate"
     current = _aware(now or _now())
     assert current is not None
     async with await new_session() as session:
         try:
             row = await _locked_audit(session, job_uuid)
-            if not row:
-                await session.commit()
-                return "no_audit"
-            if row["status"] == "settled":
-                await session.commit()
-                return "settled"
-            if row["status"] == "released":
+            if not row or row["status"] == "settled":
                 await session.commit()
                 return "duplicate"
-            if row["status"] == "manual_review":
+            if row["status"] in {"released", "manual_review"}:
                 await session.commit()
-                return "manual_review"
-            if row["status"] not in _ACTIVE:
-                raise AuditBudgetError("audit is not releasable")
-            reserved = int(row["reserved_units"])
-            counters = await _locked_counters(session, row)
-            if any(int(counter["reserved_units"]) < reserved for counter in counters):
-                raise AuditBudgetError("audit budget counter is inconsistent")
-            for scope, scope_key in _counter_specs(row):
-                result = await session.execute(
-                    sa.update(counters_t)
-                    .where(
-                        counters_t.c.bucket_start == row["budget_bucket_start"],
-                        counters_t.c.scope == scope,
-                        counters_t.c.scope_key == scope_key,
-                        counters_t.c.reserved_units >= reserved,
-                    )
-                    .values(
-                        reserved_units=counters_t.c.reserved_units - reserved,
-                        updated=current,
+                return "stale_no_payout"
+            ledger_exists = bool(
+                await session.scalar(
+                    sa.select(sa.literal(True)).where(
+                        sa.exists(sa.select(ledger_t.c.job_id).where(ledger_t.c.job_id == job_uuid)),
                     ),
-                )
-                if result.rowcount != 1:
-                    raise AuditBudgetError("audit budget release lost its counter lock")
-            await session.execute(
-                sa.update(audits_t)
-                .where(audits_t.c.job_id == job_uuid, audits_t.c.status.in_(_ACTIVE))
-                .values(
-                    status="released",
-                    failure_code=failure_code,
-                    terminal_at=current,
-                    updated=current,
                 ),
             )
-            await session.commit()
-            return "released"
+            if ledger_exists:
+                await _manual_review_in_session(
+                    session,
+                    row,
+                    failure_code="ledger_without_audit_settlement",
+                    now=current,
+                )
+                await session.commit()
+                return "audit_manual_review"
+            await session.rollback()
+            raise AuditBudgetError("duplicate ledger conflict was not reproducible")
         except Exception:
             await session.rollback()
             raise
+
+
+async def sweep_expired_audits(*, limit: int = 500, now: datetime | None = None) -> dict[str, int]:
+    """Release expired holds, but quarantine any hold with a payout ledger row."""
+    current = _aware(now or _now())
+    assert current is not None
+    async with await new_session() as session:
+        job_ids = list(
+            await session.scalars(
+                sa.select(audits_t.c.job_id)
+                .where(audits_t.c.status.in_(_ACTIVE), audits_t.c.expires < current)
+                .order_by(audits_t.c.expires)
+                .limit(max(1, min(int(limit), 5000))),
+            ),
+        )
+
+    released = manual_review = 0
+    for job_uuid in job_ids:
+        async with await new_session() as session:
+            try:
+                row = await _locked_audit(session, job_uuid)
+                if not row or row["status"] not in _ACTIVE or _aware(row["expires"]) >= current:
+                    await session.commit()
+                    continue
+                ledger_exists = bool(
+                    await session.scalar(
+                        sa.select(sa.literal(True)).where(
+                            sa.exists(sa.select(ledger_t.c.job_id).where(ledger_t.c.job_id == job_uuid)),
+                        ),
+                    ),
+                )
+                if ledger_exists:
+                    await _manual_review_in_session(
+                        session,
+                        row,
+                        failure_code="expired_with_completion_ledger",
+                        now=current,
+                    )
+                    manual_review += 1
+                else:
+                    result = await release_audit_in_session(
+                        session,
+                        job_id=job_uuid,
+                        failure_code="expired_without_completion",
+                        now=current,
+                    )
+                    released += int(result == "released")
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+    return {"released": released, "manual_review": manual_review}

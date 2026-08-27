@@ -157,6 +157,10 @@ async def test_reserve_settle_and_duplicate_are_exactly_once(db):
             session,
             job_id=contract["job_id"],
             actual_units=60,
+            worker_id=worker_id,
+            model=MODEL,
+            modality="text",
+            request_hash=contract["request_hash"],
             result_hash=result_hash,
             now=NOW + timedelta(minutes=1),
         ) == "settled"
@@ -172,6 +176,10 @@ async def test_reserve_settle_and_duplicate_are_exactly_once(db):
             session,
             job_id=contract["job_id"],
             actual_units=60,
+            worker_id=worker_id,
+            model=MODEL,
+            modality="text",
+            request_hash=contract["request_hash"],
             result_hash=result_hash,
             now=NOW + timedelta(minutes=2),
         ) == "duplicate"
@@ -205,6 +213,10 @@ async def test_release_returns_all_caps_and_late_settle_cannot_pay(db):
             session,
             job_id=contract["job_id"],
             actual_units=50,
+            worker_id=worker_id,
+            model=MODEL,
+            modality="text",
+            request_hash=contract["request_hash"],
             result_hash=hashlib.sha256(b"late").hexdigest(),
         ) == "stale_no_payout"
         await session.commit()
@@ -221,6 +233,10 @@ async def test_over_reserve_settlement_rolls_back_unchanged(db):
                 session,
                 job_id=contract["job_id"],
                 actual_units=101,
+                worker_id=worker_id,
+                model=MODEL,
+                modality="text",
+                request_hash=contract["request_hash"],
                 result_hash=hashlib.sha256(b"too much").hexdigest(),
             )
         await session.rollback()

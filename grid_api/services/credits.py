@@ -33,15 +33,16 @@ from sqlalchemy.exc import IntegrityError
 
 from ..database import new_session
 from ..safe_logging import error_type, opaque_id
+from ..v2.schema import accounts as accounts_t
 from ..v2.schema import credit_ledger as ledger_t
 from ..v2.schema import credits as credits_t
 from ..v2.schema import ledger as grid_ledger_t
 from ..v2.schema import reservations as reservations_t
-from ..v2.schema import accounts as accounts_t
 from . import free_credits
 from . import promotions
 from . import pricing
 from . import service_limits
+from . import validator_audit_budgets
 
 logger = logging.getLogger("grid_api.credits")
 
@@ -399,6 +400,10 @@ async def _insert_reservation_in_session(s, job_id, account_id, model: str, rese
                                           service_id: str | None = None,
                                           billing_source: str = "credits",
                                           external_payer: str | None = None) -> None:
+    # A UUID authorizes either customer-funded work or protocol-funded audit
+    # work, never both. The shared Postgres advisory lock closes the cross-table
+    # race that separate UNIQUE constraints cannot express.
+    await validator_audit_budgets.assert_no_audit_in_session(s, job_id)
     await s.execute(sa.insert(reservations_t).values(
         job_id=str(job_id), account_id=account_id, model=model,
         reserved_micro=int(reserved_micro or 0), free_micro=int(free_micro or 0),
@@ -1395,14 +1400,59 @@ async def settle_exact(job_id) -> None:
 
 async def release_job(job_id) -> None:
     """Terminal release for a job that produced nothing billable (client error,
-    worker fault surfaced, give-up). Full refund of the held reservation, once."""
-    await settle_job(job_id, 0, status="failed")
+    worker fault surfaced, give-up). Full refund of exactly one held demand or
+    compensated-audit reservation, once."""
+    try:
+        audit_release = False
+        async with await new_session() as s:
+            await validator_audit_budgets.lock_job_in_session(s, job_id)
+            audit = await validator_audit_budgets.maybe_audit_for_job_in_session(
+                s,
+                job_id,
+                for_update=True,
+            )
+            demand = await s.scalar(
+                sa.select(sa.literal(True)).where(
+                    sa.exists(
+                        sa.select(reservations_t.c.job_id).where(
+                            reservations_t.c.job_id == str(job_id),
+                        ),
+                    ),
+                ),
+            )
+            if audit and demand:
+                raise RuntimeError("job has both demand and compensated-audit reservations")
+            if audit:
+                await validator_audit_budgets.release_audit_in_session(
+                    s,
+                    job_id=job_id,
+                    failure_code="ordinary_terminal_failure",
+                )
+                await s.commit()
+                audit_release = True
+            else:
+                await s.rollback()
+        if not audit_release:
+            await settle_job(job_id, 0, status="failed")
+    except Exception as exc:
+        logger.error(
+            "release_job failed job=%s error_type=%s (hold remains recoverable)",
+            opaque_id(job_id),
+            error_type(exc),
+        )
+        _economic_alert(
+            "authorization_release_failed",
+            "critical",
+            "A terminal failure could not release its exclusive authorization hold.",
+            job=job_id,
+        )
 
 
 async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
                             exact: bool = False) -> str:
     """ATOMIC terminal for a SUCCESSFUL job: write the worker-payout ledger row
-    AND settle the demand reservation in ONE transaction — both commit or neither.
+    AND settle the exclusive demand or compensated-audit reservation in ONE
+    transaction — both commit or neither.
 
     This closes the window where a crash between the (separate) ledger write and
     settlement could leave a paid worker with a still-`held`, later-refunded
@@ -1413,21 +1463,19 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
     `completion_tokens` (text/passthrough). Returns:
       'duplicate'       — job already in grid_ledger (double dispatch) → nothing done
       'settled'         — ledger written + reservation reconciled (paid success)
+      'audit_settled'   — ledger written + audit budget consumed (paid success)
       'no_reservation'  — ledger written; no held row (dry-run / legacy / free)
       'stale_no_payout' — reservation existed but already closed → rolled back, no
                           ledger row, no payout, no charge
+      'audit_manual_review' — a pre-existing payout row conflicted with a held
+                              audit; budget remains quarantined for review
       'error'           — nothing committed (retryable; the sweeper recovers)
     Best-effort: never raises into the worker loop."""
     from . import ledger as ledger_svc
     job_id = str(ledger_values["job_id"])
     try:
         async with await new_session() as s:
-            try:
-                await ledger_svc.record_completion_in_session(s, **ledger_values)
-            except IntegrityError:
-                await s.rollback()
-                return "duplicate"  # already settled by a prior dispatch — do nothing
-
+            await validator_audit_budgets.lock_job_in_session(s, job_id)
             row = (await s.execute(
                 sa.select(reservations_t.c.account_id, reservations_t.c.model,
                           reservations_t.c.reserved_micro, reservations_t.c.prompt_toks,
@@ -1438,7 +1486,42 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
                           reservations_t.c.service_id,
                           reservations_t.c.billing_source)
                 .where(reservations_t.c.job_id == job_id)
+                .with_for_update()
             )).first()
+            audit = await validator_audit_budgets.maybe_audit_for_job_in_session(
+                s,
+                job_id,
+                for_update=True,
+            )
+            if row and audit:
+                raise RuntimeError("job has both demand and compensated-audit reservations")
+            try:
+                await ledger_svc.record_completion_in_session(s, **ledger_values)
+            except IntegrityError:
+                await s.rollback()
+                return await validator_audit_budgets.reconcile_duplicate_terminal(
+                    job_id=job_id,
+                )
+
+            if audit:
+                audit_status = await validator_audit_budgets.settle_audit_in_session(
+                    s,
+                    job_id=job_id,
+                    actual_units=validator_audit_budgets.den_to_units(ledger_values["den"]),
+                    worker_id=ledger_values["worker_id"],
+                    model=ledger_values["model"],
+                    modality=ledger_values["job_type"],
+                    request_hash=ledger_values.get("prompt_hash"),
+                    result_hash=ledger_values.get("result_hash"),
+                )
+                if audit_status == "settled":
+                    await s.commit()
+                    return "audit_settled"
+                await s.rollback()
+                if audit_status in {"stale_no_payout", "duplicate"}:
+                    return audit_status
+                raise RuntimeError(f"unexpected audit terminal status: {audit_status}")
+
             if not row:
                 await s.commit()  # ledger stands; nothing to settle (dry-run/legacy/free)
                 return "no_reservation"

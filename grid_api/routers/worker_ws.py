@@ -687,10 +687,11 @@ async def worker_websocket(ws: WebSocket):
                             continue
                     await token_stream.publish_error(
                         job["job_id"],
-                        f"Target worker '{hard_target}' did not claim this validator probe.",
+                        f"Target worker '{hard_target}' did not claim this job.",
                         code=503,
                     )
                     await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
+                    await credits.release_job(job["job_id"])
                     current_job = None
                     continue
 
@@ -978,7 +979,7 @@ async def worker_websocket(ws: WebSocket):
                     continue
 
                 current_job = None
-                if settle_result in _PAID_SETTLE:
+                if _is_paid_settlement(settle_result):
                     # Paid success → tell the client DONE, ack queue + worker, metrics.
                     await token_stream.publish_done(
                         job["job_id"],
@@ -1000,7 +1001,7 @@ async def worker_websocket(ws: WebSocket):
                     # so a still-waiting client isn't left hanging; for duplicate the
                     # winning dispatch already delivered the response.
                     logger.warning(f"Job {job['job_id']} closed without payout (settle={settle_result})")
-                    if settle_result == "stale_no_payout":
+                    if _requires_unpaid_terminal_error(settle_result):
                         await token_stream.publish_error(job["job_id"], "Job could not be settled (already closed); please retry.")
                     await job_queue.ack_job(job["stream_id"])
                     await ws.send_json({"type": "ack", "id": job["job_id"], "den": 0})
@@ -1076,6 +1077,12 @@ async def worker_websocket(ws: WebSocket):
                     affinity_passes=prefetched.get("affinity_passes", 0),
                 )
                 logger.warning("Requeued prefetched-but-undispatched job %s%s", pid, f" as {nid}" if nid else " (gave up)")
+                if nid is None and not _is_assignment_bound_validator_job(prefetched):
+                    await token_stream.publish_error(
+                        pid,
+                        "Worker disconnected before dispatch; no capacity to retry.",
+                    )
+                    await credits.release_job(pid)
             except Exception:
                 logger.error("failed to requeue prefetched job on cleanup", exc_info=True)
 
@@ -1426,7 +1433,7 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 await token_stream.publish_error(job_id, "Settlement failed; please retry.")
                 return False
 
-            if settle_result in _PAID_SETTLE:
+            if _is_paid_settlement(settle_result):
                 await token_stream.publish_done(
                     job_id,
                     json.dumps(
@@ -1447,7 +1454,7 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
             # no success DONE, no den, no metrics. Worker ack den=0; return True so
             # the caller acks the queue (the work is done, just not paid).
             logger.warning(f"Media job {job_id} closed without payout (settle={settle_result})")
-            if settle_result == "stale_no_payout":
+            if _requires_unpaid_terminal_error(settle_result):
                 await token_stream.publish_error(job_id, "Job could not be settled (already closed); please retry.")
             await ws.send_json({"type": "ack", "id": job_id, "den": 0})
             return True
@@ -1575,7 +1582,7 @@ async def _handle_raw_passthrough(ws: WebSocket, job: dict, selected_model: str,
                 await token_stream.publish_error(job_id, "Settlement failed; please retry.")
                 return False
 
-            if settle_result in _PAID_SETTLE:
+            if _is_paid_settlement(settle_result):
                 # Committed → finalize: tell the client DONE, ack the worker, metrics.
                 await token_stream.publish_done(job_id, usage=usage, full_json=full_json)
                 await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
@@ -1586,7 +1593,7 @@ async def _handle_raw_passthrough(ws: WebSocket, job: dict, selected_model: str,
             # success DONE, no den, no metrics. Worker ack den=0; return True so the
             # caller acks the queue.
             logger.warning(f"Raw job {job_id} closed without payout (settle={settle_result})")
-            if settle_result == "stale_no_payout":
+            if _requires_unpaid_terminal_error(settle_result):
                 await token_stream.publish_error(job_id, "Job could not be settled (already closed); please retry.")
             await ws.send_json({"type": "ack", "id": job_id, "den": 0})
             return True
@@ -1633,7 +1640,18 @@ def _merge_tool_call_deltas(acc: dict, deltas: list):
 # record_and_settle outcomes that mean a PAID success (publish DONE, pay den).
 # Everything else is either a retry ('error') or a terminally-closed-but-unpaid
 # job ('stale_no_payout' / 'duplicate') that must NOT look like a paid completion.
-_PAID_SETTLE = ("settled", "no_reservation")
+_PAID_SETTLE = frozenset({"settled", "audit_settled", "no_reservation"})
+_UNPAID_CLIENT_ERROR_SETTLE = frozenset({"stale_no_payout", "audit_manual_review"})
+
+
+def _is_paid_settlement(status: str) -> bool:
+    """Classify ordinary demand and compensated-audit terminal commits alike."""
+    return status in _PAID_SETTLE
+
+
+def _requires_unpaid_terminal_error(status: str) -> bool:
+    """Tell a waiting client when no winning completion can finish its stream."""
+    return status in _UNPAID_CLIENT_ERROR_SETTLE
 
 
 def _gen_result(

@@ -14,9 +14,12 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from grid_api.services import credits
 from grid_api.services import validator_audit_budgets as budgets
 from grid_api.v2.schema import accounts as accounts_t
+from grid_api.v2.schema import ledger as ledger_t
 from grid_api.v2.schema import metadata
+from grid_api.v2.schema import reservations as demand_reservations_t
 from grid_api.v2.schema import validator_audit_budget_counters as counters_t
 from grid_api.v2.schema import validator_audit_jobs as audits_t
 from grid_api.v2.schema import validators as validators_t
@@ -44,6 +47,7 @@ async def pg(monkeypatch):
         return factory()
 
     monkeypatch.setattr(budgets, "new_session", open_session)
+    monkeypatch.setattr(credits, "new_session", open_session)
     try:
         yield factory
     finally:
@@ -177,6 +181,10 @@ async def test_settle_release_race_has_one_terminal_winner(pg):
                 session,
                 job_id=contract["job_id"],
                 actual_units=7,
+                worker_id=worker_id,
+                model=MODEL,
+                modality="text",
+                request_hash=contract["request_hash"],
                 result_hash=hashlib.sha256(b"race-result").hexdigest(),
                 now=NOW + timedelta(minutes=1),
             )
@@ -204,3 +212,130 @@ async def test_settle_release_race_has_one_terminal_winner(pg):
         assert all(int(row["spent_units"]) == 7 for row in counters)
     else:
         assert all(int(row["spent_units"]) == 0 for row in counters)
+
+
+@pytest.mark.asyncio
+async def test_demand_and_audit_reservation_race_has_exactly_one_winner(pg):
+    validator_id, worker_id = await _seed(pg)
+
+    async def audit_attempt(contract):
+        try:
+            await budgets.reserve_audit(**contract)
+            return "audit"
+        except budgets.AuditBudgetError:
+            return "blocked"
+
+    async def demand_attempt(contract):
+        async with pg() as session:
+            try:
+                await credits._insert_reservation_in_session(
+                    session,
+                    contract["job_id"],
+                    None,
+                    MODEL,
+                    10,
+                    1,
+                )
+                await session.commit()
+                return "demand"
+            except budgets.AuditBudgetError:
+                await session.rollback()
+                return "blocked"
+
+    contracts = [_contract(validator_id, worker_id, cap=10_000) for _ in range(20)]
+    outcomes = await asyncio.gather(
+        *(task for contract in contracts for task in (audit_attempt(contract), demand_attempt(contract))),
+    )
+    for index in range(0, len(outcomes), 2):
+        assert sorted(outcomes[index : index + 2]) in (
+            ["audit", "blocked"],
+            ["blocked", "demand"],
+        )
+
+    async with pg() as session:
+        audit_jobs = {row[0] for row in (await session.execute(sa.select(audits_t.c.job_id))).all()}
+        demand_jobs = {uuid.UUID(row[0]) for row in (await session.execute(sa.select(demand_reservations_t.c.job_id))).all()}
+        counters = (await session.execute(sa.select(counters_t))).mappings().all()
+    assert audit_jobs.isdisjoint(demand_jobs)
+    assert len(audit_jobs | demand_jobs) == 20
+    if audit_jobs:
+        assert all(int(row["reserved_units"]) == len(audit_jobs) * 10 for row in counters)
+
+
+def _ledger_values(contract, worker_id):
+    return {
+        "job_id": contract["job_id"],
+        "worker_id": worker_id,
+        "wallet": WALLET,
+        "model": MODEL,
+        "job_type": "text",
+        "den": 0.000005,
+        "output_units": 5,
+        "duration": 1.0,
+        "ttft": 0.1,
+        "prompt_hash": contract["request_hash"],
+        "result_hash": hashlib.sha256(f"result:{contract['job_id']}".encode()).hexdigest(),
+    }
+
+
+@pytest.mark.asyncio
+async def test_ordinary_terminal_race_pays_and_consumes_budget_once(pg):
+    validator_id, worker_id = await _seed(pg)
+    contract = _contract(validator_id, worker_id, cap=500)
+    await budgets.reserve_audit(**contract)
+    values = _ledger_values(contract, worker_id)
+
+    outcomes = await asyncio.gather(
+        *(credits.record_and_settle(ledger_values=values, completion_tokens=5) for _ in range(20)),
+    )
+    assert outcomes.count("audit_settled") == 1
+    assert outcomes.count("duplicate") == 19
+    async with pg() as session:
+        audit = (await session.execute(sa.select(audits_t).where(audits_t.c.job_id == contract["job_id"]))).mappings().one()
+        payout_count = int(
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(ledger_t)
+                .where(
+                    ledger_t.c.job_id == contract["job_id"],
+                ),
+            )
+            or 0,
+        )
+        counters = (await session.execute(sa.select(counters_t))).mappings().all()
+    assert audit["status"] == "settled"
+    assert payout_count == 1
+    assert all(int(row["reserved_units"]) == 0 for row in counters)
+    assert all(int(row["spent_units"]) == 5 for row in counters)
+
+
+@pytest.mark.asyncio
+async def test_ordinary_terminal_vs_release_race_never_separates_payout_and_budget(pg):
+    validator_id, worker_id = await _seed(pg)
+    contract = _contract(validator_id, worker_id, cap=500)
+    await budgets.reserve_audit(**contract)
+    values = _ledger_values(contract, worker_id)
+
+    terminal, _release = await asyncio.gather(
+        credits.record_and_settle(ledger_values=values, completion_tokens=5),
+        credits.release_job(contract["job_id"]),
+    )
+    assert terminal in {"audit_settled", "stale_no_payout"}
+    async with pg() as session:
+        audit = (await session.execute(sa.select(audits_t).where(audits_t.c.job_id == contract["job_id"]))).mappings().one()
+        payout_count = int(
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(ledger_t)
+                .where(
+                    ledger_t.c.job_id == contract["job_id"],
+                ),
+            )
+            or 0,
+        )
+        counters = (await session.execute(sa.select(counters_t))).mappings().all()
+    assert audit["status"] in {"settled", "released"}
+    assert payout_count == int(audit["status"] == "settled")
+    assert all(int(row["reserved_units"]) == 0 for row in counters)
+    expected_spent = 5 if audit["status"] == "settled" else 0
+    assert all(int(row["spent_units"]) == expected_spent for row in counters)
