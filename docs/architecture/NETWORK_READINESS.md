@@ -22,7 +22,7 @@ production rollout, and a registered node does not prove independent control.
 
 At this snapshot:
 
-- production Core runs immutable commit `43156ffd` with Alembic `0028`;
+- production Core runs immutable commit `d8a48f2a` with Alembic `0029`;
 - `/v1/status/network` is live and reports seven connected workers, ten online
   model entries, and every model below the three-worker redundancy target;
 - sealed shared-quorum text validation is live in `shared_quorum_preview` mode;
@@ -37,7 +37,10 @@ At this snapshot:
   operator count remains zero;
 - validator rewards, validator stake, worker penalties from validator evidence,
   and Core federation are off;
-- charging remains a narrow allowlist canary rather than global; and
+- charging remains a narrow allowlist canary rather than global;
+- compensated-audit schema and ordinary terminal support are deployed dark:
+  both private audit tables contain zero rows, no scheduler/configuration can
+  create work, and existing validator probes remain economically inert; and
 - the four-platform `v0.1.0-preview.8` validator binary release and versioned
   multi-architecture GHCR image are published; macOS and Windows remain
   explicitly unsigned. The GHCR package is public and anonymously pullable on
@@ -155,6 +158,19 @@ rows: the migration backfilled no trust. Image/video validation and media bond
 sync remained disabled. The payout and PostgreSQL-backup timers remained
 enabled and active, and the API journal had no warning-or-higher entries from
 the deployment window.
+
+At 08:27 UTC, the Core `d8a48f2a` production candidate created the
+checksum-verified backup `grid-postgres-20260827T082751Z.dump`, restored it into
+a guarded scratch database, upgraded `0028` to `0029`, passed `alembic current`
+and `alembic check`, and removed the scratch database. Production then migrated
+to `0029` before the terminal-aware runtime started and advanced atomically to
+exact commit `d8a48f2af7109c199582b9f3305940ac4ae5dc0f`. External health reported
+the exact commit and all seven workers reconnected. Public route smokes returned
+`200` for models and validator capabilities, `401` for unauthenticated validator
+assignments, and `410` for the retired v2 route. Both compensated-audit tables
+remained empty after startup. Charging stayed allowlist/global-off, validator
+economic effect stayed `none`, and payout/backup timers remained enabled and
+active. The deployment-window journal had no warning-or-higher entries.
 
 The first-party fleet briefly advanced to preview.6 to prove the new
 account-private operator qualification response. Before the next rollout, an
@@ -386,7 +402,9 @@ flag, corpus selector, or validator scoring integration exists, so the rail
 cannot issue compensated work. Existing probes remain unpaid and worker-
 fingerprintable; they cannot become quality evidence by configuration.
 Scheduler crash/reclaim tests and held-out traffic-classifier gates remain
-required before any dark canary.
+required before any dark canary. The schema and terminal support are deployed
+dark at production commit `d8a48f2a` / Alembic `0029`; both audit tables were
+empty after startup.
 
 ### 20. Private deterministic image validation - Ready dark
 
