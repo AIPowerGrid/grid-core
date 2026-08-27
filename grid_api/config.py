@@ -67,7 +67,6 @@ class GridSettings(BaseSettings):
     validator_video_probe_enabled: bool = False
     validator_media_bond_chain_id: int = 8453
     validator_media_bond_contract: str = ""
-    validator_media_bond_facet_runtime_hash: str = ""
     validator_media_bond_confirmation_rpc_url: SecretStr | None = None
     validator_media_bond_verifier_version: str = ""
     validator_media_minimum_bond_raw: int = 0

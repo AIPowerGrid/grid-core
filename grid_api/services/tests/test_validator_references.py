@@ -20,11 +20,14 @@ from grid_api.v2.schema import workers as workers_t
 NOW = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
 MODEL = "krea-2-turbo"
 BOND_CONTRACT = "0x" + "a" * 40
+BOND_RUNTIME_HASH = "0x10cb9fb1b441747142df35545d69e705e81543516937c7a7b08c3df2ccbb5db2"
+VERIFIER = "worker-registry-v2-957685a"
 MINIMUM_BOND_RAW = 1_000_000
 BOND_POLICY = {
     "expected_chain_id": 8453,
     "expected_bond_contract": BOND_CONTRACT,
-    "expected_verifier_version": "worker-registry-v2",
+    "expected_verifier_version": VERIFIER,
+    "expected_facet_runtime_hash": BOND_RUNTIME_HASH,
     # SQLite cannot represent a one-wei boundary near 1e18 exactly. The same
     # Numeric(78, 0) policy is proved at token-scale in the Postgres suite.
     "minimum_bond_raw": MINIMUM_BOND_RAW,
@@ -86,7 +89,11 @@ async def _reference(
     chain_id=8453,
     bond_contract=BOND_CONTRACT,
     bond_amount_raw=MINIMUM_BOND_RAW,
-    verifier_version="worker-registry-v2",
+    verifier_version=VERIFIER,
+    finalized_block_hash="0x" + "d" * 64,
+    facet_address="0x" + "e" * 40,
+    facet_runtime_hash=BOND_RUNTIME_HASH,
+    bond_status_reason="active",
     quality_pass_rate=0.99,
     quality_window_end=NOW,
     last_selected=None,
@@ -105,10 +112,14 @@ async def _reference(
             bond_contract=bond_contract,
             bond_chain_id=chain_id,
             bond_finalized_block=123456,
+            bond_finalized_block_hash=finalized_block_hash,
+            bond_facet_address=facet_address,
+            bond_facet_runtime_hash=facet_runtime_hash,
             bond_amount_raw=Decimal(bond_amount_raw),
             bond_active=True,
             bond_slashed=slashed,
             bond_verifier_version=verifier_version,
+            bond_status_reason=bond_status_reason,
             bond_verified_at=NOW - bond_age,
             quality_window_start=NOW - timedelta(days=1),
             quality_window_end=quality_window_end,
@@ -165,6 +176,10 @@ async def test_selects_two_fresh_independent_online_references_and_updates_usage
         {"bond_contract": "0x" + "c" * 40},
         {"bond_amount_raw": MINIMUM_BOND_RAW - 1},
         {"verifier_version": "unknown-registry"},
+        {"finalized_block_hash": None},
+        {"facet_address": None},
+        {"facet_runtime_hash": "0x" + "f" * 64},
+        {"bond_status_reason": "sync_faulted"},
         {"quality_pass_rate": 0.94},
         {"quality_window_end": NOW + timedelta(minutes=1)},
     ],

@@ -27,7 +27,9 @@ from web3 import Web3
 from .._abi import WORKER_REGISTRY_ABI
 from ..config import GridSettings, get_settings
 from ..database import new_session
+from ..v2.schema import validator_bond_sync_state as sync_state_t
 from ..v2.schema import validator_reference_workers as references_t
+from ..v2.schema import workers as workers_t
 
 # Exact candidate selector set from aipg-smart-contracts WorkerRegistry. A
 # partial or mixed facet cut is not a valid bond authority.
@@ -49,6 +51,18 @@ WORKER_REGISTRY_SELECTORS = (
     "0x6cf6d675",  # unbondingPeriod()
     "0x66eb9cec",  # withdrawBond()
 )
+
+# Verifier identities are code-reviewed release contracts, not operator labels.
+# Adding one requires a Core release that names the exact smart-contract commit
+# and compiled runtime. Environment variables may select a supported verifier;
+# they cannot redefine what that verifier means.
+REVIEWED_WORKER_REGISTRY_RUNTIMES = {
+    "worker-registry-v2-957685a": (
+        "0x10cb9fb1b441747142df35545d69e705e81543516937c7a7b08c3df2ccbb5db2"
+    ),
+}
+
+_BOND_SYNC_LOCK_KEY = 0x4150494756424F4E  # "AIPGVBON"
 
 
 class BondSyncError(RuntimeError):
@@ -82,6 +96,11 @@ def rpc_sources_are_distinct(primary: str, confirmation: str) -> bool:
         item.scheme in {"http", "https"} and bool(item.hostname)
         for item in parsed
     ) and parsed[0].hostname.lower() != parsed[1].hostname.lower()
+
+
+def reviewed_runtime_hash(verifier_version: str) -> str | None:
+    """Return the immutable runtime approved for one named verifier release."""
+    return REVIEWED_WORKER_REGISTRY_RUNTIMES.get(verifier_version.strip())
 
 
 def _normalize_address(value: Any, *, field: str) -> str:
@@ -126,6 +145,8 @@ def read_finalized_bond_snapshot(
     max_workers: int,
     rpc_timeout_seconds: int,
     finalized_block: int | None = None,
+    anchor_block: int | None = None,
+    anchor_block_hash: str | None = None,
     web3_factory: Callable[[str, int], Any] = _default_web3_factory,
 ) -> FinalizedBondSnapshot:
     """Read and verify one internally consistent finalized chain snapshot.
@@ -163,6 +184,21 @@ def read_finalized_bond_snapshot(
     snapshot_block = finalized_tip_number if finalized_block is None else int(finalized_block)
     if snapshot_block < 0 or snapshot_block > finalized_tip_number:
         raise BondSyncError("requested block is not finalized by this provider")
+    if (anchor_block is None) != (anchor_block_hash is None):
+        raise BondSyncError("finality anchor block and hash must be supplied together")
+    if anchor_block is not None:
+        anchor_number = int(anchor_block)
+        if anchor_number < 0 or anchor_number > finalized_tip_number:
+            raise BondSyncError("prior finality anchor is not finalized by this provider")
+        expected_anchor_hash = _normalize_hash(
+            anchor_block_hash,
+            field="prior finalized block hash",
+        )
+        anchor = w3.eth.get_block(anchor_number)
+        if int(anchor["number"]) != anchor_number:
+            raise BondSyncError("Base RPC returned the wrong prior finalized block")
+        if _normalize_hash(anchor["hash"], field="prior finalized block hash") != expected_anchor_hash:
+            raise BondSyncError("prior finalized block hash changed")
     block = (
         finalized_tip
         if snapshot_block == finalized_tip_number
@@ -262,6 +298,8 @@ def read_quorum_bond_snapshot(
     reference_wallets: tuple[str, ...],
     max_workers: int,
     rpc_timeout_seconds: int,
+    anchor_block: int | None = None,
+    anchor_block_hash: str | None = None,
     single_reader: Callable[..., FinalizedBondSnapshot] = read_finalized_bond_snapshot,
 ) -> FinalizedBondSnapshot:
     """Require two distinct RPC sources to agree on the complete snapshot."""
@@ -278,6 +316,8 @@ def read_quorum_bond_snapshot(
         "reference_wallets": reference_wallets,
         "max_workers": max_workers,
         "rpc_timeout_seconds": rpc_timeout_seconds,
+        "anchor_block": anchor_block,
+        "anchor_block_hash": anchor_block_hash,
     }
     primary = single_reader(rpc_url=primary_url, **common)
     confirmation = single_reader(rpc_url=confirmation_url, **common)
@@ -307,8 +347,11 @@ async def apply_reference_bond_snapshot(
 ) -> dict[str, int]:
     """Refresh only existing reviewed reference rows in one DB transaction."""
     normalized_verifier = verifier_version.strip()
-    if not normalized_verifier or len(normalized_verifier) > 64:
-        raise ValueError("verifier version must contain 1-64 characters")
+    reviewed_runtime = reviewed_runtime_hash(normalized_verifier)
+    if reviewed_runtime is None:
+        raise BondSyncError("bond verifier version is not reviewed by this Core release")
+    if snapshot.facet_runtime_hash != reviewed_runtime:
+        raise BondSyncError("snapshot runtime does not match the named verifier")
     current = verified_at or datetime.now(UTC)
     if current.tzinfo is None:
         current = current.replace(tzinfo=UTC)
@@ -320,9 +363,24 @@ async def apply_reference_bond_snapshot(
                     references_t.c.worker_id,
                     references_t.c.model,
                     references_t.c.modality,
+                    references_t.c.account_id,
                     references_t.c.payout_wallet,
                     references_t.c.bond_finalized_block,
-                ).with_for_update(),
+                    workers_t.c.account_id.label("worker_account_id"),
+                    workers_t.c.wallet.label("worker_payout_wallet"),
+                )
+                .outerjoin(workers_t, workers_t.c.id == references_t.c.worker_id)
+                .where(
+                    sa.or_(
+                        references_t.c.bond_contract.is_(None),
+                        sa.and_(
+                            references_t.c.bond_chain_id == snapshot.chain_id,
+                            sa.func.lower(references_t.c.bond_contract)
+                            == snapshot.diamond_address,
+                        ),
+                    ),
+                )
+                .with_for_update(of=references_t),
             )
         )
         .mappings()
@@ -333,28 +391,50 @@ async def apply_reference_bond_snapshot(
         and int(row["bond_finalized_block"]) > snapshot.finalized_block
         for row in rows
     ):
-        return {
-            "reference_rows": len(rows),
-            "updated": 0,
-            "inactive": 0,
-            "stale_skipped": len(rows),
-            "matched_workers": len(snapshot.workers),
-            "finalized_block": snapshot.finalized_block,
-        }
+        raise BondSyncError("finalized bond snapshot moved backwards")
 
     updated = inactive = 0
     for row in rows:
         wallet_text = str(row["payout_wallet"] or "").strip().lower()
         bond = snapshot.workers.get(wallet_text)
-        is_active = bool(bond and bond.active and not bond.slashed and bond.amount_raw > 0)
+        worker_wallet = str(row["worker_payout_wallet"] or "").strip().lower()
+        identity_matches = bool(
+            row["worker_account_id"] == row["account_id"]
+            and worker_wallet
+            and worker_wallet == wallet_text,
+        )
+        is_active = bool(
+            identity_matches
+            and bond
+            and bond.active
+            and not bond.slashed
+            and bond.unbonding_at == 0
+            and bond.amount_raw > 0,
+        )
+        if not identity_matches:
+            status_reason = "identity_mismatch"
+        elif bond is None:
+            status_reason = "not_registered"
+        elif bond.slashed:
+            status_reason = "slashed"
+        elif bond.unbonding_at:
+            status_reason = "unbonding"
+        elif not bond.active or bond.amount_raw == 0:
+            status_reason = "inactive"
+        else:
+            status_reason = "active"
         values = {
             "bond_contract": snapshot.diamond_address,
             "bond_chain_id": snapshot.chain_id,
             "bond_finalized_block": snapshot.finalized_block,
+            "bond_finalized_block_hash": snapshot.finalized_block_hash,
+            "bond_facet_address": snapshot.facet_address,
+            "bond_facet_runtime_hash": snapshot.facet_runtime_hash,
             "bond_amount_raw": Decimal(bond.amount_raw if bond else 0),
             "bond_active": is_active,
             "bond_slashed": bool(bond and bond.slashed),
             "bond_verifier_version": normalized_verifier,
+            "bond_status_reason": status_reason,
             "bond_verified_at": current,
             "updated": current,
         }
@@ -374,10 +454,115 @@ async def apply_reference_bond_snapshot(
         "reference_rows": len(rows),
         "updated": updated,
         "inactive": inactive,
-        "stale_skipped": 0,
         "matched_workers": len(snapshot.workers),
         "finalized_block": snapshot.finalized_block,
     }
+
+
+async def _try_sync_lock(session: AsyncSession) -> bool:
+    bind = session.get_bind()
+    if bind.dialect.name != "postgresql":
+        return True
+    return bool(
+        await session.scalar(
+            sa.text("SELECT pg_try_advisory_xact_lock(:key)"),
+            {"key": _BOND_SYNC_LOCK_KEY},
+        ),
+    )
+
+
+async def _sync_state_row(
+    session: AsyncSession,
+    *,
+    chain_id: int,
+    bond_contract: str,
+) -> Mapping[str, Any] | None:
+    return (
+        (
+            await session.execute(
+                sa.select(sync_state_t)
+                .where(
+                    sync_state_t.c.chain_id == chain_id,
+                    sa.func.lower(sync_state_t.c.bond_contract) == bond_contract,
+                )
+                .with_for_update(),
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+
+
+async def _write_sync_state(
+    session: AsyncSession,
+    *,
+    chain_id: int,
+    bond_contract: str,
+    verifier_version: str,
+    status: str,
+    status_reason: str,
+    now: datetime,
+    prior: Mapping[str, Any] | None,
+    snapshot: FinalizedBondSnapshot | None,
+) -> None:
+    values = {
+        "verifier_version": verifier_version,
+        "status": status,
+        "status_reason": status_reason[:64],
+        "consecutive_failures": 0 if status == "healthy" else int((prior or {}).get("consecutive_failures") or 0) + 1,
+        "last_attempt_at": now,
+        "last_success_at": now if status == "healthy" else (prior or {}).get("last_success_at"),
+        "updated": now,
+    }
+    if snapshot is not None:
+        values.update(
+            facet_address=snapshot.facet_address,
+            facet_runtime_hash=snapshot.facet_runtime_hash,
+            finalized_block=snapshot.finalized_block,
+            finalized_block_hash=snapshot.finalized_block_hash,
+        )
+    if prior is None:
+        await session.execute(
+            sa.insert(sync_state_t).values(
+                chain_id=chain_id,
+                bond_contract=bond_contract,
+                created=now,
+                **values,
+            ),
+        )
+    else:
+        await session.execute(
+            sa.update(sync_state_t)
+            .where(
+                sync_state_t.c.chain_id == chain_id,
+                sa.func.lower(sync_state_t.c.bond_contract) == bond_contract,
+            )
+            .values(**values),
+        )
+
+
+async def _invalidate_bond_eligibility(
+    session: AsyncSession,
+    *,
+    chain_id: int,
+    bond_contract: str,
+    now: datetime,
+) -> int:
+    result = await session.execute(
+        sa.update(references_t)
+        .where(
+            references_t.c.bond_active.is_(True),
+            references_t.c.bond_chain_id == chain_id,
+            sa.func.lower(references_t.c.bond_contract) == bond_contract,
+        )
+        .values(
+            bond_active=False,
+            bond_status_reason="sync_faulted",
+            bond_verified_at=None,
+            updated=now,
+        ),
+    )
+    return int(result.rowcount or 0)
 
 
 async def sync_reference_bonds_once(
@@ -396,39 +581,103 @@ async def sync_reference_bonds_once(
         else ""
     )
     verifier_version = config.validator_media_bond_verifier_version.strip()
-    if not verifier_version:
-        raise BondSyncError("bond verifier version is not configured")
-
-    async with await new_session() as session:
-        raw_wallets = (
-            await session.execute(sa.select(references_t.c.payout_wallet).distinct())
-        ).scalars().all()
-    reference_wallets = tuple(
-        sorted(
-            {
-                str(wallet).strip().lower()
-                for wallet in raw_wallets
-                if Web3.is_address(str(wallet).strip())
-            },
-        ),
-    )
-
-    snapshot = await asyncio.to_thread(
-        snapshot_reader,
-        rpc_url=rpc_url,
-        confirmation_rpc_url=confirmation_rpc_url,
-        expected_chain_id=config.validator_media_bond_chain_id,
-        diamond_address=config.validator_media_bond_contract,
-        expected_facet_runtime_hash=config.validator_media_bond_facet_runtime_hash,
-        reference_wallets=reference_wallets,
-        max_workers=config.validator_media_bond_max_workers,
-        rpc_timeout_seconds=config.validator_media_bond_rpc_timeout_seconds,
-    )
+    expected_runtime = reviewed_runtime_hash(verifier_version)
+    if expected_runtime is None:
+        raise BondSyncError("bond verifier version is not reviewed by this Core release")
+    bond_contract = _normalize_address(config.validator_media_bond_contract, field="bond contract")
+    now = datetime.now(UTC)
     async with await new_session() as session:
         async with session.begin():
-            result = await apply_reference_bond_snapshot(
+            if not await _try_sync_lock(session):
+                return {"status": "skipped", "reason": "another sync is running"}
+            prior = await _sync_state_row(
                 session,
-                snapshot=snapshot,
-                verifier_version=verifier_version,
+                chain_id=config.validator_media_bond_chain_id,
+                bond_contract=bond_contract,
             )
-    return {"status": "synced", **result}
+            raw_wallets = (
+                await session.execute(
+                    sa.select(references_t.c.payout_wallet)
+                    .where(
+                        sa.or_(
+                            references_t.c.bond_contract.is_(None),
+                            sa.and_(
+                                references_t.c.bond_chain_id
+                                == config.validator_media_bond_chain_id,
+                                sa.func.lower(references_t.c.bond_contract)
+                                == bond_contract,
+                            ),
+                        ),
+                    )
+                    .distinct(),
+                )
+            ).scalars().all()
+            reference_wallets = tuple(
+                sorted(
+                    {
+                        str(wallet).strip().lower()
+                        for wallet in raw_wallets
+                        if Web3.is_address(str(wallet).strip())
+                    },
+                ),
+            )
+            try:
+                try:
+                    snapshot = await asyncio.to_thread(
+                        snapshot_reader,
+                        rpc_url=rpc_url,
+                        confirmation_rpc_url=confirmation_rpc_url,
+                        expected_chain_id=config.validator_media_bond_chain_id,
+                        diamond_address=bond_contract,
+                        expected_facet_runtime_hash=expected_runtime,
+                        reference_wallets=reference_wallets,
+                        max_workers=config.validator_media_bond_max_workers,
+                        rpc_timeout_seconds=config.validator_media_bond_rpc_timeout_seconds,
+                        anchor_block=(prior or {}).get("finalized_block"),
+                        anchor_block_hash=(prior or {}).get("finalized_block_hash"),
+                    )
+                except BondSyncError:
+                    raise
+                except Exception as exc:
+                    raise BondSyncError("bond snapshot read failed") from exc
+                result = await apply_reference_bond_snapshot(
+                    session,
+                    snapshot=snapshot,
+                    verifier_version=verifier_version,
+                    verified_at=now,
+                )
+            except BondSyncError as exc:
+                invalidated = await _invalidate_bond_eligibility(
+                    session,
+                    chain_id=config.validator_media_bond_chain_id,
+                    bond_contract=bond_contract,
+                    now=now,
+                )
+                await _write_sync_state(
+                    session,
+                    chain_id=config.validator_media_bond_chain_id,
+                    bond_contract=bond_contract,
+                    verifier_version=verifier_version,
+                    status="faulted",
+                    status_reason="snapshot_verification_failed",
+                    now=now,
+                    prior=prior,
+                    snapshot=None,
+                )
+                return {
+                    "status": "faulted",
+                    "reason": str(exc),
+                    "invalidated": invalidated,
+                }
+            await _write_sync_state(
+                session,
+                chain_id=config.validator_media_bond_chain_id,
+                bond_contract=bond_contract,
+                verifier_version=verifier_version,
+                status="healthy",
+                status_reason="quorum_verified",
+                now=now,
+                prior=prior,
+                snapshot=snapshot,
+            )
+            return {"status": "synced", **result}

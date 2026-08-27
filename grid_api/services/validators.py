@@ -34,7 +34,7 @@ from ..v2.schema import validator_attestations as attestations_t
 from ..v2.schema import validator_probe_groups as probe_groups_t
 from ..v2.schema import validators as validators_t
 from ..v2.schema import workers as workers_t
-from .validator_bonds import rpc_sources_are_distinct
+from .validator_bonds import reviewed_runtime_hash, rpc_sources_are_distinct
 
 logger = logging.getLogger("grid_api.validators")
 
@@ -758,8 +758,8 @@ def media_validation_policy() -> dict[str, Any]:
     """Return the fail-closed assignment gate without exposing private state."""
     settings = get_settings()
     contract = settings.validator_media_bond_contract.strip().lower()
-    runtime_hash = settings.validator_media_bond_facet_runtime_hash.strip().lower()
     verifier = settings.validator_media_bond_verifier_version.strip()
+    runtime_hash = reviewed_runtime_hash(verifier) or ""
     primary_rpc = (
         settings.base_rpc_url.get_secret_value() if settings.base_rpc_url else ""
     )
@@ -781,10 +781,10 @@ def media_validation_policy() -> dict[str, Any]:
         reasons.append("Base RPC sources are not independent")
     if not _ADDR_RE.fullmatch(contract):
         reasons.append("reviewed bond contract not configured")
-    if not _HASH_RE.fullmatch(runtime_hash):
-        reasons.append("reviewed bond facet runtime not configured")
     if not verifier:
         reasons.append("bond verifier version not configured")
+    elif not _HASH_RE.fullmatch(runtime_hash):
+        reasons.append("bond verifier version is not supported by this Core release")
     if settings.validator_media_bond_chain_id <= 0:
         reasons.append("bond chain id is invalid")
     if settings.validator_media_minimum_bond_raw <= 0:
@@ -1292,6 +1292,29 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         challenge["function_name"] = function_name
         challenge["test_inputs"] = test_inputs
     return challenge
+
+
+def _make_unique_text_challenge(
+    kind: str,
+    existing_challenges: list[dict[str, Any]],
+    *,
+    max_attempts: int = 32,
+) -> dict[str, Any]:
+    """Generate one challenge with a group-unique prompt and answer commitment."""
+    used_prompts = {
+        str(challenge.get("prompt") or "") for challenge in existing_challenges
+    }
+    used_expected_hashes = {
+        str(challenge.get("expected_hash") or "") for challenge in existing_challenges
+    }
+    for _ in range(max_attempts):
+        challenge = _make_text_challenge(kind)
+        if (
+            challenge["prompt"] not in used_prompts
+            and challenge["expected_hash"] not in used_expected_hashes
+        ):
+            return challenge
+    raise AssignmentError("could not generate a unique text challenge for the probe group")
 
 
 def _text_generator_selector(canary_kind: str) -> str:
@@ -2079,8 +2102,16 @@ async def issue_assignments(
                 group = group_values
             else:
                 if group["scoring_policy_id"] == _TEXT_BATCH_SCORING_POLICY:
-                    challenge = _make_text_challenge(
+                    existing_challenges = (
+                        await session.execute(
+                            sa.select(assignments_t.c.challenge).where(
+                                assignments_t.c.probe_group_id == group["id"],
+                            ),
+                        )
+                    ).scalars().all()
+                    challenge = _make_unique_text_challenge(
                         _text_generator_selector(str(group["canary_kind"])),
+                        [dict(value or {}) for value in existing_challenges],
                     )
                     if (
                         challenge["capability"] != group["capability"]
@@ -2298,6 +2329,7 @@ async def _issue_image_assignments(
                             expected_chain_id=policy["chain_id"],
                             expected_bond_contract=policy["bond_contract"],
                             expected_verifier_version=policy["bond_verifier_version"],
+                            expected_facet_runtime_hash=policy["bond_facet_runtime_hash"],
                             minimum_bond_raw=policy["minimum_bond_raw"],
                             minimum_quality_pass_rate=policy["minimum_quality_pass_rate"],
                         )

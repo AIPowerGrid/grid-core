@@ -368,10 +368,14 @@ validator_reference_workers = sa.Table(
     sa.Column("bond_contract", sa.String(42), nullable=True),
     sa.Column("bond_chain_id", sa.BigInteger, nullable=True),
     sa.Column("bond_finalized_block", sa.BigInteger, nullable=True),
+    sa.Column("bond_finalized_block_hash", sa.String(66), nullable=True),
+    sa.Column("bond_facet_address", sa.String(42), nullable=True),
+    sa.Column("bond_facet_runtime_hash", sa.String(66), nullable=True),
     sa.Column("bond_amount_raw", sa.Numeric(78, 0), nullable=True),
     sa.Column("bond_active", sa.Boolean, nullable=False, default=False),
     sa.Column("bond_slashed", sa.Boolean, nullable=False, default=False),
     sa.Column("bond_verifier_version", sa.String(64), nullable=True),
+    sa.Column("bond_status_reason", sa.String(64), nullable=True),
     sa.Column("bond_verified_at", sa.DateTime(timezone=True), nullable=True, index=True),
     sa.Column("quality_window_start", sa.DateTime(timezone=True), nullable=True),
     sa.Column("quality_window_end", sa.DateTime(timezone=True), nullable=True),
@@ -413,6 +417,42 @@ validator_reference_workers = sa.Table(
         "quality_window_start IS NULL OR quality_window_end IS NULL "
         "OR quality_window_end >= quality_window_start",
         name="ck_grid_validator_reference_workers_quality_window",
+    ),
+)
+
+
+# One durable finalized-chain cursor per reviewed WorkerRegistry authority.
+# This is an operational proof/health record, not a trust grant. A faulted
+# cursor makes every associated reference bond ineligible until a later exact
+# two-provider sync succeeds.
+validator_bond_sync_state = sa.Table(
+    "grid_validator_bond_sync_state",
+    metadata,
+    sa.Column("chain_id", sa.BigInteger, primary_key=True),
+    sa.Column("bond_contract", sa.String(42), primary_key=True),
+    sa.Column("verifier_version", sa.String(64), nullable=False),
+    sa.Column("facet_address", sa.String(42), nullable=True),
+    sa.Column("facet_runtime_hash", sa.String(66), nullable=True),
+    sa.Column("finalized_block", sa.BigInteger, nullable=True),
+    sa.Column("finalized_block_hash", sa.String(66), nullable=True),
+    sa.Column("status", sa.String(16), nullable=False, default="unverified"),
+    sa.Column("status_reason", sa.String(64), nullable=False),
+    sa.Column("consecutive_failures", sa.Integer, nullable=False, default=0),
+    sa.Column("last_attempt_at", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.Column("last_success_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.CheckConstraint(
+        "status IN ('unverified', 'healthy', 'faulted')",
+        name="ck_grid_validator_bond_sync_state_status",
+    ),
+    sa.CheckConstraint(
+        "consecutive_failures >= 0",
+        name="ck_grid_validator_bond_sync_state_failures",
+    ),
+    sa.CheckConstraint(
+        "finalized_block IS NULL OR finalized_block >= 0",
+        name="ck_grid_validator_bond_sync_state_block",
     ),
 )
 

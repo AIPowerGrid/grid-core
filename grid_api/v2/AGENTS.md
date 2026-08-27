@@ -81,9 +81,12 @@ snapshot pool.
   and attestations remains the final database guard against duplicate identity
   membership or votes.
 - `grid_validator_reference_workers` is derived only from finalized Base bond
-  sync plus non-economic quality review. Active selection requires fresh bond,
-  quality, worker-presence, account, and payout-wallet evidence; no worker may
-  self-declare reference eligibility.
+  sync plus non-economic quality review. Active selection requires a finalized
+  block hash, routed facet and exact reviewed runtime proof, fresh bond, quality,
+  worker-presence, account, and payout-wallet evidence; no worker may self-declare
+  reference eligibility. `grid_validator_bond_sync_state` is the durable
+  authority-scoped finalized cursor and health record. A faulted cursor must
+  invalidate its cached eligibility until a later exact sync recovers it.
 - Account IDs are UUIDs. Quota identities such as `v2:<uuid>` are not DB foreign
   keys and must not be passed to credit ledger functions.
 - New columns need explicit migrations, tests, and backfill/default strategy for

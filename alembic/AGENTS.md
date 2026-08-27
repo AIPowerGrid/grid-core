@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current head: `0026`
+- `versions/` - ordered migration revisions. Current head: `0027`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -28,7 +28,8 @@ production database match the Grid-owned schema contracts without relying on
   and one committed frozen witness set per probe group; `0025` adds a bounded
   durable assignment result used to recover completed-but-unattested probes;
   `0026` adds opaque operator groups, expiring independence-review
-  state, and bounded qualification heartbeat samples).
+  state, and bounded qualification heartbeat samples; `0027` persists finalized
+  WorkerRegistry block/facet proofs plus one authority-scoped sync cursor).
 
 ## Local Contracts
 
@@ -55,6 +56,9 @@ production database match the Grid-owned schema contracts without relying on
   self-report. Keep it empty until the reviewed cooldown-backed WorkerRegistry
   is deployed; media validation must fail closed when snapshots are stale or
   identities are not independent.
+- Apply `0027` before any release that starts the bond-sync loop or selects
+  bonded references. Existing rows backfill with NULL proof fields and remain
+  ineligible until a successful reviewed sync writes the full proof.
 - Migrations must be idempotent only where Alembic expects them to be; do not
   hide failed DDL with broad exception swallowing.
 - Economic constraints matter: unique `grid_ledger.job_id`, non-null credit refs

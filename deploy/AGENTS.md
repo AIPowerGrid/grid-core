@@ -69,15 +69,21 @@ executes an immutable release selected through `/home/aipg/current`.
   rewards, strikes, or slashing.
 - Apply Alembic `0024` before code that issues media assignments; it adds the
   group execution lease and shared frozen-witness columns read by that path.
+- Apply Alembic `0027` before starting the bond-sync loop or selecting bonded
+  references. It adds the finalized block/facet proofs and durable sync cursor;
+  deploying the code first will fail and must not be attempted.
 - `VALIDATOR_MEDIA_PROBE_ENABLED` is not a standalone launch switch. Keep it off
   until the reviewed bond contract/verifier/minimum, finalized reference sync,
   governed deterministic recipe/model digest, independent operators, immutable
   R2 witness retention, and supervised preview gates are all proven.
 - `VALIDATOR_MEDIA_BOND_SYNC_ENABLED` is independently dark. Its Diamond
-  address, facet runtime hash, verifier version, primary Base RPC, independently
-  operated confirmation RPC, bounds, and interval must be set together. The
+  address, reviewed verifier version, primary Base RPC, independently operated
+  confirmation RPC, bounds, and interval must be set together. The exact facet
+  runtime is compiled into the Core release and must never be supplied through
+  operator configuration. The
   cache refreshes only when both RPCs return the same complete finalized
-  snapshot. Enabling the loop does not enable media assignments or
+  snapshot and prior finalized anchor. A fault immediately invalidates that
+  authority's cached eligibility. Enabling the loop does not enable media assignments or
   create/activate a reference row.
 - Do not enable the backup timer merely because its unit was installed. Run one
   backup, restore it into the generated scratch database, migrate with the exact

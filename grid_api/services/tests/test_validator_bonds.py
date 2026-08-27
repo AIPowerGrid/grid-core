@@ -17,6 +17,7 @@ from grid_api.config import GridSettings
 from grid_api.services import validator_bonds
 from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import metadata
+from grid_api.v2.schema import validator_bond_sync_state as sync_state_t
 from grid_api.v2.schema import validator_reference_workers as references_t
 from grid_api.v2.schema import workers as workers_t
 
@@ -28,6 +29,8 @@ RUNTIME = b"reviewed-worker-registry-runtime"
 RUNTIME_HASH = Web3.keccak(RUNTIME).hex()
 BLOCK_HASH = "0x" + "4" * 64
 MODEL = "krea-2-turbo"
+VERIFIER = "worker-registry-v2-957685a"
+REVIEWED_RUNTIME_HASH = validator_bonds.reviewed_runtime_hash(VERIFIER)
 
 
 class _Call:
@@ -114,7 +117,15 @@ def _worker_tuple(wallet, *, amount=1_000, active=True, slashed=False, unbonding
     return (wallet, amount, 10, 20, 1_700_000_000, active, slashed, unbonding_at)
 
 
-def _read_with(fake, *, reference_wallets=None, max_workers=100, finalized_block=None):
+def _read_with(
+    fake,
+    *,
+    reference_wallets=None,
+    max_workers=100,
+    finalized_block=None,
+    anchor_block=None,
+    anchor_block_hash=None,
+):
     wallets = reference_wallets
     if wallets is None:
         wallets = tuple(fake.eth.contract_value.functions.workers)
@@ -127,6 +138,8 @@ def _read_with(fake, *, reference_wallets=None, max_workers=100, finalized_block
         max_workers=max_workers,
         rpc_timeout_seconds=10,
         finalized_block=finalized_block,
+        anchor_block=anchor_block,
+        anchor_block_hash=anchor_block_hash,
         web3_factory=lambda _url, _timeout: fake,
     )
 
@@ -156,6 +169,16 @@ def test_pins_every_read_to_requested_shared_finalized_block():
 
     assert snapshot.finalized_block == 123_455
     assert {block for _, block in eth.calls} == {123_455}
+
+
+def test_rejects_changed_prior_finalized_hash():
+    eth = _Eth(routes=_routes(), workers={})
+    with pytest.raises(validator_bonds.BondSyncError, match="prior finalized block hash changed"):
+        _read_with(
+            _Web3(eth),
+            anchor_block=123_400,
+            anchor_block_hash="0x" + "9" * 64,
+        )
 
 
 @pytest.mark.parametrize(
@@ -382,10 +405,14 @@ async def _reference(session, index, *, prior_block=None):
             bond_contract=DIAMOND if prior_block is not None else None,
             bond_chain_id=8453 if prior_block is not None else None,
             bond_finalized_block=prior_block,
+            bond_finalized_block_hash=BLOCK_HASH if prior_block is not None else None,
+            bond_facet_address=FACET if prior_block is not None else None,
+            bond_facet_runtime_hash=REVIEWED_RUNTIME_HASH if prior_block is not None else None,
             bond_amount_raw=Decimal(500 if prior_block is not None else 0),
             bond_active=prior_block is not None,
             bond_slashed=False,
-            bond_verifier_version="older" if prior_block is not None else None,
+            bond_verifier_version=VERIFIER if prior_block is not None else None,
+            bond_status_reason="active" if prior_block is not None else None,
             bond_verified_at=NOW - timedelta(hours=1) if prior_block is not None else None,
             quality_window_start=NOW - timedelta(days=1),
             quality_window_end=NOW,
@@ -404,7 +431,7 @@ def _snapshot(*workers, block=123_456):
         chain_id=8453,
         diamond_address=DIAMOND,
         facet_address=FACET,
-        facet_runtime_hash=RUNTIME_HASH,
+        facet_runtime_hash=REVIEWED_RUNTIME_HASH,
         finalized_block=block,
         finalized_block_hash=BLOCK_HASH,
         workers={worker.wallet: worker for worker in workers},
@@ -427,7 +454,7 @@ async def test_apply_updates_reviewed_rows_and_fails_missing_wallet_closed(sessi
     result = await validator_bonds.apply_reference_bond_snapshot(
         session,
         snapshot=_snapshot(bond),
-        verifier_version="worker-registry-43ec4f1",
+        verifier_version=VERIFIER,
         verified_at=NOW,
     )
     await session.commit()
@@ -442,17 +469,85 @@ async def test_apply_updates_reviewed_rows_and_fails_missing_wallet_closed(sessi
         "reference_rows": 2,
         "updated": 2,
         "inactive": 1,
-        "stale_skipped": 0,
         "matched_workers": 1,
         "finalized_block": 123_456,
     }
     assert rows[present_id].bond_active is True
     assert int(rows[present_id].bond_amount_raw) == 2_000
+    assert rows[present_id].bond_finalized_block_hash == BLOCK_HASH
+    assert rows[present_id].bond_facet_address == FACET
+    assert rows[present_id].bond_facet_runtime_hash == REVIEWED_RUNTIME_HASH
+    assert rows[present_id].bond_status_reason == "active"
     assert rows[missing_id].bond_active is False
     assert int(rows[missing_id].bond_amount_raw) == 0
     assert rows[missing_id].status == "active"
     assert rows[missing_id].quality_pass_rate == pytest.approx(0.99)
     assert rows[missing_id].status_reason == "independent quality review"
+
+
+@pytest.mark.asyncio
+async def test_apply_fails_identity_drift_closed(session):
+    worker_id, wallet = await _reference(session, 20)
+    await session.execute(
+        sa.update(workers_t)
+        .where(workers_t.c.id == worker_id)
+        .values(wallet="0x" + "9" * 40),
+    )
+    await session.commit()
+
+    result = await validator_bonds.apply_reference_bond_snapshot(
+        session,
+        snapshot=_snapshot(
+            validator_bonds.WorkerBond(
+                wallet=wallet,
+                amount_raw=2_000,
+                active=True,
+                slashed=False,
+                unbonding_at=0,
+            ),
+        ),
+        verifier_version=VERIFIER,
+        verified_at=NOW,
+    )
+    await session.commit()
+
+    row = (
+        await session.execute(
+            sa.select(references_t).where(references_t.c.worker_id == worker_id),
+        )
+    ).mappings().one()
+    assert result["inactive"] == 1
+    assert row.bond_active is False
+    assert row.bond_status_reason == "identity_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_apply_rejects_unreviewed_verifier_or_runtime(session):
+    await _reference(session, 21)
+    await session.commit()
+
+    with pytest.raises(validator_bonds.BondSyncError, match="not reviewed"):
+        await validator_bonds.apply_reference_bond_snapshot(
+            session,
+            snapshot=_snapshot(),
+            verifier_version="operator-chosen-label",
+            verified_at=NOW,
+        )
+    with pytest.raises(validator_bonds.BondSyncError, match="runtime"):
+        await validator_bonds.apply_reference_bond_snapshot(
+            session,
+            snapshot=validator_bonds.FinalizedBondSnapshot(
+                chain_id=8453,
+                diamond_address=DIAMOND,
+                facet_address=FACET,
+                facet_runtime_hash="0x" + "f" * 64,
+                finalized_block=123_456,
+                finalized_block_hash=BLOCK_HASH,
+                workers={},
+            ),
+            verifier_version=VERIFIER,
+            verified_at=NOW,
+        )
 
 
 @pytest.mark.asyncio
@@ -467,24 +562,24 @@ async def test_apply_cannot_overwrite_a_newer_finalized_snapshot(session):
         unbonding_at=0,
     )
 
-    result = await validator_bonds.apply_reference_bond_snapshot(
-        session,
-        snapshot=_snapshot(older, block=199),
-        verifier_version="worker-registry-43ec4f1",
-        verified_at=NOW,
-    )
-    await session.commit()
+    with pytest.raises(validator_bonds.BondSyncError, match="moved backwards"):
+        await validator_bonds.apply_reference_bond_snapshot(
+            session,
+            snapshot=_snapshot(older, block=199),
+            verifier_version=VERIFIER,
+            verified_at=NOW,
+        )
+    await session.rollback()
 
     row = (
         await session.execute(
             sa.select(references_t).where(references_t.c.worker_id == worker_id),
         )
     ).mappings().one()
-    assert result["stale_skipped"] == 1
     assert row.bond_finalized_block == 200
     assert row.bond_active is True
     assert int(row.bond_amount_raw) == 500
-    assert row.bond_verifier_version == "older"
+    assert row.bond_verifier_version == VERIFIER
 
 
 @pytest.mark.asyncio
@@ -542,8 +637,7 @@ async def test_enabled_sync_reads_config_and_commits_atomically(session, monkeyp
             validator_media_bond_sync_enabled=True,
             validator_media_bond_chain_id=8453,
             validator_media_bond_contract=DIAMOND,
-            validator_media_bond_facet_runtime_hash=RUNTIME_HASH,
-            validator_media_bond_verifier_version="worker-registry-43ec4f1",
+            validator_media_bond_verifier_version=VERIFIER,
             validator_media_bond_max_workers=77,
             validator_media_bond_rpc_timeout_seconds=11,
         ),
@@ -560,7 +654,6 @@ async def test_enabled_sync_reads_config_and_commits_atomically(session, monkeyp
         "reference_rows": 1,
         "updated": 1,
         "inactive": 0,
-        "stale_skipped": 0,
         "matched_workers": 1,
         "finalized_block": 123_456,
     }
@@ -569,13 +662,173 @@ async def test_enabled_sync_reads_config_and_commits_atomically(session, monkeyp
         "confirmation_rpc_url": "https://rpc-two.invalid/private-token",
         "expected_chain_id": 8453,
         "diamond_address": DIAMOND,
-        "expected_facet_runtime_hash": RUNTIME_HASH,
+        "expected_facet_runtime_hash": REVIEWED_RUNTIME_HASH,
         "reference_wallets": (wallet,),
         "max_workers": 77,
         "rpc_timeout_seconds": 11,
+        "anchor_block": None,
+        "anchor_block_hash": None,
     }
     assert row.bond_active is True
     assert int(row.bond_amount_raw) == 3_000
-    assert row.bond_verifier_version == "worker-registry-43ec4f1"
+    assert row.bond_verifier_version == VERIFIER
     assert row.status == "active"
     assert row.quality_pass_rate == pytest.approx(0.99)
+    state = (await session.execute(sa.select(sync_state_t))).mappings().one()
+    assert state.status == "healthy"
+    assert state.finalized_block == 123_456
+    assert state.finalized_block_hash == BLOCK_HASH
+    assert state.facet_runtime_hash == REVIEWED_RUNTIME_HASH
+
+
+@pytest.mark.asyncio
+async def test_sync_skips_when_another_process_holds_the_lock(session, monkeypatch):
+    called = False
+    factory = async_sessionmaker(session.bind, class_=AsyncSession, expire_on_commit=False)
+
+    async def open_session():
+        return factory()
+
+    async def lock_unavailable(_session):
+        return False
+
+    def reader(**_kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("contended sync read RPC")
+
+    monkeypatch.setattr(validator_bonds, "new_session", open_session)
+    monkeypatch.setattr(validator_bonds, "_try_sync_lock", lock_unavailable)
+    result = await validator_bonds.sync_reference_bonds_once(
+        settings=GridSettings(
+            base_rpc_url=SecretStr("https://rpc.invalid/private-token"),
+            validator_media_bond_confirmation_rpc_url=SecretStr(
+                "https://rpc-two.invalid/private-token",
+            ),
+            validator_media_bond_sync_enabled=True,
+            validator_media_bond_chain_id=8453,
+            validator_media_bond_contract=DIAMOND,
+            validator_media_bond_verifier_version=VERIFIER,
+        ),
+        snapshot_reader=reader,
+    )
+
+    assert result == {"status": "skipped", "reason": "another sync is running"}
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_sync_fault_invalidates_prior_eligibility_and_records_health(session, monkeypatch):
+    worker_id, wallet = await _reference(session, 5, prior_block=123_400)
+    other_worker_id, _ = await _reference(session, 6, prior_block=123_400)
+    await session.execute(
+        sa.update(references_t)
+        .where(references_t.c.worker_id == other_worker_id)
+        .values(bond_contract="0x" + "8" * 40),
+    )
+    await session.execute(
+        sa.insert(sync_state_t).values(
+            chain_id=8453,
+            bond_contract=DIAMOND,
+            verifier_version=VERIFIER,
+            facet_address=FACET,
+            facet_runtime_hash=REVIEWED_RUNTIME_HASH,
+            finalized_block=123_400,
+            finalized_block_hash=BLOCK_HASH,
+            status="healthy",
+            status_reason="quorum_verified",
+            consecutive_failures=0,
+            last_attempt_at=NOW,
+            last_success_at=NOW,
+            created=NOW,
+            updated=NOW,
+        ),
+    )
+    await session.commit()
+    factory = async_sessionmaker(session.bind, class_=AsyncSession, expire_on_commit=False)
+
+    async def open_session():
+        return factory()
+
+    def failing_reader(**kwargs):
+        assert kwargs["anchor_block"] == 123_400
+        assert kwargs["anchor_block_hash"] == BLOCK_HASH
+        raise RuntimeError("provider detail must not escape")
+
+    monkeypatch.setattr(validator_bonds, "new_session", open_session)
+    result = await validator_bonds.sync_reference_bonds_once(
+        settings=GridSettings(
+            base_rpc_url=SecretStr("https://rpc.invalid/private-token"),
+            validator_media_bond_confirmation_rpc_url=SecretStr("https://rpc-two.invalid/private-token"),
+            validator_media_bond_sync_enabled=True,
+            validator_media_bond_chain_id=8453,
+            validator_media_bond_contract=DIAMOND,
+            validator_media_bond_verifier_version=VERIFIER,
+        ),
+        snapshot_reader=failing_reader,
+    )
+
+    assert result["status"] == "faulted"
+    assert result["reason"] == "bond snapshot read failed"
+    assert result["invalidated"] == 1
+    row = (
+        await session.execute(sa.select(references_t).where(references_t.c.worker_id == worker_id))
+    ).mappings().one()
+    other_row = (
+        await session.execute(
+            sa.select(references_t).where(references_t.c.worker_id == other_worker_id),
+        )
+    ).mappings().one()
+    state = (await session.execute(sa.select(sync_state_t))).mappings().one()
+    assert row.payout_wallet == wallet
+    assert row.bond_active is False
+    assert row.bond_verified_at is None
+    assert row.bond_status_reason == "sync_faulted"
+    assert other_row.bond_active is True
+    assert state.status == "faulted"
+    assert state.consecutive_failures == 1
+    assert state.finalized_block == 123_400
+
+    recovered_snapshot = _snapshot(
+        validator_bonds.WorkerBond(
+            wallet=wallet,
+            amount_raw=4_000,
+            active=True,
+            slashed=False,
+            unbonding_at=0,
+        ),
+        block=123_500,
+    )
+
+    def recovered_reader(**kwargs):
+        assert kwargs["anchor_block"] == 123_400
+        assert kwargs["anchor_block_hash"] == BLOCK_HASH
+        assert kwargs["reference_wallets"] == (wallet,)
+        return recovered_snapshot
+
+    recovered = await validator_bonds.sync_reference_bonds_once(
+        settings=GridSettings(
+            base_rpc_url=SecretStr("https://rpc.invalid/private-token"),
+            validator_media_bond_confirmation_rpc_url=SecretStr(
+                "https://rpc-two.invalid/private-token",
+            ),
+            validator_media_bond_sync_enabled=True,
+            validator_media_bond_chain_id=8453,
+            validator_media_bond_contract=DIAMOND,
+            validator_media_bond_verifier_version=VERIFIER,
+        ),
+        snapshot_reader=recovered_reader,
+    )
+
+    recovered_row = (
+        await session.execute(
+            sa.select(references_t).where(references_t.c.worker_id == worker_id),
+        )
+    ).mappings().one()
+    recovered_state = (await session.execute(sa.select(sync_state_t))).mappings().one()
+    assert recovered["status"] == "synced"
+    assert recovered_row.bond_active is True
+    assert recovered_row.bond_status_reason == "active"
+    assert recovered_state.status == "healthy"
+    assert recovered_state.consecutive_failures == 0
+    assert recovered_state.finalized_block == 123_500

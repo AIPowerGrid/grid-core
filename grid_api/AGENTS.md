@@ -35,8 +35,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - **On-chain:** read via background sync loops or offline jobs, cached; never
   perform Base RPC calls on the hot request path.
 - The validator bond loop may update only existing reviewed reference rows. It
-  verifies one finalized block, the configured Diamond address, all expected
-  selector routes, and the routed facet runtime hash before one atomic refresh.
+  verifies one finalized block and prior block-hash anchor, the configured
+  Diamond address, all expected selector routes, and the Core-pinned facet
+  runtime before one atomic cursor/reference refresh. PostgreSQL serializes
+  replicas; any ambiguity invalidates only that authority's cached eligibility.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
 - **Safety:** `services/sanitizer.py` is secret redaction, not a content safety

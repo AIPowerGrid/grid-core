@@ -21,7 +21,7 @@ from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from grid_api import auth, database, safe_logging
-from grid_api.services import recipes, validator_references
+from grid_api.services import recipes, validator_bonds, validator_references
 from grid_api.services import validators as validators_svc
 from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import metadata as v2_metadata
@@ -33,6 +33,8 @@ from grid_api.v2.schema import validators as validators_t
 from grid_api.v2.schema import workers as workers_t
 
 _PG = os.environ.get("VALIDATORS_TEST_DB_URL", "")
+VERIFIER = "worker-registry-v2-957685a"
+BOND_RUNTIME_HASH = validator_bonds.reviewed_runtime_hash(VERIFIER)
 
 pytestmark = pytest.mark.skipif(
     not _PG.startswith("postgresql"),
@@ -148,10 +150,14 @@ async def _seed_reference(session, worker, *, now, bond_amount_raw):
             bond_contract="0x" + "a" * 40,
             bond_chain_id=8453,
             bond_finalized_block=123456,
+            bond_finalized_block_hash="0x" + "d" * 64,
+            bond_facet_address="0x" + "e" * 40,
+            bond_facet_runtime_hash=BOND_RUNTIME_HASH,
             bond_amount_raw=Decimal(bond_amount_raw),
             bond_active=True,
             bond_slashed=False,
-            bond_verifier_version="worker-registry-v2",
+            bond_verifier_version=VERIFIER,
+            bond_status_reason="active",
             bond_verified_at=now,
             quality_window_start=now - timedelta(days=1),
             quality_window_end=now,
@@ -170,7 +176,8 @@ def _reference_policy():
         "modality": "image",
         "expected_chain_id": 8453,
         "expected_bond_contract": "0x" + "a" * 40,
-        "expected_verifier_version": "worker-registry-v2",
+        "expected_verifier_version": VERIFIER,
+        "expected_facet_runtime_hash": BOND_RUNTIME_HASH,
         "minimum_bond_raw": 10**18,
         "minimum_quality_pass_rate": 0.95,
     }
@@ -183,11 +190,10 @@ def _media_settings():
         base_rpc_url=SecretStr("https://rpc.invalid"),
         validator_media_bond_chain_id=8453,
         validator_media_bond_contract="0x" + "a" * 40,
-        validator_media_bond_facet_runtime_hash="0x" + "b" * 64,
         validator_media_bond_confirmation_rpc_url=SecretStr(
             "https://rpc-two.invalid",
         ),
-        validator_media_bond_verifier_version="worker-registry-v2",
+        validator_media_bond_verifier_version=VERIFIER,
         validator_media_minimum_bond_raw=10**18,
         validator_media_minimum_quality_pass_rate=0.95,
         validator_media_max_output_bytes=25 * 1024 * 1024,
@@ -223,6 +229,19 @@ def _seed_deterministic_image_recipe():
         },
         recipe_id=77,
     )
+
+
+@pytest.mark.asyncio
+async def test_bond_sync_advisory_lock_serializes_core_replicas(pg):
+    first = await database.new_session()
+    second = await database.new_session()
+    async with first, second:
+        async with first.begin():
+            assert await validator_bonds._try_sync_lock(first) is True
+            async with second.begin():
+                assert await validator_bonds._try_sync_lock(second) is False
+        async with second.begin():
+            assert await validator_bonds._try_sync_lock(second) is True
 
 
 @pytest.mark.asyncio

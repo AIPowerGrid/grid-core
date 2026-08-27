@@ -151,6 +151,14 @@ async def _validator_bond_sync_loop():
                     result["inactive"],
                     result["finalized_block"],
                 )
+            elif result["status"] == "faulted":
+                alerts.emit(
+                    "validator_bond_sync_faulted",
+                    "critical",
+                    "Finalized worker-bond evidence was invalidated after a sync fault.",
+                    fields={"invalidated": result["invalidated"]},
+                    dedupe_key="validator-bond-sync-faulted",
+                )
         except Exception as exc:
             logger.error("Validator bond sync error_type=%s", error_type(exc))
             alerts.emit(

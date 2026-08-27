@@ -336,7 +336,13 @@ reviewed cooldown-backed WorkerRegistry deployment and independent reference
 operators do not exist. A stacked Core candidate now verifies the Grid Diamond,
 all 16 WorkerRegistry selector routes, and the routed facet runtime at the newest
 mutually finalized block shared by two agreeing RPC providers before atomically
-refreshing only independently reviewed rows. It reads only those reviewed payout
+refreshing only independently reviewed rows. Migration `0027` persists the
+accepted block hash/facet proof and one authority-scoped health cursor. A
+PostgreSQL advisory transaction lock serializes Core replicas; any provider,
+route, runtime, snapshot, or prior-finality-anchor disagreement atomically
+faults that cursor and invalidates only its reference bonds until a clean sync
+recovers them. The verifier name maps to an immutable runtime hash compiled
+into Core, not an operator-provided value. It reads only those reviewed payout
 wallets and never scans the registry-wide append-only worker history;
 its loop and media assignment gate both default off. External contract review,
 facet deployment, live RPC/reorg canary evidence, and independent reference
