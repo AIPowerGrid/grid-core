@@ -18,6 +18,7 @@ from eth_account import Account
 from eth_account.messages import encode_defunct
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -25,6 +26,7 @@ from grid_api import auth, database, safe_logging
 from grid_api.ratelimit import limiter
 from grid_api.routers import validator as validator_router
 from grid_api.services import recipes
+from grid_api.services import validator_bonds
 from grid_api.services import validator_operators
 from grid_api.services import validators as validators_svc
 from grid_api.v2.schema import (
@@ -54,6 +56,8 @@ from grid_api.v2.schema import (
 
 TEST_PRIVATE_KEY = "0x" + "01" * 32
 TEST_WALLET = Account.from_key(TEST_PRIVATE_KEY).address.lower()
+VERIFIER = "worker-registry-v2-957685a"
+BOND_RUNTIME_HASH = validator_bonds.reviewed_runtime_hash(VERIFIER)
 
 
 @pytest.fixture(autouse=True)
@@ -203,9 +207,14 @@ def _media_settings(*, enabled=True, video_enabled=False):
     return SimpleNamespace(
         validator_media_probe_enabled=enabled,
         validator_video_probe_enabled=video_enabled,
+        validator_media_bond_sync_enabled=True,
+        base_rpc_url=SecretStr("https://rpc.invalid"),
         validator_media_bond_chain_id=8453,
         validator_media_bond_contract="0x" + "a" * 40,
-        validator_media_bond_verifier_version="worker-registry-v2",
+        validator_media_bond_confirmation_rpc_url=SecretStr(
+            "https://rpc-two.invalid",
+        ),
+        validator_media_bond_verifier_version=VERIFIER,
         validator_media_minimum_bond_raw=10**18,
         validator_media_minimum_quality_pass_rate=0.95,
         validator_media_max_output_bytes=25 * 1024 * 1024,
@@ -465,10 +474,14 @@ async def _seed_image_reference(session, worker, *, now):
             bond_contract="0x" + "a" * 40,
             bond_chain_id=8453,
             bond_finalized_block=123,
+            bond_finalized_block_hash="0x" + "d" * 64,
+            bond_facet_address="0x" + "e" * 40,
+            bond_facet_runtime_hash=BOND_RUNTIME_HASH,
             bond_amount_raw=Decimal(10**18),
             bond_active=True,
             bond_slashed=False,
-            bond_verifier_version="worker-registry-v2",
+            bond_verifier_version=VERIFIER,
+            bond_status_reason="active",
             bond_verified_at=now,
             quality_window_start=now - timedelta(days=1),
             quality_window_end=now,
@@ -2598,6 +2611,34 @@ async def test_image_assignment_gate_is_fail_closed(db, monkeypatch):
             limit=1,
             modality="image",
         )
+
+
+def test_image_policy_requires_live_finalized_sync_and_runtime(monkeypatch):
+    settings = _media_settings()
+    settings.validator_media_bond_sync_enabled = False
+    settings.validator_media_bond_verifier_version = "unsupported-verifier"
+    settings.validator_media_bond_confirmation_rpc_url = None
+    monkeypatch.setattr(validators_svc, "get_settings", lambda: settings)
+
+    policy = validators_svc.media_validation_policy()
+
+    assert policy["enabled"] is False
+    assert "finalized bond sync disabled" in policy["reasons"]
+    assert "bond verifier version is not supported by this Core release" in policy["reasons"]
+    assert "independent confirmation RPC not configured" in policy["reasons"]
+
+
+def test_image_policy_rejects_same_rpc_host(monkeypatch):
+    settings = _media_settings()
+    settings.validator_media_bond_confirmation_rpc_url = SecretStr(
+        "https://rpc.invalid/another-account",
+    )
+    monkeypatch.setattr(validators_svc, "get_settings", lambda: settings)
+
+    policy = validators_svc.media_validation_policy()
+
+    assert policy["enabled"] is False
+    assert "Base RPC sources are not independent" in policy["reasons"]
 
 
 @pytest.mark.asyncio

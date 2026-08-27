@@ -35,6 +35,9 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - `review_validator_operator.py` - preview-first, digest-bound candidate,
   verify, or reject transition for an opaque validator control group. It never
   publishes operator identity or grants economic authority.
+- `review_validator_reference.py` - preview-first, digest-bound quality review
+  and activate/pause/revoke workflow for a media reference worker. It never
+  fabricates bond evidence or grants economic authority.
 - `backup_postgres.sh` - root-only custom-format backup of the Grid-owned
   PostgreSQL schema with checksum, archive validation, locking, and bounded
   local retention. It excludes unrelated extension and legacy schemas.
@@ -74,6 +77,11 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   same opaque `opg_*` id to every registration under common control, preview
   every transition, and apply with that exact digest. Do not place names,
   emails, hostnames, IPs, or private review notes in the group id or review ref.
+- Media reference review is two-step: use `review_validator_reference.py` with
+  `--action review` to create/update a paused quality row, let the default-off
+  chain sync write a fresh exact bond proof, then preview/apply `--action
+  activate`. Every apply requires the fresh preview digest. Identity drift
+  invalidates cached proof and requires another sync; revocation is terminal.
 - Service-key rotation requires a new `--output` path on protected local
   storage. The tool writes and fsyncs the replacement before committing the
   rotation, removes the file if the database operation fails, and refuses to

@@ -98,6 +98,7 @@ async def select_reference_workers(
     expected_chain_id: int,
     expected_bond_contract: str,
     expected_verifier_version: str,
+    expected_facet_runtime_hash: str,
     minimum_bond_raw: int,
     minimum_quality_pass_rate: float,
     count: int = 2,
@@ -122,6 +123,7 @@ async def select_reference_workers(
         raise ValueError("reference count must be between 2 and 5")
     normalized_contract = expected_bond_contract.strip().lower()
     normalized_verifier = expected_verifier_version.strip()
+    normalized_runtime = expected_facet_runtime_hash.strip().lower()
     if expected_chain_id <= 0:
         raise ValueError("expected_chain_id must be positive")
     if len(normalized_contract) != 42 or not normalized_contract.startswith("0x"):
@@ -132,6 +134,12 @@ async def select_reference_workers(
         raise ValueError("expected_bond_contract must be a 20-byte address") from exc
     if not normalized_verifier:
         raise ValueError("expected_verifier_version is required")
+    if len(normalized_runtime) != 66 or not normalized_runtime.startswith("0x"):
+        raise ValueError("expected_facet_runtime_hash must be a 32-byte hash")
+    try:
+        int(normalized_runtime[2:], 16)
+    except ValueError as exc:
+        raise ValueError("expected_facet_runtime_hash must be a 32-byte hash") from exc
     if minimum_bond_raw <= 0:
         raise ValueError("minimum_bond_raw must be positive")
     if not 0.0 <= minimum_quality_pass_rate <= 1.0:
@@ -172,10 +180,14 @@ async def select_reference_workers(
         sa.func.lower(references_t.c.payout_wallet) != candidate_wallet,
         references_t.c.bond_active.is_(True),
         references_t.c.bond_slashed.is_(False),
+        references_t.c.bond_status_reason == "active",
         references_t.c.bond_contract.isnot(None),
         sa.func.lower(references_t.c.bond_contract) == normalized_contract,
         references_t.c.bond_chain_id == expected_chain_id,
         references_t.c.bond_finalized_block.isnot(None),
+        references_t.c.bond_finalized_block_hash.isnot(None),
+        references_t.c.bond_facet_address.isnot(None),
+        sa.func.lower(references_t.c.bond_facet_runtime_hash) == normalized_runtime,
         references_t.c.bond_amount_raw >= minimum_bond_raw,
         references_t.c.bond_verifier_version == normalized_verifier,
         references_t.c.bond_verified_at >= current - bond_max_age,

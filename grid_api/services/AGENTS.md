@@ -60,8 +60,10 @@ content sanitization, and reward settlement.
   an unfilled group for one model may cover another model, but cannot create a
   second group for the blocked model. New `text.generated.v8` batches
   fix one capability/canary lane but issue and persist a distinct randomized
-  challenge for every validator; already-open v7 groups drain with their shared
-  challenge. Scorecards classify evidence as availability, protocol conformance,
+  challenge for every validator. Prompt and expected-answer commitments are
+  unique within the group by construction; generation retries boundedly and
+  fails closed on repeated collisions. Already-open v7 groups drain with their
+  shared challenge. Scorecards classify evidence as availability, protocol conformance,
   capability, quality, or fidelity. No current generated canary is quality-eligible.
   A regex/template solver may therefore pass protocol evidence but cannot earn a
   quality score. An accepted target-worker failure
@@ -123,6 +125,23 @@ content sanitization, and reward settlement.
   hard-targets one candidate, freezes one MP4 witness, and checks objective
   container/timing/motion properties. It does not claim model fidelity and has
   no reference workers. Both lanes remain non-economic.
+  `validator_bonds.py` owns the default-off Base cache refresh. It verifies all
+  WorkerRegistry selectors route through the reviewed Grid Diamond to one
+  code-pinned facet release at one mutually finalized block, requires two distinct
+  RPC sources to return the exact same block hash and complete snapshot, bounds
+  reads to the payout wallets in pre-existing reviewed reference rows, and never
+  scans the global append-only worker history. It never creates/activates a
+  reference, mutates quality review, or touches economics. A durable
+  authority-scoped cursor anchors later reads to the prior finalized block hash;
+  a PostgreSQL advisory transaction lock serializes Core replicas. Any sync
+  ambiguity atomically marks that cursor faulted and clears eligibility only for
+  that authority until a later exact sync recovers it. Operators may select only
+  a verifier/runtime pair compiled into the Core release.
+  `validator_reference_reviews.py` owns the preview-first, digest-bound human
+  quality and status workflow. A new review starts paused and cannot activate
+  until its fresh chain proof exactly matches the live Core policy. Identity
+  drift forces a pause and clears cached proof fields; only the bond sync may
+  repopulate them. Revocation is terminal.
 - **Model/media governance:** `recipes.py`, `recipe_import.py`, `styles.py`,
   `loras.py`, `model_registry.py`.
 - **Safety:** `sanitizer.py` - **secrets redactor only** (strips API keys/PGP from prompts).
@@ -312,6 +331,9 @@ content sanitization, and reward settlement.
   over scattered `os.getenv`.
 - Keep synchronous Web3/R2/network work off the event loop; use startup loops,
   offline jobs, or `asyncio.to_thread` as appropriate.
+- Bond-sync failure must leave the last snapshot untouched so freshness expiry
+  fails closed. Never partially persist an RPC traversal or accept a stale block
+  over a newer cached block.
 
 ## Verification
 

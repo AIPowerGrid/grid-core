@@ -34,6 +34,7 @@ from ..v2.schema import validator_attestations as attestations_t
 from ..v2.schema import validator_probe_groups as probe_groups_t
 from ..v2.schema import validators as validators_t
 from ..v2.schema import workers as workers_t
+from .validator_bonds import reviewed_runtime_hash, rpc_sources_are_distinct
 
 logger = logging.getLogger("grid_api.validators")
 
@@ -79,6 +80,7 @@ VALIDATOR_OPERATOR_SAMPLE_INTERVAL_SECONDS = max(
 )
 
 _ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
 _SIG_RE = re.compile(r"^(0x)?[0-9a-fA-F]{130}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -757,13 +759,32 @@ def media_validation_policy() -> dict[str, Any]:
     settings = get_settings()
     contract = settings.validator_media_bond_contract.strip().lower()
     verifier = settings.validator_media_bond_verifier_version.strip()
+    runtime_hash = reviewed_runtime_hash(verifier) or ""
+    primary_rpc = (
+        settings.base_rpc_url.get_secret_value() if settings.base_rpc_url else ""
+    )
+    confirmation_rpc = (
+        settings.validator_media_bond_confirmation_rpc_url.get_secret_value()
+        if settings.validator_media_bond_confirmation_rpc_url
+        else ""
+    )
     reasons: list[str] = []
     if not settings.validator_media_probe_enabled:
         reasons.append("operator gate disabled")
+    if not settings.validator_media_bond_sync_enabled:
+        reasons.append("finalized bond sync disabled")
+    if not settings.base_rpc_url:
+        reasons.append("Base RPC not configured")
+    if not settings.validator_media_bond_confirmation_rpc_url:
+        reasons.append("independent confirmation RPC not configured")
+    elif not rpc_sources_are_distinct(primary_rpc, confirmation_rpc):
+        reasons.append("Base RPC sources are not independent")
     if not _ADDR_RE.fullmatch(contract):
         reasons.append("reviewed bond contract not configured")
     if not verifier:
         reasons.append("bond verifier version not configured")
+    elif not _HASH_RE.fullmatch(runtime_hash):
+        reasons.append("bond verifier version is not supported by this Core release")
     if settings.validator_media_bond_chain_id <= 0:
         reasons.append("bond chain id is invalid")
     if settings.validator_media_minimum_bond_raw <= 0:
@@ -782,6 +803,7 @@ def media_validation_policy() -> dict[str, Any]:
         "reasons": reasons,
         "chain_id": settings.validator_media_bond_chain_id,
         "bond_contract": contract,
+        "bond_facet_runtime_hash": runtime_hash,
         "bond_verifier_version": verifier,
         "minimum_bond_raw": settings.validator_media_minimum_bond_raw,
         "minimum_quality_pass_rate": settings.validator_media_minimum_quality_pass_rate,
@@ -1270,6 +1292,29 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         challenge["function_name"] = function_name
         challenge["test_inputs"] = test_inputs
     return challenge
+
+
+def _make_unique_text_challenge(
+    kind: str,
+    existing_challenges: list[dict[str, Any]],
+    *,
+    max_attempts: int = 32,
+) -> dict[str, Any]:
+    """Generate one challenge with a group-unique prompt and answer commitment."""
+    used_prompts = {
+        str(challenge.get("prompt") or "") for challenge in existing_challenges
+    }
+    used_expected_hashes = {
+        str(challenge.get("expected_hash") or "") for challenge in existing_challenges
+    }
+    for _ in range(max_attempts):
+        challenge = _make_text_challenge(kind)
+        if (
+            challenge["prompt"] not in used_prompts
+            and challenge["expected_hash"] not in used_expected_hashes
+        ):
+            return challenge
+    raise AssignmentError("could not generate a unique text challenge for the probe group")
 
 
 def _text_generator_selector(canary_kind: str) -> str:
@@ -2057,8 +2102,16 @@ async def issue_assignments(
                 group = group_values
             else:
                 if group["scoring_policy_id"] == _TEXT_BATCH_SCORING_POLICY:
-                    challenge = _make_text_challenge(
+                    existing_challenges = (
+                        await session.execute(
+                            sa.select(assignments_t.c.challenge).where(
+                                assignments_t.c.probe_group_id == group["id"],
+                            ),
+                        )
+                    ).scalars().all()
+                    challenge = _make_unique_text_challenge(
                         _text_generator_selector(str(group["canary_kind"])),
+                        [dict(value or {}) for value in existing_challenges],
                     )
                     if (
                         challenge["capability"] != group["capability"]
@@ -2276,6 +2329,7 @@ async def _issue_image_assignments(
                             expected_chain_id=policy["chain_id"],
                             expected_bond_contract=policy["bond_contract"],
                             expected_verifier_version=policy["bond_verifier_version"],
+                            expected_facet_runtime_hash=policy["bond_facet_runtime_hash"],
                             minimum_bond_raw=policy["minimum_bond_raw"],
                             minimum_quality_pass_rate=policy["minimum_quality_pass_rate"],
                         )
