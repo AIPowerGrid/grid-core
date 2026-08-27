@@ -87,9 +87,9 @@ transport, accounts, stats, health/metrics.
   liveness stages. Shared 3-of-5 quorum remains preview-only with no
   routing/reward/slash authority. The image-fidelity assignment lane is
   default-off and fail-closed on governed recipe/model digest, bond/reference
-  policy, and validator capability. The separately gated video-contract lane is
-  default-off, requires an explicit governed timing recipe, and verifies one
-  candidate MP4 without claiming fidelity.
+  policy, and validator capability. The separately gated video-fidelity lane is
+  default-off and requires a governed deterministic timing recipe, one
+  candidate MP4, and two independently controlled bonded references.
   Health also exposes privacy-preserving network aggregates over a bounded
   `since_hours` window; never relabel registered validators as independently
   operated validators.
