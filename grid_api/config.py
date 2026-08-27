@@ -54,6 +54,21 @@ class GridSettings(BaseSettings):
     # from appearing in settings reprs or operational logs.
     base_rpc_url: SecretStr | None = None
 
+    # RecipeVault is an executable-graph authority, so it has an explicit dark
+    # gate and a second independent RPC. The selected verifier names a runtime
+    # compiled into this Core release; env cannot supply an arbitrary hash.
+    recipevault_sync_enabled: bool = False
+    recipevault_address: str = ""
+    recipevault_confirmation_rpc_url: SecretStr | None = None
+    recipevault_verifier_version: str = ""
+    recipevault_chain_id: int = 8453
+    recipevault_max_records: int = 256
+    recipevault_max_workflow_bytes: int = 256 * 1024
+    recipevault_rpc_timeout_seconds: int = 20
+    recipevault_max_finalized_age_seconds: int = 1800
+    recipevault_max_stale_seconds: int = 1800
+    recipe_sync_seconds: int = 600
+
     # Assignment-bound media validation. This stays dark until every field is
     # explicitly configured against a reviewed, deployed WorkerRegistry and a
     # fresh finalized-block/quality sync has populated the reference pool.

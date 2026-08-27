@@ -9,9 +9,9 @@ WorkerRegistry exposes only the reviewed read surface used by the finalized
 bond synchronizer.
 """
 
-import gzip
 import json
 import os
+import zlib
 
 _ABI_DIR = os.path.join(os.path.dirname(__file__), "abis")
 
@@ -43,7 +43,10 @@ _RECIPE_TUPLE = {
 
 # JSON ABI for just the read methods we call (web3.py-compatible).
 RECIPEVAULT_ABI = [
-    {"type": "function", "name": "totalRecipes", "stateMutability": "view",
+    {"type": "function", "name": "moduleAddress", "stateMutability": "view",
+     "inputs": [{"name": "selector", "type": "bytes4"}],
+     "outputs": [{"name": "", "type": "address"}]},
+    {"type": "function", "name": "getTotalRecipes", "stateMutability": "view",
      "inputs": [], "outputs": [{"name": "", "type": "uint256"}]},
     {"type": "function", "name": "getRecipe", "stateMutability": "view",
      "inputs": [{"name": "recipeId", "type": "uint256"}], "outputs": [_RECIPE_TUPLE]},
@@ -101,14 +104,39 @@ WORKER_REGISTRY_ABI = [
 ]
 
 
-def decompress_workflow(data: bytes, compression: int) -> bytes:
-    """Decompress on-chain workflowData per the recipe's compression enum."""
-    codec = COMPRESSION.get(int(compression), "none")
+def decompress_workflow(
+    data: bytes,
+    compression: int,
+    *,
+    max_output_bytes: int = 256 * 1024,
+) -> bytes:
+    """Decode legacy workflow bytes without allowing unbounded expansion.
+
+    Governed RecipeVault v1 records must be uncompressed. Gzip remains readable
+    only for bounded legacy tooling; Brotli is rejected because the installed
+    decoder exposes no reliable pre-allocation output cap.
+    """
+    if not 1 <= max_output_bytes <= 1024 * 1024:
+        raise ValueError("max_output_bytes must be between 1 and 1048576")
+    codec = COMPRESSION.get(int(compression))
+    if codec is None:
+        raise ValueError(f"unknown compression code {compression}")
     if codec == "none":
-        return bytes(data)
+        output = bytes(data)
+        if len(output) > max_output_bytes:
+            raise ValueError("workflow exceeds decompressed size limit")
+        return output
     if codec == "gzip":
-        return gzip.decompress(data)
+        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        output = decoder.decompress(bytes(data), max_output_bytes + 1)
+        if len(output) > max_output_bytes or decoder.unconsumed_tail:
+            raise ValueError("workflow exceeds decompressed size limit")
+        output += decoder.flush(max_output_bytes + 1 - len(output))
+        if len(output) > max_output_bytes:
+            raise ValueError("workflow exceeds decompressed size limit")
+        if not decoder.eof or decoder.unused_data:
+            raise ValueError("workflow gzip stream is incomplete or concatenated")
+        return output
     if codec == "brotli":
-        import brotli  # optional dep; only needed for brotli-compressed recipes
-        return brotli.decompress(data)
-    raise ValueError(f"unknown compression code {compression}")
+        raise ValueError("brotli workflows are not accepted from untrusted storage")
+    raise AssertionError("unreachable compression codec")

@@ -222,9 +222,22 @@ separate facts:
 1. **Worker executor** — resolved `recipe_spec` execution is merged on
    **grid-media-worker/main**. Confirm the deployed worker version before relying
    on it; repository state alone does not prove a particular host was upgraded.
-2. **On-chain source** — `RECIPEVAULT_ADDRESS` is **unset** on prod, so recipes
-   come from local `recipes/*.json`, not the chain. Setting it flips the source with
-   no authoring change.
+2. **On-chain source** — RecipeVault synchronization is dark by default. Setting
+   `RECIPEVAULT_ADDRESS` alone does nothing, and Core never falls back to
+   `GRID_DIAMOND_ADDRESS`. Enabling it requires two distinct Base RPC hosts, the
+   exact Diamond address, and a Core-reviewed verifier label. Both providers must
+   agree on one complete finalized snapshot; all ten selectors must route to one
+   pinned facet runtime. Public records must be uncompressed Core-canonical JSON
+   whose exact bytes match their SHA-256 root and pass bounded recipe policy.
+   The finalized block must be recent and cannot roll back the last accepted
+   height. Cache replacement is atomic. Stale authority drops chain recipes but
+   retains root/name tombstones, so unrelated reviewed local recipes remain
+   available while a governed recipe cannot resurrect from disk. Base RPC never
+   enters the request path.
+3. **Live legacy facet** — the currently deployed permissionless RecipeVault and
+   its three legacy gzip records do not satisfy that contract. Do not enable sync
+   until the governed facet cut is separately approved, the legacy records are
+   made private, and a read-only two-provider preflight passes.
 
 Neither blocks *writing* recipes now — the local-file path is fully wired on the
 coordinator.
