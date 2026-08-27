@@ -56,6 +56,10 @@ content sanitization, and reward settlement.
   signers require deliberate re-pairing, never alias-following or key transfer.
   Private-list timestamps are timezone-aware on every supported database, so
   strict Console clients receive the same wire contract from SQLite and PostgreSQL.
+  Pairing PostgreSQL tests use a unique schema per fixture and remove only that
+  schema, including on failure; they must not drop shared Grid tables. A real-PG
+  sentinel test proves unrelated data survives fixture cleanup. Keep the test
+  database disposable despite this additional isolation.
 - **Validation evidence:** `validators.py` verifies one linked-wallet validator
   registration per canonical account, builds shared probe batches, binds one
   assignment and authoritative vote per registered validator/group, and

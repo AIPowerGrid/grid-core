@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import time
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import uuid4
@@ -35,78 +36,124 @@ NOW = datetime(2026, 8, 27, 17, tzinfo=UTC)
 PG = os.environ.get("VALIDATORS_TEST_DB_URL", "")
 
 
-@pytest_asyncio.fixture(params=["sqlite", "postgresql"])
-async def state(request, monkeypatch):
-    if request.param == "postgresql" and not PG.startswith("postgresql"):
-        pytest.skip("set VALIDATORS_TEST_DB_URL to a disposable PostgreSQL database")
-    url = PG if request.param == "postgresql" else "sqlite+aiosqlite://"
-    engine = create_async_engine(url, **({"poolclass": StaticPool} if request.param == "sqlite" else {}))
-    if request.param == "sqlite":
+@asynccontextmanager
+async def _isolated_database(url):
+    namespace = "validator_pairing_test_" + uuid4().hex if url.startswith("postgresql") else None
+    options = {"execution_options": {"schema_translate_map": {None: namespace}}} if namespace else {"poolclass": StaticPool}
+    engine = create_async_engine(url, **options)
+    created = False
+    if not namespace:
 
         @sa.event.listens_for(engine.sync_engine, "connect")
         def foreign_keys(connection, _record):
             connection.execute("PRAGMA foreign_keys=ON")
 
-    async with engine.begin() as conn:
-        await conn.run_sync(db.metadata.create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    async def new_session():
-        return factory()
-
-    async def clock(_session):
-        return NOW
-
-    original_clock = pairing._now
-    monkeypatch.setattr(pairing, "new_session", new_session)
-    monkeypatch.setattr(pairing, "_now", clock)
-    settings = SimpleNamespace(
-        validator_pairing_audience="https://api.example.test",
-        validator_pairing_console_url="https://console.example.test/dashboard/connect-validator",
-    )
-    monkeypatch.setattr(pairing, "get_settings", lambda: settings)
-    signer, other = Account.create(), Account.create()
-    aid, operator, attacker, other_aid = (uuid4() for _ in range(4))
-    node, other_node = "val_" + uuid4().hex, "val_" + uuid4().hex
-    async with factory() as session:
-        for account_id, wallet in [(aid, signer.address.lower()), (other_aid, other.address.lower()), (operator, None), (attacker, None)]:
-            await session.execute(sa.insert(db.accounts).values(id=account_id, wallet=wallet, payout_wallet="0x" + "a" * 40, flags={}))
-            await session.execute(sa.insert(db.credits).values(account_id=account_id, balance_micro=12345))
-        for account_id, wallet, vid in [(aid, signer.address.lower(), node), (other_aid, other.address.lower(), other_node)]:
-            await session.execute(
-                sa.insert(db.validators).values(
-                    id=vid,
-                    account_id=account_id,
-                    signing_wallet=wallet,
-                    status="active",
-                    registration_signature="fixture",
-                    software_version="pairing-test",
-                    capabilities=["text.basic.v1"],
-                ),
-            )
-        await session.commit()
-    fixture = SimpleNamespace(
-        factory=factory,
-        engine=engine,
-        signer=signer,
-        other=other,
-        aid=aid,
-        operator=operator,
-        attacker=attacker,
-        node=node,
-        other_node=other_node,
-        other_aid=other_aid,
-        wallet=signer.address.lower(),
-        settings=settings,
-        original_clock=original_clock,
-        dialect=request.param,
-    )
     try:
-        yield fixture
-    finally:
         async with engine.begin() as conn:
-            await conn.run_sync(db.metadata.drop_all)
-        await engine.dispose()
+            if namespace:
+                await conn.execute(sa.schema.CreateSchema(namespace))
+            await conn.run_sync(db.metadata.create_all)
+        created = True
+        yield engine
+    finally:
+        try:
+            if namespace and created:
+                async with engine.begin() as conn:
+                    await conn.execute(sa.schema.DropSchema(namespace, cascade=True))
+        finally:
+            await engine.dispose()
+
+
+@pytest_asyncio.fixture(params=["sqlite", "postgresql"])
+async def state(request, monkeypatch):
+    if request.param == "postgresql" and not PG.startswith("postgresql"):
+        pytest.skip("set VALIDATORS_TEST_DB_URL to a disposable PostgreSQL database")
+    url = PG if request.param == "postgresql" else "sqlite+aiosqlite://"
+    async with _isolated_database(url) as engine:
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async def new_session():
+            return factory()
+
+        async def clock(_session):
+            return NOW
+
+        original_clock = pairing._now
+        monkeypatch.setattr(pairing, "new_session", new_session)
+        monkeypatch.setattr(pairing, "_now", clock)
+        settings = SimpleNamespace(
+            validator_pairing_audience="https://api.example.test",
+            validator_pairing_console_url="https://console.example.test/dashboard/connect-validator",
+        )
+        monkeypatch.setattr(pairing, "get_settings", lambda: settings)
+        signer, other = Account.create(), Account.create()
+        aid, operator, attacker, other_aid = (uuid4() for _ in range(4))
+        node, other_node = "val_" + uuid4().hex, "val_" + uuid4().hex
+        async with factory() as session:
+            account_wallets = [(aid, signer.address.lower()), (other_aid, other.address.lower()), (operator, None), (attacker, None)]
+            for account_id, wallet in account_wallets:
+                await session.execute(sa.insert(db.accounts).values(id=account_id, wallet=wallet, payout_wallet="0x" + "a" * 40, flags={}))
+                await session.execute(sa.insert(db.credits).values(account_id=account_id, balance_micro=12345))
+            for account_id, wallet, vid in [(aid, signer.address.lower(), node), (other_aid, other.address.lower(), other_node)]:
+                await session.execute(
+                    sa.insert(db.validators).values(
+                        id=vid,
+                        account_id=account_id,
+                        signing_wallet=wallet,
+                        status="active",
+                        registration_signature="fixture",
+                        software_version="pairing-test",
+                        capabilities=["text.basic.v1"],
+                    ),
+                )
+            await session.commit()
+        yield SimpleNamespace(
+            factory=factory,
+            engine=engine,
+            signer=signer,
+            other=other,
+            aid=aid,
+            operator=operator,
+            attacker=attacker,
+            node=node,
+            other_node=other_node,
+            other_aid=other_aid,
+            wallet=signer.address.lower(),
+            settings=settings,
+            original_clock=original_clock,
+            dialect=request.param,
+        )
+
+
+@pytest.mark.asyncio
+async def test_postgres_fixture_cleanup_preserves_unrelated_data():
+    if not PG.startswith("postgresql"):
+        pytest.skip("set VALIDATORS_TEST_DB_URL to a disposable PostgreSQL database")
+    namespace = "validator_pairing_guard_" + uuid4().hex
+    metadata = sa.MetaData(schema=namespace)
+    sentinel = sa.Table("sentinel", metadata, sa.Column("id", sa.Integer, primary_key=True))
+    engine = create_async_engine(PG)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(sa.schema.CreateSchema(namespace))
+            await conn.run_sync(metadata.create_all)
+            await conn.execute(sa.insert(sentinel).values(id=42))
+        with pytest.raises(RuntimeError, match="fixture test failure"):
+            async with _isolated_database(PG) as private_engine:
+                private_schema = private_engine.get_execution_options()["schema_translate_map"][None]
+                assert private_schema != namespace
+                async with private_engine.connect() as conn:
+                    assert await conn.scalar(sa.select(sa.func.count()).select_from(db.accounts)) == 0
+                raise RuntimeError("fixture test failure")
+        async with engine.connect() as conn:
+            assert await conn.scalar(sa.select(sentinel.c.id)) == 42
+            assert await conn.scalar(sa.text("SELECT count(*) FROM pg_namespace WHERE nspname = :name"), {"name": private_schema}) == 0
+    finally:
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(sa.schema.DropSchema(namespace, cascade=True, if_exists=True))
+        finally:
+            await engine.dispose()
 
 
 def _sign(signer, payload):
@@ -412,7 +459,8 @@ async def test_link_insert_failure_rolls_back_terminal_state(state):
     approved = await _approved(s)
 
     def refuse_link(_conn, _cursor, statement, _parameters, _context, _executemany):
-        if statement.startswith("INSERT INTO grid_validator_account_links"):
+        compiled = _context.compiled
+        if _context.isinsert and compiled is not None and compiled.statement.table is db.validator_account_links:
             raise RuntimeError("simulated database failure")
 
     sa.event.listen(s.engine.sync_engine, "before_cursor_execute", refuse_link)
