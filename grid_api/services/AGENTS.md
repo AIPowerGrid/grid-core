@@ -126,7 +126,10 @@ content sanitization, and reward settlement.
   selector: fresh finalized bond + quality snapshots, online workers, three
   fresh distinct worker-control groups across candidate and references,
   distinct accounts and payout wallets as defense in depth, row-locked recent-
-  use rotation, and fail-closed insufficiency.
+  use rotation, and fail-closed insufficiency. Pairwise account, payout-wallet,
+  and control-group independence must be rechecked from the authoritative rows
+  after their transaction locks are acquired; the initial candidate snapshot
+  is not sufficient.
   `validator_media_readiness.py` is the read-only rollout preflight. It uses the
   selector's non-mutating preview to combine live recipes, workers, fresh
   validator capabilities, externally reviewed operator independence, and

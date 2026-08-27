@@ -91,6 +91,17 @@ def _weighted_choice(rows: list[dict], *, now: datetime) -> dict:
     return rows[-1]
 
 
+def _independent_from_selected(row: dict, selected: Collection[dict]) -> bool:
+    """Require distinct identity and reviewed control from every selected row."""
+    wallet = str(row["payout_wallet"]).strip().lower()
+    return all(
+        row["account_id"] != picked["account_id"]
+        and wallet != str(picked["payout_wallet"]).strip().lower()
+        and row["operator_group_id"] != picked["operator_group_id"]
+        for picked in selected
+    )
+
+
 async def _choose_reference_workers(
     session: AsyncSession,
     *,
@@ -248,16 +259,7 @@ async def _choose_reference_workers(
     selected: list[dict] = []
     remaining = rows
     while remaining and len(selected) < count:
-        allowed = [
-            row
-            for row in remaining
-            if all(
-                row["account_id"] != picked["account_id"]
-                and str(row["payout_wallet"]).lower() != str(picked["payout_wallet"]).lower()
-                and row["operator_group_id"] != picked["operator_group_id"]
-                for picked in selected
-            )
-        ]
+        allowed = [row for row in remaining if _independent_from_selected(row, selected)]
         if not allowed:
             break
         candidate_row = _weighted_choice(allowed, now=current)
@@ -281,6 +283,11 @@ async def _choose_reference_workers(
             continue
         locked_row = dict(locked)
         if not GROUP_RE.fullmatch(str(locked_row["operator_group_id"] or "")):
+            continue
+        # The initial candidate list is advisory. A concurrent control-review
+        # or identity update may change a row before these authoritative locks
+        # are acquired, so repeat every pairwise independence check here.
+        if not _independent_from_selected(locked_row, selected):
             continue
         selected.append(locked_row)
 
