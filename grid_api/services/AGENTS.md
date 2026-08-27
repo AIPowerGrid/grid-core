@@ -162,7 +162,13 @@ content sanitization, and reward settlement.
   Core policy. Identity drift forces a pause and clears cached proof fields;
   only the bond sync may repopulate them. Revocation is terminal.
 - **Model/media governance:** `recipes.py`, `recipe_import.py`, `styles.py`,
-  `loras.py`, `model_registry.py`.
+  `recipe_vault_sync.py`, `loras.py`, `model_registry.py`. RecipeVault sync is
+  default-off and accepts only a dual-RPC-agreed finalized snapshot whose exact
+  ten selectors route to a Core-pinned runtime. Public records must be
+  uncompressed Core-canonical JSON with matching SHA-256 roots and valid bounded
+  metadata. Stage the complete snapshot before atomically replacing the chain
+  cache. A stale authority drops chain recipes but retains root/name tombstones:
+  unrelated reviewed local recipes remain, while governed recipes fail closed.
 - **Safety:** `sanitizer.py` - **secrets redactor only** (strips API keys/PGP from prompts).
   NOT a content filter.
 - **Settlement:** `settlement/` - owned in its own AGENTS.md.

@@ -166,8 +166,12 @@ def validate_recipe(recipe_wf: dict) -> list[str]:
 
 
 def recipe_root(recipe_wf: dict) -> str:
-    """Local content-hash id (sha256). On-chain RecipeVault computes its own keccak
-    root at store time; this is the cache/registration key off-chain."""
+    """Canonical recipe commitment used by Core and governed RecipeVault.
+
+    The root is SHA-256 over the exact sorted, compact UTF-8 JSON bytes. A public
+    on-chain record is accepted only when its stored bytes are already in this
+    canonical form and its root matches exactly.
+    """
     canon = json.dumps(recipe_wf, sort_keys=True, separators=(",", ":")).encode()
     return "0x" + hashlib.sha256(canon).hexdigest()
 
