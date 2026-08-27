@@ -962,7 +962,7 @@ def _probe_number(recipe, name: str, preferred: float) -> int | float:
     return int(value) if name in {"width", "height", "steps"} else value
 
 
-def _image_recipe_for_worker(worker: dict[str, Any]):
+def image_validation_recipes_for_worker(worker: dict[str, Any]):
     """Return governed fidelity recipes the connected worker can execute."""
     from . import recipes
 
@@ -983,7 +983,7 @@ def _image_recipe_for_worker(worker: dict[str, Any]):
     return sorted(eligible, key=lambda item: (item.model_name.lower(), item.recipe_root))
 
 
-def _video_recipe_for_worker(worker: dict[str, Any]):
+def video_validation_recipes_for_worker(worker: dict[str, Any]):
     """Return governed text-to-video recipes with an explicit timing contract."""
     from . import recipes
 
@@ -2328,7 +2328,7 @@ async def _issue_image_assignments(
                 or "image" not in (worker.get("job_types") or [])
             ):
                 continue
-            for recipe in _image_recipe_for_worker(worker):
+            for recipe in image_validation_recipes_for_worker(worker):
                 if len(rows) >= limit:
                     break
                 key = (worker_id, recipe.model_name)
@@ -2562,7 +2562,7 @@ async def _issue_video_assignments(
                 or "video" not in (worker.get("job_types") or [])
             ):
                 continue
-            for recipe in _video_recipe_for_worker(worker):
+            for recipe in video_validation_recipes_for_worker(worker):
                 if len(rows) >= limit:
                     break
                 key = (worker_id, recipe.model_name)

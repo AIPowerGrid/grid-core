@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Fail-closed rotating reference selection for future media validation.
+"""Fail-closed rotating reference selection for dark media validation.
 
 This module does not dispatch probes or change worker economics. Its table is
-fed only by a future finalized-block bond sync plus non-economic quality review.
-Until that sync exists, the pool is empty and selection always fails closed.
+fed only by finalized-block bond sync plus non-economic quality and
+common-control review. The preview entrypoint applies the same eligibility and
+independence rules without locking or updating selector state.
 """
 
 from __future__ import annotations
@@ -90,7 +91,7 @@ def _weighted_choice(rows: list[dict], *, now: datetime) -> dict:
     return rows[-1]
 
 
-async def select_reference_workers(
+async def _choose_reference_workers(
     session: AsyncSession,
     *,
     model: str,
@@ -108,6 +109,7 @@ async def select_reference_workers(
     bond_max_age: timedelta = DEFAULT_BOND_MAX_AGE,
     quality_max_age: timedelta = DEFAULT_QUALITY_MAX_AGE,
     worker_max_age: timedelta = DEFAULT_WORKER_MAX_AGE,
+    reserve: bool,
 ) -> list[SelectedReference]:
     """Select and reserve a rotating, independent reference set.
 
@@ -174,7 +176,7 @@ async def select_reference_workers(
         raise ReferencePoolUnavailable("candidate identity is incomplete")
 
     control_query = sa.select(controls_t).where(controls_t.c.worker_id == candidate_id)
-    if session.bind and session.bind.dialect.name == "postgresql":
+    if reserve and session.bind and session.bind.dialect.name == "postgresql":
         # Shared locks let concurrent validator groups inspect the same target
         # while preventing a control-review rewrite until each assignment
         # transaction has committed its frozen witness set.
@@ -241,11 +243,7 @@ async def select_reference_workers(
         )
         .limit(MAX_CANDIDATE_ROWS)
     )
-    rows = [
-        dict(row)
-        for row in (await session.execute(query)).mappings().all()
-        if GROUP_RE.fullmatch(str(row["operator_group_id"] or ""))
-    ]
+    rows = [dict(row) for row in (await session.execute(query)).mappings().all() if GROUP_RE.fullmatch(str(row["operator_group_id"] or ""))]
 
     selected: list[dict] = []
     remaining = rows
@@ -254,7 +252,8 @@ async def select_reference_workers(
             row
             for row in remaining
             if all(
-                row["account_id"] != picked["account_id"] and str(row["payout_wallet"]).lower() != str(picked["payout_wallet"]).lower()
+                row["account_id"] != picked["account_id"]
+                and str(row["payout_wallet"]).lower() != str(picked["payout_wallet"]).lower()
                 and row["operator_group_id"] != picked["operator_group_id"]
                 for picked in selected
             )
@@ -262,22 +261,21 @@ async def select_reference_workers(
         if not allowed:
             break
         candidate_row = _weighted_choice(allowed, now=current)
-        locked = (
-            (
-                await session.execute(
-                    sa.select(references_t, controls_t.c.operator_group_id)
-                    .join(workers_t, workers_t.c.id == references_t.c.worker_id)
-                    .join(controls_t, controls_t.c.worker_id == references_t.c.worker_id)
-                    .where(
-                        *eligibility,
-                        references_t.c.worker_id == candidate_row["worker_id"],
-                    )
-                    .with_for_update(of=[references_t, controls_t], skip_locked=True),
-                )
+        locked_query = (
+            sa.select(references_t, controls_t.c.operator_group_id)
+            .join(workers_t, workers_t.c.id == references_t.c.worker_id)
+            .join(controls_t, controls_t.c.worker_id == references_t.c.worker_id)
+            .where(
+                *eligibility,
+                references_t.c.worker_id == candidate_row["worker_id"],
             )
-            .mappings()
-            .one_or_none()
         )
+        if reserve:
+            locked_query = locked_query.with_for_update(
+                of=[references_t, controls_t],
+                skip_locked=True,
+            )
+        locked = (await session.execute(locked_query)).mappings().one_or_none()
         remaining = [row for row in remaining if row["worker_id"] != candidate_row["worker_id"]]
         if locked is None:
             continue
@@ -291,20 +289,21 @@ async def select_reference_workers(
             f"need {count} fresh independent references; found {len(selected)}",
         )
 
-    selected_ids = [row["worker_id"] for row in selected]
-    await session.execute(
-        sa.update(references_t)
-        .where(
-            references_t.c.worker_id.in_(selected_ids),
-            references_t.c.model == normalized_model,
-            references_t.c.modality == normalized_modality,
+    if reserve:
+        selected_ids = [row["worker_id"] for row in selected]
+        await session.execute(
+            sa.update(references_t)
+            .where(
+                references_t.c.worker_id.in_(selected_ids),
+                references_t.c.model == normalized_model,
+                references_t.c.modality == normalized_modality,
+            )
+            .values(
+                last_selected=current,
+                selection_count=references_t.c.selection_count + 1,
+                updated=current,
+            ),
         )
-        .values(
-            last_selected=current,
-            selection_count=references_t.c.selection_count + 1,
-            updated=current,
-        ),
-    )
     return [
         SelectedReference(
             worker_id=row["worker_id"],
@@ -318,3 +317,24 @@ async def select_reference_workers(
         )
         for row in selected
     ]
+
+
+async def select_reference_workers(
+    session: AsyncSession,
+    **kwargs,
+) -> list[SelectedReference]:
+    """Select, lock, and reserve a rotating independent reference set."""
+    return await _choose_reference_workers(session, reserve=True, **kwargs)
+
+
+async def preview_reference_workers(
+    session: AsyncSession,
+    **kwargs,
+) -> list[SelectedReference]:
+    """Apply authoritative eligibility rules without locks or usage updates.
+
+    This is an advisory rollout preflight. Assignment creation must continue to
+    call :func:`select_reference_workers`, which rechecks every condition under
+    transaction locks and persists the selected references with the probe group.
+    """
+    return await _choose_reference_workers(session, reserve=False, **kwargs)

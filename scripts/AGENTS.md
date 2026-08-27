@@ -41,6 +41,12 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - `review_worker_control.py` - preview-first, digest-bound verify/reject/revoke
   workflow for private media-worker common-control groups. It grants no
   economic authority and never publishes the group.
+- `check_validator_media_readiness.py` - read-only image/video rollout
+  preflight. It reads live worker state and a read-only PostgreSQL snapshot,
+  applies the authoritative reference selector without reserving rows, and
+  emits only aggregate/model-level blockers. `--require-ready` is the operator
+  gate before a supervised non-economic canary; it is not permission to enable
+  routing, rewards, strikes, or slashing.
 - `backup_postgres.sh` - root-only custom-format backup of the Grid-owned
   PostgreSQL schema with checksum, archive validation, locking, and bounded
   local retention. It excludes unrelated extension and legacy schemas.
@@ -93,6 +99,11 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   returned digest. Never place names, emails, hostnames, IPs, wallet addresses,
   or private notes in the group id or review ref. Reviews expire and identity
   drift fails closed; revocation is terminal.
+- Before changing either media assignment flag, run
+  `check_validator_media_readiness.py --lane image --sync-recipes
+  --require-ready` (and later `--lane video`). The command must use the selected
+  immutable release and production env. It never lists validator identities,
+  worker ids, wallets, control groups, review refs, prompts, or witnesses.
 - Service-key rotation requires a new `--output` path on protected local
   storage. The tool writes and fsyncs the replacement before committing the
   rotation, removes the file if the database operation fails, and refuses to

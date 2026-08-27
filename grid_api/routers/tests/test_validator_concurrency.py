@@ -283,6 +283,42 @@ async def test_reference_bond_threshold_is_exact_at_uint_scale_on_postgres(pg):
 
 
 @pytest.mark.asyncio
+async def test_reference_preview_runs_inside_a_read_only_postgres_transaction(pg):
+    now = datetime.now(UTC)
+    async with await database.new_session() as session:
+        candidate = await _seed_media_worker(session, 131, now=now)
+        references = [
+            await _seed_media_worker(session, index, now=now)
+            for index in (132, 133, 134)
+        ]
+        for reference in references:
+            await _seed_reference(session, reference, now=now, bond_amount_raw=10**18)
+        await session.commit()
+
+    async with await database.new_session() as session:
+        await session.execute(sa.text("SET TRANSACTION READ ONLY"))
+        selected = await validator_references.preview_reference_workers(
+            session,
+            candidate_worker_id=candidate[0],
+            online_model_worker_ids=[candidate[0], *(item[0] for item in references)],
+            now=now,
+            **_reference_policy(),
+        )
+        await session.commit()
+
+    assert len(selected) == 2
+    async with await database.new_session() as session:
+        counts = (
+            await session.execute(
+                sa.select(references_t.c.selection_count).where(
+                    references_t.c.worker_id.in_([item.worker_id for item in selected]),
+                ),
+            )
+        ).scalars().all()
+    assert counts == [0, 0]
+
+
+@pytest.mark.asyncio
 async def test_postgres_reference_pool_rejects_common_control_across_distinct_wallets(pg):
     now = datetime.now(UTC)
     async with await database.new_session() as session:

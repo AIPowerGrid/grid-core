@@ -369,6 +369,31 @@ with explicit prompt, seed, width, height, seconds, and fps variables. It runs
 one candidate and commits one Core-frozen MP4. It does not select references or
 claim model fidelity. Missing or ambiguous timing metadata yields no assignment.
 
+### Read-only rollout preflight
+
+Run the preflight from the exact immutable Core release with production env
+before changing either assignment flag:
+
+```bash
+.venv/bin/python scripts/check_validator_media_readiness.py \
+  --lane image --sync-recipes --require-ready
+```
+
+The command opens PostgreSQL with `default_transaction_read_only=on`, reads
+Redis worker status without pruning or mutation, loads the curated catalog and
+optionally its configured RecipeVault snapshot, and evaluates each candidate
+with `preview_reference_workers`. That preview shares the production selector's
+bond, freshness, quality, identity, common-control, account, wallet, online,
+and model rules, but takes no row locks and does not update reference rotation
+counters. Assignment creation still rechecks every condition under transaction
+locks and commits the selected set with the probe group.
+
+The report exposes model-level counts and generic blockers only. It omits
+validator and worker identities, wallets, control groups, review references,
+prompts, nonces, and witness locations. `ready_to_enable=true` means the lane is
+eligible for a supervised evidence-only canary. It does not authorize routing,
+rewards, strikes, payouts, bond changes, or slashing.
+
 ## Rollout Gates
 
 All gates are required before an operator enables production image assignments:

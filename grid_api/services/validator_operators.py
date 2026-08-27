@@ -42,7 +42,7 @@ DEFAULT_REVIEW_DAYS = max(
 )
 MAX_REVIEW_DAYS = 90
 
-_GROUP_RE = re.compile(r"^opg_[A-Za-z0-9_-]{8,88}$")
+GROUP_RE = re.compile(r"^opg_[A-Za-z0-9_-]{8,88}$")
 _ACTIONS = {"candidate", "verify", "reject"}
 
 
@@ -147,7 +147,7 @@ async def review_operator(
     action = action.strip().lower()
     if action not in _ACTIONS:
         raise OperatorReviewError("action must be candidate, verify, or reject")
-    if operator_group_id is not None and not _GROUP_RE.fullmatch(operator_group_id):
+    if operator_group_id is not None and not GROUP_RE.fullmatch(operator_group_id):
         raise OperatorReviewError("operator_group_id must be an opaque opg_* identifier")
     if not review_ref or len(review_ref) > 128:
         raise OperatorReviewError("review_ref is required and must be at most 128 characters")
@@ -174,7 +174,7 @@ async def review_operator(
         values: dict[str, Any]
         if action == "candidate":
             group_id = operator_group_id or state["operator_group_id"]
-            if not group_id or not _GROUP_RE.fullmatch(group_id):
+            if not group_id or not GROUP_RE.fullmatch(group_id):
                 raise OperatorReviewError("candidate transition requires operator_group_id")
             values = {
                 "operator_group_id": group_id,
