@@ -5,7 +5,7 @@
 
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ChatMessage(BaseModel):
@@ -51,6 +51,21 @@ class ChatCompletionRequest(BaseModel):
     seed: Optional[int] = None
     response_format: Optional[dict] = None
     stream_options: Optional[dict] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_max_completion_tokens(cls, data: Any) -> Any:
+        """Map the current OpenAI token field onto Core's metered worker cap."""
+        if not isinstance(data, dict) or "max_completion_tokens" not in data:
+            return data
+        normalized = dict(data)
+        legacy = normalized.get("max_tokens")
+        current = normalized.pop("max_completion_tokens")
+        if legacy is not None and current is not None and legacy != current:
+            raise ValueError("max_tokens and max_completion_tokens must match")
+        if legacy is None:
+            normalized["max_tokens"] = current
+        return normalized
 
 
 class ChatCompletionChoice(BaseModel):
