@@ -88,6 +88,11 @@ compensated-audit jobs plus hourly budget counters.
   or independence reviews. Neither table replaces `grid_validators.account_id`.
   The link and approved-to-linked transition commit together; no plaintext
   credential is stored. Alembic `0030` creates both empty and backfills nothing.
+- `grid_oauth_clients` and `grid_oauth_authorizations` are the dark remote-MCP
+  OAuth state. Clients are public and hold no secret. Authorization request and
+  code values are stored only as SHA-256 hashes; codes are one-use, short-lived,
+  account-bound, redirect-bound, client-bound, resource-bound, and PKCE-bound.
+  Migration `0031` must precede any OAuth feature enablement.
 - `grid_validator_reference_workers` is derived only from finalized Base bond
   sync plus non-economic quality review. Active selection requires a finalized
   block hash, routed facet and exact reviewed runtime proof, fresh bond, quality,

@@ -40,6 +40,14 @@ SESSION_SCOPES = [
 INFERENCE_SCOPES = ["account.read", "inference.submit"]
 SERVICE_SCOPES = ["account.read", "inference.submit", "identity.exchange", "identity.assert"]
 DIRECT_SERVICE_INFERENCE_SCOPE = "inference.service_submit"
+DIRECT_USER_TOKEN_AUDIENCES = frozenset({"direct", "grid-console"})
+SERVICE_SCOPE_ALLOWLIST = frozenset(
+    {
+        *SERVICE_SCOPES,
+        DIRECT_SERVICE_INFERENCE_SCOPE,
+        "oauth.introspect",
+    },
+)
 VALIDATOR_SCOPES = [
     "validator.assignments",
     "validator.probe",
@@ -48,12 +56,20 @@ VALIDATOR_SCOPES = [
 ]
 
 
-def service_scopes(*, allow_direct_inference: bool = False) -> list[str]:
+def service_scopes(
+    *,
+    allow_direct_inference: bool = False,
+    requested: list[str] | None = None,
+) -> list[str]:
     """Return bridge scopes, with direct service spending as an explicit opt-in."""
-    scopes = list(SERVICE_SCOPES)
+    scopes = list(SERVICE_SCOPES if requested is None else sorted(set(requested)))
+    if not scopes or not set(scopes).issubset(SERVICE_SCOPE_ALLOWLIST):
+        raise ValueError("service scopes contain an unsupported value")
     if allow_direct_inference:
         scopes.append(DIRECT_SERVICE_INFERENCE_SCOPE)
-    return scopes
+    elif DIRECT_SERVICE_INFERENCE_SCOPE in scopes:
+        raise ValueError("direct inference scope requires allow_direct_inference")
+    return list(dict.fromkeys(scopes))
 
 
 def _validate_direct_service_limits(
@@ -251,6 +267,16 @@ async def authenticate(
             service_policy = await get_client(claims["service_id"])
             if not service_policy or claims.get("aud") != claims["service_id"]:
                 raise HTTPException(401, detail="Grid user token service is inactive")
+        else:
+            from . import oauth_server
+
+            allowed_audiences = set(DIRECT_USER_TOKEN_AUDIENCES)
+            if oauth_server.enabled():
+                allowed_audiences.add(oauth_server.resource())
+            if claims.get("aud") not in allowed_audiences:
+                raise HTTPException(401, detail="Grid user token audience is not active")
+            if claims.get("aud") == oauth_server.resource() and not claims.get("client_id"):
+                raise HTTPException(401, detail="OAuth resource token is missing its client binding")
         user = await _account_auth(claims["sub"], scopes=claims["scopes"])
         user.update(
             {
@@ -732,6 +758,7 @@ async def create_service_client(
     per_request_micro: int | None = None,
     daily_micro: int | None = None,
     allow_direct_inference: bool = False,
+    scopes: list[str] | None = None,
 ) -> tuple[dict, str]:
     """Atomically create one backend service principal and its initial key."""
     from .service_auth import normalize_service_id, normalize_siwe_domains
@@ -750,6 +777,10 @@ async def create_service_client(
         allow_direct_inference,
         per_request_micro,
         daily_micro,
+    )
+    effective_scopes = service_scopes(
+        allow_direct_inference=allow_direct_inference,
+        requested=scopes,
     )
     account_id = uuid4()
     plain = generate_api_key()
@@ -785,9 +816,7 @@ async def create_service_client(
                 is_session=False,
                 key_kind="service",
                 service_id=sid,
-                scopes=service_scopes(
-                    allow_direct_inference=allow_direct_inference,
-                ),
+                scopes=effective_scopes,
                 created=now,
                 revoked=False,
             ),

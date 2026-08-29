@@ -107,6 +107,9 @@ transport, accounts, stats, health/metrics.
 - `health.py` - `GET /health`, including the immutable full release commit when
   the runtime can prove it from `GRID_BUILD_COMMIT` or a detached checkout.
 - `metrics.py` - `GET /metrics` Prometheus exposition.
+- `oauth.py` - default-off OAuth discovery, bounded public-client registration,
+  S256 authorization/token exchange, Console-only consent inspection/decision,
+  and service-only token introspection for the future remote MCP resource.
 - `tests/` - router-level tests, including billing/settlement behavior.
 
 ## Local Contracts
@@ -201,6 +204,10 @@ transport, accounts, stats, health/metrics.
   service key. Legacy `X-Grid-User-Assertion` is app-local only and cannot claim
   Google or wallet identity. Account management needs a recent Core-verified
   Google/SIWE proof.
+- OAuth access tokens have no `service_id`; while the OAuth gate is live Core
+  accepts them only for the configured exact resource audience. The remote MCP
+  backend key may carry only `oauth.introspect`; never reuse a frontend bridge
+  key or grant it identity exchange/direct inference authority.
 - A service may submit an `app_subject` during Google or wallet exchange only
   when it derives that value from its authenticated server session. Never trust
   a browser-supplied account/user id: proof exchange may merge value-bearing
@@ -220,6 +227,10 @@ expired or out-of-scope pilots return 503 without revealing membership.
 
 - New endpoint -> add a contract test; wire auth + rate limit; route media via `services/media.py`,
   text via `services/job_queue` + `token_stream`.
+- OAuth registration and token requests must stay explicitly body-bounded before
+  parsing. Never redirect an error to an unvalidated URI, expose a plaintext
+  request/code capability, accept a confidential-client secret, or weaken S256
+  PKCE for a native/agent client.
 - Prefer small helpers over expanding `worker_ws.py`. If a change affects worker
   registration, job dispatch, streaming, media, or health separately, consider a
   local extraction with tests.
