@@ -37,6 +37,12 @@ content sanitization, and reward settlement.
   `x402_payments.py` (default-off accountless
   Base USDC authorization and settlement receipts), `model_registry.py`
   (ModelVault sync).
+- **Remote MCP authorization:** `oauth_server.py` is the default-off OAuth 2.1
+  authorization server for public MCP clients. It requires S256 PKCE, exact
+  registered HTTPS or native-loopback redirects, short-lived resource-bound
+  Grid user tokens, hashed one-use capabilities/codes, and a dedicated
+  `oauth.introspect` backend scope. It does not issue refresh tokens or client
+  secrets. See `docs/architecture/REMOTE_MCP_AUTH.md`.
 - **Worker trust:** `worker_identity.py` verifies a payout-wallet delegation to
   a funds-less per-rig signer plus a fresh registration proof; `signing.py`
   verifies that delegated signer over `aipg-job:{job_id}:{result_hash}`.

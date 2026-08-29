@@ -49,9 +49,12 @@ def issue(
     scopes: list[str],
     auth_method: str,
     service_id: str | None = None,
+    client_id: str | None = None,
     lifetime_seconds: int = DEFAULT_TTL_SECONDS,
     now: int | None = None,
 ) -> str:
+    if client_id is not None and (not isinstance(client_id, str) or not client_id or len(client_id) > 96):
+        raise ValueError("client_id must be 1..96 characters")
     issued = int(time.time() if now is None else now)
     ttl = max(60, min(int(lifetime_seconds), MAX_TTL_SECONDS))
     payload = {
@@ -61,6 +64,7 @@ def issue(
         "scopes": sorted(set(scopes)),
         "amr": auth_method,
         "service_id": service_id,
+        "client_id": client_id,
         "auth_time": issued,
         "iat": issued,
         "exp": issued + ttl,
@@ -96,6 +100,9 @@ def verify(token: str, *, audience: str | None = None, now: int | None = None) -
         raise HTTPException(401, detail="Grid user token audience mismatch")
     if not isinstance(payload.get("scopes"), list):
         raise HTTPException(401, detail="Invalid Grid user token scopes")
+    client_id = payload.get("client_id")
+    if client_id is not None and (not isinstance(client_id, str) or not client_id or len(client_id) > 96):
+        raise HTTPException(401, detail="Invalid Grid user token client")
     return payload
 
 

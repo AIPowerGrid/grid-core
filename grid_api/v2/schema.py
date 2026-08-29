@@ -269,6 +269,72 @@ service_events = sa.Table(
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
 )
 
+
+# OAuth public clients and one-use authorization requests for the remote MCP
+# resource. Access tokens remain short-lived signed user tokens; plaintext
+# authorization codes and request capabilities are never stored.
+oauth_clients = sa.Table(
+    "grid_oauth_clients",
+    metadata,
+    sa.Column("id", sa.String(96), primary_key=True),
+    sa.Column("name", sa.String(120), nullable=False),
+    sa.Column("redirect_uris", PortableJSON, nullable=False, default=list),
+    sa.Column("application_type", sa.String(16), nullable=False),
+    sa.Column("active", sa.Boolean, nullable=False, default=True, index=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.Column("last_used", sa.DateTime(timezone=True), nullable=True),
+    sa.CheckConstraint(
+        "application_type IN ('native', 'web')",
+        name="ck_grid_oauth_clients_application_type",
+    ),
+)
+
+
+oauth_authorizations = sa.Table(
+    "grid_oauth_authorizations",
+    metadata,
+    sa.Column("request_hash", sa.String(64), primary_key=True),
+    sa.Column(
+        "client_id",
+        sa.String(96),
+        sa.ForeignKey("grid_oauth_clients.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("redirect_uri", sa.String(2048), nullable=False),
+    sa.Column("resource", sa.String(512), nullable=False),
+    sa.Column("scopes", PortableJSON, nullable=False, default=list),
+    sa.Column("state", sa.String(512), nullable=False),
+    sa.Column("code_challenge", sa.String(128), nullable=False),
+    sa.Column("status", sa.String(16), nullable=False, default="pending", index=True),
+    sa.Column(
+        "account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    ),
+    sa.Column("auth_method", sa.String(16), nullable=True),
+    sa.Column("code_hash", sa.String(64), nullable=True, unique=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False, index=True),
+    sa.Column("decided_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("consumed_at", sa.DateTime(timezone=True), nullable=True),
+    sa.CheckConstraint(
+        "status IN ('pending', 'approved', 'denied', 'consumed')",
+        name="ck_grid_oauth_authorizations_status",
+    ),
+    sa.CheckConstraint(
+        "expires_at > created",
+        name="ck_grid_oauth_authorizations_expiry",
+    ),
+    sa.CheckConstraint(
+        "status NOT IN ('approved', 'consumed') OR "
+        "(account_id IS NOT NULL AND code_hash IS NOT NULL)",
+        name="ck_grid_oauth_authorizations_approval",
+    ),
+)
+
 api_keys = sa.Table(
     "grid_api_keys",
     metadata,

@@ -54,6 +54,9 @@ validation, worker incentives, and trust boundaries.
   merge, and three-pocket credit contracts.
 - `SERVICE_ACCOUNTS.md` - bounded backend principals, native user-token
   exchange, provisioning commands, ceilings, and rollout order.
+- `REMOTE_MCP_AUTH.md` - dark OAuth 2.1/PKCE contract for a remote MCP resource,
+  Console consent boundary, least-privilege introspection service, and rollout
+  gates.
 - `INCIDENT_2026-07-12_PARTIAL_DEPLOY.md` - chat outage caused by restarting a
   code/schema-divergent production checkout; reconciliation requirements.
 

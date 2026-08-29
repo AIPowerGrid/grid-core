@@ -31,6 +31,7 @@ from .routers import (
     health,
     images,
     metrics,
+    oauth,
     openai,
     responses,
     stats,
@@ -378,6 +379,7 @@ app.add_middleware(
 )
 
 app.include_router(openai.router)
+app.include_router(oauth.router)
 app.include_router(anthropic.router)
 app.include_router(responses.router)
 app.include_router(images.router)

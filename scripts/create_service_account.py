@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from grid_api.database import close_database, init_database
-from grid_api.services.accounts import create_service_client
+from grid_api.services.accounts import SERVICE_SCOPE_ALLOWLIST, create_service_client
 
 
 async def _run(args) -> None:
@@ -29,6 +29,7 @@ async def _run(args) -> None:
             per_request_micro=args.per_request_micro,
             daily_micro=args.daily_micro,
             allow_direct_inference=args.allow_direct_inference,
+            scopes=args.scope,
         )
     finally:
         await close_database()
@@ -52,6 +53,12 @@ def main() -> None:
     )
     parser.add_argument("--per-request-micro", type=int)
     parser.add_argument("--daily-micro", type=int)
+    parser.add_argument(
+        "--scope",
+        action="append",
+        choices=sorted(SERVICE_SCOPE_ALLOWLIST),
+        help="Install only this service scope (repeatable); defaults to the standard bridge scopes",
+    )
     parser.add_argument(
         "--allow-direct-inference",
         action="store_true",
