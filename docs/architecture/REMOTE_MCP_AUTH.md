@@ -2,10 +2,12 @@
 
 ## Status
 
-The OAuth foundation is implemented behind `GRID_MCP_OAUTH_ENABLED=0`. It is
-not a public product while that gate is off. The remote MCP HTTP resource and
-the Console consent page are separate rollout gates and must not be described
-as live until a supervised production authorization and tool call pass.
+The OAuth foundation is implemented behind `GRID_MCP_OAUTH_ENABLED=0`. The
+remote Streamable HTTP resource is implemented in `grid-skill` source `0.2.0`
+and remains dark and unpublished. It is not a public product while the Core
+gate is off. The Console consent page and production reverse-proxy route are
+separate rollout gates and must not be described as live until a supervised
+production authorization and tool call pass.
 
 ## Objective
 
@@ -97,7 +99,10 @@ the Console, docs, images, CI output, or a browser environment variable.
    service key and delegated user token; the browser receives only the bounded
    request summary and final redirect.
 4. Deploy `/v1/mcp` with the introspection-only `grid-mcp` key. A 401 response
-   must advertise protected-resource metadata.
+   must advertise protected-resource metadata. Keep the Node process on
+   loopback; proxy only the MCP route from the API origin. Verify its Host and
+   Origin guards and 256 KiB request limit. Core's introspection rate limit must
+   be load-tested for per-request MCP authorization before public traffic.
 5. Enable OAuth only in an isolated production canary deployment.
 6. Prove registration, consent, generation, denial, expiry, wrong verifier,
    wrong redirect, duplicate-code redemption, charging, and revocation behavior.
