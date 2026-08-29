@@ -263,6 +263,10 @@ content sanitization, and reward settlement.
   restore follows the commit (a crash between forfeits free-day allowance,
   never paid money). The stale-reservation sweeper inherits this via
   settle_job/release_job/settle_exact.
+- Reviewed builder grants use immutable `builder-*` campaign contracts and the
+  same promotional pocket. They are issued only by the dry-run-first operator
+  command, remain globally budgeted and expiring, and cannot be self-claimed
+  through a public endpoint.
 - A wallet is not Sybil resistance. The welcome campaign requires a verified
   Google identity and has a finite global budget; wallet-only accounts do not
   receive it. The daily baseline also requires verified Google. Holder value

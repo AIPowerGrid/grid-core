@@ -86,6 +86,24 @@ async def test_builtin_campaign_syncs_bounded_launch_policy(promo_db, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_fixed_campaign_is_immutable_and_idempotent(promo_db):
+    policy = {
+        "name": "Reviewed builders",
+        "grant_micro": 10_000_000,
+        "budget_micro": 500_000_000,
+        "expires_days": 60,
+        "eligibility": {"manual_builder_review": True},
+    }
+    assert await promotions.ensure_fixed_campaign("builder-2026-q3", **policy) == "created"
+    assert await promotions.ensure_fixed_campaign("builder-2026-q3", **policy) == "existing"
+    with pytest.raises(ValueError, match="different economic contract"):
+        await promotions.ensure_fixed_campaign(
+            "builder-2026-q3",
+            **{**policy, "grant_micro": 20_000_000},
+        )
+
+
+@pytest.mark.asyncio
 async def test_consume_and_release_restore_same_grant(promo_db):
     await promotions.grant_once(promo_db, "welcome-test")
     assert await promotions.consume(promo_db, 100_000, "job-1") == 100_000
