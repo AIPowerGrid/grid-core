@@ -29,6 +29,9 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   authorities.
 - `grant_canary_credit.py` - dry-run-by-default, capped operator credit for one
   allowlisted demand-billing canary.
+- `grant_builder_credit.py` - dry-run-by-default, manually reviewed $5-$20
+  promotional grants under an immutable, expiring, globally budgeted builder
+  cohort. It is an operator tool, never a public faucet or claim endpoint.
 - `verify_demand_canary.py` - read-only reconciliation of one canonical
   account's balance, reservations, purchased-credit refs, and worker ledger
   terminals.
@@ -109,6 +112,10 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   rotation, removes the file if the database operation fails, and refuses to
   overwrite an existing file.
 - Put reusable logic in the owning service package and test it there.
+- Builder credits must remain promotional value: one grant per account and
+  campaign, $5-$20 per grant, finite cohort budget, 90-day maximum expiry, and
+  explicit `builder:*` review refs. Never expose the grant command as a public
+  endpoint or silently move promotional value into purchased balance.
 - Backup/restore tools must never print database credentials. Restore proof may
   only create or drop its generated `aipg_restore_proof_*` database.
 - A restore proof drops the default `public` schema only after creating and
