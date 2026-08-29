@@ -11,7 +11,9 @@ transport, accounts, stats, health/metrics.
   `POST /v1/x402/chat/completions`, `GET /v1/models`,
   `GET /v1/models/{model_id}`. Sanitizes messages pre-dispatch, detects
   chat-routed media models, reserves text credits in live mode, and streams or
-  collects worker output.
+  collects worker output. The request model normalizes OpenAI's current
+  `max_completion_tokens` field to the Grid's metered `max_tokens` worker cap;
+  conflicting dual fields are rejected.
   The x402 route is a separate default-off, accountless Base-USDC lane. It is
   non-streaming and text-only until a stream-aware settlement adapter exists.
 - `anthropic.py` - `POST /v1/messages` raw Anthropic Messages passthrough.
