@@ -83,6 +83,67 @@ async def ensure_builtin_campaign() -> None:
         await session.commit()
 
 
+async def ensure_fixed_campaign(
+    campaign_id: str,
+    *,
+    name: str,
+    grant_micro: int,
+    budget_micro: int,
+    expires_days: int,
+    eligibility: dict,
+) -> str:
+    """Create one immutable, bounded operator-managed campaign.
+
+    Existing campaigns must match the requested economic contract exactly.
+    This keeps a typo or a later invocation from silently changing the value,
+    budget, or expiry of grants already issued under the same campaign id.
+    """
+    grant = int(grant_micro)
+    budget = int(budget_micro)
+    expiry = int(expires_days)
+    if grant <= 0 or budget < grant:
+        raise ValueError("campaign budget must cover a positive grant")
+    if expiry <= 0:
+        raise ValueError("campaign expiry must be positive")
+    expected = {
+        "name": str(name),
+        "grant_micro": grant,
+        "budget_micro": budget,
+        "expires_days": expiry,
+        "eligibility": dict(eligibility),
+        "active": True,
+    }
+    now = _now()
+    async with await new_session() as session:
+        row = (await session.execute(
+            sa.select(promo_campaigns).where(promo_campaigns.c.id == campaign_id).with_for_update(),
+        )).mappings().first()
+        if row:
+            actual = {key: row[key] for key in expected}
+            if actual != expected:
+                raise ValueError("campaign id already exists with a different economic contract")
+            return "existing"
+        try:
+            await session.execute(sa.insert(promo_campaigns).values(
+                id=campaign_id,
+                granted_micro=0,
+                starts=None,
+                ends=None,
+                created=now,
+                **expected,
+            ))
+            await session.commit()
+            return "created"
+        except IntegrityError:
+            await session.rollback()
+            row = (await session.execute(
+                sa.select(promo_campaigns).where(promo_campaigns.c.id == campaign_id),
+            )).mappings().first()
+            if row and {key: row[key] for key in expected} == expected:
+                return "existing"
+            raise
+
+
 async def grant_once(account_id, campaign_id: str = WELCOME_CAMPAIGN_ID, *, ref: str | None = None) -> dict:
     """Issue one campaign grant to one canonical account.
 
@@ -137,7 +198,17 @@ async def grant_once(account_id, campaign_id: str = WELCOME_CAMPAIGN_ID, *, ref:
             await session.commit()
         except IntegrityError:
             await session.rollback()
-            return {"status": "already", "granted_micro": 0}
+            existing = (await session.execute(
+                sa.select(promo_grants.c.amount_micro, promo_grants.c.remaining_micro)
+                .where(promo_grants.c.account_id == aid, promo_grants.c.campaign_id == campaign_id),
+            )).first()
+            if existing:
+                return {
+                    "status": "already",
+                    "granted_micro": int(existing[0]),
+                    "remaining_micro": int(existing[1]),
+                }
+            raise
     return {"status": "granted", "granted_micro": amount, "remaining_micro": amount,
             "expires": expires.isoformat() if expires else None}
 
