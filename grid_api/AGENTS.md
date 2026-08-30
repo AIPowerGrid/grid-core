@@ -18,7 +18,7 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   and worker structures.
 - `abis/` / `_abi.py` - local contract ABI loaders used by background sync.
 - `main.py` - lifecycle: DB/Redis init, stale-job reclaimer, reservation and
-  billing invariant monitors, validator operational-history pruning,
+  billing invariant monitors, OAuth operational-state retention, validator operational-history pruning,
   default-off finalized worker-bond sync, operator alerts, recipe sync, router
   registration, and root health metadata.
 
@@ -48,6 +48,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   local file. Never infer this authority from `GRID_DIAMOND_ADDRESS`.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
+- **OAuth storage:** public client registration and authorization requests are
+  operational state, not permanent identity or economic records. The lifecycle
+  sweeper removes day-old authorization rows and never-used orphan clients even
+  while OAuth is disabled after rollback.
 - **Safety:** `services/sanitizer.py` is secret redaction, not a content safety
   system. Do not treat it as CSAM/PII/NSFW moderation.
 - **Media capabilities:** `/v1/status/models` publishes generation modes derived

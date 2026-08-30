@@ -92,7 +92,9 @@ compensated-audit jobs plus hourly budget counters.
   OAuth state. Clients are public and hold no secret. Authorization request and
   code values are stored only as SHA-256 hashes; codes are one-use, short-lived,
   account-bound, redirect-bound, client-bound, resource-bound, and PKCE-bound.
-  Migration `0031` must precede any OAuth feature enablement.
+  Migration `0031` must precede any OAuth feature enablement. Authorization
+  rows and old clients that never completed an exchange are bounded operational
+  state and may be pruned; used clients and account/economic records remain.
 - `grid_validator_reference_workers` is derived only from finalized Base bond
   sync plus non-economic quality review. Active selection requires a finalized
   block hash, routed facet and exact reviewed runtime proof, fresh bond, quality,

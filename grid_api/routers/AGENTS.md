@@ -210,7 +210,9 @@ transport, accounts, stats, health/metrics.
 - OAuth access tokens have no `service_id`; while the OAuth gate is live Core
   accepts them only for the configured exact resource audience. The remote MCP
   backend key may carry only `oauth.introspect`; never reuse a frontend bridge
-  key or grant it identity exchange/direct inference authority.
+  key or grant it identity exchange/direct inference authority. Production
+  Nginx must keep the introspection route external-dark; the co-located MCP
+  process reaches it through loopback Uvicorn only.
 - A service may submit an `app_subject` during Google or wallet exchange only
   when it derives that value from its authenticated server session. Never trust
   a browser-supplied account/user id: proof exchange may merge value-bearing

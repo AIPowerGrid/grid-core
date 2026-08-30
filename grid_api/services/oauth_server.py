@@ -33,6 +33,8 @@ AUTHORIZATION_REQUEST_TTL_SECONDS = 600
 AUTHORIZATION_CODE_TTL_SECONDS = 300
 ACCESS_TOKEN_TTL_SECONDS = 900
 MAX_REDIRECT_URIS = 10
+DEFAULT_AUTHORIZATION_RETENTION_SECONDS = 24 * 60 * 60
+DEFAULT_UNUSED_CLIENT_RETENTION_SECONDS = 24 * 60 * 60
 
 _CLIENT_NAME_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,120}$")
 _PKCE_CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{43,128}$")
@@ -464,4 +466,52 @@ def introspect_access_token(token: str) -> dict:
         "iss": claims["iss"],
         "iat": claims["iat"],
         "exp": claims["exp"],
+    }
+
+
+async def prune_operational_state(
+    *,
+    authorization_retention_seconds: int = DEFAULT_AUTHORIZATION_RETENTION_SECONDS,
+    unused_client_retention_seconds: int = DEFAULT_UNUSED_CLIENT_RETENTION_SECONDS,
+    now: datetime | None = None,
+) -> dict[str, int]:
+    """Bound public registration and authorization state.
+
+    Authorization rows are operational OAuth artifacts, not economic records.
+    A one-day default exceeds the request, code, and access-token lifetimes by
+    a wide margin while preventing unauthenticated registration traffic from
+    growing the database forever. A client is removed only when it has never
+    completed a token exchange and no retained authorization refers to it.
+    """
+    if authorization_retention_seconds < 3600:
+        raise ValueError("authorization_retention_seconds must be at least 3600")
+    if unused_client_retention_seconds < 3600:
+        raise ValueError("unused_client_retention_seconds must be at least 3600")
+
+    current = now or datetime.now(UTC)
+    authorization_cutoff = current - timedelta(seconds=authorization_retention_seconds)
+    client_cutoff = current - timedelta(seconds=unused_client_retention_seconds)
+    retained_authorization = sa.exists(
+        sa.select(oauth_authorizations.c.request_hash).where(
+            oauth_authorizations.c.client_id == oauth_clients.c.id,
+        ),
+    )
+
+    async with await new_session() as session:
+        authorization_result = await session.execute(
+            sa.delete(oauth_authorizations).where(
+                oauth_authorizations.c.created < authorization_cutoff,
+            ),
+        )
+        client_result = await session.execute(
+            sa.delete(oauth_clients).where(
+                oauth_clients.c.created < client_cutoff,
+                oauth_clients.c.last_used.is_(None),
+                ~retained_authorization,
+            ),
+        )
+        await session.commit()
+    return {
+        "authorizations": max(0, int(authorization_result.rowcount or 0)),
+        "clients": max(0, int(client_result.rowcount or 0)),
     }

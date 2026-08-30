@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -18,7 +19,7 @@ from sqlalchemy.pool import StaticPool
 
 from grid_api import database
 from grid_api.services import accounts, oauth_server, user_tokens
-from grid_api.v2.schema import metadata, oauth_authorizations
+from grid_api.v2.schema import metadata, oauth_authorizations, oauth_clients
 
 
 def _challenge(verifier: str) -> str:
@@ -256,3 +257,74 @@ async def test_oauth_audience_requires_client_binding_and_rejects_service_token(
         client_id="grid_oauth_confused_deputy",
     )
     assert oauth_server.introspect_access_token(delegated) == {"active": False}
+
+
+@pytest.mark.asyncio
+async def test_prune_bounds_old_authorizations_and_never_used_clients(oauth_db):
+    stale_client = await oauth_server.register_client(
+        {
+            "client_name": "Abandoned MCP client",
+            "application_type": "native",
+            "redirect_uris": ["http://127.0.0.1/callback"],
+        },
+    )
+    used_client = await oauth_server.register_client(
+        {
+            "client_name": "Previously used MCP client",
+            "application_type": "native",
+            "redirect_uris": ["http://127.0.0.1/used"],
+        },
+    )
+    recent_client = await oauth_server.register_client(
+        {
+            "client_name": "Recent MCP client",
+            "application_type": "native",
+            "redirect_uris": ["http://127.0.0.1/recent"],
+        },
+    )
+    verifier = "v" * 43
+    consent_url = await oauth_server.create_authorization_request(
+        client_id=stale_client["client_id"],
+        redirect_uri="http://127.0.0.1:49152/callback",
+        response_type="code",
+        scope="account.read inference.submit",
+        state="stale-state",
+        code_challenge=_challenge(verifier),
+        code_challenge_method="S256",
+        requested_resource="https://api.example.test",
+    )
+    capability = _query_value(consent_url, "request")
+    current = datetime.now(UTC)
+    old_created = current - timedelta(days=2)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(oauth_authorizations)
+            .where(oauth_authorizations.c.request_hash == hashlib.sha256(capability.encode()).hexdigest())
+            .values(created=old_created, expires_at=old_created + timedelta(minutes=10)),
+        )
+        await session.execute(
+            sa.update(oauth_clients)
+            .where(oauth_clients.c.id.in_([stale_client["client_id"], used_client["client_id"]]))
+            .values(created=old_created),
+        )
+        await session.execute(
+            sa.update(oauth_clients)
+            .where(oauth_clients.c.id == used_client["client_id"])
+            .values(last_used=old_created + timedelta(hours=1)),
+        )
+        await session.commit()
+
+    deleted = await oauth_server.prune_operational_state(now=current)
+    assert deleted == {"authorizations": 1, "clients": 1}
+
+    async with await database.new_session() as session:
+        remaining_clients = set((await session.execute(sa.select(oauth_clients.c.id))).scalars())
+        remaining_authorizations = (await session.execute(sa.select(oauth_authorizations.c.request_hash))).scalars().all()
+    assert remaining_clients == {used_client["client_id"], recent_client["client_id"]}
+    assert remaining_authorizations == []
+
+
+@pytest.mark.asyncio
+async def test_prune_rejects_retention_shorter_than_one_hour(oauth_db):
+    with pytest.raises(ValueError, match="at least 3600"):
+        await oauth_server.prune_operational_state(authorization_retention_seconds=3599)
