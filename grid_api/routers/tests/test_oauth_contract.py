@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -14,6 +15,9 @@ from starlette.requests import Request
 
 from grid_api.routers import oauth
 from grid_api.services import oauth_server
+
+
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def _request(body: bytes, content_type: str) -> Request:
@@ -73,6 +77,17 @@ def test_discovery_is_dark_by_default(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         oauth_server.require_enabled()
     assert exc.value.status_code == 404
+
+
+def test_production_nginx_preserves_exact_oauth_and_mcp_edge_routes():
+    nginx = (ROOT / "deploy/nginx/aipg-api.conf").read_text()
+    assert "location = /.well-known/oauth-protected-resource {" in nginx
+    assert "location = /.well-known/oauth-authorization-server {" in nginx
+    assert "include /etc/nginx/aipg-api.d/*.conf;" in nginx
+    assert "location /.well-known/" not in nginx
+
+    bootstrap = (ROOT / "deploy/bootstrap.sh").read_text()
+    assert "install -d -o root -g root -m 0755 /etc/nginx/aipg-api.d" in bootstrap
 
 
 @pytest.mark.asyncio
