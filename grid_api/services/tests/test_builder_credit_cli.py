@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from grid_api.services import promotions
 from scripts.grant_builder_credit import usd_to_micro, validate_policy
 
 
@@ -51,3 +52,15 @@ def test_builder_campaign_policy_rejects_open_ended_value():
 
 def test_usd_conversion_is_integer_micro_usd():
     assert usd_to_micro("5", label="amount") == 5_000_000
+
+
+def test_builder_apply_gate_requires_exact_campaign(monkeypatch):
+    monkeypatch.setattr(promotions, "PROMO_ENABLED", True)
+    monkeypatch.setattr(promotions, "PROMO_SPENDABLE_LIVE", True)
+    monkeypatch.setattr(
+        promotions,
+        "PROMO_SPENDABLE_CAMPAIGNS",
+        frozenset({"builder-2026-q3"}),
+    )
+    assert promotions.campaign_spendable("builder-2026-q3") is True
+    assert promotions.campaign_spendable("universal-welcome-v1") is False

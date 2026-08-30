@@ -31,7 +31,9 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   allowlisted demand-billing canary.
 - `grant_builder_credit.py` - dry-run-by-default, manually reviewed $5-$20
   promotional grants under an immutable, expiring, globally budgeted builder
-  cohort. It is an operator tool, never a public faucet or claim endpoint.
+  cohort. Apply mode requires that exact campaign ID in
+  `GRID_PROMO_SPENDABLE_CAMPAIGNS`; it is an operator tool, never a public
+  faucet or claim endpoint.
 - `verify_demand_canary.py` - read-only reconciliation of one canonical
   account's balance, reservations, purchased-credit refs, and worker ledger
   terminals.

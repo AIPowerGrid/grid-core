@@ -218,18 +218,22 @@ async def account_credit_summary(user: dict) -> dict:
         raise ValueError("credit summary requires a v2 account")
     wallet = user.get("wallet") or None
     paid = await get_balance(account_id)
-    promo_left = await promotions.available_micro(account_id)
+    promo_preview = await promotions.available_micro(account_id)
+    promo_left = await promotions.available_micro(account_id, spendable_only=True)
     daily_cap = await free_credits.daily_cap_micro(account_id, wallet)
     free_left = await free_credits.available_micro(account_id, wallet)
     free_active = free_credits.FREE_ENABLED and free_credits.FREE_SPENDABLE_LIVE
-    promo_active = promotions.PROMO_ENABLED and promotions.PROMO_SPENDABLE_LIVE
-    spendable = paid + (free_left if free_active else 0) + (promo_left if promo_active else 0)
-    preview = paid + free_left + promo_left
+    promo_active = promotions.spending_live()
+    promo_reported = promo_left if promo_active else promo_preview
+    spendable = paid + (free_left if free_active else 0) + promo_left
+    preview = paid + free_left + promo_preview
     return {
         "account_id": str(account_id),
         "promotional": {
-            "remaining_micro": promo_left,
-            "remaining_usd": _usd(promo_left),
+            "remaining_micro": promo_reported,
+            "remaining_usd": _usd(promo_reported),
+            "preview_remaining_micro": promo_preview,
+            "preview_remaining_usd": _usd(promo_preview),
             "active": promo_active,
         },
         "free": {
@@ -436,7 +440,7 @@ async def _free_first(account_id, wallet: str | None, cost: int, ref: str) -> in
 
 async def _promo_first(account_id, cost: int, ref: str) -> int:
     """Draw durable expiring promotion grants before daily and paid credit."""
-    if not (promotions.PROMO_ENABLED and promotions.PROMO_SPENDABLE_LIVE):
+    if not promotions.spending_live():
         return 0
     try:
         return await promotions.consume(account_id, cost, ref=ref)
@@ -558,7 +562,7 @@ async def charge_request(user: dict, model: str, prompt_tokens: int, completion_
     wallet = user.get("wallet")
     if not charging_enabled_for(user, model):
         # Preview the free-first split for observability (no consume in dry-run).
-        promo_avail = await promotions.available_micro(aid)
+        promo_avail = await promotions.available_micro(aid, spendable_only=True)
         from_promo = min(cost, promo_avail)
         free_avail = await free_credits.available_micro(aid, wallet)
         from_free = min(cost - from_promo, free_avail)

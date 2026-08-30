@@ -12,7 +12,8 @@ content sanitization, and reward settlement.
   (presigned R2 upload), `enforcement.py` (worker strike/evict).
 - **Economy:** `credits.py` (reserve/settle lifecycle; draws promotional, then
   daily free, then purchased value), `promotions.py` (durable budgeted grants,
-  gated on `GRID_PROMO_SPENDABLE_LIVE`), `free_credits.py`
+  gated on `GRID_PROMO_SPENDABLE_LIVE` plus exact campaign IDs in
+  `GRID_PROMO_SPENDABLE_CAMPAIGNS`), `free_credits.py`
   (daily free CREDIT allowance, Redis, FAIL-CLOSED, atomic consume/release
   idempotent on ref), `quota.py` (free-tier request COUNT, fail-open — distinct
   from credit value), `pricing.py` (versioned USD rates plus expiring,

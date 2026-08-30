@@ -151,7 +151,7 @@ preventing subject collisions across partners even when local IDs match.
 | --- | ---: | --- | --- | --- |
 | Daily free | $0.01/day | UTC midnight | Verified Google | `GRID_FREE_SPENDABLE_LIVE` |
 | AIPG holder bonus | Disabled | N/A | Deferred until non-recyclable | `GRID_FREE_SPENDABLE_LIVE` |
-| Welcome promotion | $0.10 once; $500 campaign cap | 30 days | Verified Google plus global budget | `GRID_PROMO_SPENDABLE_LIVE` |
+| Welcome promotion | $0.10 once; $500 campaign cap | 30 days | Verified Google plus global budget | Global gate plus exact campaign in `GRID_PROMO_SPENDABLE_CAMPAIGNS` |
 | Purchased | Deposited value | None | Payment confirmation | `GRID_CHARGING_MODE` |
 
 Clients must gate generation on `total_spendable_micro`, not preview totals or
@@ -160,6 +160,16 @@ active state separately and includes the canonical `account_id`. Partner apps
 use that narrow response to prove account and balance together; delegated
 tokens do not need access to the broader `/v1/account` key and identity
 metadata.
+
+Promotional issuance and spending are separate controls. All issued grants are
+visible in `promotional.preview_remaining_micro`; while the rail is dark, the
+legacy `promotional.remaining_micro` display also reports that preview value
+with `active: false`. Once active, only grants whose exact campaign ID is in
+`GRID_PROMO_SPENDABLE_CAMPAIGNS` contribute to `promotional.remaining_micro`
+and `total_spendable_micro`, and the global `GRID_PROMO_SPENDABLE_LIVE`
+emergency gate must also be enabled. Wildcards are invalid. This permits a
+reviewed builder cohort to go live without activating the universal welcome
+campaign.
 
 Before rendering a generation estimate, clients call
 `POST /v1/account/credits/quote`. The response repeats the same canonical
