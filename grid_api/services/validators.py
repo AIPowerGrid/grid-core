@@ -1922,6 +1922,18 @@ async def prune_validator_operational_history(
     }
 
 
+def _ordered_assignment_workers(active_workers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Use one global worker-lock order across concurrent assignment polls."""
+
+    return sorted(
+        active_workers,
+        key=lambda worker: (
+            str(worker.get("worker_id") or worker.get("id") or ""),
+            str(worker.get("name") or ""),
+        ),
+    )
+
+
 async def issue_assignments(
     *,
     account_id,
@@ -2004,7 +2016,7 @@ async def issue_assignments(
         existing_keys = {(r["target_worker_id"], r["model"]) for r in existing}
         rows = list(existing)
 
-        for worker in active_workers:
+        for worker in _ordered_assignment_workers(active_workers):
             if len(rows) >= safe_limit:
                 break
             worker_id = str(worker.get("worker_id") or worker.get("id") or "")
@@ -2316,7 +2328,7 @@ async def _issue_image_assignments(
         rows = list(existing)
         existing_keys = {(str(row["target_worker_id"]), row["model"]) for row in existing}
 
-        for worker in active_workers:
+        for worker in _ordered_assignment_workers(active_workers):
             if len(rows) >= limit:
                 break
             worker_id = str(worker.get("worker_id") or worker.get("id") or "")
@@ -2552,7 +2564,7 @@ async def _issue_video_assignments(
         rows = list(existing)
         existing_keys = {(str(row["target_worker_id"]), row["model"]) for row in existing}
 
-        for worker in active_workers:
+        for worker in _ordered_assignment_workers(active_workers):
             if len(rows) >= limit:
                 break
             worker_id = str(worker.get("worker_id") or worker.get("id") or "")

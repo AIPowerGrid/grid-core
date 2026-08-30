@@ -76,7 +76,9 @@ content sanitization, and reward settlement.
 - **Validation evidence:** `validators.py` verifies one linked-wallet validator
   registration per canonical account, builds shared probe batches, binds one
   assignment and authoritative vote per registered validator/group, and
-  aggregates a conservative 3-of-5 preview quorum. Text groups use randomized
+  aggregates a conservative 3-of-5 preview quorum. Assignment polls acquire
+  PostgreSQL worker advisory locks in one canonical worker-ID order across
+  validators so multi-worker polls cannot deadlock. Text groups use randomized
   exact-instruction, arithmetic, strict-JSON, calibrated 4K/16K/32K
   context-retrieval, multistep logic, restricted-AST Python function synthesis,
   exact function-call, two-stage tool-chain, stop-sequence, and gross token-limit
