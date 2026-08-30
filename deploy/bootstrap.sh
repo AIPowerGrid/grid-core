@@ -83,6 +83,7 @@ echo "── [5/6] service + nginx ──"
 install -m 0644 "$RELEASE/deploy/systemd/aipg-gridapi.service" /etc/systemd/system/
 install -m 0644 "$RELEASE/deploy/systemd/aipg-postgres-backup.service" /etc/systemd/system/
 install -m 0644 "$RELEASE/deploy/systemd/aipg-postgres-backup.timer" /etc/systemd/system/
+install -d -o root -g root -m 0755 /etc/nginx/aipg-api.d
 install -m 0644 "$RELEASE/deploy/nginx/aipg-api.conf" /etc/nginx/sites-available/aipg-api.conf
 ln -sfn /etc/nginx/sites-available/aipg-api.conf /etc/nginx/sites-enabled/aipg-api.conf
 ln -sfn "$RELEASE" /home/aipg/.current.next
