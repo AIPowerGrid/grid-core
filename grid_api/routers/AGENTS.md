@@ -18,6 +18,9 @@ transport, accounts, stats, health/metrics.
   non-streaming and text-only until a stream-aware settlement adapter exists.
 - `anthropic.py` - `POST /v1/messages` raw Anthropic Messages passthrough.
 - `responses.py` - `POST /v1/responses` raw OpenAI Responses passthrough.
+- `pricing.py` - public, unauthenticated `GET /v1/pricing`; exposes the exact
+  versioned USD price book plus only fresh, source-linked same-model comparison
+  workloads. Expired comparison evidence is omitted rather than repeated.
 - `_passthrough.py` - shared raw passthrough submit/stream/collect and deep
   secret sanitization helpers.
 - `images.py` - `POST /v1/images/generations` native image jobs.

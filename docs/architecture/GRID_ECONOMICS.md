@@ -135,9 +135,14 @@ and revenue-share all work for them automatically, everywhere.**
 
 ## 4. Metering, tiers & enforcement (all grid-side)
 
-The grid prices every request (`services/pricing.py`, "half the cheapest
-competitor") and enforces in the request path (chat metering already wired,
-dry-run). Tiers are **entitlements on the account**, not front-end logic:
+The grid prices every request through `services/pricing.py` and enforces the
+selected charging mode in the request path. `GET /v1/pricing` publishes the
+exact versioned USD rate book plus a deliberately narrow set of fresh,
+source-linked same-model comparison workloads. Comparison evidence expires and
+disappears unless reviewed again; configured rates do not claim that a model is
+currently online. Some guarded launch pegs are based on measured worker cost,
+so do not describe the entire catalog as "half the cheapest competitor."
+Tiers are **entitlements on the account**, not front-end logic:
 
 | Tier | Limit | Mechanism |
 | --- | --- | --- |
@@ -186,13 +191,15 @@ money four ways, all settled by the grid:
 ### 6a. Reseller margin (the headline)
 A developer builds an app, sets their **own retail price**, and the grid bills
 their end-users the retail price, pays the developer the **spread**, and keeps
-the wholesale cost. Because wholesale is already "half the cheapest competitor,"
-the developer has real room to price and still undercut the market.
+the wholesale cost. Fresh same-model comparisons can show where the developer
+has room to add margin and still undercut a named hosted provider; other models
+must be priced from their published Grid rate without a blanket market claim.
 
 - Grid charges end-user `retail`; grid keeps `wholesale + protocol_fee`; developer
   earns `retail − wholesale − protocol_fee`.
 - The developer never touches infrastructure, billing, or payments — they ship a
-  product and collect a margin.
+  product and collect a margin. A market-undercutting claim is valid only for a
+  fresh same-model workload published by `/v1/pricing`, not the whole catalog.
 
 ### 6b. Revenue share on referred usage
 For developers who don't want to run their own billing: tag traffic with an
