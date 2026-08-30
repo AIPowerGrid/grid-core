@@ -106,6 +106,7 @@ sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-payout.service" /etc/systemd/
 sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-payout.timer" /etc/systemd/system/
 sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-postgres-backup.service" /etc/systemd/system/
 sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-postgres-backup.timer" /etc/systemd/system/
+sudo install -d -o root -g root -m 0755 /etc/nginx/aipg-api.d
 sudo install -m 0644 "$RELEASE/deploy/nginx/aipg-api.conf" /etc/nginx/sites-available/aipg-api.conf
 sudo ln -sfn /etc/nginx/sites-available/aipg-api.conf /etc/nginx/sites-enabled/aipg-api.conf
 sudo ln -s "$RELEASE" /home/aipg/.current.next
@@ -116,6 +117,11 @@ sudo nginx -t
 sudo systemctl restart aipg-gridapi
 sudo systemctl reload nginx
 ```
+
+The optional `/etc/nginx/aipg-api.d/*.conf` include is for reviewed exact-route
+overlays such as the loopback remote-MCP proxy. Core upgrades preserve those
+separate files while replacing the versioned base site. Never install a broad
+prefix proxy in the overlay directory, and always run `nginx -t` before reload.
 
 The payout timer is a money-moving control. Preserve its prior enabled/active
 state; do not enable or start it merely because unit files were installed. The

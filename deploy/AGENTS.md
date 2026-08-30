@@ -16,8 +16,9 @@ executes an immutable release selected through `/home/aipg/current`.
 - `VALIDATOR_COHORT_RUNBOOK.md` - privacy-safe intake, opaque common-control
   review, 72-hour qualification, verification, expiry, and incident handling
   for independent preview operators.
-- `nginx/aipg-api.conf` - Grid routes, restricted metrics, public docs/health,
-  and static `410 Gone` responses for retired API paths.
+- `nginx/aipg-api.conf` - Grid routes, exact OAuth metadata routes, optional
+  reviewed exact-route overlays, restricted metrics, public docs/health, and
+  static `410 Gone` responses for retired API paths.
 - `systemd/aipg-gridapi.service` - uvicorn Grid API unit.
 - `systemd/aipg-payout.{service,timer}` - custodial payout one-shot and hourly
   scheduler. The service invokes the wrapper from the selected release.
@@ -30,10 +31,15 @@ executes an immutable release selected through `/home/aipg/current`.
 - Env names in `env.template`, systemd, code, and docs must match exactly.
 - Public route split is intentional:
   - `/v1/*`, `/`, `/health`, `/docs`, and `/openapi.json` -> Grid API.
+  - The two exact OAuth `/.well-known/*` metadata routes -> Grid API; all other
+    well-known paths remain under the static fallback.
+  - `/etc/nginx/aipg-api.d/*.conf` may add reviewed exact locations such as
+    `/v1/mcp`; no overlay may add a broad prefix proxy.
   - `/api/v2/*` and `/v2/*` -> static `410 Gone`; no legacy process.
   - `/metrics` should remain restricted by nginx.
 - Existing-host deployments install the versioned Nginx site from the selected
-  release, run `nginx -t`, and reload Nginx. Do not let the live site drift from
+  release, preserve reviewed files in `/etc/nginx/aipg-api.d`, run `nginx -t`,
+  and reload Nginx. Do not let the base live site drift from
   `nginx/aipg-api.conf`.
 - `/health` and `/v1/status/network` must report the reviewed immutable commit;
   `GRID_BUILD_COMMIT`, when set, must be the full 40-character release SHA.
