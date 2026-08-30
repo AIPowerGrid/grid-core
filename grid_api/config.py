@@ -114,6 +114,14 @@ class GridSettings(BaseSettings):
     validator_history_retention_days: int = 90
     validator_history_sweep_seconds: int = 21600
 
+    # Remote-MCP OAuth operational rows are bounded independently of the
+    # feature flag so rollback does not leave attacker-created registration
+    # state growing forever. Signed access tokens live at most 15 minutes;
+    # authorization rows are retained for a full day for incident review.
+    oauth_authorization_retention_seconds: int = Field(default=86400, ge=3600, le=604800)
+    oauth_unused_client_retention_seconds: int = Field(default=86400, ge=3600, le=2592000)
+    oauth_state_sweep_seconds: int = Field(default=21600, ge=300, le=86400)
+
     # Best-effort operator alerts. The webhook is a production secret and must
     # never be committed, logged, or returned by an API.
     grid_alert_discord_webhook: SecretStr | None = None

@@ -17,6 +17,7 @@ from ..services import accounts as accounts_svc
 from ..services import oauth_server, user_tokens
 
 router = APIRouter()
+OAUTH_INTROSPECTION_RATE_LIMIT = "1200/minute"
 
 
 class ClientRegistration(BaseModel):
@@ -243,7 +244,7 @@ async def token(request: Request):
 
 
 @router.post("/v1/oauth/introspect")
-@limiter.limit("120/minute")
+@limiter.limit(OAUTH_INTROSPECTION_RATE_LIMIT)
 async def introspect(
     request: Request,
     apikey: str | None = Header(None),

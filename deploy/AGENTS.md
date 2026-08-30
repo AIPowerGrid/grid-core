@@ -35,6 +35,8 @@ executes an immutable release selected through `/home/aipg/current`.
     well-known paths remain under the static fallback.
   - `/etc/nginx/aipg-api.d/*.conf` may add reviewed exact locations such as
     `/v1/mcp`; no overlay may add a broad prefix proxy.
+  - `/v1/oauth/introspect` returns an exact public `404`; the co-located MCP
+    process reaches it only through loopback Uvicorn transport.
   - `/api/v2/*` and `/v2/*` -> static `410 Gone`; no legacy process.
   - `/metrics` should remain restricted by nginx.
 - Existing-host deployments install the versioned Nginx site from the selected
@@ -83,6 +85,10 @@ executes an immutable release selected through `/home/aipg/current`.
   `VALIDATOR_HISTORY_SWEEP_SECONDS` bound finalized assignment/group machinery;
   signed attestations are preserved. Keep `env.template`, `config.py`, and the
   validator runbook aligned when changing these controls.
+- `OAUTH_AUTHORIZATION_RETENTION_SECONDS`,
+  `OAUTH_UNUSED_CLIENT_RETENTION_SECONDS`, and `OAUTH_STATE_SWEEP_SECONDS`
+  bound unauthenticated OAuth operational storage. Keep at least one hour of
+  retention and do not disable cleanup during an OAuth rollback.
 - Keep `VALIDATOR_SEALED_ASSIGNMENTS_ENABLED=0` through the compatible-node
   rollout. Merge and upgrade the validator fleet first, deploy the compatible
   Core second, verify old unsealed operation, then enable the flag in a

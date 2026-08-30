@@ -145,6 +145,39 @@ async def _validator_history_sweeper():
         await asyncio.sleep(interval)
 
 
+async def _oauth_state_sweeper():
+    """Bound unauthenticated OAuth registration and authorization storage."""
+    from .config import get_settings
+    from .safe_logging import error_type
+    from .services import alerts
+    from .services.oauth_server import prune_operational_state
+
+    settings = get_settings()
+    interval = settings.oauth_state_sweep_seconds
+    while True:
+        try:
+            deleted = await prune_operational_state(
+                authorization_retention_seconds=settings.oauth_authorization_retention_seconds,
+                unused_client_retention_seconds=settings.oauth_unused_client_retention_seconds,
+            )
+            if deleted["authorizations"] or deleted["clients"]:
+                logger.info(
+                    "Pruned OAuth operational rows authorizations=%d unused_clients=%d",
+                    deleted["authorizations"],
+                    deleted["clients"],
+                )
+        except Exception as exc:
+            logger.error("OAuth state sweeper error_type=%s", error_type(exc))
+            alerts.emit(
+                "oauth_state_sweeper_failed",
+                "warning",
+                "The OAuth operational-state retention loop failed.",
+                fields={"error_type": error_type(exc)},
+                dedupe_key="oauth-state-sweeper-failed",
+            )
+        await asyncio.sleep(interval)
+
+
 async def _validator_bond_sync_loop():
     """Refresh the dark media-reference bond cache from finalized Base state."""
     from .config import get_settings
@@ -283,6 +316,7 @@ async def lifespan(app: FastAPI):
     recipe_sync = asyncio.create_task(_recipe_sync_loop())
     sweeper = asyncio.create_task(_reservation_sweeper())
     validator_history_sweeper = asyncio.create_task(_validator_history_sweeper())
+    oauth_state_sweeper = asyncio.create_task(_oauth_state_sweeper())
     validator_bond_sync = asyncio.create_task(_validator_bond_sync_loop())
     billing_monitor = asyncio.create_task(_billing_monitor())
     # Verification probes ("validator zero") — dormant unless GRID_PROBE_ENABLED;
@@ -309,6 +343,7 @@ async def lifespan(app: FastAPI):
     recipe_sync.cancel()
     sweeper.cancel()
     validator_history_sweeper.cancel()
+    oauth_state_sweeper.cancel()
     validator_bond_sync.cancel()
     billing_monitor.cancel()
     prober.cancel()
