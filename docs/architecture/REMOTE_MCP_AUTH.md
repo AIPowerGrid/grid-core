@@ -2,14 +2,13 @@
 
 ## Status
 
-The OAuth foundation is implemented behind `GRID_MCP_OAUTH_ENABLED=0`. The
-remote Streamable HTTP resource is implemented in unpublished `grid-skill`
-source `0.2.0`. Its loopback process, least-privilege introspection principal,
-and exact production reverse-proxy route were deployed dark on 2026-08-30 and
-passed the unauthenticated dark preflight. Core OAuth remains disabled, so this
-is not a usable public product: discovery and client registration still return
-404 and no remote MCP user token can be issued. Do not describe the endpoint as
-live until a supervised production authorization and paid tool call pass.
+The remote Streamable HTTP MCP resource and Core OAuth 2.1 authorization flow
+are production-live behind `GRID_MCP_OAUTH_ENABLED=1`. The supervised rollout
+on 2026-08-30 proved Google-backed consent, a 15-minute user token, exact issuer
+and audience checks, credit and quote reads, seven-tool discovery, 20 repeated
+same-token requests, immediate SSE headers, one bounded paid text call, and a
+clean off/on rollback. Public introspection remains an exact Nginx `404`;
+the least-privilege MCP service reaches it only over loopback.
 
 ## Objective
 
@@ -120,12 +119,16 @@ the Console, docs, images, CI output, or a browser environment variable.
 7. Monitor registration/auth rate limits and database growth before making the
    endpoint public.
 
-As of 2026-08-30, gates 1-3 and the dark infrastructure portion of gate 4 have
-passed in production. Gate 4's authenticated load and long-running SSE checks,
-plus gates 5-7, remain open because no valid remote token exists while OAuth is
-disabled.
+As of 2026-08-30, gates 1-6 passed in production. Same-token pressure, bounded
+distinct invalid-token pressure, immediate SSE headers, the paid tool path, and
+the feature-gate rollback were exercised against immutable Core release
+`4e744feed6e20f6d866a891ebf9b96f34feae376` and MCP release
+`6e03fa95718d39b13b2da5623cb8803d220d334a`. Gate 7 is an ongoing operational
+monitoring obligation rather than a one-time launch test.
 
-Rollback is one flag: set `GRID_MCP_OAUTH_ENABLED=0`. This invalidates OAuth
-resource tokens at Core without affecting ordinary API keys or existing
-frontend service delegation. A remote MCP process may retain a successful
-introspection for at most five seconds before observing the rollback.
+Rollback is one flag: set `GRID_MCP_OAUTH_ENABLED=0`. The private introspection
+route remains service-authenticated on loopback and returns every token as
+inactive, so remote clients receive a no-store `401`; public OAuth issuance and
+public introspection remain unavailable. Ordinary API keys and existing
+frontend service delegation are unaffected. A remote MCP process may retain a
+successful introspection for at most five seconds before observing the rollback.
