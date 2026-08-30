@@ -730,6 +730,40 @@ async def test_concurrent_polls_from_one_validator_reuse_one_assignment(pg):
 
 
 @pytest.mark.asyncio
+async def test_concurrent_validators_use_one_worker_lock_order(pg):
+    validators = await _seed_validators(5)
+    workers = [
+        {
+            "worker_id": str(uuid.uuid4()),
+            "name": f"pg-lock-order-rig-{index}",
+            "models": ["qwen3-27b"],
+            "job_types": ["text"],
+        }
+        for index in range(2)
+    ]
+
+    results = await asyncio.gather(
+        *[
+            validators_svc.issue_assignments(
+                account_id=account_id,
+                validator_id=validator_id,
+                validator_wallet=wallet,
+                active_workers=workers if index % 2 == 0 else list(reversed(workers)),
+                limit=2,
+            )
+            for index, (account_id, validator_id, wallet, _private_key) in enumerate(validators)
+        ],
+    )
+
+    assert all(len(result["assignments"]) == 2 for result in results)
+    assert {
+        assignment["target_worker_id"]
+        for result in results
+        for assignment in result["assignments"]
+    } == {worker["worker_id"] for worker in workers}
+
+
+@pytest.mark.asyncio
 async def test_concurrent_distinct_votes_reach_quorum_atomically(pg):
     validators = await _seed_validators(3)
     workers = _workers()
