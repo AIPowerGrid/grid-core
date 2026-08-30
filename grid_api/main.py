@@ -8,6 +8,7 @@ This is the sole production coordinator runtime. Provides:
   - POST /v1/messages          (Anthropic-compatible, streaming)
   - POST /v1/images/generations (OpenAI-compatible image gen)
   - GET  /v1/models            (available models from connected workers)
+  - GET  /v1/pricing           (versioned USD price book and fresh comparisons)
   - WS   /v1/workers/ws        (WebSocket for text generation workers)
   - GET  /health               (health check)
 """
@@ -33,6 +34,7 @@ from .routers import (
     metrics,
     oauth,
     openai,
+    pricing,
     responses,
     stats,
     styles,
@@ -84,6 +86,7 @@ async def _reservation_sweeper():
     worker-WS terminal. No-op while charging is dark. Interval/threshold via
     RESERVATION_SWEEP_SECONDS / RESERVATION_STALE_SECONDS."""
     import os
+
     from .services.credits import sweep_stale_reservations
     from .services.promotions import sweep_stale_spends
     from .services.validator_audit_budgets import sweep_expired_audits
@@ -379,6 +382,7 @@ app.add_middleware(
 )
 
 app.include_router(openai.router)
+app.include_router(pricing.router)
 app.include_router(oauth.router)
 app.include_router(anthropic.router)
 app.include_router(responses.router)
@@ -399,7 +403,7 @@ app.include_router(metrics.router)
 
 @app.get("/")
 async def root():
-    from .services.p2p import get_p2p_node, get_p2p_config
+    from .services.p2p import get_p2p_config, get_p2p_node
 
     p2p_config = get_p2p_config()
     p2p_node = get_p2p_node()
@@ -413,6 +417,7 @@ async def root():
             "images": "POST /v1/images/generations",
             "audio": "POST /v1/audio/generations",
             "models": "GET /v1/models",
+            "pricing": "GET /v1/pricing",
             "worker_ws": "WS /v1/workers/ws",
             "health": "GET /health",
         },

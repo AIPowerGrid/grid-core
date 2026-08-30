@@ -15,7 +15,8 @@ content sanitization, and reward settlement.
   gated on `GRID_PROMO_SPENDABLE_LIVE`), `free_credits.py`
   (daily free CREDIT allowance, Redis, FAIL-CLOSED, atomic consume/release
   idempotent on ref), `quota.py` (free-tier request COUNT, fail-open — distinct
-  from credit value), `pricing.py`, `ledger.py` (incl. `content_hash` — real
+  from credit value), `pricing.py` (versioned USD rates plus expiring,
+  source-linked public same-model comparisons), `ledger.py` (incl. `content_hash` — real
   sha256 of witnessed output or NULL, never sha256("")), `den.py` (den
   accounting), `accounts.py` (scoped keys and payout preference),
   `identities.py` (verified identities, keyed subject lookups, aliases, and
