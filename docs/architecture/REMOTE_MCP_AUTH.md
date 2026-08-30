@@ -3,11 +3,13 @@
 ## Status
 
 The OAuth foundation is implemented behind `GRID_MCP_OAUTH_ENABLED=0`. The
-remote Streamable HTTP resource is implemented in `grid-skill` source `0.2.0`
-and remains dark and unpublished. It is not a public product while the Core
-gate is off. The Console consent page and production reverse-proxy route are
-separate rollout gates and must not be described as live until a supervised
-production authorization and tool call pass.
+remote Streamable HTTP resource is implemented in unpublished `grid-skill`
+source `0.2.0`. Its loopback process, least-privilege introspection principal,
+and exact production reverse-proxy route were deployed dark on 2026-08-30 and
+passed the unauthenticated dark preflight. Core OAuth remains disabled, so this
+is not a usable public product: discovery and client registration still return
+404 and no remote MCP user token can be issued. Do not describe the endpoint as
+live until a supervised production authorization and paid tool call pass.
 
 ## Objective
 
@@ -108,6 +110,11 @@ the Console, docs, images, CI output, or a browser environment variable.
    wrong redirect, duplicate-code redemption, charging, and revocation behavior.
 7. Monitor registration/auth rate limits and database growth before making the
    endpoint public.
+
+As of 2026-08-30, gates 1-3 and the dark infrastructure portion of gate 4 have
+passed in production. Gate 4's authenticated load and long-running SSE checks,
+plus gates 5-7, remain open because no valid remote token exists while OAuth is
+disabled.
 
 Rollback is one flag: set `GRID_MCP_OAUTH_ENABLED=0`. This invalidates OAuth
 resource tokens at Core without affecting ordinary API keys or existing
