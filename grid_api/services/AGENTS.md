@@ -43,7 +43,10 @@ content sanitization, and reward settlement.
   registered HTTPS or native-loopback redirects, short-lived resource-bound
   Grid user tokens, hashed one-use capabilities/codes, and a dedicated
   `oauth.introspect` backend scope. It does not issue refresh tokens or client
-  secrets. See `docs/architecture/REMOTE_MCP_AUTH.md`.
+  secrets. `prune_operational_state` bounds authorization rows and removes only
+  old clients that never completed a token exchange; used clients and economic
+  account records are not retention targets. See
+  `docs/architecture/REMOTE_MCP_AUTH.md`.
 - **Worker trust:** `worker_identity.py` verifies a payout-wallet delegation to
   a funds-less per-rig signer plus a fresh registration proof; `signing.py`
   verifies that delegated signer over `aipg-job:{job_id}:{result_hash}`.

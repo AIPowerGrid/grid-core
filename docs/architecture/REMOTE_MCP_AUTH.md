@@ -66,8 +66,15 @@ MCP client                 Core OAuth                 Grid Console             C
 - The MCP resource introspects tokens with a separate `grid-mcp` service key
   carrying only `oauth.introspect`. It must not have `identity.exchange`,
   `identity.assert`, `inference.submit`, or `inference.service_submit`.
+- Introspection is loopback-only at the deployment edge: public Nginx returns
+  an exact `404` for `/v1/oauth/introspect`. The MCP process coalesces identical
+  checks, keeps at most five seconds of positive cache, bounds cache and
+  in-flight entries, and never caches a failed check.
 - Registration JSON and token forms are size-limited before parsing and are
   rate-limited. Token and registration responses use `Cache-Control: no-store`.
+- A background retention loop deletes authorization rows after one day and
+  removes old clients only when they never completed a token exchange and no
+  retained authorization still references them.
 
 ## Non-Goals
 
@@ -105,6 +112,8 @@ the Console, docs, images, CI output, or a browser environment variable.
    loopback; proxy only the MCP route from the API origin. Verify its Host and
    Origin guards and 256 KiB request limit. Core's introspection rate limit must
    be load-tested for per-request MCP authorization before public traffic.
+   Prove both same-token coalescing/cache behavior and bounded distinct-token
+   pressure. Confirm the public introspection URL stays `404`.
 5. Enable OAuth only in an isolated production canary deployment.
 6. Prove registration, consent, generation, denial, expiry, wrong verifier,
    wrong redirect, duplicate-code redemption, charging, and revocation behavior.
@@ -118,4 +127,5 @@ disabled.
 
 Rollback is one flag: set `GRID_MCP_OAUTH_ENABLED=0`. This invalidates OAuth
 resource tokens at Core without affecting ordinary API keys or existing
-frontend service delegation.
+frontend service delegation. A remote MCP process may retain a successful
+introspection for at most five seconds before observing the rollback.

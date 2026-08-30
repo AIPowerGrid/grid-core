@@ -16,7 +16,6 @@ from starlette.requests import Request
 from grid_api.routers import oauth
 from grid_api.services import oauth_server
 
-
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -84,7 +83,10 @@ def test_production_nginx_preserves_exact_oauth_and_mcp_edge_routes():
     assert "location = /.well-known/oauth-protected-resource {" in nginx
     assert "location = /.well-known/oauth-authorization-server {" in nginx
     assert "include /etc/nginx/aipg-api.d/*.conf;" in nginx
+    assert "location = /v1/oauth/introspect {" in nginx
+    assert "return 404 '{\"detail\":\"Not Found\"}';" in nginx
     assert "location /.well-known/" not in nginx
+    assert oauth.OAUTH_INTROSPECTION_RATE_LIMIT == "1200/minute"
 
     bootstrap = (ROOT / "deploy/bootstrap.sh").read_text()
     assert "install -d -o root -g root -m 0755 /etc/nginx/aipg-api.d" in bootstrap
