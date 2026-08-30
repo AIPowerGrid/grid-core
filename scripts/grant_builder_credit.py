@@ -73,8 +73,10 @@ async def _run(args) -> None:
         )
         return
 
-    if not (promotions.PROMO_ENABLED and promotions.PROMO_SPENDABLE_LIVE):
-        raise RuntimeError("promotional credits are not enabled and spendable")
+    if not promotions.campaign_spendable(args.campaign_id):
+        raise RuntimeError(
+            f"builder campaign {args.campaign_id!r} is not enabled for promotional spending",
+        )
     await alerts.start()
     await init_database()
     try:
@@ -105,7 +107,7 @@ async def _run(args) -> None:
                 "amount_micro": amount_micro,
                 "campaign_status": campaign_status,
                 "grant_status": result["status"],
-                "spendable_live": promotions.PROMO_SPENDABLE_LIVE,
+                "spendable_live": promotions.campaign_spendable(args.campaign_id),
             },
             dedupe_key=f"builder-credit:{args.ref}",
         )
@@ -116,7 +118,8 @@ async def _run(args) -> None:
     print(
         f"campaign_status={campaign_status} grant_status={result['status']} "
         f"account_id={account_id} campaign_id={args.campaign_id} "
-        f"amount_micro={amount_micro} spendable_live={str(promotions.PROMO_SPENDABLE_LIVE).lower()}",
+        f"amount_micro={amount_micro} "
+        f"spendable_live={str(promotions.campaign_spendable(args.campaign_id)).lower()}",
     )
 
 

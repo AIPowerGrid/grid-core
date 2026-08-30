@@ -27,6 +27,7 @@ async def promo_db(monkeypatch):
     database._session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr(promotions, "PROMO_ENABLED", True)
     monkeypatch.setattr(promotions, "PROMO_SPENDABLE_LIVE", True)
+    monkeypatch.setattr(promotions, "PROMO_SPENDABLE_CAMPAIGNS", frozenset({"welcome-test"}))
     aid = uuid4()
     async with database._session_factory() as session:
         await session.execute(sa.insert(accounts).values(id=aid, flags={}, username="promo-test"))
@@ -141,6 +142,50 @@ async def test_shadow_flag_never_consumes(promo_db, monkeypatch):
     monkeypatch.setattr(promotions, "PROMO_SPENDABLE_LIVE", False)
     assert await promotions.consume(promo_db, 150_000, "shadow-job") == 0
     assert await promotions.available_micro(promo_db) == 150_000
+
+
+def test_spendable_campaign_parser_is_exact_and_bounded():
+    assert promotions.parse_spendable_campaigns("builder-q3, welcome-v1,builder-q3") == frozenset({
+        "builder-q3",
+        "welcome-v1",
+    })
+    with pytest.raises(ValueError, match="campaign ids"):
+        promotions.parse_spendable_campaigns("*")
+    with pytest.raises(ValueError, match="campaign ids"):
+        promotions.parse_spendable_campaigns("Builder-Q3")
+    with pytest.raises(ValueError, match="at most 64"):
+        promotions.parse_spendable_campaigns(",".join(f"builder-{index}" for index in range(65)))
+
+
+@pytest.mark.asyncio
+async def test_global_gate_alone_does_not_make_any_campaign_spendable(promo_db, monkeypatch):
+    await promotions.grant_once(promo_db, "welcome-test")
+    monkeypatch.setattr(promotions, "PROMO_SPENDABLE_CAMPAIGNS", frozenset())
+
+    assert promotions.spending_live() is False
+    assert await promotions.available_micro(promo_db) == 150_000
+    assert await promotions.available_micro(promo_db, spendable_only=True) == 0
+    assert await promotions.consume(promo_db, 150_000, "no-allowlist-job") == 0
+
+
+@pytest.mark.asyncio
+async def test_only_exact_allowlisted_campaign_is_available_and_consumed(promo_db):
+    await promotions.grant_once(promo_db, "welcome-test")
+    await promotions.ensure_fixed_campaign(
+        "builder-test",
+        name="Reviewed builders",
+        grant_micro=20_000,
+        budget_micro=20_000,
+        expires_days=30,
+        eligibility={"manual_builder_review": True},
+    )
+    await promotions.grant_once(promo_db, "builder-test", ref="builder:test")
+
+    assert await promotions.available_micro(promo_db) == 170_000
+    assert await promotions.available_micro(promo_db, spendable_only=True) == 150_000
+    assert await promotions.consume(promo_db, 170_000, "selective-job") == 150_000
+    assert await promotions.available_micro(promo_db) == 20_000
+    assert await promotions.available_micro(promo_db, spendable_only=True) == 0
 
 
 @pytest.mark.asyncio

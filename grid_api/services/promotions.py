@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -26,6 +27,27 @@ logger = logging.getLogger("grid_api.promotions")
 
 PROMO_ENABLED = os.getenv("GRID_PROMO_CREDITS_ENABLED", "1").lower() in {"1", "true", "yes", "on"}
 PROMO_SPENDABLE_LIVE = os.getenv("GRID_PROMO_SPENDABLE_LIVE", "0").lower() in {"1", "true", "yes", "on"}
+_CAMPAIGN_ID_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+
+
+def parse_spendable_campaigns(raw: str) -> frozenset[str]:
+    """Parse a bounded exact campaign allowlist; wildcards are never valid."""
+    campaigns = [value.strip() for value in str(raw or "").split(",") if value.strip()]
+    if len(campaigns) > 64:
+        raise ValueError("at most 64 promotional campaigns may be spendable")
+    if any(not _CAMPAIGN_ID_RE.fullmatch(campaign) for campaign in campaigns):
+        raise ValueError("spendable campaign ids must be 1-64 lowercase letters, digits, or hyphens")
+    return frozenset(campaigns)
+
+
+try:
+    PROMO_SPENDABLE_CAMPAIGNS = parse_spendable_campaigns(
+        os.getenv("GRID_PROMO_SPENDABLE_CAMPAIGNS", ""),
+    )
+except ValueError as exc:
+    logger.error("invalid GRID_PROMO_SPENDABLE_CAMPAIGNS; promotional spending disabled: %s", exc)
+    PROMO_SPENDABLE_CAMPAIGNS = frozenset()
+
 WELCOME_CAMPAIGN_ID = os.getenv("GRID_WELCOME_CAMPAIGN_ID", "universal-welcome-v1")
 WELCOME_GRANT_MICRO = int(os.getenv("GRID_WELCOME_GRANT_MICRO", "100000"))
 WELCOME_EXPIRES_DAYS = int(os.getenv("GRID_WELCOME_EXPIRES_DAYS", "30"))
@@ -48,6 +70,15 @@ def _after(value: datetime | None, reference: datetime) -> bool:
     elif value.tzinfo is not None and reference.tzinfo is None:
         reference = reference.replace(tzinfo=timezone.utc)
     return value > reference
+
+
+def spending_live() -> bool:
+    """True only when the emergency gate and a non-empty exact allowlist are live."""
+    return PROMO_ENABLED and PROMO_SPENDABLE_LIVE and bool(PROMO_SPENDABLE_CAMPAIGNS)
+
+
+def campaign_spendable(campaign_id: str) -> bool:
+    return spending_live() and campaign_id in PROMO_SPENDABLE_CAMPAIGNS
 
 
 async def ensure_builtin_campaign() -> None:
@@ -213,21 +244,23 @@ async def grant_once(account_id, campaign_id: str = WELCOME_CAMPAIGN_ID, *, ref:
             "expires": expires.isoformat() if expires else None}
 
 
-async def available_micro(account_id) -> int:
+async def available_micro(account_id, *, spendable_only: bool = False) -> int:
     if not PROMO_ENABLED or not account_id:
+        return 0
+    if spendable_only and not spending_live():
         return 0
     now = _now()
     try:
         async with await new_session() as session:
-            value = await session.scalar(
-                sa.select(sa.func.coalesce(sa.func.sum(promo_grants.c.remaining_micro), 0))
-                .where(
-                    promo_grants.c.account_id == _as_uuid(account_id),
-                    promo_grants.c.status == "active",
-                    promo_grants.c.remaining_micro > 0,
-                    sa.or_(promo_grants.c.expires.is_(None), promo_grants.c.expires > now),
-                )
+            query = sa.select(sa.func.coalesce(sa.func.sum(promo_grants.c.remaining_micro), 0)).where(
+                promo_grants.c.account_id == _as_uuid(account_id),
+                promo_grants.c.status == "active",
+                promo_grants.c.remaining_micro > 0,
+                sa.or_(promo_grants.c.expires.is_(None), promo_grants.c.expires > now),
             )
+            if spendable_only:
+                query = query.where(promo_grants.c.campaign_id.in_(PROMO_SPENDABLE_CAMPAIGNS))
+            value = await session.scalar(query)
             return int(value or 0)
     except Exception:
         return 0  # fail closed: unknown promotional value is not spendable
@@ -247,7 +280,7 @@ async def held_micro(account_id, ref: str) -> int:
 
 async def consume(account_id, want_micro: int, ref: str) -> int:
     """Hold up to want_micro from earliest-expiring active grants."""
-    if not (PROMO_ENABLED and PROMO_SPENDABLE_LIVE) or not account_id or want_micro <= 0 or not ref:
+    if not spending_live() or not account_id or want_micro <= 0 or not ref:
         return 0
     aid = _as_uuid(account_id)
     now = _now()
@@ -262,6 +295,7 @@ async def consume(account_id, want_micro: int, ref: str) -> int:
             sa.select(promo_grants.c.id, promo_grants.c.remaining_micro)
             .where(
                 promo_grants.c.account_id == aid,
+                promo_grants.c.campaign_id.in_(PROMO_SPENDABLE_CAMPAIGNS),
                 promo_grants.c.status == "active",
                 promo_grants.c.remaining_micro > 0,
                 sa.or_(promo_grants.c.expires.is_(None), promo_grants.c.expires > now),
