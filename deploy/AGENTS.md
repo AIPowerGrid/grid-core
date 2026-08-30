@@ -29,6 +29,9 @@ executes an immutable release selected through `/home/aipg/current`.
 ## Local Contracts
 
 - Env names in `env.template`, systemd, code, and docs must match exactly.
+- Promotional spending requires both the global emergency gate and a non-empty
+  exact `GRID_PROMO_SPENDABLE_CAMPAIGNS` allowlist. Never use or emulate a
+  wildcard; enable reviewed builder cohorts independently of welcome grants.
 - Public route split is intentional:
   - `/v1/*`, `/`, `/health`, `/docs`, and `/openapi.json` -> Grid API.
   - The two exact OAuth `/.well-known/*` metadata routes -> Grid API; all other

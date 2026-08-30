@@ -122,6 +122,10 @@ async def test_quote_uses_only_active_pockets_in_spending_order(db, monkeypatch)
     monkeypatch.setattr("grid_api.services.promotions.available_micro", promo)
     monkeypatch.setattr("grid_api.services.promotions.PROMO_ENABLED", True)
     monkeypatch.setattr("grid_api.services.promotions.PROMO_SPENDABLE_LIVE", True)
+    monkeypatch.setattr(
+        "grid_api.services.promotions.PROMO_SPENDABLE_CAMPAIGNS",
+        frozenset({"builder-test"}),
+    )
     monkeypatch.setattr("grid_api.services.free_credits.daily_cap_micro", daily)
     monkeypatch.setattr("grid_api.services.free_credits.available_micro", daily)
     monkeypatch.setattr("grid_api.services.free_credits.FREE_ENABLED", True)
@@ -150,6 +154,82 @@ async def test_quote_uses_only_active_pockets_in_spending_order(db, monkeypatch)
     assert result["estimate"]["from_daily_micro"] == 1_000
     assert result["estimate"]["from_paid_micro"] == 2_000
     assert result["estimate"]["shortfall_micro"] == 0
+
+
+@pytest.mark.asyncio
+async def test_quote_excludes_unallowlisted_promo_from_spendable_balance(db, monkeypatch):
+    async def promo(*_args, spendable_only=False, **_kwargs):
+        return 0 if spendable_only else 2_000
+
+    monkeypatch.setattr("grid_api.services.promotions.available_micro", promo)
+    monkeypatch.setattr("grid_api.services.promotions.PROMO_ENABLED", True)
+    monkeypatch.setattr("grid_api.services.promotions.PROMO_SPENDABLE_LIVE", True)
+    monkeypatch.setattr(
+        "grid_api.services.promotions.PROMO_SPENDABLE_CAMPAIGNS",
+        frozenset({"builder-test"}),
+    )
+    monkeypatch.setattr("grid_api.services.free_credits.daily_cap_micro", _zero)
+    monkeypatch.setattr("grid_api.services.free_credits.available_micro", _zero)
+    account, key = await accounts.create_account(
+        username="Unallowlisted promo quote",
+        issue_initial_key=True,
+    )
+    account_id = UUID(account["id"])
+    assert await credits.credit(account_id, 4_000, "test_funding", "quote:promo-filter")
+
+    result = await accounts_router.quote_credits(
+        Request({"type": "http", "method": "POST", "path": "/", "headers": []}),
+        accounts_router.CreditQuoteForm(
+            model="Krea 2 Turbo",
+            modality="image",
+        ),
+        apikey=key,
+        authorization=None,
+        x_grid_user_assertion=None,
+        x_grid_user_token=None,
+    )
+
+    assert result["promotional"] == {
+        "remaining_micro": 0,
+        "remaining_usd": 0.0,
+        "preview_remaining_micro": 2_000,
+        "preview_remaining_usd": 0.002,
+        "active": True,
+    }
+    assert result["total_spendable_micro"] == 4_000
+    assert result["total_preview_micro"] == 6_000
+    assert result["estimate"]["from_promotional_micro"] == 0
+    assert result["estimate"]["shortfall_micro"] == 1_000
+
+
+@pytest.mark.asyncio
+async def test_dark_promo_keeps_legacy_preview_display_without_becoming_spendable(db, monkeypatch):
+    async def promo(*_args, spendable_only=False, **_kwargs):
+        return 0 if spendable_only else 2_000
+
+    monkeypatch.setattr("grid_api.services.promotions.available_micro", promo)
+    monkeypatch.setattr("grid_api.services.promotions.PROMO_ENABLED", True)
+    monkeypatch.setattr("grid_api.services.promotions.PROMO_SPENDABLE_LIVE", True)
+    monkeypatch.setattr(
+        "grid_api.services.promotions.PROMO_SPENDABLE_CAMPAIGNS",
+        frozenset(),
+    )
+    monkeypatch.setattr("grid_api.services.free_credits.daily_cap_micro", _zero)
+    monkeypatch.setattr("grid_api.services.free_credits.available_micro", _zero)
+    account, _key = await accounts.create_account(
+        username="Dark promo display",
+        issue_initial_key=True,
+    )
+    account_id = UUID(account["id"])
+    assert await credits.credit(account_id, 4_000, "test_funding", "summary:promo-dark")
+
+    result = await credits.account_credit_summary({"account_id": account_id})
+
+    assert result["promotional"]["active"] is False
+    assert result["promotional"]["remaining_micro"] == 2_000
+    assert result["promotional"]["preview_remaining_micro"] == 2_000
+    assert result["total_spendable_micro"] == 4_000
+    assert result["total_preview_micro"] == 6_000
 
 
 @pytest.mark.asyncio

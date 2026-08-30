@@ -65,11 +65,14 @@ The disposable database must not be production or share production tables.
    GRID_FREE_DAILY_MICRO=10000
    GRID_FREE_HOLDER_BONUS_MICRO=0
    GRID_PROMO_SPENDABLE_LIVE=0
+   GRID_PROMO_SPENDABLE_CAMPAIGNS=
    GRID_FREE_SPENDABLE_LIVE=0
    ```
 
    These values mean `$0.10` once for verified Google, a `$500` global welcome
    ceiling, `$0.01/day` for verified Google, and no wallet-only holder faucet.
+   Promotional spending additionally requires one or more reviewed exact
+   campaign IDs; the global live flag alone must leave every campaign dark.
 3. Add `GRID_ALERT_DISCORD_WEBHOOK` only to `/etc/aipg/grid.env`; preserve its
    restrictive permissions and never print the file.
 4. Restart Core. Confirm `core_started` arrives without secrets and reports

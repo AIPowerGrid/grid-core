@@ -70,7 +70,9 @@ Verify `http://127.0.0.1:7010/health` and
   bounded canary cohort before `on`; the legacy `GRID_CHARGING_ENABLED` boolean
   remains a compatibility fallback.
 - Free-credit spending has its own `GRID_FREE_SPENDABLE_LIVE` gate.
-- Promotional-credit spending has its own `GRID_PROMO_SPENDABLE_LIVE` gate.
+- Promotional-credit spending requires `GRID_PROMO_SPENDABLE_LIVE` plus exact
+  campaign IDs in `GRID_PROMO_SPENDABLE_CAMPAIGNS`; the global flag alone
+  spends nothing.
 - The live worker reward bridge is the custodial, Transfer-verified AIPG payout
   sender. Multi-asset pass-through is dark. Reward claim facets are deployed on
   Base, but the Merkle publisher/claim operation is not the live payout rail.
