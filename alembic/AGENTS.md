@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current head: `0030`
+- `versions/` - ordered migration revisions. Current head: `0031`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -34,7 +34,9 @@ production database match the Grid-owned schema contracts without relying on
   reviews; `0029` adds the private compensated-audit job and hourly budget-
   counter foundation, without enabling audit dispatch or worker payout;
   `0030` adds bounded validator/account pairing slots and signed visibility
-  associations, without moving node accounts or enabling any economics).
+  associations, without moving node accounts or enabling any economics;
+  `0031` adds empty OAuth public-client and authorization-state tables for the
+  disabled-by-default remote MCP authorization foundation).
 
 ## Local Contracts
 
@@ -74,6 +76,10 @@ production database match the Grid-owned schema contracts without relying on
   tables start empty, and existing validator/authentication paths do not query
   them. Operational rollback is flag-off, not deleting identity configuration
   or downgrading the database.
+- Apply `0031` before deploying remote MCP OAuth code. The migration only adds
+  empty tables and indexes; it does not register clients, authorize accounts,
+  issue tokens, or enable routes. Keep `GRID_MCP_OAUTH_ENABLED=0` until the
+  separate Console consent and remote MCP rollout gates pass.
 - Migrations must be idempotent only where Alembic expects them to be; do not
   hide failed DDL with broad exception swallowing.
 - Economic constraints matter: unique `grid_ledger.job_id`, non-null credit refs
