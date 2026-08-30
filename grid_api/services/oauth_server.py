@@ -463,7 +463,7 @@ def introspect_access_token(token: str) -> dict:
         "aud": claims["aud"],
         "scope": " ".join(claims["scopes"]),
         "token_type": "Bearer",
-        "iss": claims["iss"],
+        "iss": issuer(),
         "iat": claims["iat"],
         "exp": claims["exp"],
     }

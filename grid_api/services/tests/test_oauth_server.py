@@ -158,7 +158,11 @@ async def test_native_loopback_pkce_code_is_single_use_and_never_stored_plaintex
         required_scope="inference.submit",
     )
     assert str(authenticated["account_id"]) == oauth_db["id"]
-    assert oauth_server.introspect_access_token(token["access_token"])["active"] is True
+    introspected = oauth_server.introspect_access_token(token["access_token"])
+    assert introspected["active"] is True
+    assert introspected["iss"] == "https://api.example.test"
+    assert introspected["aud"] == "https://api.example.test"
+    assert introspected["client_id"] == client["client_id"]
 
     with pytest.raises(oauth_server.OAuthProtocolError, match="Invalid or expired authorization code"):
         await oauth_server.exchange_authorization_code(
