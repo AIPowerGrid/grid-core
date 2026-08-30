@@ -16,17 +16,23 @@ x402 settles in, so credits are denominated in USD and a USDC deposit credits
 1:1 with zero oracle. AIPG is the worker-stake / reward-share asset (supply
 side), not the customer unit of account — see services/economics.py.
 
-The price book is sourced from the cheapest competitor's USD sheet, halved
-(`half_of`) — our standing "half of the cheapest competitor" position. Re-peg by
-editing the USD numbers here; nothing converts at request time.
+Some rates are derived from a reviewed hosted-provider floor through `half_of`;
+others are guarded launch pegs based on measured worker cost. Re-peg by editing
+the USD numbers here; nothing converts at request time. Public market claims
+must come only from the expiring same-model evidence below, never from the
+presence of a configured price.
 
     cost_usd = (prompt_tokens * input_per_mtok + completion_tokens * output_per_mtok) / 1_000_000
 """
 
 import math
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 MICRO = 1_000_000  # micro-USD per USD (the ledger's integer unit)
+PRICE_BOOK_VERSION = "2026-08-29-a"
+COMPARISON_AS_OF = "2026-08-29T00:00:00Z"
+COMPARISON_VALID_UNTIL = "2026-09-29T00:00:00Z"
 
 
 @dataclass
@@ -52,8 +58,8 @@ def half_of(usd_input: float, usd_output: float, **media) -> ModelPrice:
     )
 
 
-# ── Price book (keyed by lowercased model name) — HALF cheapest competitor ──
-# half_of() takes the competitor USD floor and stores HALF of it, in USD.
+# ── Price book (keyed by lowercased model name) ──
+# For competitor-derived entries, half_of() stores half the reviewed USD floor.
 # KEYS MUST MATCH the model name workers advertise. Last media peg: 2026-07-28.
 PRICING: dict[str, ModelPrice] = {
     "gpt-oss-120b":       half_of(0.15, 0.60),   # floor Fireworks/Groq
@@ -97,6 +103,38 @@ PRICE_ALIASES: dict[str, str] = {
     "ltx director 2.0": "ltx-2.3",
     "ltx-2.3 audio": "ltx-2.3",
 }
+
+# These are narrowly comparable public benchmarks, not a claim that every Grid
+# model is cheaper than every hosted alternative. Each source is the named
+# provider's own current price page. The comparison disappears after the review
+# window instead of letting a stale marketing claim live forever.
+PUBLIC_COMPARISON_BENCHMARKS: tuple[dict, ...] = (
+    {
+        "id": "gpt-oss-120b-standard-token-rates",
+        "model": "gpt-oss-120b",
+        "modality": "text",
+        "provider": "Groq",
+        "source_url": "https://console.groq.com/docs/model/openai/gpt-oss-120b",
+        "basis": "same model; 1M uncached input tokens plus 1M output tokens",
+        "workload": {"input_tokens": 1_000_000, "output_tokens": 1_000_000},
+        "competitor_micro_usd": 750_000,
+        "competitor_rates": {
+            "input_per_mtok_usd": 0.15,
+            "output_per_mtok_usd": 0.60,
+        },
+    },
+    {
+        "id": "z-image-turbo-one-megapixel",
+        "model": "z-image-turbo",
+        "modality": "image",
+        "provider": "fal",
+        "source_url": "https://fal.ai/models/fal-ai/z-image/turbo",
+        "basis": "same model; one 1-megapixel image without optional prompt expansion",
+        "workload": {"images": 1, "megapixels": 1},
+        "competitor_micro_usd": 5_000,
+        "competitor_rates": {"per_megapixel_usd": 0.005},
+    },
+)
 
 def register(model: str, price: ModelPrice) -> None:
     if model:
@@ -169,3 +207,95 @@ def quote_audio(model: str, seconds: float = 0.0) -> int:
 def quote_3d(model: str, n: int = 1) -> int:
     p = get_price(model)
     return _micro_usd(p.mesh_per_generation * max(n, 1)) if p else 0
+
+
+def _usd(micro_usd: int) -> float:
+    return round(micro_usd / MICRO, 6)
+
+
+def _public_model_price(model: str, price: ModelPrice) -> dict:
+    return {
+        "model": model,
+        "rates": {
+            "input_per_mtok_usd": price.input_per_mtok or None,
+            "output_per_mtok_usd": price.output_per_mtok or None,
+            "per_image_usd": price.image_per_image or None,
+            "per_video_second_usd": price.video_per_second or None,
+            "per_audio_second_usd": price.audio_per_second or None,
+            "per_3d_generation_usd": price.mesh_per_generation or None,
+        },
+    }
+
+
+def _comparison_item(benchmark: dict) -> dict:
+    workload = benchmark["workload"]
+    if benchmark["modality"] == "text":
+        aipg_micro = quote_text(
+            benchmark["model"],
+            workload["input_tokens"],
+            workload["output_tokens"],
+        )
+    elif benchmark["modality"] == "image":
+        aipg_micro = quote_image(benchmark["model"], workload["images"])
+    else:  # The static benchmark set is intentionally narrow.
+        raise ValueError("unsupported public comparison modality")
+
+    competitor_micro = int(benchmark["competitor_micro_usd"])
+    if aipg_micro <= 0 or competitor_micro <= 0:
+        raise ValueError("public comparison references an unpriced workload")
+    savings_bps = (competitor_micro - aipg_micro) * 10_000 // competitor_micro
+    return {
+        **{key: value for key, value in benchmark.items() if key != "competitor_micro_usd"},
+        "aipg_usd": _usd(aipg_micro),
+        "competitor_usd": _usd(competitor_micro),
+        "savings_percent": round(savings_bps / 100, 2),
+    }
+
+
+def public_catalog(now: datetime | None = None) -> dict:
+    """Return a read-only, versioned public price book and fresh comparisons.
+
+    Comparison evidence expires independently from the charge book. Stale
+    evidence is omitted, while the exact configured AIPG rates remain visible.
+    """
+    current = now or datetime.now(UTC)
+    if current.tzinfo is None:
+        raise ValueError("pricing catalog time must be timezone-aware")
+    as_of = datetime.fromisoformat(COMPARISON_AS_OF.replace("Z", "+00:00"))
+    valid_until = datetime.fromisoformat(COMPARISON_VALID_UNTIL.replace("Z", "+00:00"))
+    if current < as_of:
+        comparison_status = "not_yet_valid"
+    elif current <= valid_until:
+        comparison_status = "current"
+    else:
+        comparison_status = "stale"
+    comparisons = (
+        [_comparison_item(item) for item in PUBLIC_COMPARISON_BENCHMARKS]
+        if comparison_status == "current"
+        else []
+    )
+    return {
+        "schema": "aipg.pricing.v1",
+        "currency": "USD",
+        "ledger_unit": "micro_usd",
+        "price_book": {
+            "version": PRICE_BOOK_VERSION,
+            "availability": (
+                "Configured rates do not assert that a model is online; use /v1/status/models."
+            ),
+            "models": [
+                _public_model_price(model, PRICING[model]) for model in sorted(PRICING)
+            ],
+            "aliases": dict(sorted(PRICE_ALIASES.items())),
+        },
+        "comparison_evidence": {
+            "status": comparison_status,
+            "as_of": COMPARISON_AS_OF,
+            "valid_until": COMPARISON_VALID_UNTIL,
+            "items": comparisons,
+            "scope": (
+                "Only the named, same-model reference workloads are compared. "
+                "Availability, latency, reliability, and output quality are not price claims."
+            ),
+        },
+    }
