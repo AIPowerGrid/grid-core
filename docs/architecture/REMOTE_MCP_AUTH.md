@@ -7,8 +7,10 @@ are production-live behind `GRID_MCP_OAUTH_ENABLED=1`. The supervised rollout
 on 2026-08-30 proved Google-backed consent, a 15-minute user token, exact issuer
 and audience checks, credit and quote reads, seven-tool discovery, 20 repeated
 same-token requests, immediate SSE headers, one bounded paid text call, and a
-clean off/on rollback. Public introspection remains an exact Nginx `404`;
-the least-privilege MCP service reaches it only over loopback.
+clean off/on rollback. The issued token was then checked three seconds after
+its exact expiry and received a challenged, no-store `401`. Public introspection
+remains an exact Nginx `404`; the least-privilege MCP service reaches it only
+over loopback.
 
 ## Objective
 
