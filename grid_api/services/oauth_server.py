@@ -446,6 +446,8 @@ async def exchange_authorization_code(
 
 
 def introspect_access_token(token: str) -> dict:
+    if not enabled():
+        return {"active": False}
     try:
         claims = user_tokens.verify(token, audience=resource())
     except HTTPException:

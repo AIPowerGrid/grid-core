@@ -241,6 +241,11 @@ def test_oauth_access_tokens_reject_wrong_audience_and_invalid_client(monkeypatc
         )
 
 
+def test_disabled_oauth_invalidates_introspection_without_parsing_tokens(monkeypatch):
+    monkeypatch.setenv("GRID_MCP_OAUTH_ENABLED", "0")
+    assert oauth_server.introspect_access_token("not-a-token") == {"active": False}
+
+
 @pytest.mark.asyncio
 async def test_oauth_audience_requires_client_binding_and_rejects_service_token(oauth_db):
     unbound = user_tokens.issue(

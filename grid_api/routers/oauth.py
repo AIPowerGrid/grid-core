@@ -250,7 +250,6 @@ async def introspect(
     apikey: str | None = Header(None),
     authorization: str | None = Header(None),
 ):
-    oauth_server.require_enabled()
     await _require_mcp_service(apikey, authorization)
     try:
         form = await _bounded_form(request)
