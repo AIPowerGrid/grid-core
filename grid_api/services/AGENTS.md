@@ -115,6 +115,11 @@ content sanitization, and reward settlement.
   assignments at the API boundary. Finalized assignment/group machinery is
   pruned after the configured retention window; signed attestations remain the
   durable evidence record.
+  Completed text probe envelopes include one bounded private `score_reason`
+  code so maintainers can separate empty transport output, malformed protocol
+  output, commitment mismatch, token-window mismatch, and latency without
+  storing or exposing expected answers. Reason codes do not change the existing
+  verdict, score, routing, or economic contracts.
   New probes stop at assignment expiry; already-completed probes may deliver
   only during the bounded attestation grace window. A completed assignment
   commits a JSON-safe synthetic result envelope (maximum 512 KiB) in the same

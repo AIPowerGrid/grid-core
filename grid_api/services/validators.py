@@ -41,6 +41,19 @@ logger = logging.getLogger("grid_api.validators")
 
 VALID_VERDICTS = {"healthy", "slow", "failed"}
 VERDICT_SCORE = {"healthy": 1.0, "slow": 0.75, "failed": 0.0}
+VALID_SCORE_REASONS = frozenset({
+    "accepted",
+    "commitment_mismatch",
+    "empty_visible_output",
+    "invalid_challenge",
+    "invalid_expected_commitment",
+    "invalid_repetition",
+    "latency_exceeded",
+    "malformed_output",
+    "observed_tokens_above_ceiling",
+    "observed_tokens_below_floor",
+    "terminal_reason_not_length",
+})
 VALID_AUTHORITY = {"all", "preview", "authoritative"}
 MAX_PAYLOAD_BYTES = 64 * 1024
 MAX_PROBE_RESULT_BYTES = 512 * 1024
@@ -1724,26 +1737,47 @@ def _normalized_token_limit_answer(
     finish_reason: str | None,
 ) -> str | None:
     """Verify gross output-budget compliance without claiming native-token parity."""
+    return _normalized_token_limit_answer_detail(
+        challenge,
+        text,
+        reasoning_text,
+        finish_reason,
+    )[0]
+
+
+def _normalized_token_limit_answer_detail(
+    challenge: dict[str, Any],
+    text: str,
+    reasoning_text: str,
+    finish_reason: str | None,
+) -> tuple[str | None, str]:
+    """Return a normalized answer plus one bounded, non-secret reason code."""
     try:
         max_tokens = int(challenge.get("max_tokens") or 0)
     except (TypeError, ValueError):
-        return None
-    if max_tokens < 32 or finish_reason not in {"length", "max_tokens"}:
-        return None
+        return None, "invalid_challenge"
+    if max_tokens < 32:
+        return None, "invalid_challenge"
+    if finish_reason not in {"length", "max_tokens"}:
+        return None, "terminal_reason_not_length"
 
     answer = _strip_think(text)
+    if not answer:
+        return None, "empty_visible_output"
     pieces = answer.split()
     if len(pieces) < 2 or any(piece != pieces[0] for piece in pieces):
-        return None
+        return None, "invalid_repetition"
 
     from .den import count_tokens
 
     observed = count_tokens(text) + count_tokens(reasoning_text)
     minimum = max(1, max_tokens // 2)
     maximum = ((max_tokens * 5) + 3) // 4 + 8
-    if observed < minimum or observed > maximum:
-        return None
-    return pieces[0]
+    if observed < minimum:
+        return None, "observed_tokens_below_floor"
+    if observed > maximum:
+        return None, "observed_tokens_above_ceiling"
+    return pieces[0], "accepted"
 
 
 def _score_text_challenge(
@@ -1756,12 +1790,34 @@ def _score_text_challenge(
     reasoning_text: str = "",
     finish_reason: str | None = None,
 ) -> str:
+    return _score_text_challenge_detail(
+        challenge,
+        text,
+        latency_ms,
+        tool_calls=tool_calls,
+        tool_chain=tool_chain,
+        reasoning_text=reasoning_text,
+        finish_reason=finish_reason,
+    )[0]
+
+
+def _score_text_challenge_detail(
+    challenge: dict[str, Any],
+    text: str,
+    latency_ms: int,
+    *,
+    tool_calls: Any = None,
+    tool_chain: Any = None,
+    reasoning_text: str = "",
+    finish_reason: str | None = None,
+) -> tuple[str, str]:
+    """Score one challenge and return a bounded reason without answer material."""
     expected_hash = str(challenge.get("expected_hash") or "")
     if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
-        return "failed"
+        return "failed", "invalid_expected_commitment"
     kind = str(challenge.get("kind") or "")
     if kind == "token.limit":
-        candidate = _normalized_token_limit_answer(
+        candidate, reason = _normalized_token_limit_answer_detail(
             challenge,
             text,
             reasoning_text,
@@ -1772,12 +1828,18 @@ def _score_text_challenge(
     else:
         candidate = _normalized_text_answer(kind, text, tool_calls, tool_chain)
     if candidate is None:
-        return "failed"
+        if kind != "token.limit":
+            reason = (
+                "empty_visible_output"
+                if kind not in {"tool.call", "tool.chain"} and not _strip_think(text)
+                else "malformed_output"
+            )
+        return "failed", reason
     if not secrets.compare_digest(_hash_text(candidate), expected_hash):
-        return "failed"
+        return "failed", "commitment_mismatch"
     if latency_ms > PROBE_LATENCY_BUDGET_SECONDS * 1000:
-        return "slow"
-    return "healthy"
+        return "slow", "latency_exceeded"
+    return "healthy", "accepted"
 
 
 def _assignment_to_dict(
@@ -3933,7 +3995,7 @@ async def probe_assignment(
     }
     evidence["evidence_hash"] = _hash_obj(evidence)
     latency_ms = int((_now() - started).total_seconds() * 1000)
-    probe_verdict = _score_text_challenge(
+    probe_verdict, score_reason = _score_text_challenge_detail(
         row["challenge"] or {},
         full_text,
         latency_ms,
@@ -3942,6 +4004,8 @@ async def probe_assignment(
         reasoning_text=full_reasoning,
         finish_reason=finish_reason,
     )
+    if score_reason not in VALID_SCORE_REASONS:
+        raise AssignmentError("text score reason is invalid")
     result = {
         "status": "completed",
         "assignment_id": assignment_id,
@@ -3956,6 +4020,7 @@ async def probe_assignment(
         "usage": usage,
         "grid": grid_meta,
         "probe_latency_ms": latency_ms,
+        "score_reason": score_reason,
         **evidence,
         "economic_effect": "none",
     }
