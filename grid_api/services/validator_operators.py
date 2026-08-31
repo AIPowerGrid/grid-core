@@ -19,6 +19,7 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from ..config import get_settings
 from ..database import new_session
 from ..v2.schema import validator_assignments as assignments_t
 from ..v2.schema import validator_attestations as attestations_t
@@ -64,6 +65,7 @@ def _digest(row: dict[str, Any]) -> str:
     state = {
         "validator_id": row["id"],
         "status": row["status"],
+        "software_version": row["software_version"],
         "operator_group_id": row["operator_group_id"],
         "independence_status": row["independence_status"],
         "qualification_started_at": str(row["qualification_started_at"] or ""),
@@ -75,6 +77,24 @@ def _digest(row: dict[str, Any]) -> str:
     }
     encoded = json.dumps(state, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def cohort_version_status(software_version: str | None) -> tuple[str, bool]:
+    """Return the frozen cohort baseline and whether this node matches it."""
+    baseline = str(get_settings().validator_cohort_baseline_version or "").strip()
+    current = str(software_version or "").strip()
+    normalized_baseline = baseline.removeprefix("v")
+    normalized_current = current.removeprefix("v")
+    return baseline, bool(normalized_baseline and normalized_current == normalized_baseline)
+
+
+def cohort_version_filter(column):
+    """Return a SQL predicate matching the configured cohort baseline."""
+    baseline, _ = cohort_version_status(None)
+    normalized_baseline = baseline.removeprefix("v")
+    if not normalized_baseline:
+        return sa.false()
+    return sa.func.ltrim(sa.func.trim(column), "v") == normalized_baseline
 
 
 def qualification_metrics(row: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
@@ -178,6 +198,11 @@ async def review_operator(
             since=qualification_started if state["independence_status"] == "candidate" else None,
         )
         blocking_reasons: list[str] = []
+        required_version, version_supported = cohort_version_status(state["software_version"])
+        if action in {"candidate", "verify"} and not version_supported:
+            blocking_reasons.append(
+                f"software version must match frozen cohort baseline {required_version}"
+            )
         values: dict[str, Any]
         if action == "candidate":
             group_id = operator_group_id or state["operator_group_id"]
@@ -209,8 +234,6 @@ async def review_operator(
                 current - timedelta(seconds=SAMPLE_INTERVAL_SECONDS * 2)
             ):
                 blocking_reasons.append("candidate heartbeat is not fresh")
-            if apply and blocking_reasons:
-                raise OperatorReviewError("; ".join(blocking_reasons))
             values = {
                 "independence_status": "verified",
                 "independence_reviewed_at": current,
@@ -227,6 +250,9 @@ async def review_operator(
                 "updated": current,
             }
 
+        if apply and blocking_reasons:
+            raise OperatorReviewError("; ".join(blocking_reasons))
+
         result = {
             "validator_id": validator_id,
             "action": action,
@@ -239,6 +265,9 @@ async def review_operator(
             "eligible_to_apply": not blocking_reasons,
             "blocking_reasons": blocking_reasons,
             "activity": activity,
+            "software_version": state["software_version"],
+            "required_software_version": required_version,
+            "software_version_supported": version_supported,
             "review_ref": review_ref,
             "economic_effect": "none",
         }

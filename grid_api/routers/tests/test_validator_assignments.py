@@ -77,7 +77,12 @@ def _sign(payload, private_key=TEST_PRIVATE_KEY):
     ).signature.hex()
 
 
-async def _register(account_id, private_key=TEST_PRIVATE_KEY, capabilities=None):
+async def _register(
+    account_id,
+    private_key=TEST_PRIVATE_KEY,
+    capabilities=None,
+    software_version="0.1.0-test",
+):
     wallet = Account.from_key(private_key).address.lower()
     async with await database.new_session() as session:
         await session.execute(
@@ -87,7 +92,7 @@ async def _register(account_id, private_key=TEST_PRIVATE_KEY, capabilities=None)
     payload = {
         "registration_schema": "aipg.validator.registration.v1",
         "validator": wallet,
-        "software_version": "0.1.0-test",
+        "software_version": software_version,
         "capabilities": capabilities or ["text.basic.v1"],
         "ts": int(time.time()),
     }
@@ -286,7 +291,7 @@ def _media_settings(*, enabled=True, video_enabled=False):
 @pytest.mark.asyncio
 async def test_operator_review_requires_qualification_and_compare_and_swap(db):
     account_id = uuid.uuid4()
-    validator_id = await _register(account_id)
+    validator_id = await _register(account_id, software_version="v0.1.0-preview.13")
     review_now = datetime.now(UTC)
 
     preview = await validator_operators.review_operator(
@@ -413,6 +418,43 @@ async def test_operator_review_requires_qualification_and_compare_and_swap(db):
 
 
 @pytest.mark.asyncio
+async def test_operator_review_rejects_outdated_cohort_version(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, software_version="v0.1.0-preview.9")
+    review_now = datetime.now(UTC)
+
+    preview = await validator_operators.review_operator(
+        validator_id,
+        action="candidate",
+        operator_group_id="opg_outdated_test_01",
+        review_ref="review:outdated-candidate",
+        apply=False,
+        now=review_now,
+    )
+
+    assert preview["eligible_to_apply"] is False
+    assert preview["software_version"] == "v0.1.0-preview.9"
+    assert preview["required_software_version"] == "v0.1.0-preview.13"
+    assert preview["software_version_supported"] is False
+    assert preview["blocking_reasons"] == [
+        "software version must match frozen cohort baseline v0.1.0-preview.13",
+    ]
+    with pytest.raises(
+        validator_operators.OperatorReviewError,
+        match="frozen cohort baseline",
+    ):
+        await validator_operators.review_operator(
+            validator_id,
+            action="candidate",
+            operator_group_id="opg_outdated_test_01",
+            review_ref="review:outdated-candidate",
+            expected_digest=preview["current_digest"],
+            apply=True,
+            now=review_now,
+        )
+
+
+@pytest.mark.asyncio
 async def test_candidate_heartbeat_sampling_is_rate_limited(db):
     account_id = uuid.uuid4()
     validator_id = await _register(account_id)
@@ -527,6 +569,7 @@ async def test_one_operator_group_cannot_fill_two_quorum_seats(db):
     async with await database.new_session() as session:
         await session.execute(
             sa.update(validators_t).values(
+                software_version="v0.1.0-preview.13",
                 independence_status="verified",
                 independence_reviewed_at=now,
                 independence_expires_at=now + timedelta(days=30),
@@ -879,7 +922,7 @@ async def test_registration_view_exposes_own_qualification_without_control_metad
 @pytest.mark.asyncio
 async def test_registration_view_eligibility_matches_independent_quorum_predicate(db):
     account_id = uuid.uuid4()
-    validator_id = await _register(account_id)
+    validator_id = await _register(account_id, software_version="v0.1.0-preview.13")
     now = datetime.now(UTC)
     async with await database.new_session() as session:
         await session.execute(
@@ -1522,8 +1565,9 @@ async def test_three_distinct_registered_validators_accept_shared_probe_group(db
             await session.execute(
                 sa.update(validators_t)
                 .where(validators_t.c.id == validator_id)
-                .values(
-                    operator_group_id=f"opg_quorum_test_{index:02d}",
+                    .values(
+                        software_version="v0.1.0-preview.13",
+                        operator_group_id=f"opg_quorum_test_{index:02d}",
                     independence_status="verified",
                     independence_reviewed_at=review_now,
                     independence_expires_at=review_now + timedelta(days=30),
@@ -2833,6 +2877,8 @@ async def test_public_validator_status_is_redacted_and_reports_qualification(db)
     assert body["summary"] == "qualifying"
     assert body["online"] is True
     assert body["software_version"] == "v0.1.0-preview.13"
+    assert body["required_software_version"] == "v0.1.0-preview.13"
+    assert body["software_version_supported"] is True
     assert body["last_heartbeat"].endswith(":00+00:00")
     assert body["activity"] == {"assigned": 0, "completed": 0, "attested": 0}
     assert body["qualification"]["status"] == "candidate"
@@ -2844,6 +2890,25 @@ async def test_public_validator_status_is_redacted_and_reports_qualification(db)
     assert str(account_id) not in encoded
     assert "opg_never_public_01" not in encoded
     assert "private:cohort-review" not in encoded
+
+
+@pytest.mark.asyncio
+async def test_public_validator_status_prioritizes_required_upgrade(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, software_version="v0.1.0-preview.9")
+
+    body = await validators_svc.public_validator_status(validator_id)
+
+    assert body["summary"] == "upgrade_required"
+    assert body["online"] is True
+    assert body["software_version"] == "v0.1.0-preview.9"
+    assert body["required_software_version"] == "v0.1.0-preview.13"
+    assert body["software_version_supported"] is False
+    assert body["qualification"]["independent_vote_eligible"] is False
+    assert body["next_action"] == (
+        "Upgrade to v0.1.0-preview.13, preserve the existing config and validator ID, "
+        "then restart the validator."
+    )
 
 
 def test_public_validator_status_route_needs_no_key_and_maps_missing_to_404(monkeypatch):

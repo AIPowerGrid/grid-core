@@ -156,10 +156,16 @@ content sanitization, and reward settlement.
   qualification status, sampled-heartbeat progress, review expiry, and current
   eligibility, but never its opaque control-group id or private review ref.
   Public validator lookup may expose only the shareable validator ID, a
-  minute-rounded heartbeat, software version, aggregate assignment/attestation
-  counts, redacted qualification progress, and a bounded next action. Wallets,
+  minute-rounded heartbeat, software version plus the frozen required cohort
+  version and compatibility status, aggregate assignment/attestation counts,
+  redacted qualification progress, and a bounded next action. An online stale
+  version must receive an upgrade action before cohort-review guidance. Wallets,
   account IDs, signatures, operator groups, review refs, raw assignments, and
   evidence remain private.
+  Candidate and verify transitions require the frozen cohort version from typed
+  Core settings. Software version is part of the compare-and-swap review digest,
+  so a re-registration or downgrade between preview and apply invalidates the
+  transition. Rejection remains available regardless of version.
   `validator_text_calibration.py` provides the same privacy boundary for
   read-only text-lane calibration: only public model names, lane/status/verdict,
   bounded reason/finish codes, counts, and average latency may leave the
