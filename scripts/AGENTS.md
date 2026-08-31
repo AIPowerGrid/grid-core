@@ -52,6 +52,11 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   emits only aggregate/model-level blockers. `--require-ready` is the operator
   gate before a supervised non-economic canary; it is not permission to enable
   routing, rewards, strikes, or slashing.
+- `report_validator_text_calibration.py` - read-only aggregate report of text
+  probe transport states, verdicts, bounded score reasons, finish reasons, and
+  model/lane counts. It cannot emit prompts, outputs, nonces, evidence,
+  validator or worker identities, wallets, or accounts, and it grants no
+  quality, routing, or economic authority.
 - `backup_postgres.sh` - root-only custom-format backup of the Grid-owned
   PostgreSQL schema with checksum, archive validation, locking, and bounded
   local retention. It excludes unrelated extension and legacy schemas.

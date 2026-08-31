@@ -160,6 +160,12 @@ content sanitization, and reward settlement.
   counts, redacted qualification progress, and a bounded next action. Wallets,
   account IDs, signatures, operator groups, review refs, raw assignments, and
   evidence remain private.
+  `validator_text_calibration.py` provides the same privacy boundary for
+  read-only text-lane calibration: only public model names, lane/status/verdict,
+  bounded reason/finish codes, counts, and average latency may leave the
+  service. It must never return prompts, outputs, nonces, assignment, worker or
+  validator identifiers, wallets, accounts, or signed evidence, and its report
+  has no quality, routing, or economic authority.
   `validator_cohort_monitor.py` owns the aggregate, read-only cohort watchdog.
   It measures matured assignment completion, authoritative evidence delivery,
   terminal probe errors, disagreement, stale active/candidate registrations,

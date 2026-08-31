@@ -139,6 +139,21 @@ These are privacy-safe operational signals only: they contain counts, never
 validator or control-group identifiers, and cannot change qualification,
 routing, rewards, strikes, payouts, or slashing.
 
+For backend/lane calibration, run the privacy-safe read-only report from the
+selected immutable release. It groups only public model names, challenge lanes,
+transport states, verdicts, bounded reason codes, finish reasons, counts, and
+average latency. It never emits prompts, answers, nonces, validator or worker
+identities, wallets, accounts, or signed evidence:
+
+```bash
+$PY scripts/report_validator_text_calibration.py --window-hours 168
+```
+
+Interpret `stop.sequence`, `token.limit`, structured output, and tool-call rows
+as protocol-conformance evidence. They are explicitly not a general model
+quality score. A backend-specific failure remains useful calibration evidence,
+but cannot affect routing, rewards, strikes, payouts, bonds, or slashing.
+
 ## 4. Verify Independence
 
 Verification is a human common-control review, not an automatic claim that an
