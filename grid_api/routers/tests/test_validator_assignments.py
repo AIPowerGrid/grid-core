@@ -204,6 +204,66 @@ async def _fresh_assignment(account_id):
     return validator_id, issued["assignments"][0]
 
 
+async def _record_qualification_evidence(account_id, validator_id, *, created):
+    assignment_id = f"asg_review_{uuid.uuid4().hex}"
+    nonce = f"nonce-{uuid.uuid4().hex}"
+    evidence_hash = uuid.uuid4().hex * 2
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.insert(assignments_t).values(
+                id=assignment_id,
+                account_id=account_id,
+                validator_wallet=TEST_WALLET,
+                validator_id=validator_id,
+                grid_nonce=nonce,
+                target_worker_id=str(uuid.uuid4()),
+                target_worker_name="qualification-worker",
+                model="qwen3-27b",
+                modality="text",
+                capability="text.generated.v8",
+                canary_kind="math",
+                scoring_policy_id="text.generated.v8",
+                challenge={},
+                status="finalized",
+                quorum_status="finalized",
+                probe_status="completed",
+                probe_attempts=1,
+                probe_evidence_hash=evidence_hash,
+                probe_verdict="healthy",
+                created=created,
+                expires=created + timedelta(minutes=15),
+                probed=created + timedelta(minutes=1),
+                finalized=created + timedelta(minutes=2),
+            ),
+        )
+        await session.execute(
+            sa.insert(attestations_t).values(
+                attestation_hash=uuid.uuid4().hex * 2,
+                account_id=account_id,
+                validator_wallet=TEST_WALLET,
+                validator_id=validator_id,
+                assignment_id=assignment_id,
+                grid_nonce=nonce,
+                evidence_hash=evidence_hash,
+                authority="authoritative",
+                quorum_status="finalized",
+                worker_id="qualification-worker",
+                model="qwen3-27b",
+                modality="text",
+                capability="text.generated.v8",
+                canary_kind="math",
+                nonce=nonce,
+                verdict="healthy",
+                score=1.0,
+                signature="0x" + "22" * 65,
+                signature_status="verified",
+                payload={},
+                created=created + timedelta(minutes=1),
+            ),
+        )
+        await session.commit()
+
+
 def _media_settings(*, enabled=True, video_enabled=False):
     return SimpleNamespace(
         validator_media_probe_enabled=enabled,
@@ -260,6 +320,8 @@ async def test_operator_review_requires_qualification_and_compare_and_swap(db):
     assert early_preview["blocking_reasons"] == [
         "minimum qualification time has not elapsed",
         "heartbeat sample coverage is below minimum",
+        "no completed workload in qualification window",
+        "no authoritative evidence in qualification window",
     ]
     with pytest.raises(
         validator_operators.OperatorReviewError,
@@ -292,6 +354,31 @@ async def test_operator_review_requires_qualification_and_compare_and_swap(db):
             )
         )
         await session.commit()
+
+    await _record_qualification_evidence(
+        account_id,
+        validator_id,
+        created=started - timedelta(minutes=2),
+    )
+
+    no_current_evidence = await validator_operators.review_operator(
+        validator_id,
+        action="verify",
+        review_ref="review:test-verify-no-current-evidence",
+        apply=False,
+        now=review_now,
+    )
+    assert no_current_evidence["eligible_to_apply"] is False
+    assert no_current_evidence["blocking_reasons"] == [
+        "no completed workload in qualification window",
+        "no authoritative evidence in qualification window",
+    ]
+
+    await _record_qualification_evidence(
+        account_id,
+        validator_id,
+        created=review_now - timedelta(hours=1),
+    )
 
     verify_preview = await validator_operators.review_operator(
         validator_id,
