@@ -113,6 +113,12 @@ class GridSettings(BaseSettings):
     validator_text_group_min_interval_seconds: int = 3600
     validator_history_retention_days: int = 90
     validator_history_sweep_seconds: int = 21600
+    # Read-only cohort watchdog. It reports aggregate operational drift only;
+    # validator evidence remains economically inert.
+    validator_cohort_monitor_enabled: bool = False
+    validator_cohort_monitor_seconds: int = Field(default=300, ge=60, le=3600)
+    validator_cohort_monitor_window_hours: int = Field(default=24, ge=1, le=720)
+    validator_cohort_baseline_version: str = "v0.1.0-preview.13"
 
     # Remote-MCP OAuth operational rows are bounded independently of the
     # feature flag so rollback does not leave attacker-created registration

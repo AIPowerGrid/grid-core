@@ -85,8 +85,10 @@ so deliberately restarts the 72-hour window.
 
 The node must remain online for at least 72 hours and supply at least 80 percent
 of the bounded heartbeat samples. Heartbeat freshness is checked again at
-verification time. Assignment activity is informative but does not replace
-the time and heartbeat gates.
+verification time. At least one completed assignment and one Core-accepted
+authoritative attestation must also be created after the candidate clock starts;
+historical evidence from before qualification does not count. Workload evidence
+does not replace the time and heartbeat gates.
 
 The operator can inspect its own safe progress with:
 
@@ -123,6 +125,16 @@ $PY scripts/review_validator_operator.py \
 Inspect `qualification`, `activity`, `eligible_to_apply`, and
 `blocking_reasons`. An incomplete preview is read-only and reports every unmet
 gate. Applying the same transition still fails closed until all blockers clear.
+
+Production Core can also run the aggregate cohort watchdog with
+`VALIDATOR_COHORT_MONITOR_ENABLED=1`. Every configured interval it evaluates
+expired-assignment completion, accepted authoritative evidence, terminal probe
+errors, validator disagreement, stale active/candidate nodes, software-version
+drift from preview.13, and duplicate reviewed control groups. Alerts fire when
+a condition first appears and when it recovers, rather than on every poll.
+These are privacy-safe operational signals only: they contain counts, never
+validator or control-group identifiers, and cannot change qualification,
+routing, rewards, strikes, payouts, or slashing.
 
 ## 4. Verify Independence
 

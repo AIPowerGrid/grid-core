@@ -89,6 +89,12 @@ executes an immutable release selected through `/home/aipg/current`.
   `VALIDATOR_HISTORY_SWEEP_SECONDS` bound finalized assignment/group machinery;
   signed attestations are preserved. Keep `env.template`, `config.py`, and the
   validator runbook aligned when changing these controls.
+- `VALIDATOR_COHORT_MONITOR_ENABLED` starts an aggregate-only read path inside
+  Core. It may emit redacted transition alerts for stale candidates, assignment
+  completion/evidence regressions, probe errors, disagreement, version drift,
+  and duplicate reviewed control groups. It never changes qualification or any
+  economic/routing state. Keep its interval, window, and frozen baseline in
+  `env.template`, `config.py`, and the cohort runbook aligned.
 - `OAUTH_AUTHORIZATION_RETENTION_SECONDS`,
   `OAUTH_UNUSED_CLIENT_RETENTION_SECONDS`, and `OAUTH_STATE_SWEEP_SECONDS`
   bound unauthenticated OAuth operational storage. Keep at least one hour of

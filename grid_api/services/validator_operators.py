@@ -96,14 +96,23 @@ def qualification_metrics(row: dict[str, Any], *, now: datetime | None = None) -
     }
 
 
-async def _activity(session, validator_id: str) -> dict[str, int]:
+async def qualification_activity(
+    session,
+    validator_id: str,
+    *,
+    since: datetime | None = None,
+) -> dict[str, int]:
+    assignment_scope = [assignments_t.c.validator_id == validator_id]
+    attestation_scope = [
+        attestations_t.c.validator_id == validator_id,
+        attestations_t.c.authority == "authoritative",
+    ]
+    if since is not None:
+        assignment_scope.append(assignments_t.c.created >= since)
+        attestation_scope.append(attestations_t.c.created >= since)
     assigned = int(
         await session.scalar(
-            sa.select(sa.func.count())
-            .select_from(assignments_t)
-            .where(
-                assignments_t.c.validator_id == validator_id,
-            ),
+            sa.select(sa.func.count()).select_from(assignments_t).where(*assignment_scope),
         )
         or 0,
     )
@@ -111,21 +120,13 @@ async def _activity(session, validator_id: str) -> dict[str, int]:
         await session.scalar(
             sa.select(sa.func.count())
             .select_from(assignments_t)
-            .where(
-                assignments_t.c.validator_id == validator_id,
-                assignments_t.c.probe_status == "completed",
-            ),
+            .where(*assignment_scope, assignments_t.c.probe_status == "completed"),
         )
         or 0,
     )
     attested = int(
         await session.scalar(
-            sa.select(sa.func.count())
-            .select_from(attestations_t)
-            .where(
-                attestations_t.c.validator_id == validator_id,
-                attestations_t.c.authority == "authoritative",
-            ),
+            sa.select(sa.func.count()).select_from(attestations_t).where(*attestation_scope),
         )
         or 0,
     )
@@ -170,6 +171,12 @@ async def review_operator(
             raise OperatorReviewError("validator review state changed; preview again")
 
         metrics = qualification_metrics(state, now=current)
+        qualification_started = _aware(state["qualification_started_at"])
+        activity = await qualification_activity(
+            session,
+            validator_id,
+            since=qualification_started if state["independence_status"] == "candidate" else None,
+        )
         blocking_reasons: list[str] = []
         values: dict[str, Any]
         if action == "candidate":
@@ -194,6 +201,10 @@ async def review_operator(
                 blocking_reasons.append("minimum qualification time has not elapsed")
             if not metrics["coverage_ready"]:
                 blocking_reasons.append("heartbeat sample coverage is below minimum")
+            if activity["completed"] < 1:
+                blocking_reasons.append("no completed workload in qualification window")
+            if activity["attested"] < 1:
+                blocking_reasons.append("no authoritative evidence in qualification window")
             if not _aware(state["last_heartbeat"]) or _aware(state["last_heartbeat"]) < (
                 current - timedelta(seconds=SAMPLE_INTERVAL_SECONDS * 2)
             ):
@@ -216,7 +227,6 @@ async def review_operator(
                 "updated": current,
             }
 
-        activity = await _activity(session, validator_id)
         result = {
             "validator_id": validator_id,
             "action": action,

@@ -143,7 +143,10 @@ content sanitization, and reward settlement.
   remain zero until externally reviewed; registration count is not independence
   proof. `validator_operators.py` owns the review state: an opaque control group,
   at least 72 hours of qualification, rate-limited heartbeat coverage, an
-  expiring maintainer review, and preview-first compare-and-swap transitions.
+  expiring maintainer review, at least one completed probe plus authoritative
+  attestation created during that qualification window, and preview-first
+  compare-and-swap transitions. Evidence created before the candidate clock
+  starts cannot satisfy the gate.
   A verify preview reports current qualification metrics and every blocking
   reason even before the gate is satisfied; an apply remains fail-closed until
   all blockers clear and requires that preview's exact state digest.
@@ -157,6 +160,13 @@ content sanitization, and reward settlement.
   counts, redacted qualification progress, and a bounded next action. Wallets,
   account IDs, signatures, operator groups, review refs, raw assignments, and
   evidence remain private.
+  `validator_cohort_monitor.py` owns the aggregate, read-only cohort watchdog.
+  It measures matured assignment completion, authoritative evidence delivery,
+  terminal probe errors, disagreement, stale active/candidate registrations,
+  frozen-baseline version drift, and duplicate reviewed control groups. Its
+  output and alerts contain counts only, never validator IDs, group IDs, review
+  refs, wallets, accounts, prompts, responses, or evidence. It has no routing,
+  reward, strike, payout, qualification, or slashing side effect.
   Preview group acceptance still records distinct-registration quorum for
   compatibility; independent-operator quorum is a separate explicit signal and
   is not required for acceptance until a later reviewed authority gate.
