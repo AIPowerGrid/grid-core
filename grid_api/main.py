@@ -15,6 +15,7 @@ This is the sole production coordinator runtime. Provides:
 
 import asyncio
 import logging
+import secrets
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -150,7 +151,10 @@ async def _validator_cohort_monitor():
     from .config import get_settings
     from .safe_logging import error_type
     from .services import alerts
-    from .services.validator_cohort_monitor import inspect_cohort_health
+    from .services.validator_cohort_monitor import (
+        acquire_monitor_leadership,
+        inspect_cohort_health,
+    )
 
     settings = get_settings()
     if not settings.validator_cohort_monitor_enabled:
@@ -158,8 +162,16 @@ async def _validator_cohort_monitor():
         return
 
     prior_codes: set[str] = set()
+    lease_token = secrets.token_hex(16)
+    lease_ttl = max(120, settings.validator_cohort_monitor_seconds * 2)
     while True:
         try:
+            if not await acquire_monitor_leadership(
+                token=lease_token,
+                ttl_seconds=lease_ttl,
+            ):
+                await asyncio.sleep(settings.validator_cohort_monitor_seconds)
+                continue
             report = await inspect_cohort_health(
                 window_hours=settings.validator_cohort_monitor_window_hours,
                 baseline_version=settings.validator_cohort_baseline_version,

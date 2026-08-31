@@ -132,6 +132,9 @@ expired-assignment completion, accepted authoritative evidence, terminal probe
 errors, validator disagreement, stale active/candidate nodes, software-version
 drift from preview.13, and duplicate reviewed control groups. Alerts fire when
 a condition first appears and when it recovers, rather than on every poll.
+One renewable Redis lease elects a single watchdog across Uvicorn processes and
+Core replicas; if Redis is unavailable, that pass is skipped instead of running
+duplicate database scans.
 These are privacy-safe operational signals only: they contain counts, never
 validator or control-group identifiers, and cannot change qualification,
 routing, rewards, strikes, payouts, or slashing.

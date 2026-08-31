@@ -164,6 +164,9 @@ content sanitization, and reward settlement.
   It measures matured assignment completion, authoritative evidence delivery,
   terminal probe errors, disagreement, stale active/candidate registrations,
   frozen-baseline version drift, and duplicate reviewed control groups. Its
+  Redis lease permits one monitor across all Uvicorn processes and Core
+  replicas; a Redis fault skips the pass rather than multiplying query loops.
+  The lease has no qualification or authority effect. Its
   output and alerts contain counts only, never validator IDs, group IDs, review
   refs, wallets, accounts, prompts, responses, or evidence. It has no routing,
   reward, strike, payout, qualification, or slashing side effect.
