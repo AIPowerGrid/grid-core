@@ -2686,6 +2686,14 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["features"]["sealed_assignments"] is False
     assert body["features"]["blind_quality"] is False
     assert body["features"]["worker_terminal_indistinguishable"] is False
+    assert body["features"]["public_status"] is True
+    assert body["endpoints"]["public_status"] == {
+        "enabled": True,
+        "method": "GET",
+        "path": "/v1/validator/public/{validator_id}",
+        "auth": "none",
+        "economic_effect": "none",
+    }
     assert body["probe_policy"]["max_attempts"] >= 1
     assert body["probe_policy"]["lease_seconds"] > validators_svc.PROBE_TIMEOUT_SECONDS
     assert body["probe_policy"]["text_batch_scoring_policy"] == "text.generated.v8"
@@ -2705,6 +2713,74 @@ def test_validator_capabilities_expose_assignment_gates():
     assert body["features"]["video_validation"] is False
     assert body["media_validation"]["image"]["economic_effect"] == "none"
     assert body["media_validation"]["video"]["economic_effect"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_public_validator_status_is_redacted_and_reports_qualification(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id)
+    now = datetime.now(UTC)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t)
+            .where(validators_t.c.id == validator_id)
+            .values(
+                operator_group_id="opg_never_public_01",
+                independence_status="candidate",
+                qualification_started_at=now - timedelta(hours=12),
+                heartbeat_sample_count=140,
+                last_heartbeat_sampled_at=now,
+                last_heartbeat=now,
+                independence_review_ref="private:cohort-review",
+                software_version="v0.1.0-preview.13",
+            )
+        )
+        await session.commit()
+
+    body = await validators_svc.public_validator_status(validator_id)
+
+    assert body["schema"] == "aipg.validator.public-status.v1"
+    assert body["validator_id"] == validator_id
+    assert body["summary"] == "qualifying"
+    assert body["online"] is True
+    assert body["software_version"] == "v0.1.0-preview.13"
+    assert body["last_heartbeat"].endswith(":00+00:00")
+    assert body["activity"] == {"assigned": 0, "completed": 0, "attested": 0}
+    assert body["qualification"]["status"] == "candidate"
+    assert body["qualification"]["remaining_seconds"] > 0
+    assert body["qualification"]["heartbeat_fresh"] is True
+    assert body["economic_effect"] == "none"
+    encoded = json.dumps(body)
+    assert TEST_WALLET not in encoded
+    assert str(account_id) not in encoded
+    assert "opg_never_public_01" not in encoded
+    assert "private:cohort-review" not in encoded
+
+
+def test_public_validator_status_route_needs_no_key_and_maps_missing_to_404(monkeypatch):
+    async def fake_status(validator_id):
+        if validator_id == "val_1234567890abcdef":
+            return {
+                "schema": "aipg.validator.public-status.v1",
+                "validator_id": validator_id,
+                "summary": "online",
+                "economic_effect": "none",
+            }
+        raise validators_svc.RegistrationError("validator not found")
+
+    monkeypatch.setattr(validators_svc, "public_validator_status", fake_status)
+    app = FastAPI()
+    app.state.limiter = limiter
+    app.include_router(validator_router.router)
+
+    with TestClient(app) as client:
+        found = client.get("/v1/validator/public/val_1234567890abcdef")
+        missing = client.get("/v1/validator/public/val_0000000000000000")
+
+    assert found.status_code == 200
+    assert found.json()["validator_id"] == "val_1234567890abcdef"
+    assert missing.status_code == 404
+    assert missing.json() == {"detail": "validator not found"}
 
 
 def test_validator_capabilities_expose_enabled_sealed_assignment_mode(monkeypatch):

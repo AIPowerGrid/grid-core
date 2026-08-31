@@ -46,6 +46,7 @@ def _capabilities_payload() -> dict[str, Any]:
             "targeted_probe": True,
             "worker_scorecards": True,
             "assignment_health": True,
+            "public_status": True,
             "quorum": True,
             "score_dimensions": True,
             "unique_text_batch_challenges": True,
@@ -174,6 +175,13 @@ def _capabilities_payload() -> dict[str, Any]:
                 "auth": "validator.read",
                 "economic_effect": "none",
             },
+            "public_status": {
+                "enabled": True,
+                "method": "GET",
+                "path": "/v1/validator/public/{validator_id}",
+                "auth": "none",
+                "economic_effect": "none",
+            },
         },
         "notes": [
             "Preview evidence remains non-authoritative.",
@@ -291,6 +299,16 @@ async def validator_registration(
     except validators_svc.RegistrationError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
     return validators_svc.validator_registration_payload(validator)
+
+
+@router.get("/v1/validator/public/{validator_id}")
+@limiter.limit("30/minute")
+async def validator_public_status(validator_id: str, request: Request):
+    """Return one validator's redacted public cohort and liveness status."""
+    try:
+        return await validators_svc.public_validator_status(validator_id)
+    except validators_svc.RegistrationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/v1/validator/suspend")
