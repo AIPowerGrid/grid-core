@@ -12,7 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from grid_api import database
-from grid_api.services.validator_cohort_monitor import evaluate_snapshot, inspect_cohort_health
+from grid_api.services.validator_cohort_monitor import (
+    acquire_monitor_leadership,
+    evaluate_snapshot,
+    inspect_cohort_health,
+)
 from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import metadata
 from grid_api.v2.schema import validator_assignments as assignments_t
@@ -20,6 +24,31 @@ from grid_api.v2.schema import validator_attestations as attestations_t
 from grid_api.v2.schema import validators as validators_t
 
 NOW = datetime(2026, 8, 31, 16, 0, tzinfo=UTC)
+
+
+class _LeaseRedis:
+    def __init__(self, *, fail: bool = False):
+        self.fail = fail
+        self.token = None
+        self.ttl = None
+
+    async def set(self, _key, token, *, ex, nx):
+        if self.fail:
+            raise RuntimeError("redis unavailable")
+        assert nx is True
+        if self.token is not None:
+            return False
+        self.token = token
+        self.ttl = ex
+        return True
+
+    async def eval(self, _script, _keys, _key, token, ttl):
+        if self.fail:
+            raise RuntimeError("redis unavailable")
+        if self.token != token:
+            return 0
+        self.ttl = ttl
+        return 1
 
 
 @pytest_asyncio.fixture
@@ -161,6 +190,25 @@ def test_small_sample_is_informational_not_a_false_failure():
     assert [issue["code"] for issue in report["issues"]] == [
         "insufficient_matured_sample",
     ]
+
+
+@pytest.mark.asyncio
+async def test_monitor_lease_has_one_owner_and_owner_can_renew(monkeypatch):
+    redis = _LeaseRedis()
+    monkeypatch.setattr("grid_api.redis_client.get_redis", lambda: redis)
+
+    assert await acquire_monitor_leadership(token="process-a", ttl_seconds=120) is True
+    assert await acquire_monitor_leadership(token="process-b", ttl_seconds=120) is False
+    assert await acquire_monitor_leadership(token="process-a", ttl_seconds=180) is True
+    assert redis.ttl == 180
+
+
+@pytest.mark.asyncio
+async def test_monitor_lease_fails_closed_when_redis_is_unavailable(monkeypatch):
+    redis = _LeaseRedis(fail=True)
+    monkeypatch.setattr("grid_api.redis_client.get_redis", lambda: redis)
+
+    assert await acquire_monitor_leadership(token="process-a", ttl_seconds=120) is False
 
 
 @pytest.mark.asyncio
