@@ -94,6 +94,23 @@ The operator can inspect its own safe progress with:
 aipg-validator check --no-probe
 ```
 
+The operator or maintainer should also confirm that the public status contract
+matches the local node. Paste the public `val_*` id into
+<https://aipowergrid.io/validate>, or query it directly:
+
+```bash
+curl -fsS https://api.aipowergrid.io/v1/validator/public/val_example
+```
+
+The public result may expose only the validator id, online state, last
+heartbeat rounded to the minute, version, aggregate assignment/evidence counts,
+redacted qualification progress, next action, and the fact that economic effect
+is disabled. It must not expose accounts, wallets, signatures, operator groups,
+review references, assignment content, evidence content, IPs, or operator
+identity. Check the individual result before relying on aggregate network
+counts; it catches stale versions and offline nodes without disclosing cohort
+review data.
+
 The maintainer can preview verification at any time:
 
 ```bash
@@ -139,7 +156,8 @@ starts a fresh qualification rather than silently extending old trust.
 
 ## 5. Verify Public State
 
-After approval, check the public aggregate only:
+After approval, recheck the individual public result and then the public
+aggregate:
 
 ```bash
 curl -fsS https://api.aipowergrid.io/v1/status/network
@@ -167,8 +185,14 @@ signed evidence and non-sensitive review references for later dispute review.
 
 ## Exit Gate
 
-The independent pilot is not proven until at least five distinct reviewed
-control groups complete qualification and remain healthy through the agreed
-observation window. Target ten operators for useful fault tolerance. Keep
-validator rewards, routing influence, strikes, staking, and slashing disabled
-through this cohort and through the later text/image/video evidence pilots.
+Three distinct reviewed control groups completing qualification is the initial
+production-cohort milestone. It is enough to assess independent onboarding,
+shared-evidence handling, and basic disagreement behavior; it is not enough to
+enable validator economics or routing authority.
+
+The broader independent pilot is not proven until at least five distinct
+reviewed control groups complete qualification and remain healthy through the
+agreed observation window. Target ten operators for useful fault tolerance.
+Keep validator rewards, routing influence, strikes, staking, and slashing
+disabled through this cohort and through the later text/image/video evidence
+pilots.
