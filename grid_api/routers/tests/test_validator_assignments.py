@@ -2646,6 +2646,7 @@ async def test_token_limit_probe_forwards_budget_and_commits_terminal_evidence(d
     assert result["status"] == "completed"
     assert result["canary_kind"] == "token.limit"
     assert result["finish_reason"] == "length"
+    assert result["score_reason"] == "accepted"
     assert submitted["payload"]["request"]["max_tokens"] == challenge["max_tokens"]
     assert submitted["kwargs"]["hard_target_worker"] == "rig-token-limit"
     response_commitment = validators_svc._canonical({
@@ -2661,6 +2662,7 @@ async def test_token_limit_probe_forwards_budget_and_commits_terminal_evidence(d
         )).mappings().one()
     assert row["probe_status"] == "completed"
     assert row["probe_verdict"] == "healthy"
+    assert row["probe_result"]["score_reason"] == "accepted"
     assert row["probe_response_hash"] == result["response_hash"]
 
 
