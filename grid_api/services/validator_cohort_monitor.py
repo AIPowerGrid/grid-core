@@ -22,6 +22,29 @@ MIN_COMPLETION_RATE = 0.80
 MIN_EVIDENCE_RATE = 0.80
 MAX_PROBE_ERROR_RATE = 0.10
 MAX_DISPUTED_RATE = 0.20
+MONITOR_LEADER_KEY = "grid:validator-cohort-monitor:leader"
+_RENEW_LEASE = (
+    "if redis.call('get', KEYS[1]) == ARGV[1] then "
+    "return redis.call('expire', KEYS[1], ARGV[2]) else return 0 end"
+)
+
+
+async def acquire_monitor_leadership(*, token: str, ttl_seconds: int) -> bool:
+    """Acquire or renew the cross-process monitor lease, failing closed."""
+    if not token:
+        raise ValueError("monitor lease token is required")
+    ttl = max(60, int(ttl_seconds))
+    try:
+        from ..redis_client import get_redis
+
+        redis = get_redis()
+        if await redis.set(MONITOR_LEADER_KEY, token, ex=ttl, nx=True):
+            return True
+        return bool(await redis.eval(_RENEW_LEASE, 1, MONITOR_LEADER_KEY, token, ttl))
+    except Exception:
+        # Core runs one lifespan per Uvicorn process. Without a distributed
+        # lease, a Redis fault would turn one watchdog into N duplicate loops.
+        return False
 
 
 def _ratio(numerator: int, denominator: int) -> float | None:
