@@ -35,6 +35,15 @@ hostname, IP address, assignment payload, prompt, or worker response. Keep any
 human contact details outside the Grid database. Core stores only an opaque
 common-control group and a non-sensitive review reference.
 
+Treat the protected review record as the only authority for mapping a human
+operator or contact handle to a `val_*` id. Never infer that mapping from a
+GitHub username, chat handle, public comment, timing, platform, region, version,
+or activity pattern. Before sending node-specific guidance or publishing a
+node-specific status claim, verify the exact mapping in that protected record;
+if it is unavailable, give only generic instructions and ask the operator to
+use the public status page themselves. Do not disclose that private mapping as
+part of support.
+
 ## 1. Assign Common Control
 
 One person or organization gets one `opg_*` group regardless of its number of
