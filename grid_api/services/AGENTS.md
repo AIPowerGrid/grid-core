@@ -147,6 +147,11 @@ content sanitization, and reward settlement.
   The account-authenticated registration view exposes that operator's own
   qualification status, sampled-heartbeat progress, review expiry, and current
   eligibility, but never its opaque control-group id or private review ref.
+  Public validator lookup may expose only the shareable validator ID, a
+  minute-rounded heartbeat, software version, aggregate assignment/attestation
+  counts, redacted qualification progress, and a bounded next action. Wallets,
+  account IDs, signatures, operator groups, review refs, raw assignments, and
+  evidence remain private.
   Preview group acceptance still records distinct-registration quorum for
   compatibility; independent-operator quorum is a separate explicit signal and
   is not required for acceptance until a later reviewed authority gate.

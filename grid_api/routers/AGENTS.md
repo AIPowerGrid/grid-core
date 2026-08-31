@@ -87,7 +87,11 @@ transport, accounts, stats, health/metrics.
   `POST /v1/validator/probe/{assignment_id}`,
   `POST /v1/validator/attest`, `GET /v1/validator/workers`,
   `GET /v1/validator/scorecards`, and
-  `GET /v1/validator/assignments/health`. Health separates probe,
+  `GET /v1/validator/assignments/health`. The unauthenticated
+  `GET /v1/validator/public/{validator_id}` exposes only a shareable validator
+  ID's rounded heartbeat, version, aggregate activity, qualification progress,
+  and actionable status; it never returns account, wallet, signature, operator
+  group, review reference, assignment, or evidence data. Health separates probe,
   accepted-evidence, worker-pass, quorum, finalization, and aggregate validator
   liveness stages. Shared 3-of-5 quorum remains preview-only with no
   routing/reward/slash authority. The image-fidelity assignment lane is
