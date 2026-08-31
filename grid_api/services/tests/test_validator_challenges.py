@@ -391,6 +391,23 @@ def test_stop_sequence_challenge_commits_only_the_pre_stop_output():
     assert challenge["stop"] not in prefix
 
 
+def test_stop_sequence_score_reasons_do_not_expose_expected_output():
+    challenge = validators._make_text_challenge("stop.sequence")
+
+    assert validators._score_text_challenge_detail(challenge, "", 10) == (
+        "failed",
+        "empty_visible_output",
+    )
+    assert validators._score_text_challenge_detail(challenge, "WRONG", 10) == (
+        "failed",
+        "commitment_mismatch",
+    )
+    assert {
+        "empty_visible_output",
+        "commitment_mismatch",
+    } <= validators.VALID_SCORE_REASONS
+
+
 def _repeat_to_grid_tokens(token: str, minimum: int) -> str:
     pieces = []
     while den.count_tokens(" ".join(pieces)) < minimum:
@@ -445,6 +462,35 @@ def test_token_limit_count_includes_reasoning_output():
         reasoning_text=reasoning,
         finish_reason="length",
     ) == "healthy"
+
+
+def test_token_limit_score_reasons_separate_transport_and_shape_failures():
+    token = "visible_marker"
+    challenge = {
+        "kind": "token.limit",
+        "expected_hash": hashlib.sha256(token.encode()).hexdigest(),
+        "max_tokens": 64,
+    }
+
+    assert validators._score_text_challenge_detail(
+        challenge,
+        "",
+        10,
+        reasoning_text=_repeat_to_grid_tokens("thought", 32),
+        finish_reason="length",
+    ) == ("failed", "empty_visible_output")
+    assert validators._score_text_challenge_detail(
+        challenge,
+        f"{token} {token}",
+        10,
+        finish_reason="stop",
+    ) == ("failed", "terminal_reason_not_length")
+    assert validators._score_text_challenge_detail(
+        challenge,
+        f"{token} WRONG",
+        10,
+        finish_reason="length",
+    ) == ("failed", "invalid_repetition")
 
 
 def test_modern_basic_scorers_can_finish_legacy_basic_groups():
