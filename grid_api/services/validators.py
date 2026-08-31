@@ -84,6 +84,7 @@ _ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _HASH_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
 _SIG_RE = re.compile(r"^(0x)?[0-9a-fA-F]{130}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_PUBLIC_VALIDATOR_ID_RE = re.compile(r"^val_[A-Za-z0-9_-]{16,88}$")
 
 
 class AttestationError(ValueError):
@@ -171,6 +172,142 @@ def validator_registration_payload(
                 and state["status"] == "active"
             ),
         },
+        "economic_effect": "none",
+    }
+
+
+async def public_validator_status(validator_id: str) -> dict[str, Any]:
+    """Return one validator's allowlisted public operational status.
+
+    Validator IDs are intentionally shareable. Wallets, accounts, signatures,
+    operator groups, review references, assignments, and evidence remain
+    private. Heartbeat timestamps are rounded to the minute to avoid publishing
+    unnecessary high-resolution operator activity.
+    """
+    normalized_id = str(validator_id or "").strip()
+    if not _PUBLIC_VALIDATOR_ID_RE.fullmatch(normalized_id):
+        raise RegistrationError("validator not found")
+
+    now = _now()
+    async with await new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(validators_t).where(validators_t.c.id == normalized_id),
+            )
+        ).mappings().first()
+        if not row:
+            raise RegistrationError("validator not found")
+
+        assigned = int(
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(assignments_t)
+                .where(assignments_t.c.validator_id == normalized_id),
+            )
+            or 0
+        )
+        completed = int(
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(assignments_t)
+                .where(
+                    assignments_t.c.validator_id == normalized_id,
+                    assignments_t.c.probe_status == "completed",
+                ),
+            )
+            or 0
+        )
+        attested = int(
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(attestations_t)
+                .where(
+                    attestations_t.c.validator_id == normalized_id,
+                    attestations_t.c.authority == "authoritative",
+                ),
+            )
+            or 0
+        )
+
+    state = dict(row)
+    last_heartbeat = state.get("last_heartbeat")
+    aware_heartbeat = _aware(last_heartbeat) if last_heartbeat else None
+    heartbeat_fresh = bool(
+        aware_heartbeat
+        and aware_heartbeat
+        >= now - timedelta(seconds=VALIDATOR_HEARTBEAT_FRESH_SECONDS)
+    )
+    qualification = validator_operators.qualification_metrics(state, now=now)
+    qualification_status = str(state.get("independence_status") or "unreviewed")
+    reviewed_at = state.get("independence_reviewed_at")
+    expires_at = state.get("independence_expires_at")
+    aware_expires = _aware(expires_at) if expires_at else None
+    review_current = bool(
+        qualification_status == "verified"
+        and state.get("operator_group_id")
+        and reviewed_at
+        and aware_expires
+        and aware_expires >= now
+    )
+    active = state.get("status") == "active"
+
+    if not active:
+        summary = "inactive"
+        next_action = "Resume or repair the validator from its local manager."
+    elif not heartbeat_fresh:
+        summary = "offline"
+        next_action = "Start the validator and check its local connection diagnostics."
+    elif qualification_status == "candidate":
+        summary = "qualifying"
+        next_action = (
+            "Keep this validator online until its time and heartbeat coverage gates are complete."
+        )
+    elif review_current:
+        summary = "verified"
+        next_action = "No operator action is currently required."
+    elif qualification_status == "rejected":
+        summary = "review_required"
+        next_action = "Contact the Grid maintainer before continuing qualification."
+    else:
+        summary = "online"
+        next_action = "Request cohort review using only this public validator ID."
+
+    rounded_heartbeat = (
+        aware_heartbeat.replace(second=0, microsecond=0).isoformat()
+        if aware_heartbeat
+        else None
+    )
+    return {
+        "schema": "aipg.validator.public-status.v1",
+        "validator_id": normalized_id,
+        "summary": summary,
+        "registration_status": str(state.get("status") or "unknown"),
+        "online": bool(active and heartbeat_fresh),
+        "last_heartbeat": rounded_heartbeat,
+        "heartbeat_fresh_seconds": VALIDATOR_HEARTBEAT_FRESH_SECONDS,
+        "software_version": str(state.get("software_version") or "unknown"),
+        "activity": {
+            "assigned": assigned,
+            "completed": completed,
+            "attested": attested,
+        },
+        "qualification": {
+            "status": qualification_status,
+            "elapsed_seconds": qualification["elapsed_seconds"],
+            "minimum_seconds": qualification["minimum_seconds"],
+            "remaining_seconds": max(
+                0,
+                qualification["minimum_seconds"] - qualification["elapsed_seconds"],
+            ),
+            "sample_coverage": qualification["sample_coverage"],
+            "minimum_sample_coverage": qualification["minimum_sample_coverage"],
+            "time_ready": qualification["time_ready"],
+            "coverage_ready": qualification["coverage_ready"],
+            "heartbeat_fresh": heartbeat_fresh,
+            "review_current": review_current,
+            "independent_vote_eligible": bool(review_current and active and heartbeat_fresh),
+        },
+        "next_action": next_action,
         "economic_effect": "none",
     }
 
