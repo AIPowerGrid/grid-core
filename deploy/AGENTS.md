@@ -14,8 +14,9 @@ executes an immutable release selected through `/home/aipg/current`.
 - `DEMAND_BILLING_RUNBOOK.md` - dark deploy, allowlisted canary, alert,
   rollback, and staged demand-charging procedure.
 - `VALIDATOR_COHORT_RUNBOOK.md` - privacy-safe intake, opaque common-control
-  review, 72-hour qualification, verification, expiry, and incident handling
-  for independent preview operators.
+  review, public per-node status verification, 72-hour qualification,
+  verification, expiry, and incident handling for independent preview
+  operators.
 - `nginx/aipg-api.conf` - Grid routes, exact OAuth metadata routes, optional
   reviewed exact-route overlays, restricted metrics, public docs/health, and
   static `410 Gone` responses for retired API paths.
