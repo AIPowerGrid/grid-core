@@ -145,6 +145,67 @@ async def _validator_history_sweeper():
         await asyncio.sleep(interval)
 
 
+async def _validator_cohort_monitor():
+    """Alert on aggregate validator cohort regressions without granting authority."""
+    from .config import get_settings
+    from .safe_logging import error_type
+    from .services import alerts
+    from .services.validator_cohort_monitor import inspect_cohort_health
+
+    settings = get_settings()
+    if not settings.validator_cohort_monitor_enabled:
+        logger.info("Validator cohort monitor is disabled")
+        return
+
+    prior_codes: set[str] = set()
+    while True:
+        try:
+            report = await inspect_cohort_health(
+                window_hours=settings.validator_cohort_monitor_window_hours,
+                baseline_version=settings.validator_cohort_baseline_version,
+            )
+            current_codes = {str(issue["code"]) for issue in report["issues"]}
+            logger.info(
+                "Validator cohort status=%s active=%d fresh=%d candidates=%d completed=%d evidence=%d issues=%d",
+                report["status"],
+                report["validators"]["active"],
+                report["validators"]["fresh"],
+                report["validators"]["candidates"],
+                report["assignments"]["completed"],
+                report["assignments"]["authoritative_evidence"],
+                len(current_codes),
+            )
+            for issue in report["issues"]:
+                code = str(issue["code"])
+                if code not in prior_codes:
+                    alerts.emit(
+                        f"validator_cohort_{code}",
+                        str(issue["severity"]),
+                        str(issue["summary"]),
+                        fields=issue["fields"],
+                        dedupe_key=f"validator-cohort:{code}",
+                    )
+            for code in prior_codes - current_codes:
+                alerts.emit(
+                    "validator_cohort_recovered",
+                    "success",
+                    "A validator cohort health condition has recovered.",
+                    fields={"condition": code},
+                    dedupe_key=f"validator-cohort-recovered:{code}",
+                )
+            prior_codes = current_codes
+        except Exception as exc:
+            logger.error("Validator cohort monitor error_type=%s", error_type(exc))
+            alerts.emit(
+                "validator_cohort_monitor_failed",
+                "warning",
+                "The read-only validator cohort monitor failed.",
+                fields={"error_type": error_type(exc)},
+                dedupe_key="validator-cohort-monitor-failed",
+            )
+        await asyncio.sleep(settings.validator_cohort_monitor_seconds)
+
+
 async def _oauth_state_sweeper():
     """Bound unauthenticated OAuth registration and authorization storage."""
     from .config import get_settings
@@ -316,6 +377,7 @@ async def lifespan(app: FastAPI):
     recipe_sync = asyncio.create_task(_recipe_sync_loop())
     sweeper = asyncio.create_task(_reservation_sweeper())
     validator_history_sweeper = asyncio.create_task(_validator_history_sweeper())
+    validator_cohort_monitor = asyncio.create_task(_validator_cohort_monitor())
     oauth_state_sweeper = asyncio.create_task(_oauth_state_sweeper())
     validator_bond_sync = asyncio.create_task(_validator_bond_sync_loop())
     billing_monitor = asyncio.create_task(_billing_monitor())
@@ -343,6 +405,7 @@ async def lifespan(app: FastAPI):
     recipe_sync.cancel()
     sweeper.cancel()
     validator_history_sweeper.cancel()
+    validator_cohort_monitor.cancel()
     oauth_state_sweeper.cancel()
     validator_bond_sync.cancel()
     billing_monitor.cancel()
