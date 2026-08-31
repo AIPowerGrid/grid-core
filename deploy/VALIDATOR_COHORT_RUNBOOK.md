@@ -81,6 +81,13 @@ Candidate application starts a new qualification clock and clears prior
 heartbeat samples. Do not repeat it to repair a temporarily offline node; doing
 so deliberately restarts the 72-hour window.
 
+Core rejects both candidate and verify transitions unless the node's latest
+registration/heartbeat reports the exact frozen cohort baseline configured by
+`VALIDATOR_COHORT_BASELINE_VERSION`. The version is part of the review digest,
+so an upgrade or downgrade between preview and apply requires a fresh preview.
+Preserve the node's existing config and `val_*` ID when upgrading; a new
+registration would not prove continuity of the reviewed operator.
+
 ## 3. Monitor the 72-Hour Gate
 
 The node must remain online for at least 72 hours and supply at least 80 percent
@@ -105,9 +112,11 @@ curl -fsS https://api.aipowergrid.io/v1/validator/public/val_example
 ```
 
 The public result may expose only the validator id, online state, last
-heartbeat rounded to the minute, version, aggregate assignment/evidence counts,
-redacted qualification progress, next action, and the fact that economic effect
-is disabled. It must not expose accounts, wallets, signatures, operator groups,
+heartbeat rounded to the minute, reported and required cohort versions,
+compatibility status, aggregate assignment/evidence counts, redacted
+qualification progress, next action, and the fact that economic effect is
+disabled. An online stale node receives `upgrade_required` before any request
+for cohort review. It must not expose accounts, wallets, signatures, operator groups,
 review references, assignment content, evidence content, IPs, or operator
 identity. Check the individual result before relying on aggregate network
 counts; it catches stale versions and offline nodes without disclosing cohort

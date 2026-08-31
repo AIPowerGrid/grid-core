@@ -11,8 +11,8 @@ rows.
 
 from __future__ import annotations
 
-import asyncio
 import ast
+import asyncio
 import hashlib
 import json
 import logging
@@ -160,10 +160,15 @@ def validator_registration_payload(
         and aware_heartbeat
         >= current - timedelta(seconds=VALIDATOR_HEARTBEAT_FRESH_SECONDS)
     )
+    required_version, version_supported = validator_operators.cohort_version_status(
+        state["software_version"]
+    )
     return {
         "validator_id": state["id"],
         "signing_wallet": state["signing_wallet"],
         "software_version": state["software_version"],
+        "required_software_version": required_version,
+        "software_version_supported": version_supported,
         "capabilities": list(state.get("capabilities") or []),
         "status": state["status"],
         "last_heartbeat": aware_heartbeat.isoformat() if aware_heartbeat else None,
@@ -183,6 +188,7 @@ def validator_registration_payload(
                 review_current
                 and heartbeat_fresh
                 and state["status"] == "active"
+                and version_supported
             ),
         },
         "economic_effect": "none",
@@ -263,6 +269,10 @@ async def public_validator_status(validator_id: str) -> dict[str, Any]:
         and aware_expires >= now
     )
     active = state.get("status") == "active"
+    software_version = str(state.get("software_version") or "unknown")
+    required_version, version_supported = validator_operators.cohort_version_status(
+        software_version
+    )
 
     if not active:
         summary = "inactive"
@@ -270,6 +280,12 @@ async def public_validator_status(validator_id: str) -> dict[str, Any]:
     elif not heartbeat_fresh:
         summary = "offline"
         next_action = "Start the validator and check its local connection diagnostics."
+    elif not version_supported:
+        summary = "upgrade_required"
+        next_action = (
+            f"Upgrade to {required_version}, preserve the existing config and validator ID, "
+            "then restart the validator."
+        )
     elif qualification_status == "candidate":
         summary = "qualifying"
         next_action = (
@@ -298,7 +314,9 @@ async def public_validator_status(validator_id: str) -> dict[str, Any]:
         "online": bool(active and heartbeat_fresh),
         "last_heartbeat": rounded_heartbeat,
         "heartbeat_fresh_seconds": VALIDATOR_HEARTBEAT_FRESH_SECONDS,
-        "software_version": str(state.get("software_version") or "unknown"),
+        "software_version": software_version,
+        "required_software_version": required_version,
+        "software_version_supported": version_supported,
         "activity": {
             "assigned": assigned,
             "completed": completed,
@@ -318,7 +336,9 @@ async def public_validator_status(validator_id: str) -> dict[str, Any]:
             "coverage_ready": qualification["coverage_ready"],
             "heartbeat_fresh": heartbeat_fresh,
             "review_current": review_current,
-            "independent_vote_eligible": bool(review_current and active and heartbeat_fresh),
+            "independent_vote_eligible": bool(
+                review_current and active and heartbeat_fresh and version_supported
+            ),
         },
         "next_action": next_action,
         "economic_effect": "none",
@@ -3018,6 +3038,7 @@ async def _network_health_in_session(session, *, since_hours: int) -> dict[str, 
     verified_filter = sa.and_(
         validators_t.c.status == "active",
         validators_t.c.last_heartbeat >= heartbeat_cutoff,
+        validator_operators.cohort_version_filter(validators_t.c.software_version),
         validators_t.c.operator_group_id.isnot(None),
         validators_t.c.independence_status == "verified",
         validators_t.c.independence_reviewed_at.isnot(None),
@@ -3233,6 +3254,9 @@ async def assignment_health(
                         validators_t.c.operator_group_id.isnot(None),
                         validators_t.c.status == "active",
                         validators_t.c.last_heartbeat >= operator_fresh_cutoff,
+                        validator_operators.cohort_version_filter(
+                            validators_t.c.software_version
+                        ),
                         validators_t.c.independence_status == "verified",
                         validators_t.c.independence_reviewed_at.isnot(None),
                         validators_t.c.independence_expires_at >= now,
