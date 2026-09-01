@@ -100,7 +100,8 @@ def _capability(job: dict[str, Any]) -> str:
 
 async def _candidate_snapshot(
     *,
-    job: dict[str, Any],
+    job_type: str,
+    api_format: str,
     selected_model: str,
     actual_worker_id: str,
 ) -> list[dict[str, Any]]:
@@ -109,9 +110,6 @@ async def _candidate_snapshot(
     ids = sorted(str(value) for value in await redis.smembers(WORKER_ACTIVE_SET_KEY))
     if len(ids) > MAX_ACTIVE_WORKERS:
         raise ValueError("active worker snapshot exceeds the observer bound")
-    job_type = str(job.get("job_type") or "text")
-    payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
-    api_format = str(payload.get("api_format") or "openai-chat")
     candidates: set[tuple[str, str]] = {(str(actual_worker_id), str(selected_model))}
 
     keys = [f"{_WORKER_STATUS_PREFIX}{worker_id}{_WORKER_STATUS_SUFFIX}" for worker_id in ids]
@@ -138,17 +136,29 @@ async def _candidate_snapshot(
     return [{"worker_id": worker_id, "model": model, "baseline_rank": rank} for rank, (worker_id, model) in enumerate(ordered)]
 
 
+def _route_capture(job: dict[str, Any]) -> dict[str, str]:
+    """Reduce a live job to bounded observer fields before scheduling work."""
+    payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
+    return {
+        "route_ref": _route_ref(job),
+        "job_type": str(job.get("job_type") or "text")[:16],
+        "api_format": str(payload.get("api_format") or "openai-chat")[:64],
+        "task_class": _task_class(job),
+        "capability": _capability(job),
+    }
+
+
 async def _emit_route(
-    job: dict[str, Any],
+    capture: dict[str, str],
     selected_model: str,
     worker_id: str,
     observed_at: str | None = None,
 ) -> None:
     try:
         async with asyncio.timeout(CAPTURE_TIMEOUT_SECONDS):
-            route_ref = _route_ref(job)
             candidates = await _candidate_snapshot(
-                job=job,
+                job_type=capture["job_type"],
+                api_format=capture["api_format"],
                 selected_model=selected_model,
                 actual_worker_id=worker_id,
             )
@@ -156,11 +166,11 @@ async def _emit_route(
                 STREAM_KEY,
                 {
                     "kind": "route",
-                    "route_ref": route_ref,
+                    "route_ref": capture["route_ref"],
                     "observed_at": observed_at or _iso_now(),
-                    "task_class": _task_class(job),
-                    "modality": str(job.get("job_type") or "text")[:16],
-                    "capability": _capability(job),
+                    "task_class": capture["task_class"],
+                    "modality": capture["job_type"],
+                    "capability": capture["capability"],
                     "candidates": json.dumps(candidates, sort_keys=True, separators=(",", ":")),
                     "actual_model": str(selected_model)[:255],
                     "actual_worker_id": str(worker_id)[:64],
@@ -173,7 +183,7 @@ async def _emit_route(
 
 
 async def _emit_outcome(
-    job: dict[str, Any],
+    route_ref: str,
     worker_id: str,
     terminal_status: str,
     duration_seconds: float | None,
@@ -188,7 +198,7 @@ async def _emit_outcome(
                 STREAM_KEY,
                 {
                     "kind": "outcome",
-                    "route_ref": _route_ref(job),
+                    "route_ref": route_ref,
                     "finished_at": finished_at or _iso_now(),
                     "actual_worker_id": str(worker_id)[:64],
                     "terminal_status": str(terminal_status),
@@ -227,7 +237,14 @@ def _schedule(coro) -> None:
 
 def capture_route(*, job: dict[str, Any], selected_model: str, worker_id: str) -> None:
     """Schedule a route snapshot without awaiting or mutating the live route."""
-    _schedule(_emit_route(dict(job), str(selected_model), str(worker_id), _iso_now()))
+    try:
+        if not _enabled():
+            return
+        capture = _route_capture(job)
+    except Exception as exc:
+        logger.warning("Route-event preparation failed error_type=%s", error_type(exc))
+        return
+    _schedule(_emit_route(capture, str(selected_model), str(worker_id), _iso_now()))
 
 
 def capture_outcome(
@@ -238,9 +255,16 @@ def capture_outcome(
     duration_seconds: float | None = None,
 ) -> None:
     """Schedule one route-attempt outcome without touching terminal authority."""
+    try:
+        if not _enabled():
+            return
+        route_ref = _route_ref(job)
+    except Exception as exc:
+        logger.warning("Route-outcome preparation failed error_type=%s", error_type(exc))
+        return
     _schedule(
         _emit_outcome(
-            dict(job),
+            route_ref,
             str(worker_id),
             str(terminal_status),
             duration_seconds,

@@ -41,6 +41,7 @@ from ..v2.schema import validators as validators_t
 POLICY_VERSION = "aipg.validator.shadow.protocol-capability.v2"
 RUN_HOURS = 168
 MIN_QUALIFICATION_SECONDS = 72 * 3600
+TRANSITION_CLOCK_SKEW_SECONDS = 300
 DEFAULT_POLICY_CONFIG: dict[str, Any] = {
     "policy_version": POLICY_VERSION,
     "validator_baseline_version": "v0.1.0-preview.13",
@@ -103,6 +104,15 @@ def _aware(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _fresh_transition_time(value: datetime, *, label: str) -> datetime:
+    """Reject backdated or future-dated lifecycle transitions."""
+    current = _now()
+    candidate = _aware(value)
+    if abs((candidate - current).total_seconds()) > TRANSITION_CLOCK_SKEW_SECONDS:
+        raise ValueError(f"{label} must be within five minutes of server time")
+    return candidate
 
 
 def _iso(value: datetime) -> str:
@@ -950,51 +960,63 @@ async def start_run(
 ) -> dict[str, Any]:
     """Start a previously frozen run only when collection and every gate are live."""
     _require_enabled()
-    started = _aware(started_at or _now())
+    started = _fresh_transition_time(started_at or _now(), label="shadow start time")
     async with await new_session() as session:
-        async with session.begin():
-            row = (
-                (
-                    await session.execute(
-                        sa.select(runs_t).where(runs_t.c.id == run_id).with_for_update(),
+        try:
+            async with session.begin():
+                row = (
+                    (
+                        await session.execute(
+                            sa.select(runs_t).where(runs_t.c.id == run_id).with_for_update(),
+                        )
                     )
+                    .mappings()
+                    .first()
                 )
-                .mappings()
-                .first()
-            )
-            if not row:
-                raise ShadowError("shadow run does not exist")
-            if row["status"] == "running":
-                return dict(row)
-            if row["status"] != "draft":
-                raise ShadowConflict(f"cannot start a {row['status']} shadow run")
-            config = runtime_policy_config(row["policy_config"])
-            verification = {key: bool(row["start_gate"].get(key)) for key in _VERIFICATION_KEYS}
-            live_gate = await live_start_gate_snapshot(
-                verification=verification,
-                observed_at=started,
-                policy_config=config,
-            )
-            evaluation = live_gate["evaluation"]
-            if not evaluation.get("eligible"):
-                raise ShadowStartGateError(
-                    "shadow start gate failed: " + ", ".join(evaluation.get("failed", [])),
+                if not row:
+                    raise ShadowError("shadow run does not exist")
+                if row["status"] == "running":
+                    return dict(row)
+                if row["status"] != "draft":
+                    raise ShadowConflict(f"cannot start a {row['status']} shadow run")
+                if started < _aware(row["created"]):
+                    raise ValueError("shadow start time cannot precede draft creation")
+                other_running = await session.scalar(
+                    sa.select(runs_t.c.id)
+                    .where(runs_t.c.status == "running", runs_t.c.id != run_id)
+                    .limit(1),
                 )
-            gate_hash = commitment(live_gate)
-            if expected_start_gate_hash is not None and expected_start_gate_hash != gate_hash:
-                raise ShadowStartGateError("shadow start gate changed; preview again")
-            scheduled_end = started + timedelta(hours=int(row["policy_config"]["run_hours"]))
-            await session.execute(
-                sa.update(runs_t)
-                .where(runs_t.c.id == run_id, runs_t.c.status == "draft")
-                .values(
-                    status="running",
-                    start_gate=live_gate,
-                    start_gate_hash=gate_hash,
-                    started=started,
-                    scheduled_end=scheduled_end,
-                ),
-            )
+                if other_running:
+                    raise ShadowConflict("another shadow run is already running")
+                config = runtime_policy_config(row["policy_config"])
+                verification = {key: bool(row["start_gate"].get(key)) for key in _VERIFICATION_KEYS}
+                live_gate = await live_start_gate_snapshot(
+                    verification=verification,
+                    observed_at=started,
+                    policy_config=config,
+                )
+                evaluation = live_gate["evaluation"]
+                if not evaluation.get("eligible"):
+                    raise ShadowStartGateError(
+                        "shadow start gate failed: " + ", ".join(evaluation.get("failed", [])),
+                    )
+                gate_hash = commitment(live_gate)
+                if expected_start_gate_hash is not None and expected_start_gate_hash != gate_hash:
+                    raise ShadowStartGateError("shadow start gate changed; preview again")
+                scheduled_end = started + timedelta(hours=int(row["policy_config"]["run_hours"]))
+                await session.execute(
+                    sa.update(runs_t)
+                    .where(runs_t.c.id == run_id, runs_t.c.status == "draft")
+                    .values(
+                        status="running",
+                        start_gate=live_gate,
+                        start_gate_hash=gate_hash,
+                        started=started,
+                        scheduled_end=scheduled_end,
+                    ),
+                )
+        except IntegrityError as exc:
+            raise ShadowConflict("another shadow run is already running") from exc
     return {
         **dict(row),
         "status": "running",
@@ -1330,7 +1352,7 @@ async def finish_run(
     _require_enabled()
     if status not in {"completed", "failed", "cancelled"}:
         raise ValueError("terminal run status must be completed, failed, or cancelled")
-    ended = _aware(ended_at or _now())
+    ended = _fresh_transition_time(ended_at or _now(), label="shadow finish time")
     async with await new_session() as session:
         async with session.begin():
             row = (

@@ -55,6 +55,7 @@ async def pg(monkeypatch):
             validator_shadow_sample_seconds=300,
         ),
     )
+    monkeypatch.setattr(shadow, "_now", lambda: NOW)
 
     async def fake_live_gate(**kwargs):
         snapshot = {
@@ -170,6 +171,26 @@ async def test_conflicting_observation_race_never_rewrites_winner(pg):
         rows = (await session.execute(sa.select(observations_t))).mappings().all()
     assert len(rows) == 1
     assert rows[0]["payload_hash"] == successes[0]["payload_hash"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_shadow_starts_have_one_winner(pg):
+    run_ids = ("shadow_pg_start_one", "shadow_pg_start_two")
+    for run_id in run_ids:
+        await shadow.create_run(
+            run_id=run_id,
+            policy_config=None,
+            implementation_commit="a" * 40,
+            verification_ref=f"ci://validator-shadow/{run_id}",
+            verification=_gate(),
+            observed_at=NOW,
+        )
+    results = await asyncio.gather(
+        *(shadow.start_run(run_id, started_at=NOW) for run_id in run_ids),
+        return_exceptions=True,
+    )
+    assert len([row for row in results if isinstance(row, dict)]) == 1
+    assert len([row for row in results if isinstance(row, shadow.ShadowConflict)]) == 1
 
 
 @pytest.mark.asyncio

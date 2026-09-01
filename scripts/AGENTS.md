@@ -109,6 +109,8 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   transition from a stale preview, mutable checkout, abbreviated implementation
   commit, or non-immutable verification reference. Never complete a run until
   its scheduled end has passed and `transport` reports a fully drained outbox.
+  Apply timestamps must be within five minutes of Core's UTC clock; only one
+  run may be `running` at a time.
 - Media reference review is two-step: use `review_validator_reference.py` with
   `--action review` to create/update a paused quality row, let the default-off
   chain sync write a fresh exact bond proof, then preview/apply `--action

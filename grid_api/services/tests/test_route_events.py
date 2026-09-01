@@ -94,7 +94,7 @@ async def test_route_event_is_committed_bounded_and_contains_compatible_candidat
     monkeypatch.setattr(route_events, "get_settings", _settings)
     monkeypatch.setattr(route_events, "get_redis", lambda: redis)
 
-    await route_events._emit_route(_job(), "model-a", "worker-a")
+    await route_events._emit_route(route_events._route_capture(_job()), "model-a", "worker-a")
 
     assert len(redis.events) == 1
     stream, event = redis.events[0]
@@ -129,7 +129,8 @@ async def test_oversized_worker_registry_fails_capture_closed(monkeypatch):
 
     with pytest.raises(ValueError, match="snapshot exceeds"):
         await route_events._candidate_snapshot(
-            job=_job(),
+            job_type="text",
+            api_format="openai-chat",
             selected_model="model-a",
             actual_worker_id="worker-a",
         )
@@ -141,7 +142,7 @@ async def test_capture_timeout_is_bounded_and_never_escapes(monkeypatch):
     monkeypatch.setattr(route_events, "get_redis", lambda: HangingRegistryRedis())
     monkeypatch.setattr(route_events, "CAPTURE_TIMEOUT_SECONDS", 0.01)
 
-    await route_events._emit_route(_job(), "model-a", "worker-a")
+    await route_events._emit_route(route_events._route_capture(_job()), "model-a", "worker-a")
 
 
 @pytest.mark.asyncio
@@ -150,7 +151,7 @@ async def test_outcome_contains_no_raw_job_identifier(monkeypatch):
     monkeypatch.setattr(route_events, "get_settings", _settings)
     monkeypatch.setattr(route_events, "get_redis", lambda: redis)
 
-    await route_events._emit_outcome(_job(), "worker-a", "succeeded", 1.25)
+    await route_events._emit_outcome(route_events._route_ref(_job()), "worker-a", "succeeded", 1.25)
 
     event = redis.events[0][1]
     assert event["duration_ms"] == "1250"
@@ -178,6 +179,24 @@ def test_disabled_capture_creates_no_task(monkeypatch):
     before = set(route_events._pending)
     route_events.capture_route(job=_job(), selected_model="model-a", worker_id="worker-a")
     assert route_events._pending == before
+
+
+def test_scheduled_capture_envelope_retains_no_customer_payload(monkeypatch):
+    monkeypatch.setattr(route_events, "get_settings", _settings)
+    capture = route_events._route_capture(_job())
+    serialized = json.dumps(capture)
+    assert set(capture) == {"route_ref", "job_type", "api_format", "task_class", "capability"}
+    assert "private-job-id" not in serialized
+    assert "private customer prompt" not in serialized
+
+
+def test_settings_failure_never_reaches_worker_path(monkeypatch):
+    def broken_settings():
+        raise RuntimeError("settings unavailable")
+
+    monkeypatch.setattr(route_events, "get_settings", broken_settings)
+    route_events.capture_route(job=_job(), selected_model="model-a", worker_id="worker-a")
+    route_events.capture_outcome(job=_job(), worker_id="worker-a", terminal_status="failed")
 
 
 @pytest.mark.asyncio

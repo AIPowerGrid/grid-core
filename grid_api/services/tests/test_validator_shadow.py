@@ -50,6 +50,7 @@ async def db(monkeypatch):
             validator_shadow_sample_seconds=300,
         ),
     )
+    monkeypatch.setattr(shadow, "_now", lambda: NOW)
     try:
         yield
     finally:
@@ -546,6 +547,48 @@ async def test_collection_is_dark_by_default(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_start_and_finish_times_must_be_current(db, monkeypatch):
+    monkeypatch.setattr(shadow, "live_start_gate_snapshot", _fake_live_gate())
+    await shadow.create_run(
+        run_id=RUN_ID,
+        policy_config=None,
+        implementation_commit="a" * 40,
+        verification_ref="ci://validator-shadow/fresh-time",
+        verification=_gate(),
+        observed_at=NOW,
+    )
+    with pytest.raises(ValueError, match="within five minutes"):
+        await shadow.start_run(RUN_ID, started_at=NOW - timedelta(minutes=6))
+    with pytest.raises(ValueError, match="cannot precede draft creation"):
+        await shadow.start_run(RUN_ID, started_at=NOW - timedelta(minutes=1))
+    running = await shadow.start_run(RUN_ID, started_at=NOW)
+    monkeypatch.setattr(shadow, "_now", lambda: running["scheduled_end"])
+    with pytest.raises(ValueError, match="within five minutes"):
+        await shadow.finish_run(
+            RUN_ID,
+            status="completed",
+            ended_at=running["scheduled_end"] + timedelta(minutes=6),
+        )
+
+
+@pytest.mark.asyncio
+async def test_only_one_shadow_run_may_be_running(db, monkeypatch):
+    monkeypatch.setattr(shadow, "live_start_gate_snapshot", _fake_live_gate())
+    for run_id in (RUN_ID, "shadow_2026_09_01_protocol_v2"):
+        await shadow.create_run(
+            run_id=run_id,
+            policy_config=None,
+            implementation_commit="a" * 40,
+            verification_ref=f"ci://validator-shadow/{run_id}",
+            verification=_gate(),
+            observed_at=NOW,
+        )
+    await shadow.start_run(RUN_ID, started_at=NOW)
+    with pytest.raises(shadow.ShadowConflict, match="already running"):
+        await shadow.start_run("shadow_2026_09_01_protocol_v2", started_at=NOW)
+
+
+@pytest.mark.asyncio
 async def test_ineligible_run_cannot_start_even_when_enabled(db, monkeypatch):
     monkeypatch.setattr(
         shadow,
@@ -892,8 +935,10 @@ def test_missing_samples_and_negative_quorum_are_both_reported_as_gaps():
 @pytest.mark.asyncio
 async def test_run_cannot_complete_early_and_completion_never_promotes(db, monkeypatch):
     await _running_run(monkeypatch)
+    monkeypatch.setattr(shadow, "_now", lambda: NOW + timedelta(hours=167))
     with pytest.raises(shadow.ShadowStartGateError, match="before 168 hours"):
         await shadow.finish_run(RUN_ID, status="completed", ended_at=NOW + timedelta(hours=167))
+    monkeypatch.setattr(shadow, "_now", lambda: NOW + timedelta(hours=168))
     done = await shadow.finish_run(RUN_ID, status="completed", ended_at=NOW + timedelta(hours=168))
     assert done["status"] == "completed"
     report = await shadow.run_report(RUN_ID, at=NOW + timedelta(hours=168))
@@ -905,6 +950,7 @@ async def test_run_cannot_complete_early_and_completion_never_promotes(db, monke
 @pytest.mark.asyncio
 async def test_finish_rejects_stale_operator_run_state_hash(db, monkeypatch):
     running = await _running_run(monkeypatch)
+    monkeypatch.setattr(shadow, "_now", lambda: NOW + timedelta(hours=168))
     with pytest.raises(shadow.ShadowConflict, match="run state changed"):
         await shadow.finish_run(
             RUN_ID,

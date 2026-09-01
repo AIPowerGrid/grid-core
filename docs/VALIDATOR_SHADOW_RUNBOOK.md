@@ -18,6 +18,9 @@ validator release merely to start this server-side run.
   the production secret path.
 - Every database mutation is preview-first. Apply with the exact UTC `--at` and
   gate/state hash from that preview. A changed gate or run row fails closed.
+- Apply timestamps must remain within five minutes of Core's UTC clock, and a
+  run cannot start before its draft was created. Core and the database permit
+  at most one `running` shadow experiment.
 - The implementation commit is the exact deployed Core commit, not a branch or
   abbreviated SHA. The verification reference is the immutable GitHub Actions
   run or job URL that proves the candidate.

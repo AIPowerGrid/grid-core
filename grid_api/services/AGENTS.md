@@ -197,8 +197,9 @@ content sanitization, and reward settlement.
   sample slots and successful ledger completions absent from the route capture
   count against report coverage. `route_events.py` is the neutral, non-awaited
   producer: after actual dispatch it HMAC-commits job/Redis-delivery identity,
-  snapshots bounded compatible replicas, and writes no prompt, output, account,
-  wallet, worker name, or validator identity. `validator_shadow_collector.py` is
+  reduces the job to bounded metadata before scheduling background work,
+  snapshots compatible replicas, and writes no prompt, output, account, wallet,
+  worker name, or validator identity. `validator_shadow_collector.py` is
   the only outbox consumer allowed to import `validator_shadow`; it uses a Redis
   lease, retries transient faults, records outcomes/capacity, and has no routing
   or economic output. The Redis outbox is bounded; SQL retention configuration
