@@ -6,6 +6,13 @@ Prepared procedure only. Do not execute it while Core reports fewer than three
 recently participating, independently reviewed validator operator groups. Shadow
 collection has no routing, reward, strike, bond, payout, or slashing authority.
 
+Core `e1e4ad4c9eeb277f385a2359f3bc418917a7f0e1` and Alembic `0034` are
+production-live with the observer disabled. The dark deploy passed a
+production-backup restore/migration/drift proof; the shadow tables remained
+empty and no route-event stream existed. A 2026-09-01 read-only gate run failed
+only the three expected cohort checks. This does not authorize enabling the
+collector.
+
 The cohort baseline remains `v0.1.0-preview.13`. Do not publish a replacement
 validator release merely to start this server-side run.
 
@@ -35,14 +42,37 @@ validator release merely to start this server-side run.
 - A completed report can be reviewed; it cannot promote itself or change live
   behavior.
 
-Run every command through the selected immutable release virtual environment:
+Production releases live under `/home/aipg/releases`, not `/opt`. Run every
+command through the selected immutable release virtual environment:
 
 ```bash
-PY=/opt/aipg/releases/<release>/.venv/bin/python
-TOOL=/opt/aipg/releases/<release>/scripts/manage_validator_shadow_run.py
+PY=/home/aipg/releases/<release>/.venv/bin/python
+TOOL=/home/aipg/releases/<release>/scripts/manage_validator_shadow_run.py
 ```
 
 Do not point these variables at a mutable checkout.
+
+The production environment file is root-readable and the service runs as
+`aipg`. Load the environment as root, then enter an `aipg` shell with the target
+user's home before using any command below:
+
+```bash
+sudo bash -c '
+  set -a
+  . /etc/aipg/grid.env
+  set +a
+  exec sudo -H -E -u aipg /bin/bash
+'
+test "$HOME" = /home/aipg
+cd /home/aipg/releases/<release>
+PY=$PWD/.venv/bin/python
+TOOL=$PWD/scripts/manage_validator_shadow_run.py
+```
+
+Do not omit `-H`. Preserving root's `HOME` makes asyncpg inspect
+`/root/.postgresql` and can fail before the gate is evaluated. Keep the
+verification JSON readable by `aipg`; the file contains proof booleans and must
+not contain database credentials or the route HMAC secret.
 
 ## 1. Verification evidence
 
