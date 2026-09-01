@@ -160,6 +160,7 @@ async def review_operator(
     operator_group_id: str | None = None,
     review_ref: str | None = None,
     review_days: int = DEFAULT_REVIEW_DAYS,
+    restart_qualification: bool = False,
     expected_digest: str | None = None,
     apply: bool = False,
     now: datetime | None = None,
@@ -168,6 +169,10 @@ async def review_operator(
     action = action.strip().lower()
     if action not in _ACTIONS:
         raise OperatorReviewError("action must be candidate, verify, or reject")
+    if restart_qualification and action != "candidate":
+        raise OperatorReviewError(
+            "restart_qualification is valid only for a candidate transition",
+        )
     if operator_group_id is not None and not GROUP_RE.fullmatch(operator_group_id):
         raise OperatorReviewError("operator_group_id must be an opaque opg_* identifier")
     if not review_ref or len(review_ref) > 128:
@@ -208,6 +213,10 @@ async def review_operator(
             group_id = operator_group_id or state["operator_group_id"]
             if not group_id or not GROUP_RE.fullmatch(group_id):
                 raise OperatorReviewError("candidate transition requires operator_group_id")
+            if state["independence_status"] == "candidate" and not restart_qualification:
+                blocking_reasons.append(
+                    "candidate qualification is already active; explicitly restart qualification to reset it",
+                )
             values = {
                 "operator_group_id": group_id,
                 "independence_status": "candidate",
@@ -269,6 +278,7 @@ async def review_operator(
             "required_software_version": required_version,
             "software_version_supported": version_supported,
             "review_ref": review_ref,
+            "restart_qualification": restart_qualification,
             "economic_effect": "none",
         }
         if apply:

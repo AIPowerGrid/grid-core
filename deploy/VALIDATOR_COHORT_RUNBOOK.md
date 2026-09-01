@@ -88,7 +88,11 @@ $PY scripts/review_validator_operator.py \
 
 Candidate application starts a new qualification clock and clears prior
 heartbeat samples. Do not repeat it to repair a temporarily offline node; doing
-so deliberately restarts the 72-hour window.
+so deliberately restarts the 72-hour window. Core rejects applying a candidate
+transition when qualification is already active unless the command includes
+`--restart-qualification`. Run a fresh preview with the same flag before its
+matching apply command. Use that flag only when the protected review record says
+the existing progress must be discarded.
 
 Core rejects both candidate and verify transitions unless the node's latest
 registration/heartbeat reports the exact frozen cohort baseline configured by
@@ -143,6 +147,9 @@ $PY scripts/review_validator_operator.py \
 Inspect `qualification`, `activity`, `eligible_to_apply`, and
 `blocking_reasons`. An incomplete preview is read-only and reports every unmet
 gate. Applying the same transition still fails closed until all blockers clear.
+Do not run `--action candidate` during monitoring or graduation; an accidental
+candidate re-entry is blocked, while an explicit restart discards all elapsed
+time and heartbeat samples.
 
 Production Core can also run the aggregate cohort watchdog with
 `VALIDATOR_COHORT_MONITOR_ENABLED=1`. Every configured interval it evaluates
