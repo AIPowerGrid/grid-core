@@ -11,8 +11,10 @@ validator release merely to start this server-side run.
 
 ## Safety contract
 
-- Deploy the reviewed Core release and migration with
-  `VALIDATOR_SHADOW_OBSERVER_ENABLED=0` first.
+- Deploy the reviewed Core release and migrate through Alembic `0033` with
+  `VALIDATOR_SHADOW_OBSERVER_ENABLED=0` first. Migration `0032` creates the
+  shadow records; `0033` adds the database-enforced single-running-run guard.
+  `alembic current` must report `0033`; `0032` alone is not deploy-ready.
 - Use one stable, randomly generated 32+ character
   `VALIDATOR_SHADOW_ROUTE_HMAC_SECRET` for the entire run. Store it only through
   the production secret path.
