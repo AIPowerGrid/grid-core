@@ -149,7 +149,9 @@ content sanitization, and reward settlement.
   starts cannot satisfy the gate.
   A verify preview reports current qualification metrics and every blocking
   reason even before the gate is satisfied; an apply remains fail-closed until
-  all blockers clear and requires that preview's exact state digest.
+  all blockers clear and requires that preview's exact state digest. Candidate
+  re-entry cannot silently reset an active clock; apply requires an explicit
+  reset acknowledgement, and operators must use it on both preview and apply.
   A control group occupies at most one seat in any probe group. Public health
   exposes only distinct aggregate group counts, never group ids or review refs.
   The account-authenticated registration view exposes that operator's own

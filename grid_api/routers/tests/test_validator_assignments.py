@@ -455,6 +455,96 @@ async def test_operator_review_rejects_outdated_cohort_version(db):
 
 
 @pytest.mark.asyncio
+async def test_candidate_restart_requires_explicit_preview_and_apply(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, software_version="v0.1.0-preview.13")
+    with pytest.raises(
+        validator_operators.OperatorReviewError,
+        match="valid only for a candidate transition",
+    ):
+        await validator_operators.review_operator(
+            validator_id,
+            action="verify",
+            review_ref="review:invalid-restart-action",
+            restart_qualification=True,
+        )
+    started = datetime.now(UTC) - timedelta(hours=24)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t)
+            .where(validators_t.c.id == validator_id)
+            .values(
+                operator_group_id="opg_restart_test_01",
+                independence_status="candidate",
+                qualification_started_at=started,
+                heartbeat_sample_count=100,
+                last_heartbeat_sampled_at=started + timedelta(hours=23),
+            ),
+        )
+        await session.commit()
+
+    blocked = await validator_operators.review_operator(
+        validator_id,
+        action="candidate",
+        operator_group_id="opg_restart_test_01",
+        review_ref="review:accidental-restart",
+        apply=False,
+        now=datetime.now(UTC),
+    )
+    assert blocked["eligible_to_apply"] is False
+    assert blocked["restart_qualification"] is False
+    assert blocked["blocking_reasons"] == [
+        "candidate qualification is already active; explicitly restart qualification to reset it",
+    ]
+    with pytest.raises(
+        validator_operators.OperatorReviewError,
+        match="qualification is already active",
+    ):
+        await validator_operators.review_operator(
+            validator_id,
+            action="candidate",
+            operator_group_id="opg_restart_test_01",
+            review_ref="review:accidental-restart",
+            expected_digest=blocked["current_digest"],
+            apply=True,
+            now=datetime.now(UTC),
+        )
+
+    restart_now = datetime.now(UTC)
+    preview = await validator_operators.review_operator(
+        validator_id,
+        action="candidate",
+        operator_group_id="opg_restart_test_01",
+        review_ref="review:deliberate-restart",
+        restart_qualification=True,
+        apply=False,
+        now=restart_now,
+    )
+    assert preview["eligible_to_apply"] is True
+    assert preview["restart_qualification"] is True
+    applied = await validator_operators.review_operator(
+        validator_id,
+        action="candidate",
+        operator_group_id="opg_restart_test_01",
+        review_ref="review:deliberate-restart",
+        restart_qualification=True,
+        expected_digest=preview["current_digest"],
+        apply=True,
+        now=restart_now,
+    )
+    assert applied["eligible_to_apply"] is True
+    async with await database.new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(validators_t).where(validators_t.c.id == validator_id),
+            )
+        ).mappings().one()
+    assert validator_operators._aware(row["qualification_started_at"]) == restart_now
+    assert row["heartbeat_sample_count"] == 0
+    assert row["last_heartbeat_sampled_at"] is None
+
+
+@pytest.mark.asyncio
 async def test_candidate_heartbeat_sampling_is_rate_limited(db):
     account_id = uuid.uuid4()
     validator_id = await _register(account_id)
