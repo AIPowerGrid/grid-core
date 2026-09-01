@@ -197,13 +197,15 @@ content sanitization, and reward settlement.
   sample slots and successful ledger completions absent from the route capture
   count against report coverage. `route_events.py` is the neutral, non-awaited
   producer: after actual dispatch it HMAC-commits job/Redis-delivery identity,
-  reduces the job to bounded metadata before scheduling background work,
-  snapshots compatible replicas, and writes no prompt, output, account, wallet,
-  worker name, or validator identity. `validator_shadow_collector.py` is
-  the only outbox consumer allowed to import `validator_shadow`; it uses a Redis
-  lease, retries transient faults, records outcomes/capacity, and has no routing
-  or economic output. The Redis outbox is bounded; SQL retention configuration
-  remains reserved until an append-only-compatible pruner is designed and tested.
+  reduces the job to bounded metadata before scheduling background work, uses a
+  two-second single-flight cache of minimal worker fields to snapshot compatible
+  replicas, caps snapshots at 256 candidates and 128,000 UTF-8 bytes, and writes
+  no prompt, output, account, wallet, worker name, or validator identity.
+  `validator_shadow_collector.py` is the only outbox consumer allowed to import
+  `validator_shadow`; it uses a Redis lease, retries transient faults, records
+  outcomes/capacity, and has no routing or economic output. The Redis outbox has
+  a 10,000-event emergency bound; SQL retention configuration remains reserved
+  until an append-only-compatible pruner is designed and tested.
   Preview group acceptance still records distinct-registration quorum for
   compatibility; independent-operator quorum is a separate explicit signal and
   is not required for acceptance until a later reviewed authority gate.
