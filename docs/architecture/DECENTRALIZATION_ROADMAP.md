@@ -69,6 +69,14 @@ qualification, expires reviews, prevents a group from occupying multiple seats,
 and publishes only aggregate counts. It is a conservative precursor to, not a
 replacement for, the audited Base registry in Phase B.
 
+An initial milestone of three recently participating, independently qualified
+groups permits the default-off seven-day observer in
+[`VALIDATOR_SHADOW_AUTHORITY.md`](VALIDATOR_SHADOW_AUTHORITY.md). The observer
+records what a frozen validator advisory policy would have changed while the
+production router remains authoritative and unchanged. It does not satisfy the
+five-operator/30-day Phase A exit, and neither its completion nor its findings
+enable rewards, routing weight, strikes, bonds, or slashing automatically.
+
 ## Phase B - Base Validator And Evidence Contracts
 
 Do not deploy these contracts until Phase A exit evidence exists and the

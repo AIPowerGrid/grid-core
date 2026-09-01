@@ -21,6 +21,10 @@ validation, worker incentives, and trust boundaries.
   economic gates.
 - `VALIDATOR_ANTI_GAMING.md` - executable hostile-worker baseline, public-probe
   limitations, blind-audit contract, and the quality-evidence promotion gate.
+- `VALIDATOR_SHADOW_AUTHORITY.md` - default-off seven-day advisory-routing
+  observation contract after three independently qualified operators. It owns
+  the no-side-effect boundary, eligible evidence, replayable decision record,
+  and review gates; completing a run does not activate routing or economics.
 - `VALIDATOR_ACCOUNT_PAIRING.md` - default-off, two-party association of an
   enrolled node with a human account, without identity merges, key transfer,
   payout changes, or trust grants. Core, Console and local-app implementations
@@ -71,6 +75,9 @@ validation, worker incentives, and trust boundaries.
   transport, never authority for global Google or wallet identities.
 - Validator/slashing docs must not imply automatic slashing exists until
   enforcement and WorkerRegistry integration are wired and reviewed.
+- Shadow validator policy must remain asynchronous and observational. It may
+  compare hypothetical and actual routing only after the independent cohort
+  gate; no router or economic path may read shadow records.
 - Validator/fidelity docs must separate reproducible workflow certification
   from product policies such as NFT minting or marketplace eligibility.
 
