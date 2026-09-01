@@ -182,6 +182,18 @@ content sanitization, and reward settlement.
   output and alerts contain counts only, never validator IDs, group IDs, review
   refs, wallets, accounts, prompts, responses, or evidence. It has no routing,
   reward, strike, payout, qualification, or slashing side effect.
+  `validator_shadow.py` owns the separately gated seven-day advisory observer.
+  It derives evidence only from Core-reverified finalized assignment,
+  attestation, signature, nonce, evidence-hash, frozen-version, heartbeat, and
+  expiring operator-review bindings. Duplicate operator groups count once.
+  Its public observation function never accepts caller-asserted binding
+  validity. Shadow runs, observations, outcomes, Core-derived capacity samples,
+  and bounded errors are private replay records only; routing, worker health,
+  credits, settlement, payouts, rewards, bonds, strikes, and slashing must
+  neither import this module nor query its tables. The flag defaults off, the
+  CLI is read-only, and a completed run cannot promote itself. Missing expected
+  sample slots count against report coverage. Retention configuration is
+  reserved until a future collector owns a tested pruner.
   Preview group acceptance still records distinct-registration quorum for
   compatibility; independent-operator quorum is a separate explicit signal and
   is not required for acceptance until a later reviewed authority gate.

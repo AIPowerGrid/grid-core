@@ -10,7 +10,8 @@ epochs, per-asset revenue pots (`grid_revenue`), multi-asset payout legs
 assignment/attestation evidence rows, bounded service clients plus their
 delegation audit events, private identity-bound media-worker control reviews,
 the fail-closed bonded media reference-worker snapshot pool, and private
-compensated-audit jobs plus hourly budget counters.
+compensated-audit jobs plus hourly budget counters, and economically inert
+validator shadow-observation records.
 
 ## Ownership
 
@@ -81,6 +82,17 @@ compensated-audit jobs plus hourly budget counters.
   review references are never public. Group/validator uniqueness on assignments
   and attestations remains the final database guard against duplicate identity
   membership or votes.
+- `grid_validator_shadow_runs`, `grid_validator_shadow_observations`,
+  `grid_validator_shadow_outcomes`, `grid_validator_shadow_capacity_samples`,
+  and `grid_validator_shadow_errors` are the private append-only evidence for a
+  reviewed seven-day advisory experiment. They store bounded candidate and
+  evidence snapshots plus commitments, never customer prompts/outputs,
+  accounts, wallets, signatures, nonces, operator-group ids, or review refs.
+  `mutation_attempted` is constrained false and fixed-size commitments are
+  enforced by the database. No production routing or economic path may read
+  these tables, and creating them grants no validator authority.
+  Alembic `0032` must exist before the observer flag can be considered; the flag
+  remains off until the independently reviewed three-operator start gate passes.
 - `grid_validator_pairings` is one replaceable, expiring slot per registered
   validator. `grid_validator_account_links` stores its current signed human-
   account association and revocation time. These are private operational

@@ -2,12 +2,15 @@
 
 ## Status
 
-Accepted rollout contract, not a live feature. Production validator evidence is
-currently observability-only and the real router does not read it. Shadow mode
-may start only after three recently participating, independently reviewed
-operator groups complete the validator cohort gate. It runs for seven days
-without changing routing, rewards, worker status, den, payouts, bonds, strikes,
-or slashing.
+Accepted rollout contract with a disabled-by-default Core implementation;
+collection is not live. Migration `0032`, the pure policy, Core-derived evidence
+snapshot, append-only replay store, live start-gate evaluator, aggregate report
+CLI, import isolation guard, and SQLite/PostgreSQL concurrency tests exist.
+Production validator evidence remains observability-only and the real router
+does not read it. Shadow mode may start only after three recently participating,
+independently reviewed operator groups complete the validator cohort gate. It
+runs for seven days without changing routing, rewards, worker status, den,
+payouts, bonds, strikes, or slashing.
 
 Shadow mode is an evaluation phase, not partial authority. Completing it creates
 a review artifact; it does not enable routing or validator economics.
@@ -63,6 +66,12 @@ The maintainer may begin a shadow run only when all of these are true:
 - the observation policy and configuration hash are recorded; and
 - production routing and validator economic effect still report `none`.
 
+The draft gate is derived from current Core records rather than supplied
+operator counts. Starting a draft re-derives the gate, freezes that fresh
+snapshot, and fails if capacity or cohort health changed between review and
+start. PostgreSQL migration/concurrency, replay, and no-side-effect proofs remain
+explicit reviewed inputs referenced by the run artifact.
+
 Five independent operators remain the broader pilot target. Three is enough to
 start this bounded readiness experiment, not enough to claim mature fault
 tolerance.
@@ -81,6 +90,15 @@ A shadow opinion may use only a finalized probe group that:
 `disputed`, `inconclusive`, reference-unavailable, and Core/verdict-disagreement
 groups remain visible but cannot become a worker-negative opinion. Preview rows
 and ordinary registration quorum are never promoted by inference.
+
+The implemented collector boundary does not accept a caller-provided
+`bindings_valid` assertion. Core joins finalized probe groups to their exact
+assignments, authoritative attestations, and registered validators, then
+rechecks signature status, assignment/validator/group identity, Grid nonce,
+evidence hash, Core probe verdict, worker/model/modality/capability/policy
+bindings, qualification timing, frozen software version, heartbeat freshness,
+review status, review expiry, and distinct opaque operator groups. Only the
+resulting bounded commitment and count enter the replay snapshot.
 
 ## Decision Record
 
@@ -105,8 +123,10 @@ signatures, nonces, private review references, IPs, or host data.
 
 ## Seven-Day Observation
 
-The run lasts at least 168 wall-clock hours. Core samples independent capacity
-at bounded intervals and records gaps rather than substituting first-party
+The run lasts at least 168 wall-clock hours. Core derives independent capacity
+from current reviewed registrations and finalized evidence at bounded intervals;
+callers cannot supply the counts. Missing expected five-minute slots count
+against coverage, and gaps are recorded rather than filled with first-party
 votes. The report is eligible for review only when:
 
 - at least 80 percent of observation samples have three recently participating
@@ -120,6 +140,12 @@ votes. The report is eligible for review only when:
   explain rather than hidden in a global average; and
 - an automated invariant test and production audit confirm zero real routing or
   economic reads from the shadow records.
+
+The report also requires terminal outcomes for at least 80 percent of recorded
+observations. A run marked `completed` means only that its frozen 168-hour window
+elapsed and was closed. Only the separate `review_eligible` gate means the
+coverage, outcome, replay, gap, and zero-mutation checks all passed; neither state
+promotes the observer automatically.
 
 If the capacity or integrity gate fails, the run is evidence about readiness but
 does not satisfy the seven-day milestone. Restore the cohort, freeze a new run,
@@ -143,20 +169,28 @@ revise and rerun, not to activate it.
 
 ## Implementation Order
 
-1. Add a pure, versioned advisory-policy function over frozen candidate and
-   finalized-evidence inputs.
-2. Add an append-only observation store plus bounded retention and replay.
-3. Run the observer from a durable background/outbox boundary after the real
-   route is selected; never call it from the route-critical transaction.
-4. Add PostgreSQL concurrency and replay tests, explicit import/query guards,
-   and tests proving every user-visible and economic output is unchanged.
-5. Expose privacy-safe aggregate health and a maintainer report command.
-6. Dark-deploy with collection disabled and verify migration/rollback.
-7. After the three-operator gate, freeze one policy and start the seven-day run.
-8. Review the report before discussing any routing-weight experiment. Validator
+1. **Implemented dark:** pure, versioned advisory-policy function over frozen
+   candidate and Core-derived finalized-evidence inputs.
+2. **Implemented dark:** append-only observation store, outcome/capacity/error
+   records, replay, start-gate evaluation, aggregate reporting, migration, and
+   no-side-effect/import/concurrency tests.
+3. **Next, after review:** run the observer from a durable background/outbox
+   boundary after the real route is selected; never call it from the
+   route-critical transaction.
+4. Add the route/outcome outbox integration and prove every user-visible and
+   economic output remains byte-for-byte unchanged under collection faults.
+5. Dark-deploy with collection disabled and verify migration/rollback on the
+   production-shaped release.
+6. After the three-operator gate, freeze one policy and start the seven-day run.
+7. Review the report before discussing any routing-weight experiment. Validator
    rewards remain out of scope.
 
 This implementation belongs to Core. The public validator binary continues to
 submit the same signed evidence and does not need a new release for shadow
 collection. In particular, do not publish preview.14 merely to begin this work;
 preview.13 remains the cohort baseline while an operator is qualifying.
+
+`VALIDATOR_SHADOW_RETENTION_DAYS` reserves the operational policy value, but no
+pruner is wired yet. Do not claim retention enforcement until the future
+collector owns and tests that cleanup path; existing shadow evidence remains
+append-only in this dark foundation.

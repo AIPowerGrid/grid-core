@@ -95,6 +95,16 @@ executes an immutable release selected through `/home/aipg/current`.
   and duplicate reviewed control groups. It never changes qualification or any
   economic/routing state. Keep its interval, window, and frozen baseline in
   `env.template`, `config.py`, and the cohort runbook aligned.
+- `VALIDATOR_SHADOW_OBSERVER_ENABLED` is a separate, default-off seven-day
+  advisory-observation gate. Installing migration `0032` or deploying report
+  tooling does not permit a run to start. Enable it only after three current,
+  participating, independently reviewed operator groups have produced real
+  finalized quorum and the frozen PostgreSQL migration/concurrency, replay, and
+  no-side-effect verification reference is recorded. Keep
+  `VALIDATOR_SHADOW_SAMPLE_SECONDS=300`; no router or economic unit may consume
+  shadow state. `VALIDATOR_SHADOW_RETENTION_DAYS` is reserved configuration
+  until the future collector ships a tested pruner, so do not claim that dark
+  records are currently deleted. Rollback is flag-off.
 - `OAUTH_AUTHORIZATION_RETENTION_SECONDS`,
   `OAUTH_UNUSED_CLIENT_RETENTION_SECONDS`, and `OAUTH_STATE_SWEEP_SECONDS`
   bound unauthenticated OAuth operational storage. Keep at least one hour of

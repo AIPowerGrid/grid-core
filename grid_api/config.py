@@ -119,6 +119,12 @@ class GridSettings(BaseSettings):
     validator_cohort_monitor_seconds: int = Field(default=300, ge=60, le=3600)
     validator_cohort_monitor_window_hours: int = Field(default=24, ge=1, le=720)
     validator_cohort_baseline_version: str = "v0.1.0-preview.13"
+    # Seven-day advisory comparison. Schema and report tooling may be deployed
+    # while false; no run can start and no observation can be written until the
+    # three-independent-operator gate is separately frozen and this is enabled.
+    validator_shadow_observer_enabled: bool = False
+    validator_shadow_sample_seconds: int = Field(default=300, ge=60, le=3600)
+    validator_shadow_retention_days: int = Field(default=90, ge=30, le=3650)
 
     # Remote-MCP OAuth operational rows are bounded independently of the
     # feature flag so rollback does not leave attacker-created registration
