@@ -117,6 +117,7 @@ async def test_route_event_is_committed_bounded_and_contains_compatible_candidat
     stream, event = redis.events[0]
     assert stream == route_events.STREAM_KEY
     assert event["kind"] == "route"
+    assert event["candidate_basis"] == route_events.CANDIDATE_BASIS
     assert len(event["route_ref"]) == 64
     assert event["capability"] == "text.tool_call.v1"
     assert event["task_class"]

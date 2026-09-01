@@ -22,7 +22,7 @@ from ..v2.schema import validator_shadow_observations as observations_t
 from ..v2.schema import validator_shadow_outcomes as outcomes_t
 from ..v2.schema import validator_shadow_runs as runs_t
 from . import validator_shadow as shadow
-from .route_events import MAX_CANDIDATE_BYTES, MAX_CANDIDATES, STREAM_KEY
+from .route_events import CANDIDATE_BASIS, MAX_CANDIDATE_BYTES, MAX_CANDIDATES, STREAM_KEY
 
 logger = logging.getLogger("grid_api.validator_shadow_collector")
 
@@ -130,6 +130,10 @@ async def process_event(fields: dict[str, str], *, now: datetime | None = None) 
         run = await _run_for_time(observed_at)
         if not run:
             return "discard"
+        if fields.get("candidate_basis") != CANDIDATE_BASIS:
+            raise ValueError("route event has an unknown candidate basis")
+        if run["policy_config"].get("candidate_basis") != CANDIDATE_BASIS:
+            raise ValueError("shadow run candidate basis does not match the collector")
         encoded_candidates = str(fields["candidates"])
         if len(encoded_candidates.encode("utf-8")) > MAX_CANDIDATE_BYTES:
             raise ValueError("candidate snapshot is too large")

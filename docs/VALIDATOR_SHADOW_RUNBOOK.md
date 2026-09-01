@@ -86,7 +86,7 @@ Preview first:
 
 ```bash
 $PY $TOOL prepare \
-  --run-id shadow_2026_09_protocol_v2 \
+  --run-id shadow_2026_09_protocol_v3 \
   --implementation-commit <40-character-deployed-commit> \
   --verification-ref <immutable-grid-core-actions-run-or-job-url> \
   --verification-json /protected/shadow-verification.json \
@@ -98,7 +98,7 @@ the same proposal with the exact timestamp and hash:
 
 ```bash
 $PY $TOOL prepare \
-  --run-id shadow_2026_09_protocol_v2 \
+  --run-id shadow_2026_09_protocol_v3 \
   --implementation-commit <40-character-deployed-commit> \
   --verification-ref <immutable-grid-core-actions-run-or-job-url> \
   --verification-json /protected/shadow-verification.json \
@@ -134,7 +134,7 @@ Take a fresh preview with a new fixed UTC time:
 
 ```bash
 START_AT=2026-09-08T17:00:00Z
-$PY $TOOL start --run-id shadow_2026_09_protocol_v2 --at "$START_AT"
+$PY $TOOL start --run-id shadow_2026_09_protocol_v3 --at "$START_AT"
 ```
 
 Require `eligible_to_apply: true`, inspect every failed gate field, and apply
@@ -142,7 +142,7 @@ with the exact hash:
 
 ```bash
 $PY $TOOL start \
-  --run-id shadow_2026_09_protocol_v2 \
+  --run-id shadow_2026_09_protocol_v3 \
   --at "$START_AT" \
   --apply \
   --expect-gate-hash <preview-start-gate-hash>
@@ -157,13 +157,23 @@ At least daily, archive these aggregate outputs:
 
 ```bash
 $PY $TOOL transport
-$PY $TOOL report --run-id shadow_2026_09_protocol_v2
+$PY $TOOL report --run-id shadow_2026_09_protocol_v3
 ```
 
 Alert on collector lease loss, sustained stream backlog, observer errors,
 capacity gaps, route-capture loss, replay failure, or any nonzero mutation count.
 Do not repair bad evidence by editing rows or extending the frozen policy. Mark
 the run failed and repeat with a new run ID after fixing the cause.
+
+Every report must state:
+
+- `candidate_basis: post_dispatch_connected_compatible_replicas.v1`; and
+- `counterfactual_scope: same-model replica preference, not exact production scheduler replay`.
+
+This Grid uses pull-based dispatch. Do not present `would_change` as proof that
+the production scheduler considered and rejected the hypothetical worker. The
+sample can contain busy or prefetched replicas and can lead or lag dispatch by
+the bounded registry-cache/background-capture window.
 
 ## 7. Drain and close
 
@@ -182,7 +192,7 @@ completion tool enforces both. Then preview completion at a fixed UTC time:
 ```bash
 END_AT=2026-09-15T17:05:00Z
 $PY $TOOL finish \
-  --run-id shadow_2026_09_protocol_v2 \
+  --run-id shadow_2026_09_protocol_v3 \
   --status completed \
   --at "$END_AT"
 ```
@@ -191,7 +201,7 @@ Apply using the exact `current_run_state_hash`:
 
 ```bash
 $PY $TOOL finish \
-  --run-id shadow_2026_09_protocol_v2 \
+  --run-id shadow_2026_09_protocol_v3 \
   --status completed \
   --at "$END_AT" \
   --apply \

@@ -1207,6 +1207,8 @@ validator_shadow_observations = sa.Table(
     sa.Column("modality", sa.String(16), nullable=False),
     sa.Column("requested_capability", sa.String(128), nullable=False),
     sa.Column("candidate_set_hash", sa.String(64), nullable=False),
+    # Post-dispatch connected-compatible replica sample. This is not the exact
+    # candidate set considered by the pull-based production scheduler.
     sa.Column("candidate_snapshot", PortableJSON, nullable=False),
     sa.Column("evidence_snapshot", PortableJSON, nullable=False),
     sa.Column("actual_model", sa.String(255), nullable=False),

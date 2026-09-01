@@ -200,7 +200,12 @@ content sanitization, and reward settlement.
   reduces the job to bounded metadata before scheduling background work, uses a
   two-second single-flight cache of minimal worker fields to snapshot compatible
   replicas, caps snapshots at 256 candidates and 128,000 UTF-8 bytes, and writes
-  no prompt, output, account, wallet, worker name, or validator identity.
+  no prompt, output, account, wallet, worker name, or validator identity. Because
+  production dispatch is worker-pull, this is explicitly a post-dispatch sample
+  of connected compatible replicas, not the exact candidate set considered by a
+  centralized scheduler; it may include busy or prefetched workers. The policy,
+  event, collector, and report must agree on the fixed candidate basis, and the
+  report must disclose that its counterfactual is same-model replica preference.
   `validator_shadow_collector.py` is the only outbox consumer allowed to import
   `validator_shadow`; it uses a Redis lease, retries transient faults, records
   outcomes/capacity, and has no routing or economic output. The Redis outbox has

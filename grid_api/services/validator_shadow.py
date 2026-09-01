@@ -38,12 +38,14 @@ from ..v2.schema import validator_shadow_outcomes as outcomes_t
 from ..v2.schema import validator_shadow_runs as runs_t
 from ..v2.schema import validators as validators_t
 
-POLICY_VERSION = "aipg.validator.shadow.protocol-capability.v2"
+POLICY_VERSION = "aipg.validator.shadow.protocol-capability.v3"
+CANDIDATE_BASIS = "post_dispatch_connected_compatible_replicas.v1"
 RUN_HOURS = 168
 MIN_QUALIFICATION_SECONDS = 72 * 3600
 TRANSITION_CLOCK_SKEW_SECONDS = 300
 DEFAULT_POLICY_CONFIG: dict[str, Any] = {
     "policy_version": POLICY_VERSION,
+    "candidate_basis": CANDIDATE_BASIS,
     "validator_baseline_version": "v0.1.0-preview.13",
     "validator_heartbeat_fresh_seconds": 900,
     "minimum_qualification_seconds": MIN_QUALIFICATION_SECONDS,
@@ -175,6 +177,8 @@ def frozen_policy_config(overrides: Mapping[str, Any] | None = None) -> dict[str
 
     if config["policy_version"] != POLICY_VERSION:
         raise ValueError("unknown shadow policy version")
+    if config["candidate_basis"] != CANDIDATE_BASIS:
+        raise ValueError("unknown shadow candidate basis")
     if int(config["evidence_window_seconds"]) < 60:
         raise ValueError("evidence_window_seconds must be at least 60")
     baseline = str(config["validator_baseline_version"] or "").strip()
@@ -847,6 +851,7 @@ def _decision(
     result = {
         "schema": "aipg.validator.shadow-decision.v1",
         "policy_version": config["policy_version"],
+        "candidate_basis": config["candidate_basis"],
         "config_hash": commitment(config),
         "candidate_set_hash": commitment(candidate_set),
         "candidate_snapshot": list(candidate_set),
@@ -1650,6 +1655,8 @@ async def run_report(run_id: str, *, at: datetime | None = None) -> dict[str, An
         "run_id": run_id,
         "status": run["status"],
         "policy_version": run["policy_version"],
+        "candidate_basis": config["candidate_basis"],
+        "counterfactual_scope": "same-model replica preference, not exact production scheduler replay",
         "config_hash": run["config_hash"],
         "implementation_commit": run["implementation_commit"],
         "start_gate_hash": run["start_gate_hash"],

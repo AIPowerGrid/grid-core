@@ -21,6 +21,7 @@ def _route_event():
         "task_class": "simple",
         "modality": "text",
         "capability": "text.instruction.v1",
+        "candidate_basis": collector.CANDIDATE_BASIS,
         "candidates": json.dumps(
             [{"worker_id": "worker-a", "model": "model-a", "baseline_rank": 0}],
         ),
@@ -43,7 +44,13 @@ def _outcome_event(*, finished_at: datetime = NOW + timedelta(seconds=2)):
 @pytest.mark.asyncio
 async def test_route_event_uses_only_core_derived_shadow_writer(monkeypatch):
     seen = {}
-    monkeypatch.setattr(collector, "_run_for_time", lambda _at: _async_value({"id": "run-1"}))
+    monkeypatch.setattr(
+        collector,
+        "_run_for_time",
+        lambda _at: _async_value(
+            {"id": "run-1", "policy_config": {"candidate_basis": collector.CANDIDATE_BASIS}},
+        ),
+    )
 
     async def record_observation(**kwargs):
         seen.update(kwargs)
@@ -54,6 +61,20 @@ async def test_route_event_uses_only_core_derived_shadow_writer(monkeypatch):
     assert seen["run_id"] == "run-1"
     assert seen["route_ref"] == "a" * 64
     assert seen["candidates"][0]["worker_id"] == "worker-a"
+
+
+@pytest.mark.asyncio
+async def test_route_event_rejects_an_unfrozen_candidate_basis(monkeypatch):
+    monkeypatch.setattr(
+        collector,
+        "_run_for_time",
+        lambda _at: _async_value(
+            {"id": "run-1", "policy_config": {"candidate_basis": collector.CANDIDATE_BASIS}},
+        ),
+    )
+    event = {**_route_event(), "candidate_basis": "exact_scheduler_candidates.v1"}
+    with pytest.raises(ValueError, match="unknown candidate basis"):
+        await collector.process_event(event, now=NOW)
 
 
 @pytest.mark.asyncio

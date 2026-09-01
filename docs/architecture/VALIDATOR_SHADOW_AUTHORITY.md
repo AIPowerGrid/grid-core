@@ -23,13 +23,25 @@ a review artifact; it does not enable routing or validator economics.
 
 The shadow observer answers one bounded question:
 
-> If the reviewed validator policy had advisory routing authority, would it have
-> changed the route selected by the existing production router?
+> Given the concrete model and worker that pull-based production dispatch
+> actually used, would the reviewed validator policy have preferred another
+> connected, protocol-compatible replica sampled near that dispatch?
 
-For every eligible production routing opportunity, Core retains the actual
-choice and computes a hypothetical choice from the same frozen candidate set.
-The comparison measures coverage, disagreement, stability, and likely impact
-before validator evidence can influence users.
+For every captured production route, Core retains the actual choice and computes
+a hypothetical preference from a frozen post-dispatch replica sample. The
+comparison measures coverage, disagreement, and signal stability before
+validator evidence can influence users.
+
+Production uses worker-pull Redis streams; it does not materialize or rank one
+central candidate set before dispatch. The background observer therefore cannot
+replay an exact scheduler decision. Its sample may include a compatible worker
+that was busy or had a prefetched job, and a connection may appear or disappear
+between dispatch and the asynchronous snapshot. The two-second registry cache
+also means the sample can lead or lag dispatch slightly. The frozen policy names
+this basis `post_dispatch_connected_compatible_replicas.v1`, and the collector
+rejects events or runs that claim another basis. A report from this phase is
+evidence about same-model replica preference, not proof that production would
+have made the hypothetical route.
 
 The first collector deliberately freezes only connected, protocol-compatible
 replicas of the concrete model that production selected. It can measure whether
@@ -129,8 +141,9 @@ commitments without retaining customer prompts or outputs. At minimum it records
 
 - run id, UTC time, policy version, and configuration hash;
 - task class and requested capability;
-- a privacy-safe commitment to the frozen candidate set;
-- actual model and worker selected by the production router;
+- a privacy-safe commitment to the frozen post-dispatch replica sample;
+- the fixed candidate basis recorded by the run policy;
+- actual model and worker used by pull-based production dispatch;
 - hypothetical model and worker, or `insufficient_evidence`;
 - decision class (`same`, `would_change`, `would_exclude`, or
   `insufficient_evidence`);
@@ -149,6 +162,8 @@ path.
 Public summaries aggregate these fields. They never expose prompts, outputs,
 worker or validator wallets, account ids, validator ids, control-group ids,
 signatures, nonces, private review references, IPs, or host data.
+Every report must expose `candidate_basis` and the bounded counterfactual scope;
+neither may be relabeled as exact scheduler replay during review.
 
 ## Seven-Day Observation
 
@@ -216,6 +231,9 @@ revise and rerun, not to activate it.
    two-second, single-flight minimal worker-registry snapshot prevents route
    bursts from multiplying Redis registry scans. Candidate events are capped at
    256 entries and 128,000 UTF-8 bytes on both sides of the outbox contract.
+   The policy and every route event identify this as a post-dispatch
+   connected-compatible replica sample. The collector fails closed on a
+   mismatched basis, and the final report repeats the limitation.
    Full worker-transport regression and production-shaped fault verification
    remain release gates.
 5. Next: dark-deploy with collection disabled and verify migration/rollback on the
