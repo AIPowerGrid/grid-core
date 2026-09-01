@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from grid_api import database
 from grid_api.services import validator_shadow as shadow
+from grid_api.v2.schema import ledger as ledger_t
 from grid_api.v2.schema import metadata
 from grid_api.v2.schema import validator_assignments as assignments_t
 from grid_api.v2.schema import validator_attestations as attestations_t
@@ -858,3 +859,27 @@ async def test_run_cannot_complete_early_and_completion_never_promotes(db, monke
     assert report["automatic_promotion"] is False
     assert report["review_eligible"] is False
     assert report["gates"]["observations_present"] is False
+
+
+@pytest.mark.asyncio
+async def test_report_detects_successful_routes_missing_from_capture(db, monkeypatch):
+    await _running_run(monkeypatch)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.insert(ledger_t).values(
+                job_id=UUID("10000000-0000-0000-0000-000000000001"),
+                worker_id=UUID("20000000-0000-0000-0000-000000000001"),
+                model="model-a",
+                job_type="text",
+                den=1.0,
+                output_units=1,
+                created=NOW + timedelta(seconds=1),
+            ),
+        )
+        await session.commit()
+
+    report = await shadow.run_report(RUN_ID, at=NOW + timedelta(seconds=2))
+    assert report["production_successful_completions"] == 1
+    assert report["captured_successful_routes"] == 0
+    assert report["route_capture_coverage"] == 0.0
+    assert report["gates"]["route_capture_coverage"] is False

@@ -218,6 +218,32 @@ async def _validator_cohort_monitor():
         await asyncio.sleep(settings.validator_cohort_monitor_seconds)
 
 
+async def _validator_shadow_collector():
+    """Consume privacy-safe route events without joining the routing path."""
+    from .config import get_settings
+    from .safe_logging import error_type
+    from .services import alerts
+    from .services.validator_shadow_collector import run_loop
+
+    settings = get_settings()
+    if not settings.validator_shadow_observer_enabled:
+        logger.info("Validator shadow collector is disabled")
+        return
+    try:
+        await run_loop(sample_seconds=settings.validator_shadow_sample_seconds)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.error("Validator shadow collector stopped error_type=%s", error_type(exc))
+        alerts.emit(
+            "validator_shadow_collector_stopped",
+            "warning",
+            "The economically inert validator shadow collector stopped.",
+            fields={"error_type": error_type(exc)},
+            dedupe_key="validator-shadow-collector-stopped",
+        )
+
+
 async def _oauth_state_sweeper():
     """Bound unauthenticated OAuth registration and authorization storage."""
     from .config import get_settings
@@ -390,6 +416,7 @@ async def lifespan(app: FastAPI):
     sweeper = asyncio.create_task(_reservation_sweeper())
     validator_history_sweeper = asyncio.create_task(_validator_history_sweeper())
     validator_cohort_monitor = asyncio.create_task(_validator_cohort_monitor())
+    validator_shadow_collector = asyncio.create_task(_validator_shadow_collector())
     oauth_state_sweeper = asyncio.create_task(_oauth_state_sweeper())
     validator_bond_sync = asyncio.create_task(_validator_bond_sync_loop())
     billing_monitor = asyncio.create_task(_billing_monitor())
@@ -418,10 +445,14 @@ async def lifespan(app: FastAPI):
     sweeper.cancel()
     validator_history_sweeper.cancel()
     validator_cohort_monitor.cancel()
+    validator_shadow_collector.cancel()
     oauth_state_sweeper.cancel()
     validator_bond_sync.cancel()
     billing_monitor.cancel()
     prober.cancel()
+    await asyncio.gather(validator_shadow_collector, return_exceptions=True)
+    from .services import route_events as _route_events
+    await _route_events.drain()
     await close_p2p()  # Shutdown P2P
     await close_redis()
     await close_database()
