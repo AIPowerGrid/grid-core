@@ -126,7 +126,8 @@ class GridSettings(BaseSettings):
     validator_shadow_sample_seconds: int = Field(default=300, ge=60, le=3600)
     validator_shadow_retention_days: int = Field(default=90, ge=30, le=3650)
     # HMACs production job/stream identifiers before they enter the private
-    # observer outbox. Required only when the observer is explicitly enabled.
+    # observer outbox and links reports to ledger jobs without exposing ids.
+    # Keep stable through final-report archival; required only when enabled.
     validator_shadow_route_hmac_secret: SecretStr | None = None
 
     # Remote-MCP OAuth operational rows are bounded independently of the

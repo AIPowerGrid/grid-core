@@ -1197,8 +1197,10 @@ validator_shadow_observations = sa.Table(
         nullable=False,
         index=True,
     ),
-    # HMAC commitment to the production job id; the raw id is not retained.
+    # HMAC commitment to one queue-delivery attempt; retries receive a new ref.
     sa.Column("route_ref", sa.String(64), nullable=False),
+    # Stable HMAC commitment to the production job id across delivery retries.
+    sa.Column("job_ref", sa.String(64), nullable=False),
     sa.Column("payload_hash", sa.String(64), nullable=False),
     sa.Column("observed_at", sa.DateTime(timezone=True), nullable=False, index=True),
     sa.Column("policy_version", sa.String(96), nullable=False),
@@ -1247,6 +1249,10 @@ validator_shadow_observations = sa.Table(
     sa.CheckConstraint(
         "length(route_ref) = 64 AND length(payload_hash) = 64 AND length(config_hash) = 64 AND length(candidate_set_hash) = 64",
         name="ck_grid_validator_shadow_observations_hashes",
+    ),
+    sa.CheckConstraint(
+        "length(job_ref) = 64",
+        name="ck_grid_validator_shadow_observations_job_ref",
     ),
 )
 
