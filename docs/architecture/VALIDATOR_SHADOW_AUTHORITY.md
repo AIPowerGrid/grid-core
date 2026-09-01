@@ -8,7 +8,8 @@ snapshot, append-only replay store, live start-gate evaluator, aggregate report
 CLI, import isolation guard, asynchronous Redis route-event outbox and isolated
 collector, and SQLite/PostgreSQL concurrency tests exist.
 Migration `0033` additionally enforces one running experiment at the database
-boundary; lifecycle transitions reject backdated or future-dated operator time.
+boundary, and `0034` adds a stable private per-job commitment for exact ledger
+coverage; lifecycle transitions reject backdated or future-dated operator time.
 Production validator evidence remains observability-only and the real router
 does not read it. Shadow mode may start only after three recently participating,
 independently reviewed operator groups complete the validator cohort gate. It
@@ -67,8 +68,11 @@ run.
    delivery retains it until the collector acknowledges and deletes it. The stream
    has a 10,000-event emergency bound, so an extended collector outage can trim
    the oldest pending evidence. A process crash before acceptance can also lose an
-   event. The final report measures captured successful routes against the
-   independent completion ledger and fails review below the frozen threshold.
+   event. Every route attempt carries a delivery-specific HMAC plus a stable,
+   domain-separated per-job HMAC. The final report matches successful job
+   commitments against the independent completion ledger, deduplicates retries,
+   and fails review below the frozen threshold. Aggregate event counts cannot
+   satisfy this gate.
 3. **Independent evidence only.** First-party nodes, unreviewed registrations,
    unsupported releases, stale reviews, and duplicate control groups never fill
    a shadow quorum seat.
@@ -142,6 +146,7 @@ commitments without retaining customer prompts or outputs. At minimum it records
 - run id, UTC time, policy version, and configuration hash;
 - task class and requested capability;
 - a privacy-safe commitment to the frozen post-dispatch replica sample;
+- a delivery-specific route commitment and stable per-job commitment;
 - the fixed candidate basis recorded by the run policy;
 - actual model and worker used by pull-based production dispatch;
 - hypothetical model and worker, or `insufficient_evidence`;
@@ -153,15 +158,19 @@ commitments without retaining customer prompts or outputs. At minimum it records
 - confirmation that no routing or economic mutation was attempted.
 
 The route commitment binds the private job id, Redis stream, and delivery id.
-Retries therefore produce distinct route attempts instead of overwriting an
-earlier worker choice. Raw job ids, prompts, outputs, accounts, wallets, worker
-names, and validator identities never enter the outbox. The HMAC secret must
-remain stable for the full run and is injected through the production secret
-path.
+The job commitment binds only the private job id under a separate HMAC domain.
+Retries therefore produce distinct route attempts without inflating the count
+of ledger jobs covered by the observer. Raw job ids, prompts, outputs, accounts,
+wallets, worker names, and validator identities never enter the outbox. The
+HMAC secret must remain stable for the full run and archived final-report proof,
+and is injected through the production secret path. Without that exact secret,
+Core fails closed instead of claiming route coverage.
 
 Public summaries aggregate these fields. They never expose prompts, outputs,
 worker or validator wallets, account ids, validator ids, control-group ids,
 signatures, nonces, private review references, IPs, or host data.
+The exact-coverage report is `aipg.validator.shadow-report.v2`; its route count
+is telemetry, while its coverage gate uses unique matched job commitments.
 Every report must expose `candidate_basis` and the bounded counterfactual scope;
 neither may be relabeled as exact scheduler replay during review.
 
@@ -180,8 +189,9 @@ votes. The report is eligible for review only when:
 - observer errors, stale evidence, and insufficient-evidence rates are reported;
 - actual versus hypothetical route counts and terminal outcomes are reported by
   model, capability, and bounded reason code;
-- at least 80 percent of independently recorded successful ledger completions
-  have a matching captured successful route attempt;
+- at least 80 percent of distinct independently recorded successful ledger jobs
+  have an exact matching successful job commitment; duplicate retry attempts
+  count once;
 - would-change, reversal, disagreement, and coverage rates are stable enough to
   explain rather than hidden in a global average; and
 - an automated invariant test and production audit confirm zero real routing or

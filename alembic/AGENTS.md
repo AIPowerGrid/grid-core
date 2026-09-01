@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current head: `0033`
+- `versions/` - ordered migration revisions. Current head: `0034`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -39,7 +39,8 @@ production database match the Grid-owned schema contracts without relying on
   disabled-by-default remote MCP authorization foundation; `0032` adds private
   validator shadow-run, observation, outcome, capacity-sample, and bounded-error
   tables without enabling collection, routing, or economics; `0033` adds the
-  database-enforced single-running-shadow invariant).
+  database-enforced single-running-shadow invariant; `0034` adds the stable,
+  private per-job commitment required for exact ledger coverage).
 
 ## Local Contracts
 
@@ -90,6 +91,9 @@ production database match the Grid-owned schema contracts without relying on
   downgrading the database.
 - Apply `0033` before starting a shadow run. It prevents overlapping experiments
   even when two operators race the preview/apply workflow.
+- Apply `0034` before enabling shadow collection. It fails closed unless the
+  observation table is empty because historical route attempts cannot be
+  linked to raw ledger job ids without fabricating evidence.
 - Migrations must be idempotent only where Alembic expects them to be; do not
   hide failed DDL with broad exception swallowing.
 - Economic constraints matter: unique `grid_ledger.job_id`, non-null credit refs

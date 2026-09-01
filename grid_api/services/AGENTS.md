@@ -194,9 +194,12 @@ content sanitization, and reward settlement.
   credits, settlement, payouts, rewards, bonds, strikes, and slashing must
   neither import this module nor query its tables. The flag defaults off, the
   CLI is read-only, and a completed run cannot promote itself. Missing expected
-  sample slots and successful ledger completions absent from the route capture
-  count against report coverage. `route_events.py` is the neutral, non-awaited
-  producer: after actual dispatch it HMAC-commits job/Redis-delivery identity,
+  sample slots and successful ledger jobs absent from the exact route capture
+  count against report coverage. `route_commitments.py` domain-separates a
+  stable per-job HMAC from a delivery-specific route HMAC; reports intersect
+  unique successful job commitments with the ledger, so wrong-job captures and
+  duplicate retries cannot satisfy coverage. `route_events.py` is the neutral,
+  non-awaited producer: after actual dispatch it commits both private references,
   reduces the job to bounded metadata before scheduling background work, uses a
   two-second single-flight cache of minimal worker fields to snapshot compatible
   replicas, caps snapshots at 256 candidates and 128,000 UTF-8 bytes, and writes

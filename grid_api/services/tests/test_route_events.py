@@ -13,7 +13,7 @@ import pytest
 from pydantic import SecretStr
 
 from grid_api.config import GridSettings
-from grid_api.services import route_events
+from grid_api.services import route_commitments, route_events
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -119,6 +119,7 @@ async def test_route_event_is_committed_bounded_and_contains_compatible_candidat
     assert event["kind"] == "route"
     assert event["candidate_basis"] == route_events.CANDIDATE_BASIS
     assert len(event["route_ref"]) == 64
+    assert len(event["job_ref"]) == 64
     assert event["capability"] == "text.tool_call.v1"
     assert event["task_class"]
     candidates = json.loads(event["candidates"])
@@ -138,6 +139,15 @@ async def test_retry_delivery_gets_a_distinct_route_commitment(monkeypatch):
     first = route_events._route_ref(_job())
     retry = route_events._route_ref({**_job(), "stream_id": "124-0"})
     assert first != retry
+    assert route_events._job_ref(_job()) == route_events._job_ref({**_job(), "stream_id": "124-0"})
+
+
+def test_commitment_domains_are_stable_and_separate():
+    secret = "s" * 32
+    job = route_commitments.job_ref("job-1", secret=secret)
+    route = route_commitments.route_ref("job-1", "stream", "1-0", secret=secret)
+    assert job == route_commitments.job_ref("job-1", secret=secret)
+    assert job != route
 
 
 @pytest.mark.asyncio
@@ -256,7 +266,7 @@ def test_scheduled_capture_envelope_retains_no_customer_payload(monkeypatch):
     monkeypatch.setattr(route_events, "get_settings", _settings)
     capture = route_events._route_capture(_job())
     serialized = json.dumps(capture)
-    assert set(capture) == {"route_ref", "job_type", "api_format", "task_class", "capability"}
+    assert set(capture) == {"route_ref", "job_ref", "job_type", "api_format", "task_class", "capability"}
     assert "private-job-id" not in serialized
     assert "private customer prompt" not in serialized
 

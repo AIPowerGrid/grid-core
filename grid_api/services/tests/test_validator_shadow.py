@@ -9,11 +9,13 @@ from uuid import UUID
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
+from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from grid_api import database
 from grid_api.services import validator_shadow as shadow
+from grid_api.services.route_commitments import job_ref as committed_job_ref
 from grid_api.v2.schema import ledger as ledger_t
 from grid_api.v2.schema import metadata
 from grid_api.v2.schema import validator_assignments as assignments_t
@@ -48,6 +50,7 @@ async def db(monkeypatch):
             validator_shadow_observer_enabled=True,
             validator_cohort_baseline_version="v0.1.0-preview.13",
             validator_shadow_sample_seconds=300,
+            validator_shadow_route_hmac_secret=SecretStr("s" * 32),
         ),
     )
     monkeypatch.setattr(shadow, "_now", lambda: NOW)
@@ -413,9 +416,9 @@ def test_unknown_actual_worker_with_multiple_model_replicas_is_insufficient():
     assert result["reason_code"] == "actual_worker_unknown"
 
 
-def test_route_reference_is_keyed_and_does_not_expose_job_id():
-    one = shadow.committed_route_ref("job-secret-123", secret="server-secret")
-    two = shadow.committed_route_ref("job-secret-123", secret="other-secret")
+def test_job_reference_is_keyed_and_does_not_expose_job_id():
+    one = committed_job_ref("job-secret-123", secret="server-secret")
+    two = committed_job_ref("job-secret-123", secret="other-secret")
     assert one != two
     assert len(one) == 64
     assert "job-secret-123" not in one
@@ -534,6 +537,7 @@ async def test_collection_is_dark_by_default(db, monkeypatch):
             validator_shadow_observer_enabled=False,
             validator_cohort_baseline_version="v0.1.0-preview.13",
             validator_shadow_sample_seconds=300,
+            validator_shadow_route_hmac_secret=SecretStr("s" * 32),
         ),
     )
     monkeypatch.setattr(shadow, "live_start_gate_snapshot", _fake_live_gate())
@@ -702,6 +706,7 @@ async def test_public_observation_path_derives_evidence_in_core(db, monkeypatch)
     observation = await shadow.record_observation(
         run_id=RUN_ID,
         route_ref="e" * 64,
+        job_ref="1" * 64,
         task_class="simple",
         modality="text",
         requested_capability="text.instruction.v1",
@@ -743,6 +748,7 @@ async def test_observation_outcome_and_sample_are_exactly_idempotent_and_replaya
     kwargs = {
         "run_id": RUN_ID,
         "route_ref": route_ref,
+        "job_ref": "2" * 64,
         "task_class": "simple",
         "modality": "text",
         "requested_capability": "text.instruction.v1",
@@ -789,6 +795,7 @@ async def test_observation_outcome_and_sample_are_exactly_idempotent_and_replaya
     assert error["error_code"] == "outbox_gap"
 
     report = await shadow.run_report(RUN_ID, at=NOW + timedelta(hours=1))
+    assert report["schema"] == "aipg.validator.shadow-report.v2"
     assert report["candidate_basis"] == shadow.CANDIDATE_BASIS
     assert report["counterfactual_scope"].startswith("same-model replica preference")
     assert report["decisions"]["would_change"] == 1
@@ -807,6 +814,7 @@ async def test_idempotency_key_reuse_with_different_payload_fails_closed(db, mon
     kwargs = {
         "run_id": RUN_ID,
         "route_ref": "d" * 64,
+        "job_ref": "3" * 64,
         "task_class": "simple",
         "modality": "text",
         "requested_capability": "text.instruction.v1",
@@ -827,6 +835,7 @@ async def test_terminal_outcome_is_bound_to_observed_worker_and_time(db, monkeyp
     observation = await shadow._record_observation(
         run_id=RUN_ID,
         route_ref="e" * 64,
+        job_ref="4" * 64,
         task_class="simple",
         modality="text",
         requested_capability="text.instruction.v1",
@@ -861,6 +870,7 @@ async def test_shadow_records_must_fall_inside_frozen_run_window(db, monkeypatch
         await shadow._record_observation(
             run_id=RUN_ID,
             route_ref="f" * 64,
+            job_ref="5" * 64,
             task_class="simple",
             modality="text",
             requested_capability="text.instruction.v1",
@@ -994,3 +1004,112 @@ async def test_report_detects_successful_routes_missing_from_capture(db, monkeyp
     assert report["captured_successful_routes"] == 0
     assert report["route_capture_coverage"] == 0.0
     assert report["gates"]["route_capture_coverage"] is False
+
+
+@pytest.mark.asyncio
+async def test_report_fails_closed_without_the_run_hmac_secret(db, monkeypatch):
+    await _running_run(monkeypatch)
+    monkeypatch.setattr(
+        shadow,
+        "get_settings",
+        lambda: SimpleNamespace(validator_shadow_route_hmac_secret=None),
+    )
+    with pytest.raises(shadow.ShadowError, match="requires the shadow route HMAC secret"):
+        await shadow.run_report(RUN_ID, at=NOW + timedelta(seconds=1))
+
+
+@pytest.mark.asyncio
+async def test_report_matches_exact_jobs_instead_of_aggregate_route_count(db, monkeypatch):
+    await _running_run(monkeypatch)
+    expected_job = UUID("10000000-0000-0000-0000-000000000001")
+    wrong_job = UUID("10000000-0000-0000-0000-000000000002")
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.insert(ledger_t).values(
+                job_id=expected_job,
+                worker_id=UUID("20000000-0000-0000-0000-000000000001"),
+                model="model-a",
+                job_type="text",
+                den=1.0,
+                output_units=1,
+                created=NOW + timedelta(seconds=1),
+            ),
+        )
+        await session.commit()
+    observation = await shadow._record_observation(
+        run_id=RUN_ID,
+        route_ref="a" * 64,
+        job_ref=committed_job_ref(str(wrong_job), secret="s" * 32),
+        task_class="simple",
+        modality="text",
+        requested_capability="text.instruction.v1",
+        candidates=_candidates(),
+        evidence=[],
+        actual_model="model-a",
+        actual_worker_id="worker-a",
+        observed_at=NOW + timedelta(seconds=1),
+    )
+    await shadow.record_outcome(
+        observation_id=observation["id"],
+        actual_worker_id="worker-a",
+        terminal_status="succeeded",
+        duration_ms=100,
+        finished_at=NOW + timedelta(seconds=2),
+    )
+
+    report = await shadow.run_report(RUN_ID, at=NOW + timedelta(seconds=3))
+    assert report["production_successful_completions"] == 1
+    assert report["captured_successful_routes"] == 1
+    assert report["captured_successful_jobs"] == 1
+    assert report["matched_successful_jobs"] == 0
+    assert report["unmatched_captured_successful_jobs"] == 1
+    assert report["route_capture_coverage"] == 0.0
+    assert report["gates"]["route_capture_coverage"] is False
+
+
+@pytest.mark.asyncio
+async def test_report_deduplicates_retry_attempts_for_one_job(db, monkeypatch):
+    await _running_run(monkeypatch)
+    job_id = UUID("10000000-0000-0000-0000-000000000001")
+    job_ref = committed_job_ref(str(job_id), secret="s" * 32)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.insert(ledger_t).values(
+                job_id=job_id,
+                worker_id=UUID("20000000-0000-0000-0000-000000000001"),
+                model="model-a",
+                job_type="text",
+                den=1.0,
+                output_units=1,
+                created=NOW + timedelta(seconds=1),
+            ),
+        )
+        await session.commit()
+    for index, route_char in enumerate(("a", "b"), start=1):
+        observation = await shadow._record_observation(
+            run_id=RUN_ID,
+            route_ref=route_char * 64,
+            job_ref=job_ref,
+            task_class="simple",
+            modality="text",
+            requested_capability="text.instruction.v1",
+            candidates=_candidates(),
+            evidence=[],
+            actual_model="model-a",
+            actual_worker_id="worker-a",
+            observed_at=NOW + timedelta(seconds=index),
+        )
+        await shadow.record_outcome(
+            observation_id=observation["id"],
+            actual_worker_id="worker-a",
+            terminal_status="succeeded",
+            duration_ms=100,
+            finished_at=NOW + timedelta(seconds=index + 2),
+        )
+
+    report = await shadow.run_report(RUN_ID, at=NOW + timedelta(seconds=5))
+    assert report["captured_successful_routes"] == 2
+    assert report["captured_successful_jobs"] == 1
+    assert report["matched_successful_jobs"] == 1
+    assert report["unmatched_captured_successful_jobs"] == 0
+    assert report["route_capture_coverage"] == 1.0
