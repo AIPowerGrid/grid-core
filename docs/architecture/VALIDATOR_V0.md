@@ -212,6 +212,15 @@ delivery gap; nodes still need a durable assignment journal and operator-visible
 dead-letter recovery. Slashing requires a separate objective-fraud policy and contract
 review after those controls are proven.
 
+Three recently participating, independently qualified operator groups unlock
+only the seven-day shadow-authority experiment defined in
+[`VALIDATOR_SHADOW_AUTHORITY.md`](VALIDATOR_SHADOW_AUTHORITY.md). That observer
+must be asynchronous, must preserve the real route, and may use current public-
+template text evidence only for narrow protocol/capability advice. Its report is
+an input to a later routing review, not an activation event. Five independent
+operators remain the broader preview target, and validator rewards remain out
+of scope throughout shadow collection.
+
 The accepted post-preview contract and Core-federation sequence is defined in
 [`DECENTRALIZATION_ROADMAP.md`](DECENTRALIZATION_ROADMAP.md). It keeps validator
 staking and economic authority gated on independent production evidence rather
