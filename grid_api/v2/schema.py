@@ -1173,6 +1173,13 @@ validator_shadow_runs = sa.Table(
         name="ck_grid_validator_shadow_runs_schedule",
     ),
 )
+sa.Index(
+    "uq_grid_validator_shadow_runs_single_running",
+    validator_shadow_runs.c.status,
+    unique=True,
+    postgresql_where=validator_shadow_runs.c.status == "running",
+    sqlite_where=validator_shadow_runs.c.status == "running",
+)
 
 validator_shadow_observations = sa.Table(
     "grid_validator_shadow_observations",
