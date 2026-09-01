@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[3]
 class FakeRedis:
     def __init__(self):
         self.events: list[tuple[str, dict]] = []
+        self.registry_reads = 0
         self.workers = {
             "worker-a": {
                 "worker_id": "worker-a",
@@ -42,6 +44,7 @@ class FakeRedis:
         }
 
     async def smembers(self, _key):
+        self.registry_reads += 1
         return set(self.workers)
 
     async def mget(self, keys):
@@ -65,6 +68,20 @@ class OversizedRegistryRedis(FakeRedis):
 class HangingRegistryRedis(FakeRedis):
     async def smembers(self, _key):
         await route_events.asyncio.Event().wait()
+
+
+class FailingRegistryRedis(FakeRedis):
+    async def smembers(self, _key):
+        self.registry_reads += 1
+        raise ConnectionError("registry unavailable")
+
+
+@pytest.fixture(autouse=True)
+def _clear_registry_cache():
+    route_events._registry_cache = None
+    route_events._registry_failure_until = 0.0
+    route_events._registry_cache_lock = None
+    route_events._registry_cache_loop = None
 
 
 def _settings(enabled: bool = True):
@@ -143,6 +160,59 @@ async def test_capture_timeout_is_bounded_and_never_escapes(monkeypatch):
     monkeypatch.setattr(route_events, "CAPTURE_TIMEOUT_SECONDS", 0.01)
 
     await route_events._emit_route(route_events._route_capture(_job()), "model-a", "worker-a")
+
+
+@pytest.mark.asyncio
+async def test_burst_uses_one_single_flight_registry_read(monkeypatch):
+    redis = FakeRedis()
+    monkeypatch.setattr(route_events, "get_settings", _settings)
+    monkeypatch.setattr(route_events, "get_redis", lambda: redis)
+    capture = route_events._route_capture(_job())
+
+    await asyncio.gather(*(route_events._emit_route(capture, "model-a", "worker-a") for _ in range(200)))
+
+    assert redis.registry_reads == 1
+    assert len(redis.events) == 200
+
+
+@pytest.mark.asyncio
+async def test_registry_cache_refreshes_after_window(monkeypatch):
+    redis = FakeRedis()
+    clock = iter((10.0, 10.0, 10.0, 13.0, 13.0, 13.0))
+    monkeypatch.setattr(route_events, "get_redis", lambda: redis)
+    monkeypatch.setattr(route_events, "_monotonic", lambda: next(clock))
+
+    await route_events._worker_registry_snapshot()
+    await route_events._worker_registry_snapshot()
+
+    assert redis.registry_reads == 2
+
+
+@pytest.mark.asyncio
+async def test_registry_failure_backoff_prevents_a_burst_stampede(monkeypatch):
+    redis = FailingRegistryRedis()
+    monkeypatch.setattr(route_events, "get_redis", lambda: redis)
+
+    results = await asyncio.gather(
+        *(route_events._worker_registry_snapshot() for _ in range(200)),
+        return_exceptions=True,
+    )
+
+    assert redis.registry_reads == 1
+    assert sum(isinstance(result, ConnectionError) for result in results) == 1
+    assert all(isinstance(result, Exception) for result in results)
+
+
+def test_candidate_encoding_is_deterministic_and_wire_bounded(monkeypatch):
+    monkeypatch.setattr(route_events, "MAX_CANDIDATE_BYTES", 150)
+    candidates = [{"worker_id": f"worker-{index}", "model": "model-a", "baseline_rank": index} for index in range(10)]
+
+    encoded = route_events._encoded_candidates(candidates)
+    decoded = json.loads(encoded)
+
+    assert len(encoded.encode("utf-8")) <= 150
+    assert decoded[0] == candidates[0]
+    assert decoded == candidates[: len(decoded)]
 
 
 @pytest.mark.asyncio

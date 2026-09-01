@@ -22,7 +22,7 @@ from ..v2.schema import validator_shadow_observations as observations_t
 from ..v2.schema import validator_shadow_outcomes as outcomes_t
 from ..v2.schema import validator_shadow_runs as runs_t
 from . import validator_shadow as shadow
-from .route_events import STREAM_KEY
+from .route_events import MAX_CANDIDATE_BYTES, MAX_CANDIDATES, STREAM_KEY
 
 logger = logging.getLogger("grid_api.validator_shadow_collector")
 
@@ -30,7 +30,6 @@ CONSUMER_GROUP = "grid-validator-shadow"
 LEADER_KEY = "grid:validator-shadow-collector:leader"
 CLAIM_IDLE_MS = 30_000
 ORPHAN_OUTCOME_SECONDS = 600
-MAX_CANDIDATES = 512
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -132,7 +131,7 @@ async def process_event(fields: dict[str, str], *, now: datetime | None = None) 
         if not run:
             return "discard"
         encoded_candidates = str(fields["candidates"])
-        if len(encoded_candidates) > 128_000:
+        if len(encoded_candidates.encode("utf-8")) > MAX_CANDIDATE_BYTES:
             raise ValueError("candidate snapshot is too large")
         candidates = json.loads(encoded_candidates)
         if not isinstance(candidates, list) or not 1 <= len(candidates) <= MAX_CANDIDATES:

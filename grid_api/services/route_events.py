@@ -27,14 +27,21 @@ from ..safe_logging import error_type
 logger = logging.getLogger("grid_api.route_events")
 
 STREAM_KEY = "grid:validator:shadow-route-events"
-MAX_STREAM_LEN = 100_000
-MAX_CANDIDATES = 512
+MAX_STREAM_LEN = 10_000
+MAX_CANDIDATES = 256
+MAX_CANDIDATE_BYTES = 128_000
 MAX_ACTIVE_WORKERS = 4096
 MAX_PENDING_TASKS = 2048
 CAPTURE_TIMEOUT_SECONDS = 5.0
+REGISTRY_CACHE_SECONDS = 2.0
+REGISTRY_FAILURE_BACKOFF_SECONDS = 1.0
 _WORKER_STATUS_PREFIX = "grid:worker:"
 _WORKER_STATUS_SUFFIX = ":status"
 _pending: set[asyncio.Task] = set()
+_registry_cache: tuple[float, tuple[dict[str, Any], ...]] | None = None
+_registry_failure_until = 0.0
+_registry_cache_lock: asyncio.Lock | None = None
+_registry_cache_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _enabled() -> bool:
@@ -59,6 +66,22 @@ def _route_ref(job: dict[str, Any]) -> str:
 
 def _iso_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _monotonic() -> float:
+    return asyncio.get_running_loop().time()
+
+
+def _cache_lock() -> asyncio.Lock:
+    """Return a lock bound to the current application or test event loop."""
+    global _registry_cache, _registry_cache_lock, _registry_cache_loop, _registry_failure_until
+    loop = asyncio.get_running_loop()
+    if _registry_cache_lock is None or _registry_cache_loop is not loop:
+        _registry_cache_lock = asyncio.Lock()
+        _registry_cache_loop = loop
+        _registry_cache = None
+        _registry_failure_until = 0.0
+    return _registry_cache_lock
 
 
 def _task_class(job: dict[str, Any]) -> str:
@@ -98,6 +121,59 @@ def _capability(job: dict[str, Any]) -> str:
     return "text.instruction.v1"
 
 
+async def _worker_registry_snapshot() -> tuple[dict[str, Any], ...]:
+    """Read a minimal worker registry snapshot once per short burst window."""
+    global _registry_cache, _registry_failure_until
+    lock = _cache_lock()
+    now = _monotonic()
+    if _registry_cache is not None and now - _registry_cache[0] < REGISTRY_CACHE_SECONDS:
+        return _registry_cache[1]
+    if now < _registry_failure_until:
+        raise RuntimeError("worker registry snapshot is in failure backoff")
+
+    async with lock:
+        now = _monotonic()
+        if _registry_cache is not None and now - _registry_cache[0] < REGISTRY_CACHE_SECONDS:
+            return _registry_cache[1]
+        if now < _registry_failure_until:
+            raise RuntimeError("worker registry snapshot is in failure backoff")
+        try:
+            redis = get_redis()
+            ids = sorted(str(value) for value in await redis.smembers(WORKER_ACTIVE_SET_KEY))
+            if len(ids) > MAX_ACTIVE_WORKERS:
+                raise ValueError("active worker snapshot exceeds the observer bound")
+            keys = [f"{_WORKER_STATUS_PREFIX}{worker_id}{_WORKER_STATUS_SUFFIX}" for worker_id in ids]
+            raw_rows = await redis.mget(keys) if keys else []
+            rows: list[dict[str, Any]] = []
+            for worker_id, raw in zip(ids, raw_rows, strict=True):
+                if not raw:
+                    continue
+                try:
+                    info = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(info, dict):
+                    continue
+                candidate_id = str(info.get("worker_id") or worker_id)
+                if not candidate_id or len(candidate_id) > 64:
+                    continue
+                rows.append(
+                    {
+                        "worker_id": candidate_id,
+                        "models": tuple(str(value)[:255] for value in (info.get("models") or [])),
+                        "job_types": tuple(str(value)[:16] for value in (info.get("job_types") or ["text"])),
+                        "api_formats": tuple(str(value)[:64] for value in (info.get("api_formats") or ["openai-chat"])),
+                    },
+                )
+        except Exception:
+            _registry_failure_until = _monotonic() + REGISTRY_FAILURE_BACKOFF_SECONDS
+            raise
+        snapshot = tuple(rows)
+        _registry_cache = (_monotonic(), snapshot)
+        _registry_failure_until = 0.0
+        return snapshot
+
+
 async def _candidate_snapshot(
     *,
     job_type: str,
@@ -106,34 +182,31 @@ async def _candidate_snapshot(
     actual_worker_id: str,
 ) -> list[dict[str, Any]]:
     """Freeze connected compatible replicas without retaining worker metadata."""
-    redis = get_redis()
-    ids = sorted(str(value) for value in await redis.smembers(WORKER_ACTIVE_SET_KEY))
-    if len(ids) > MAX_ACTIVE_WORKERS:
-        raise ValueError("active worker snapshot exceeds the observer bound")
-    candidates: set[tuple[str, str]] = {(str(actual_worker_id), str(selected_model))}
-
-    keys = [f"{_WORKER_STATUS_PREFIX}{worker_id}{_WORKER_STATUS_SUFFIX}" for worker_id in ids]
-    rows = await redis.mget(keys) if keys else []
-    for worker_id, raw in zip(ids, rows, strict=True):
-        if not raw:
-            continue
-        try:
-            info = json.loads(raw)
-        except (TypeError, ValueError):
-            continue
-        if selected_model not in (info.get("models") or []):
+    actual = (str(actual_worker_id)[:64], str(selected_model)[:255])
+    candidates: set[tuple[str, str]] = {actual}
+    for info in await _worker_registry_snapshot():
+        if actual[1] not in (info.get("models") or []):
             continue
         if job_type not in (info.get("job_types") or ["text"]):
             continue
         if job_type == "text" and api_format not in (info.get("api_formats") or ["openai-chat"]):
             continue
-        candidate_id = str(info.get("worker_id") or worker_id)
-        if candidate_id and len(candidate_id) <= 64:
-            candidates.add((candidate_id, str(selected_model)[:255]))
+        candidates.add((str(info["worker_id"]), actual[1]))
 
-    ordered = [(str(actual_worker_id), str(selected_model))]
+    ordered = [actual]
     ordered.extend(sorted(candidates - {ordered[0]})[: MAX_CANDIDATES - 1])
     return [{"worker_id": worker_id, "model": model, "baseline_rank": rank} for rank, (worker_id, model) in enumerate(ordered)]
+
+
+def _encoded_candidates(candidates: list[dict[str, Any]]) -> str:
+    """Keep the actual route and a deterministic prefix within the wire bound."""
+    bounded = candidates[:MAX_CANDIDATES]
+    while bounded:
+        encoded = json.dumps(bounded, sort_keys=True, separators=(",", ":"))
+        if len(encoded.encode("utf-8")) <= MAX_CANDIDATE_BYTES:
+            return encoded
+        bounded = bounded[:-1]
+    raise ValueError("candidate snapshot cannot fit the observer payload bound")
 
 
 def _route_capture(job: dict[str, Any]) -> dict[str, str]:
@@ -171,7 +244,7 @@ async def _emit_route(
                     "task_class": capture["task_class"],
                     "modality": capture["job_type"],
                     "capability": capture["capability"],
-                    "candidates": json.dumps(candidates, sort_keys=True, separators=(",", ":")),
+                    "candidates": _encoded_candidates(candidates),
                     "actual_model": str(selected_model)[:255],
                     "actual_worker_id": str(worker_id)[:64],
                 },
