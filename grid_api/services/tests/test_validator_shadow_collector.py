@@ -17,6 +17,7 @@ def _route_event():
     return {
         "kind": "route",
         "route_ref": "a" * 64,
+        "job_ref": "b" * 64,
         "observed_at": NOW.isoformat(),
         "task_class": "simple",
         "modality": "text",
@@ -60,6 +61,7 @@ async def test_route_event_uses_only_core_derived_shadow_writer(monkeypatch):
     assert result == "ack"
     assert seen["run_id"] == "run-1"
     assert seen["route_ref"] == "a" * 64
+    assert seen["job_ref"] == "b" * 64
     assert seen["candidates"][0]["worker_id"] == "worker-a"
 
 
@@ -74,6 +76,13 @@ async def test_route_event_rejects_an_unfrozen_candidate_basis(monkeypatch):
     )
     event = {**_route_event(), "candidate_basis": "exact_scheduler_candidates.v1"}
     with pytest.raises(ValueError, match="unknown candidate basis"):
+        await collector.process_event(event, now=NOW)
+
+
+@pytest.mark.asyncio
+async def test_route_event_rejects_a_malformed_job_ref(monkeypatch):
+    event = {**_route_event(), "job_ref": "raw-job-id"}
+    with pytest.raises(ValueError, match="job_ref"):
         await collector.process_event(event, now=NOW)
 
 

@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
-import hmac
 import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
@@ -37,8 +36,9 @@ from ..v2.schema import validator_shadow_observations as observations_t
 from ..v2.schema import validator_shadow_outcomes as outcomes_t
 from ..v2.schema import validator_shadow_runs as runs_t
 from ..v2.schema import validators as validators_t
+from .route_commitments import job_ref as committed_job_ref
 
-POLICY_VERSION = "aipg.validator.shadow.protocol-capability.v3"
+POLICY_VERSION = "aipg.validator.shadow.protocol-capability.v4"
 CANDIDATE_BASIS = "post_dispatch_connected_compatible_replicas.v1"
 RUN_HOURS = 168
 MIN_QUALIFICATION_SECONDS = 72 * 3600
@@ -157,13 +157,6 @@ def run_state_hash(row: Mapping[str, Any]) -> str:
             "ended": row.get("ended"),
         },
     )
-
-
-def committed_route_ref(job_id: str, *, secret: str) -> str:
-    """Hide a production job id behind a server-keyed stable commitment."""
-    if not job_id or not secret:
-        raise ValueError("job_id and secret are required")
-    return hmac.new(secret.encode(), job_id.encode(), hashlib.sha256).hexdigest()
 
 
 def frozen_policy_config(overrides: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -1036,6 +1029,7 @@ async def _record_observation(
     *,
     run_id: str,
     route_ref: str,
+    job_ref: str,
     task_class: str,
     modality: str,
     requested_capability: str,
@@ -1049,6 +1043,8 @@ async def _record_observation(
     _require_enabled()
     if not _HEX_64.fullmatch(route_ref):
         raise ValueError("route_ref must be a 64-character lowercase commitment")
+    if not _HEX_64.fullmatch(job_ref):
+        raise ValueError("job_ref must be a 64-character lowercase commitment")
     observed = _aware(observed_at)
     async with await new_session() as session:
         run = (await session.execute(sa.select(runs_t).where(runs_t.c.id == run_id))).mappings().first()
@@ -1068,6 +1064,7 @@ async def _record_observation(
         values = {
             "run_id": run_id,
             "route_ref": route_ref,
+            "job_ref": job_ref,
             "observed_at": observed,
             "policy_version": decision["policy_version"],
             "config_hash": decision["config_hash"],
@@ -1121,6 +1118,7 @@ async def record_observation(
     *,
     run_id: str,
     route_ref: str,
+    job_ref: str,
     task_class: str,
     modality: str,
     requested_capability: str,
@@ -1150,6 +1148,7 @@ async def record_observation(
     return await _record_observation(
         run_id=run_id,
         route_ref=route_ref,
+        job_ref=job_ref,
         task_class=task_class,
         modality=modality,
         requested_capability=requested_capability,
@@ -1539,6 +1538,7 @@ async def run_report(run_id: str, *, at: datetime | None = None) -> dict[str, An
                     sa.select(
                         outcomes_t.c.observation_id,
                         outcomes_t.c.terminal_status,
+                        observations_t.c.job_ref,
                         observations_t.c.actual_model,
                         observations_t.c.requested_capability,
                     )
@@ -1571,18 +1571,19 @@ async def run_report(run_id: str, *, at: datetime | None = None) -> dict[str, An
             .mappings()
             .all()
         )
-        successful_completions = 0
+        successful_job_ids: list[str] = []
         if started_at:
-            successful_completions = int(
-                (
+            successful_job_ids = [
+                str(value)
+                for value in (
                     await session.execute(
-                        sa.select(sa.func.count()).select_from(ledger_t).where(
+                        sa.select(ledger_t.c.job_id).where(
                             ledger_t.c.created >= started_at,
                             ledger_t.c.created <= report_end,
                         ),
                     )
-                ).scalar_one(),
-            )
+                ).scalars()
+            ]
 
     decisions = {name: 0 for name in sorted(_DECISIONS)}
     reasons: dict[str, int] = {}
@@ -1634,10 +1635,26 @@ async def run_report(run_id: str, *, at: datetime | None = None) -> dict[str, An
     observation_count = len(observations)
     terminal_coverage = len(outcome_rows) / observation_count if observation_count else 0.0
     captured_successes = int(terminal_counts.get("succeeded", 0))
+    route_secret_value = get_settings().validator_shadow_route_hmac_secret
+    route_secret = route_secret_value.get_secret_value() if route_secret_value is not None else ""
+    if not route_secret:
+        raise ShadowError("exact route coverage requires the shadow route HMAC secret")
+    expected_success_refs = {
+        committed_job_ref(job_id, secret=route_secret)
+        for job_id in successful_job_ids
+    }
+    captured_success_refs = {
+        str(row["job_ref"])
+        for row in outcome_rows
+        if row["terminal_status"] == "succeeded"
+    }
+    matched_success_refs = expected_success_refs & captured_success_refs
+    unmatched_captured_refs = captured_success_refs - expected_success_refs
+    successful_completions = len(expected_success_refs)
     route_capture_coverage = (
-        min(1.0, captured_successes / successful_completions)
+        len(matched_success_refs) / successful_completions
         if successful_completions
-        else (1.0 if captured_successes == 0 else 0.0)
+        else (1.0 if not captured_success_refs else 0.0)
     )
     gates = {
         "run_completed": run["status"] == "completed",
@@ -1651,7 +1668,7 @@ async def run_report(run_id: str, *, at: datetime | None = None) -> dict[str, An
         "zero_mutation_attempts": mutation_attempts == 0,
     }
     return {
-        "schema": "aipg.validator.shadow-report.v1",
+        "schema": "aipg.validator.shadow-report.v2",
         "run_id": run_id,
         "status": run["status"],
         "policy_version": run["policy_version"],
@@ -1682,6 +1699,9 @@ async def run_report(run_id: str, *, at: datetime | None = None) -> dict[str, An
         "terminal_outcome_coverage": terminal_coverage,
         "production_successful_completions": successful_completions,
         "captured_successful_routes": captured_successes,
+        "captured_successful_jobs": len(captured_success_refs),
+        "matched_successful_jobs": len(matched_success_refs),
+        "unmatched_captured_successful_jobs": len(unmatched_captured_refs),
         "route_capture_coverage": route_capture_coverage,
         "terminal_breakdown": [
             {

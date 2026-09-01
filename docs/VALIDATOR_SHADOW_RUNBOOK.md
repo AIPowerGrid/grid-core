@@ -11,13 +11,17 @@ validator release merely to start this server-side run.
 
 ## Safety contract
 
-- Deploy the reviewed Core release and migrate through Alembic `0033` with
+- Deploy the reviewed Core release and migrate through Alembic `0034` with
   `VALIDATOR_SHADOW_OBSERVER_ENABLED=0` first. Migration `0032` creates the
-  shadow records; `0033` adds the database-enforced single-running-run guard.
-  `alembic current` must report `0033`; `0032` alone is not deploy-ready.
+  shadow records, `0033` adds the database-enforced single-running-run guard,
+  and `0034` adds exact privacy-safe ledger correlation. `0034` intentionally
+  fails if any observation already exists because the raw job id is unavailable
+  for an honest backfill. `alembic current` must report `0034`.
 - Use one stable, randomly generated 32+ character
   `VALIDATOR_SHADOW_ROUTE_HMAC_SECRET` for the entire run. Store it only through
-  the production secret path.
+  the production secret path and retain it with protected final-report evidence.
+  Core cannot reproduce exact ledger coverage after this secret is lost or
+  rotated and will fail the report closed.
 - Every database mutation is preview-first. Apply with the exact UTC `--at` and
   gate/state hash from that preview. A changed gate or run row fails closed.
 - Apply timestamps must remain within five minutes of Core's UTC clock, and a
@@ -86,7 +90,7 @@ Preview first:
 
 ```bash
 $PY $TOOL prepare \
-  --run-id shadow_2026_09_protocol_v3 \
+  --run-id shadow_2026_09_protocol_v4 \
   --implementation-commit <40-character-deployed-commit> \
   --verification-ref <immutable-grid-core-actions-run-or-job-url> \
   --verification-json /protected/shadow-verification.json \
@@ -98,7 +102,7 @@ the same proposal with the exact timestamp and hash:
 
 ```bash
 $PY $TOOL prepare \
-  --run-id shadow_2026_09_protocol_v3 \
+  --run-id shadow_2026_09_protocol_v4 \
   --implementation-commit <40-character-deployed-commit> \
   --verification-ref <immutable-grid-core-actions-run-or-job-url> \
   --verification-json /protected/shadow-verification.json \
@@ -134,7 +138,7 @@ Take a fresh preview with a new fixed UTC time:
 
 ```bash
 START_AT=2026-09-08T17:00:00Z
-$PY $TOOL start --run-id shadow_2026_09_protocol_v3 --at "$START_AT"
+$PY $TOOL start --run-id shadow_2026_09_protocol_v4 --at "$START_AT"
 ```
 
 Require `eligible_to_apply: true`, inspect every failed gate field, and apply
@@ -142,7 +146,7 @@ with the exact hash:
 
 ```bash
 $PY $TOOL start \
-  --run-id shadow_2026_09_protocol_v3 \
+  --run-id shadow_2026_09_protocol_v4 \
   --at "$START_AT" \
   --apply \
   --expect-gate-hash <preview-start-gate-hash>
@@ -157,7 +161,7 @@ At least daily, archive these aggregate outputs:
 
 ```bash
 $PY $TOOL transport
-$PY $TOOL report --run-id shadow_2026_09_protocol_v3
+$PY $TOOL report --run-id shadow_2026_09_protocol_v4
 ```
 
 Alert on collector lease loss, sustained stream backlog, observer errors,
@@ -192,7 +196,7 @@ completion tool enforces both. Then preview completion at a fixed UTC time:
 ```bash
 END_AT=2026-09-15T17:05:00Z
 $PY $TOOL finish \
-  --run-id shadow_2026_09_protocol_v3 \
+  --run-id shadow_2026_09_protocol_v4 \
   --status completed \
   --at "$END_AT"
 ```
@@ -201,7 +205,7 @@ Apply using the exact `current_run_state_hash`:
 
 ```bash
 $PY $TOOL finish \
-  --run-id shadow_2026_09_protocol_v3 \
+  --run-id shadow_2026_09_protocol_v4 \
   --status completed \
   --at "$END_AT" \
   --apply \

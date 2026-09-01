@@ -96,8 +96,9 @@ executes an immutable release selected through `/home/aipg/current`.
   economic/routing state. Keep its interval, window, and frozen baseline in
   `env.template`, `config.py`, and the cohort runbook aligned.
 - `VALIDATOR_SHADOW_OBSERVER_ENABLED` is a separate, default-off seven-day
-  advisory-observation gate. Migrations `0032` and `0033` must both be applied;
-  `0032` creates the observer records and `0033` enforces one running experiment
+  advisory-observation gate. Migrations `0032`, `0033`, and `0034` must all be applied;
+  `0032` creates the observer records, `0033` enforces one running experiment,
+  and `0034` adds exact privacy-safe ledger correlation
   at the database boundary. Applying either migration or deploying report
   tooling does not permit a run to start. Enable it only after three current,
   participating, independently reviewed operator groups have produced real

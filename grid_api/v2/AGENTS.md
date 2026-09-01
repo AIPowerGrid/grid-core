@@ -89,9 +89,12 @@ validator shadow-observation records.
   evidence snapshots plus commitments, never customer prompts/outputs,
   accounts, wallets, signatures, nonces, operator-group ids, or review refs.
   `mutation_attempted` is constrained false and fixed-size commitments are
-  enforced by the database. No production routing or economic path may read
+  enforced by the database. Each observation has a delivery-specific
+  `route_ref` plus a stable per-job `job_ref`; both are domain-separated HMACs,
+  and neither exposes the raw job id. No production routing or economic path may read
   these tables, and creating them grants no validator authority.
-  Alembic `0032` and the single-running-run index in `0033` must exist before the observer flag can be considered; the flag
+  Alembic `0032`, the single-running-run index in `0033`, and exact-coverage
+  commitment migration `0034` must exist before the observer flag can be considered; the flag
   remains off until the independently reviewed three-operator start gate passes.
 - `grid_validator_pairings` is one replaceable, expiring slot per registered
   validator. `grid_validator_account_links` stores its current signed human-

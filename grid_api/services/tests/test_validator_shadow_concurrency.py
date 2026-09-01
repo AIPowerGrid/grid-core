@@ -16,6 +16,7 @@ from uuid import UUID
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
+from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from grid_api import database
@@ -53,6 +54,7 @@ async def pg(monkeypatch):
             validator_shadow_observer_enabled=True,
             validator_cohort_baseline_version="v0.1.0-preview.13",
             validator_shadow_sample_seconds=300,
+            validator_shadow_route_hmac_secret=SecretStr("s" * 32),
         ),
     )
     monkeypatch.setattr(shadow, "_now", lambda: NOW)
@@ -124,6 +126,7 @@ def _kwargs(*, task_class: str = "simple"):
     return {
         "run_id": RUN_ID,
         "route_ref": "b" * 64,
+        "job_ref": "c" * 64,
         "task_class": task_class,
         "modality": "text",
         "requested_capability": "text.instruction.v1",

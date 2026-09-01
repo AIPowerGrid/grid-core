@@ -126,6 +126,9 @@ async def process_event(fields: dict[str, str], *, now: datetime | None = None) 
     if not _HEX_64.fullmatch(route_ref):
         raise ValueError("route_ref must be a lowercase SHA-256 commitment")
     if kind == "route":
+        job_ref = str(fields.get("job_ref") or "")
+        if not _HEX_64.fullmatch(job_ref):
+            raise ValueError("job_ref must be a lowercase SHA-256 commitment")
         observed_at = _parse_time(fields["observed_at"])
         run = await _run_for_time(observed_at)
         if not run:
@@ -143,6 +146,7 @@ async def process_event(fields: dict[str, str], *, now: datetime | None = None) 
         await shadow.record_observation(
             run_id=str(run["id"]),
             route_ref=route_ref,
+            job_ref=job_ref,
             task_class=str(fields["task_class"]),
             modality=str(fields["modality"]),
             requested_capability=str(fields["capability"]),

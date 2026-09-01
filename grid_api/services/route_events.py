@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
-import hmac
 import json
 import logging
 from datetime import UTC, datetime
@@ -23,6 +21,8 @@ from typing import Any
 from ..config import get_settings
 from ..redis_client import WORKER_ACTIVE_SET_KEY, get_redis
 from ..safe_logging import error_type
+from .route_commitments import job_ref as committed_job_ref
+from .route_commitments import route_ref as committed_route_ref
 
 logger = logging.getLogger("grid_api.route_events")
 
@@ -61,8 +61,15 @@ def _route_ref(job: dict[str, Any]) -> str:
     secret = _secret()
     if not secret or not job_id or not stream_id:
         raise ValueError("route commitment inputs are unavailable")
-    material = f"{job_id}:{stream}:{stream_id}".encode()
-    return hmac.new(secret.encode(), material, hashlib.sha256).hexdigest()
+    return committed_route_ref(job_id, stream, stream_id, secret=secret)
+
+
+def _job_ref(job: dict[str, Any]) -> str:
+    job_id = str(job.get("job_id") or "")
+    secret = _secret()
+    if not secret or not job_id:
+        raise ValueError("job commitment inputs are unavailable")
+    return committed_job_ref(job_id, secret=secret)
 
 
 def _iso_now() -> str:
@@ -220,6 +227,7 @@ def _route_capture(job: dict[str, Any]) -> dict[str, str]:
     payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
     return {
         "route_ref": _route_ref(job),
+        "job_ref": _job_ref(job),
         "job_type": str(job.get("job_type") or "text")[:16],
         "api_format": str(payload.get("api_format") or "openai-chat")[:64],
         "task_class": _task_class(job),
@@ -246,6 +254,7 @@ async def _emit_route(
                 {
                     "kind": "route",
                     "route_ref": capture["route_ref"],
+                    "job_ref": capture["job_ref"],
                     "observed_at": observed_at or _iso_now(),
                     "task_class": capture["task_class"],
                     "modality": capture["job_type"],
