@@ -53,7 +53,7 @@ run.
    replicas in a tracked background task and commits only bounded, HMAC-linked
    metadata to a private Redis Stream. Once Redis accepts an event, consumer-group
    delivery retains it until the collector acknowledges and deletes it. The stream
-   has a 100,000-event emergency bound, so an extended collector outage can trim
+   has a 10,000-event emergency bound, so an extended collector outage can trim
    the oldest pending evidence. A process crash before acceptance can also lose an
    event. The final report measures captured successful routes against the
    independent completion ledger and fails review below the frozen threshold.
@@ -211,9 +211,13 @@ revise and rerun, not to activate it.
    store, derives authoritative evidence, persists observations/outcomes, samples
    independent capacity, retries transient faults, and drops malformed poison
    events without touching production authority.
-4. **Implemented dark:** static isolation plus producer/consumer fault tests prove
-   collection calls are never awaited by worker transport. Full worker-transport
-   regression and production-shaped fault verification remain release gates.
+4. **Implemented dark:** static isolation plus producer/consumer fault and burst
+   tests prove collection calls are never awaited by worker transport. A
+   two-second, single-flight minimal worker-registry snapshot prevents route
+   bursts from multiplying Redis registry scans. Candidate events are capped at
+   256 entries and 128,000 UTF-8 bytes on both sides of the outbox contract.
+   Full worker-transport regression and production-shaped fault verification
+   remain release gates.
 5. Next: dark-deploy with collection disabled and verify migration/rollback on the
    production-shaped release.
 6. After the three-operator gate, freeze one policy and start the seven-day run.
@@ -225,7 +229,7 @@ submit the same signed evidence and does not need a new release for shadow
 collection. In particular, do not publish preview.14 merely to begin this work;
 preview.13 remains the cohort baseline while an operator is qualifying.
 
-The Redis outbox is capped at 100,000 events and acknowledged events are deleted
+The Redis outbox is capped at 10,000 events and acknowledged events are deleted
 after leaving its consumer pending list. `VALIDATOR_SHADOW_RETENTION_DAYS`
 reserves the SQL evidence policy value, but no SQL pruner is wired yet. Do not
 claim SQL retention enforcement until an explicit archive/delete policy preserves
