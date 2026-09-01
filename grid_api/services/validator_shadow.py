@@ -130,6 +130,23 @@ def commitment(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def run_state_hash(row: Mapping[str, Any]) -> str:
+    """Commit the mutable run lifecycle fields used by operator transitions."""
+    return commitment(
+        {
+            "id": str(row.get("id") or ""),
+            "status": str(row.get("status") or ""),
+            "policy_version": str(row.get("policy_version") or ""),
+            "config_hash": str(row.get("config_hash") or ""),
+            "implementation_commit": str(row.get("implementation_commit") or ""),
+            "start_gate_hash": str(row.get("start_gate_hash") or ""),
+            "started": row.get("started"),
+            "scheduled_end": row.get("scheduled_end"),
+            "ended": row.get("ended"),
+        },
+    )
+
+
 def committed_route_ref(job_id: str, *, secret: str) -> str:
     """Hide a production job id behind a server-keyed stable commitment."""
     if not job_id or not secret:
@@ -861,6 +878,7 @@ async def create_run(
     verification_ref: str,
     verification: Mapping[str, Any],
     observed_at: datetime | None = None,
+    expected_start_gate_hash: str | None = None,
 ) -> dict[str, Any]:
     """Create a draft from a Core-derived gate. Creation enables nothing."""
     config = runtime_policy_config(policy_config)
@@ -874,6 +892,9 @@ async def create_run(
         observed_at=observed_at,
         policy_config=config,
     )
+    gate_hash = commitment(gate)
+    if expected_start_gate_hash is not None and expected_start_gate_hash != gate_hash:
+        raise ShadowStartGateError("shadow creation gate changed; preview again")
     values = {
         "id": run_id,
         "status": "draft",
@@ -883,7 +904,7 @@ async def create_run(
         "implementation_commit": commit,
         "verification_ref": verification_ref.strip(),
         "start_gate": gate,
-        "start_gate_hash": commitment(gate),
+        "start_gate_hash": gate_hash,
         "created": _now(),
         "started": None,
         "scheduled_end": None,
@@ -912,7 +933,21 @@ async def create_run(
     return values
 
 
-async def start_run(run_id: str, *, started_at: datetime | None = None) -> dict[str, Any]:
+async def get_run(run_id: str) -> dict[str, Any]:
+    """Return one private run row for an authenticated operator tool."""
+    async with await new_session() as session:
+        row = (await session.execute(sa.select(runs_t).where(runs_t.c.id == run_id))).mappings().first()
+    if not row:
+        raise ShadowError("shadow run does not exist")
+    return dict(row)
+
+
+async def start_run(
+    run_id: str,
+    *,
+    started_at: datetime | None = None,
+    expected_start_gate_hash: str | None = None,
+) -> dict[str, Any]:
     """Start a previously frozen run only when collection and every gate are live."""
     _require_enabled()
     started = _aware(started_at or _now())
@@ -945,6 +980,9 @@ async def start_run(run_id: str, *, started_at: datetime | None = None) -> dict[
                 raise ShadowStartGateError(
                     "shadow start gate failed: " + ", ".join(evaluation.get("failed", [])),
                 )
+            gate_hash = commitment(live_gate)
+            if expected_start_gate_hash is not None and expected_start_gate_hash != gate_hash:
+                raise ShadowStartGateError("shadow start gate changed; preview again")
             scheduled_end = started + timedelta(hours=int(row["policy_config"]["run_hours"]))
             await session.execute(
                 sa.update(runs_t)
@@ -952,7 +990,7 @@ async def start_run(run_id: str, *, started_at: datetime | None = None) -> dict[
                 .values(
                     status="running",
                     start_gate=live_gate,
-                    start_gate_hash=commitment(live_gate),
+                    start_gate_hash=gate_hash,
                     started=started,
                     scheduled_end=scheduled_end,
                 ),
@@ -961,7 +999,7 @@ async def start_run(run_id: str, *, started_at: datetime | None = None) -> dict[
         **dict(row),
         "status": "running",
         "start_gate": live_gate,
-        "start_gate_hash": commitment(live_gate),
+        "start_gate_hash": gate_hash,
         "started": started,
         "scheduled_end": scheduled_end,
     }
@@ -1286,6 +1324,7 @@ async def finish_run(
     *,
     status: str,
     ended_at: datetime | None = None,
+    expected_run_state_hash: str | None = None,
 ) -> dict[str, Any]:
     """Close a run without interpreting or promoting its observations."""
     _require_enabled()
@@ -1305,6 +1344,8 @@ async def finish_run(
             )
             if not row:
                 raise ShadowError("shadow run does not exist")
+            if expected_run_state_hash is not None and expected_run_state_hash != run_state_hash(row):
+                raise ShadowConflict("shadow run state changed; preview again")
             if row["status"] == status:
                 return dict(row)
             if row["status"] != "running":
