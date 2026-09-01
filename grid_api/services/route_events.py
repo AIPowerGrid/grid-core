@@ -35,6 +35,7 @@ MAX_PENDING_TASKS = 2048
 CAPTURE_TIMEOUT_SECONDS = 5.0
 REGISTRY_CACHE_SECONDS = 2.0
 REGISTRY_FAILURE_BACKOFF_SECONDS = 1.0
+CANDIDATE_BASIS = "post_dispatch_connected_compatible_replicas.v1"
 _WORKER_STATUS_PREFIX = "grid:worker:"
 _WORKER_STATUS_SUFFIX = ":status"
 _pending: set[asyncio.Task] = set()
@@ -181,7 +182,12 @@ async def _candidate_snapshot(
     selected_model: str,
     actual_worker_id: str,
 ) -> list[dict[str, Any]]:
-    """Freeze connected compatible replicas without retaining worker metadata."""
+    """Sample connected compatible replicas after dispatch.
+
+    This is deliberately not described as the production scheduler's candidate
+    set. Grid workers pull from shared streams, and this background sample may
+    include busy replicas that could not have claimed the dispatched job.
+    """
     actual = (str(actual_worker_id)[:64], str(selected_model)[:255])
     candidates: set[tuple[str, str]] = {actual}
     for info in await _worker_registry_snapshot():
@@ -244,6 +250,7 @@ async def _emit_route(
                     "task_class": capture["task_class"],
                     "modality": capture["job_type"],
                     "capability": capture["capability"],
+                    "candidate_basis": CANDIDATE_BASIS,
                     "candidates": _encoded_candidates(candidates),
                     "actual_model": str(selected_model)[:255],
                     "actual_worker_id": str(worker_id)[:64],
