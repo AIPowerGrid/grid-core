@@ -62,6 +62,11 @@ class OversizedRegistryRedis(FakeRedis):
         return {f"worker-{index}" for index in range(route_events.MAX_ACTIVE_WORKERS + 1)}
 
 
+class HangingRegistryRedis(FakeRedis):
+    async def smembers(self, _key):
+        await route_events.asyncio.Event().wait()
+
+
 def _settings(enabled: bool = True):
     return SimpleNamespace(
         validator_shadow_observer_enabled=enabled,
@@ -131,6 +136,15 @@ async def test_oversized_worker_registry_fails_capture_closed(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_capture_timeout_is_bounded_and_never_escapes(monkeypatch):
+    monkeypatch.setattr(route_events, "get_settings", _settings)
+    monkeypatch.setattr(route_events, "get_redis", lambda: HangingRegistryRedis())
+    monkeypatch.setattr(route_events, "CAPTURE_TIMEOUT_SECONDS", 0.01)
+
+    await route_events._emit_route(_job(), "model-a", "worker-a")
+
+
+@pytest.mark.asyncio
 async def test_outcome_contains_no_raw_job_identifier(monkeypatch):
     redis = FakeRedis()
     monkeypatch.setattr(route_events, "get_settings", _settings)
@@ -142,6 +156,21 @@ async def test_outcome_contains_no_raw_job_identifier(monkeypatch):
     assert event["duration_ms"] == "1250"
     assert event["terminal_status"] == "succeeded"
     assert "private-job-id" not in json.dumps(event)
+
+
+@pytest.mark.asyncio
+async def test_capture_binds_time_before_background_execution(monkeypatch):
+    redis = FakeRedis()
+    times = iter(("2026-09-01T16:00:00+00:00", "2026-09-01T16:00:01+00:00"))
+    monkeypatch.setattr(route_events, "get_settings", _settings)
+    monkeypatch.setattr(route_events, "get_redis", lambda: redis)
+    monkeypatch.setattr(route_events, "_iso_now", lambda: next(times))
+
+    route_events.capture_route(job=_job(), selected_model="model-a", worker_id="worker-a")
+    await route_events.drain()
+
+    assert redis.events[0][1]["observed_at"] == "2026-09-01T16:00:00+00:00"
+    assert next(times) == "2026-09-01T16:00:01+00:00"
 
 
 def test_disabled_capture_creates_no_task(monkeypatch):

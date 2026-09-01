@@ -591,6 +591,47 @@ async def test_start_rechecks_live_gate_instead_of_trusting_draft_snapshot(db, m
 
 
 @pytest.mark.asyncio
+async def test_create_and_start_reject_stale_operator_gate_hashes(db, monkeypatch):
+    live_gate = _live_gate_snapshot()
+    monkeypatch.setattr(shadow, "live_start_gate_snapshot", _fake_live_gate())
+
+    with pytest.raises(shadow.ShadowStartGateError, match="creation gate changed"):
+        await shadow.create_run(
+            run_id=RUN_ID,
+            policy_config=None,
+            implementation_commit="a" * 40,
+            verification_ref="ci://validator-shadow/stale-preview",
+            verification=_gate(),
+            observed_at=NOW,
+            expected_start_gate_hash="0" * 64,
+        )
+
+    await shadow.create_run(
+        run_id=RUN_ID,
+        policy_config=None,
+        implementation_commit="a" * 40,
+        verification_ref="ci://validator-shadow/fresh-preview",
+        verification=_gate(),
+        observed_at=NOW,
+        expected_start_gate_hash=shadow.commitment(live_gate),
+    )
+    with pytest.raises(shadow.ShadowStartGateError, match="start gate changed"):
+        await shadow.start_run(
+            RUN_ID,
+            started_at=NOW,
+            expected_start_gate_hash="0" * 64,
+        )
+
+    started = await shadow.start_run(
+        RUN_ID,
+        started_at=NOW,
+        expected_start_gate_hash=shadow.commitment(live_gate),
+    )
+    assert started["status"] == "running"
+    assert (await shadow.get_run(RUN_ID))["status"] == "running"
+
+
+@pytest.mark.asyncio
 async def test_create_and_start_derive_real_gate_from_core(db):
     await _seed_authoritative_group()
     draft = await shadow.create_run(
@@ -859,6 +900,25 @@ async def test_run_cannot_complete_early_and_completion_never_promotes(db, monke
     assert report["automatic_promotion"] is False
     assert report["review_eligible"] is False
     assert report["gates"]["observations_present"] is False
+
+
+@pytest.mark.asyncio
+async def test_finish_rejects_stale_operator_run_state_hash(db, monkeypatch):
+    running = await _running_run(monkeypatch)
+    with pytest.raises(shadow.ShadowConflict, match="run state changed"):
+        await shadow.finish_run(
+            RUN_ID,
+            status="completed",
+            ended_at=NOW + timedelta(hours=168),
+            expected_run_state_hash="0" * 64,
+        )
+    done = await shadow.finish_run(
+        RUN_ID,
+        status="completed",
+        ended_at=NOW + timedelta(hours=168),
+        expected_run_state_hash=shadow.run_state_hash(running),
+    )
+    assert done["status"] == "completed"
 
 
 @pytest.mark.asyncio

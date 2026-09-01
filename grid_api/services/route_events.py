@@ -31,6 +31,7 @@ MAX_STREAM_LEN = 100_000
 MAX_CANDIDATES = 512
 MAX_ACTIVE_WORKERS = 4096
 MAX_PENDING_TASKS = 2048
+CAPTURE_TIMEOUT_SECONDS = 5.0
 _WORKER_STATUS_PREFIX = "grid:worker:"
 _WORKER_STATUS_SUFFIX = ":status"
 _pending: set[asyncio.Task] = set()
@@ -137,30 +138,36 @@ async def _candidate_snapshot(
     return [{"worker_id": worker_id, "model": model, "baseline_rank": rank} for rank, (worker_id, model) in enumerate(ordered)]
 
 
-async def _emit_route(job: dict[str, Any], selected_model: str, worker_id: str) -> None:
+async def _emit_route(
+    job: dict[str, Any],
+    selected_model: str,
+    worker_id: str,
+    observed_at: str | None = None,
+) -> None:
     try:
-        route_ref = _route_ref(job)
-        candidates = await _candidate_snapshot(
-            job=job,
-            selected_model=selected_model,
-            actual_worker_id=worker_id,
-        )
-        await get_redis().xadd(
-            STREAM_KEY,
-            {
-                "kind": "route",
-                "route_ref": route_ref,
-                "observed_at": _iso_now(),
-                "task_class": _task_class(job),
-                "modality": str(job.get("job_type") or "text")[:16],
-                "capability": _capability(job),
-                "candidates": json.dumps(candidates, sort_keys=True, separators=(",", ":")),
-                "actual_model": str(selected_model)[:255],
-                "actual_worker_id": str(worker_id)[:64],
-            },
-            maxlen=MAX_STREAM_LEN,
-            approximate=True,
-        )
+        async with asyncio.timeout(CAPTURE_TIMEOUT_SECONDS):
+            route_ref = _route_ref(job)
+            candidates = await _candidate_snapshot(
+                job=job,
+                selected_model=selected_model,
+                actual_worker_id=worker_id,
+            )
+            await get_redis().xadd(
+                STREAM_KEY,
+                {
+                    "kind": "route",
+                    "route_ref": route_ref,
+                    "observed_at": observed_at or _iso_now(),
+                    "task_class": _task_class(job),
+                    "modality": str(job.get("job_type") or "text")[:16],
+                    "capability": _capability(job),
+                    "candidates": json.dumps(candidates, sort_keys=True, separators=(",", ":")),
+                    "actual_model": str(selected_model)[:255],
+                    "actual_worker_id": str(worker_id)[:64],
+                },
+                maxlen=MAX_STREAM_LEN,
+                approximate=True,
+            )
     except Exception as exc:
         logger.warning("Route-event capture failed error_type=%s", error_type(exc))
 
@@ -170,24 +177,26 @@ async def _emit_outcome(
     worker_id: str,
     terminal_status: str,
     duration_seconds: float | None,
+    finished_at: str | None = None,
 ) -> None:
     try:
-        duration_ms = ""
-        if duration_seconds is not None:
-            duration_ms = str(max(0, int(float(duration_seconds) * 1000)))
-        await get_redis().xadd(
-            STREAM_KEY,
-            {
-                "kind": "outcome",
-                "route_ref": _route_ref(job),
-                "finished_at": _iso_now(),
-                "actual_worker_id": str(worker_id)[:64],
-                "terminal_status": str(terminal_status),
-                "duration_ms": duration_ms,
-            },
-            maxlen=MAX_STREAM_LEN,
-            approximate=True,
-        )
+        async with asyncio.timeout(CAPTURE_TIMEOUT_SECONDS):
+            duration_ms = ""
+            if duration_seconds is not None:
+                duration_ms = str(max(0, int(float(duration_seconds) * 1000)))
+            await get_redis().xadd(
+                STREAM_KEY,
+                {
+                    "kind": "outcome",
+                    "route_ref": _route_ref(job),
+                    "finished_at": finished_at or _iso_now(),
+                    "actual_worker_id": str(worker_id)[:64],
+                    "terminal_status": str(terminal_status),
+                    "duration_ms": duration_ms,
+                },
+                maxlen=MAX_STREAM_LEN,
+                approximate=True,
+            )
     except Exception as exc:
         logger.warning("Route-outcome capture failed error_type=%s", error_type(exc))
 
@@ -218,7 +227,7 @@ def _schedule(coro) -> None:
 
 def capture_route(*, job: dict[str, Any], selected_model: str, worker_id: str) -> None:
     """Schedule a route snapshot without awaiting or mutating the live route."""
-    _schedule(_emit_route(dict(job), str(selected_model), str(worker_id)))
+    _schedule(_emit_route(dict(job), str(selected_model), str(worker_id), _iso_now()))
 
 
 def capture_outcome(
@@ -235,6 +244,7 @@ def capture_outcome(
             str(worker_id),
             str(terminal_status),
             duration_seconds,
+            _iso_now(),
         ),
     )
 

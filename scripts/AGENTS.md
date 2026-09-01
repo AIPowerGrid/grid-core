@@ -57,6 +57,10 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   model/lane counts. It cannot emit prompts, outputs, nonces, evidence,
   validator or worker identities, wallets, or accounts, and it grants no
   quality, routing, or economic authority.
+- `manage_validator_shadow_run.py` - preview-first draft/start/finish control,
+  aggregate reporting, and read-only Redis backlog health for the economically
+  inert seven-day shadow run. Every mutation requires the exact fixed UTC time
+  and gate/state hash from a fresh preview.
 - `backup_postgres.sh` - root-only custom-format backup of the Grid-owned
   PostgreSQL schema with checksum, archive validation, locking, and bounded
   local retention. It excludes unrelated extension and legacy schemas.
@@ -98,6 +102,10 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   apply with that exact digest. An incomplete verify preview reports progress;
   the corresponding apply still fails closed. Do not place names, emails,
   hostnames, IPs, or private review notes in the group id or review ref.
+- Shadow-run mutation uses `manage_validator_shadow_run.py`. Never apply a
+  transition from a stale preview, mutable checkout, abbreviated implementation
+  commit, or non-immutable verification reference. Never complete a run until
+  its scheduled end has passed and `transport` reports a fully drained outbox.
 - Media reference review is two-step: use `review_validator_reference.py` with
   `--action review` to create/update a paused quality row, let the default-off
   chain sync write a fresh exact bond proof, then preview/apply `--action
