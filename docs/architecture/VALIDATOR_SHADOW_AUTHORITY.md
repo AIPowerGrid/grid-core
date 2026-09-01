@@ -7,6 +7,8 @@ collection is not live. Migration `0032`, the pure policy, Core-derived evidence
 snapshot, append-only replay store, live start-gate evaluator, aggregate report
 CLI, import isolation guard, asynchronous Redis route-event outbox and isolated
 collector, and SQLite/PostgreSQL concurrency tests exist.
+Migration `0033` additionally enforces one running experiment at the database
+boundary; lifecycle transitions reject backdated or future-dated operator time.
 Production validator evidence remains observability-only and the real router
 does not read it. Shadow mode may start only after three recently participating,
 independently reviewed operator groups complete the validator cohort gate. It
@@ -45,7 +47,9 @@ run.
    router, worker health, settlement, credits, payouts, rewards, bonds, strikes,
    and slashing code must not import or query them.
    Worker transport performs only a non-awaited handoff to a neutral route-event
-   emitter after actual dispatch. The emitter snapshots compatible connected
+   emitter after actual dispatch. The handoff first reduces the live job to a
+   bounded envelope, so queued observer tasks retain no prompt, output, account,
+   wallet, or raw job identifier. The emitter snapshots compatible connected
    replicas in a tracked background task and commits only bounded, HMAC-linked
    metadata to a private Redis Stream. Once Redis accepts an event, consumer-group
    delivery retains it until the collector acknowledges and deletes it. The stream
