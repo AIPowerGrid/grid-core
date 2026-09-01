@@ -15,8 +15,9 @@ for humans and agents.
 - `FUNDING_RAIL.md` - Base asset acceptance and x402 architecture.
 - `FUNDING_CANARY_RUNBOOK.md` - dark deploy, real-money canary evidence, and
   rollback gates.
-- `VALIDATOR_SHADOW_RUNBOOK.md` - exact preview/apply, transport-drain, rollback,
-  and evidence procedure for the economically inert seven-day validator run.
+- `VALIDATOR_SHADOW_RUNBOOK.md` - exact cohort-finalization, preview/apply,
+  transport-drain, rollback, and evidence procedure for the economically inert
+  seven-day validator run.
 - `V2.md` - v2 API/design notes.
 - `architecture/DECENTRALIZATION_ROADMAP.md` - accepted post-preview Base
   validator and trusted-partner Core federation phases, event contract, and
