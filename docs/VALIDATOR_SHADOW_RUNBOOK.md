@@ -74,6 +74,79 @@ Do not omit `-H`. Preserving root's `HOME` makes asyncpg inspect
 verification JSON readable by `aipg`; the file contains proof booleans and must
 not contain database credentials or the route HMAC secret.
 
+## 0. Finalize and recheck the independent cohort
+
+The shadow gate counts verified operator groups, not candidates. Finalize each
+candidate only after its public status reports a fresh heartbeat and the
+maintainer has confirmed that the operator-control facts have not changed. Do
+not run another `candidate` transition at the end of a qualification window:
+that starts a new 72-hour window. Candidate re-entry is separately guarded by
+an explicit restart flag.
+
+Use the immutable production release and a non-sensitive review reference. The
+tool's output includes the private opaque operator group, so inspect it only in
+the protected production terminal and never paste it into GitHub, chat, or a
+public incident report.
+
+```bash
+REVIEW=$PWD/scripts/review_validator_operator.py
+VALIDATOR_ID=val_0123456789abcdef0123456789abcdef
+REVIEW_REF=review:cohort-final-2026-09-08
+
+$PY "$REVIEW" \
+  --validator-id "$VALIDATOR_ID" \
+  --action verify \
+  --review-ref "$REVIEW_REF"
+```
+
+Require the preview to show all of the following:
+
+- `current_status: candidate` and `proposed_status: verified`;
+- `eligible_to_apply: true` and an empty `blocking_reasons` list;
+- `time_ready`, `coverage_ready`, and `software_version_supported` all true;
+- at least one completed probe and one authoritative attestation created after
+  this candidate window began; and
+- `economic_effect: none`.
+
+The activity check is qualification-window scoped. Lifetime evidence created
+before the candidate clock started cannot satisfy it. If any field fails, keep
+the node in candidate state and correct or observe the blocker; never edit the
+timestamps, sample counters, or evidence rows.
+
+Apply immediately with the exact digest from that preview. A heartbeat sample,
+version change, status change, or concurrent review between the two commands
+invalidates the digest and requires another preview.
+
+```bash
+$PY "$REVIEW" \
+  --validator-id "$VALIDATOR_ID" \
+  --action verify \
+  --review-ref "$REVIEW_REF" \
+  --apply \
+  --expect-digest <preview-current-digest>
+```
+
+After each apply, check the redacted public status and the aggregate gate. The
+public response must report `status: verified`, a fresh heartbeat, the frozen
+cohort version, and `independent_vote_eligible: true`. It must not expose the
+operator group or review reference.
+
+```bash
+curl -fsS \
+  "https://api.aipowergrid.io/v1/validator/public/$VALIDATOR_ID"
+GATE_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+$PY $TOOL gate \
+  --verification-json /protected/shadow-verification.json \
+  --at "$GATE_AT"
+```
+
+Repeat for three unrelated operator groups. A verified review expires after its
+bounded review period; expiry removes eligibility. Starting a later review cycle
+requires a deliberate candidate transition and a fresh qualification window,
+not an in-place expiry extension. Do not prepare or start shadow collection
+until the gate independently reports three recently participating verified
+groups.
+
 ## 1. Verification evidence
 
 Create a protected local JSON file containing exactly:
