@@ -17,6 +17,16 @@ runs for seven days without changing routing, rewards, worker status, den,
 payouts, bonds, strikes, or slashing.
 The operational procedure is [VALIDATOR_SHADOW_RUNBOOK.md](../VALIDATOR_SHADOW_RUNBOOK.md).
 
+Core `e1e4ad4c9eeb277f385a2359f3bc418917a7f0e1` was dark-deployed on
+2026-09-01 with Alembic `0034`. A production-backup restore traversed
+`0031 -> 0032 -> 0033 -> 0034` with no schema drift before the live migration.
+The observer flag remained false, every shadow table remained empty, and the
+route-event stream was absent after deployment. A later read-only invocation of
+the immutable release's gate tool rejected startup on exactly the three cohort
+requirements: verified independent operators, participating independent
+operators, and a finalized independent probe group. That is deployment and
+fail-closed evidence only; collection has not started.
+
 Shadow mode is an evaluation phase, not partial authority. Completing it creates
 a review artifact; it does not enable routing or validator economics.
 
@@ -246,9 +256,11 @@ revise and rerun, not to activate it.
    mismatched basis, and the final report repeats the limitation.
    Full worker-transport regression and production-shaped fault verification
    remain release gates.
-5. Next: dark-deploy with collection disabled and verify migration/rollback on the
-   production-shaped release.
-6. After the three-operator gate, freeze one policy and start the seven-day run.
+5. **Implemented dark:** Core `e1e4ad4c` and schema `0034` are production-live
+   with collection disabled; backup/restore, migration, drift, empty-state, and
+   fail-closed live-gate checks passed.
+6. **Next:** after the three-operator gate, freeze one policy and start the
+   seven-day run.
 7. Review the report before discussing any routing-weight experiment. Validator
    rewards remain out of scope.
 
