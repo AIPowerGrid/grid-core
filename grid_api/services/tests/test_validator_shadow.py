@@ -291,6 +291,8 @@ def test_policy_rejects_subjective_quality_and_weakened_gates():
         shadow.frozen_policy_config({"required_sample_coverage": 0.79})
     with pytest.raises(ValueError, match="72 hours"):
         shadow.frozen_policy_config({"minimum_qualification_seconds": 71 * 3600})
+    with pytest.raises(ValueError, match="candidate basis"):
+        shadow.frozen_policy_config({"candidate_basis": "exact_scheduler_candidates.v1"})
 
 
 def test_runtime_policy_cannot_drift_from_deployed_baseline_or_sample_interval(db):
@@ -304,6 +306,7 @@ def test_runtime_policy_cannot_drift_from_deployed_baseline_or_sample_interval(d
 
 def test_actual_healthy_is_same():
     result = _evaluate([_evidence("worker-a", "model-a", "healthy", commitment_char="a")])
+    assert result["candidate_basis"] == shadow.CANDIDATE_BASIS
     assert result["decision_class"] == "same"
     assert result["reason_code"] == "actual_objectively_healthy"
     assert result["hypothetical_worker_id"] == "worker-a"
@@ -786,6 +789,8 @@ async def test_observation_outcome_and_sample_are_exactly_idempotent_and_replaya
     assert error["error_code"] == "outbox_gap"
 
     report = await shadow.run_report(RUN_ID, at=NOW + timedelta(hours=1))
+    assert report["candidate_basis"] == shadow.CANDIDATE_BASIS
+    assert report["counterfactual_scope"].startswith("same-model replica preference")
     assert report["decisions"]["would_change"] == 1
     assert report["terminal_outcomes"] == {"succeeded": 1}
     assert report["observer_errors"] == [
