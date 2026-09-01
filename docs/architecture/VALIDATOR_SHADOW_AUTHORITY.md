@@ -12,6 +12,7 @@ does not read it. Shadow mode may start only after three recently participating,
 independently reviewed operator groups complete the validator cohort gate. It
 runs for seven days without changing routing, rewards, worker status, den,
 payouts, bonds, strikes, or slashing.
+The operational procedure is [VALIDATOR_SHADOW_RUNBOOK.md](../VALIDATOR_SHADOW_RUNBOOK.md).
 
 Shadow mode is an evaluation phase, not partial authority. Completing it creates
 a review artifact; it does not enable routing or validator economics.
