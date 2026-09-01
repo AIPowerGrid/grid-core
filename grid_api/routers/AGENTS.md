@@ -40,6 +40,11 @@ transport, accounts, stats, health/metrics.
   settles through the exact text/media/passthrough paid terminal: ordinary frame,
   nonzero den acknowledgement, and no worker-visible audit marker. No scheduler
   creates those jobs yet.
+  After an ordinary compatible job is actually sent, worker transport calls the
+  neutral `route_events` emitter without awaiting it. Terminal attempt outcomes
+  use the same non-awaited handoff. The emitter cannot fail, delay, retry, ack,
+  settle, pay, or change a job; only the isolated background collector may read
+  those private outbox events into validator shadow records.
 - `accounts.py` - native Google/strict EIP-4361 SIWE auth, bounded service exchange, and
   default-off legacy dashboard/internal session creation,
   account profile (incl. resolved `payout{asset, aipg_bps, active, live_asset}`),

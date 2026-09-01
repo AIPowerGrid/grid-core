@@ -5,7 +5,8 @@
 Accepted rollout contract with a disabled-by-default Core implementation;
 collection is not live. Migration `0032`, the pure policy, Core-derived evidence
 snapshot, append-only replay store, live start-gate evaluator, aggregate report
-CLI, import isolation guard, and SQLite/PostgreSQL concurrency tests exist.
+CLI, import isolation guard, asynchronous Redis route-event outbox and isolated
+collector, and SQLite/PostgreSQL concurrency tests exist.
 Production validator evidence remains observability-only and the real router
 does not read it. Shadow mode may start only after three recently participating,
 independently reviewed operator groups complete the validator cohort gate. It
@@ -27,6 +28,13 @@ choice and computes a hypothetical choice from the same frozen candidate set.
 The comparison measures coverage, disagreement, stability, and likely impact
 before validator evidence can influence users.
 
+The first collector deliberately freezes only connected, protocol-compatible
+replicas of the concrete model that production selected. It can measure whether
+validator evidence would have avoided one worker replica; it does not yet
+second-guess the earlier `auto` model-family choice. Cross-model advice requires
+a separately frozen pre-resolution candidate contract and is not implied by this
+run.
+
 ## Invariants
 
 1. **No hot-path dependency.** The real router completes from its existing
@@ -35,6 +43,15 @@ before validator evidence can influence users.
 2. **No shared write path.** Shadow records are append-only observations. The
    router, worker health, settlement, credits, payouts, rewards, bonds, strikes,
    and slashing code must not import or query them.
+   Worker transport performs only a non-awaited handoff to a neutral route-event
+   emitter after actual dispatch. The emitter snapshots compatible connected
+   replicas in a tracked background task and commits only bounded, HMAC-linked
+   metadata to a private Redis Stream. Once Redis accepts an event, consumer-group
+   delivery retains it until the collector acknowledges and deletes it. The stream
+   has a 100,000-event emergency bound, so an extended collector outage can trim
+   the oldest pending evidence. A process crash before acceptance can also lose an
+   event. The final report measures captured successful routes against the
+   independent completion ledger and fails review below the frozen threshold.
 3. **Independent evidence only.** First-party nodes, unreviewed registrations,
    unsupported releases, stale reviews, and duplicate control groups never fill
    a shadow quorum seat.
@@ -117,6 +134,13 @@ commitments without retaining customer prompts or outputs. At minimum it records
 - actual terminal outcome when it later becomes available; and
 - confirmation that no routing or economic mutation was attempted.
 
+The route commitment binds the private job id, Redis stream, and delivery id.
+Retries therefore produce distinct route attempts instead of overwriting an
+earlier worker choice. Raw job ids, prompts, outputs, accounts, wallets, worker
+names, and validator identities never enter the outbox. The HMAC secret must
+remain stable for the full run and is injected through the production secret
+path.
+
 Public summaries aggregate these fields. They never expose prompts, outputs,
 worker or validator wallets, account ids, validator ids, control-group ids,
 signatures, nonces, private review references, IPs, or host data.
@@ -136,6 +160,8 @@ votes. The report is eligible for review only when:
 - observer errors, stale evidence, and insufficient-evidence rates are reported;
 - actual versus hypothetical route counts and terminal outcomes are reported by
   model, capability, and bounded reason code;
+- at least 80 percent of independently recorded successful ledger completions
+  have a matching captured successful route attempt;
 - would-change, reversal, disagreement, and coverage rates are stable enough to
   explain rather than hidden in a global average; and
 - an automated invariant test and production audit confirm zero real routing or
@@ -174,12 +200,16 @@ revise and rerun, not to activate it.
 2. **Implemented dark:** append-only observation store, outcome/capacity/error
    records, replay, start-gate evaluation, aggregate reporting, migration, and
    no-side-effect/import/concurrency tests.
-3. **Next, after review:** run the observer from a durable background/outbox
-   boundary after the real route is selected; never call it from the
-   route-critical transaction.
-4. Add the route/outcome outbox integration and prove every user-visible and
-   economic output remains byte-for-byte unchanged under collection faults.
-5. Dark-deploy with collection disabled and verify migration/rollback on the
+3. **Implemented dark:** after a compatible worker receives a real job, a
+   non-awaited producer writes a bounded privacy-safe route/outcome event to a
+   dedicated Redis Stream. A leased background consumer alone imports the shadow
+   store, derives authoritative evidence, persists observations/outcomes, samples
+   independent capacity, retries transient faults, and drops malformed poison
+   events without touching production authority.
+4. **Implemented dark:** static isolation plus producer/consumer fault tests prove
+   collection calls are never awaited by worker transport. Full worker-transport
+   regression and production-shaped fault verification remain release gates.
+5. Next: dark-deploy with collection disabled and verify migration/rollback on the
    production-shaped release.
 6. After the three-operator gate, freeze one policy and start the seven-day run.
 7. Review the report before discussing any routing-weight experiment. Validator
@@ -190,7 +220,9 @@ submit the same signed evidence and does not need a new release for shadow
 collection. In particular, do not publish preview.14 merely to begin this work;
 preview.13 remains the cohort baseline while an operator is qualifying.
 
-`VALIDATOR_SHADOW_RETENTION_DAYS` reserves the operational policy value, but no
-pruner is wired yet. Do not claim retention enforcement until the future
-collector owns and tests that cleanup path; existing shadow evidence remains
-append-only in this dark foundation.
+The Redis outbox is capped at 100,000 events and acknowledged events are deleted
+after leaving its consumer pending list. `VALIDATOR_SHADOW_RETENTION_DAYS`
+reserves the SQL evidence policy value, but no SQL pruner is wired yet. Do not
+claim SQL retention enforcement until an explicit archive/delete policy preserves
+the append-only review contract and is tested; existing shadow evidence remains
+append-only.

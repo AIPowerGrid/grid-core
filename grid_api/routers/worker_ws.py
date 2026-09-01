@@ -32,7 +32,7 @@ from ..config import get_settings
 from ..database import new_session
 from ..redis_client import get_redis
 from ..services import accounts as accounts_svc
-from ..services import audio, credits, job_queue, signing, storage, token_stream
+from ..services import audio, credits, job_queue, route_events, signing, storage, token_stream
 from ..services import ledger as ledger_svc
 from ..services import worker_identity as worker_identity_svc
 from ..services.den import calculate_den, calculate_media_den, count_tokens
@@ -802,6 +802,7 @@ async def worker_websocket(ws: WebSocket):
                         "payload": job["payload"],
                     },
                 )
+                route_events.capture_route(job=job, selected_model=selected_model, worker_id=worker_id)
 
                 # Wait for tokens + done
                 import time as _time
@@ -824,6 +825,12 @@ async def worker_websocket(ws: WebSocket):
                     record_job_failed()
                     await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
                     await credits.release_job(job["job_id"])  # terminal: refund the hold
+                    route_events.capture_outcome(
+                        job=job,
+                        worker_id=worker_id,
+                        terminal_status="failed",
+                        duration_seconds=gen_time,
+                    )
                     current_job = None
                     continue
 
@@ -835,6 +842,12 @@ async def worker_websocket(ws: WebSocket):
                     # den for a failed generation.
                     strikes = await _record_strike(worker_id, job["job_id"])
                     record_job_failed()
+                    route_events.capture_outcome(
+                        job=job,
+                        worker_id=worker_id,
+                        terminal_status="failed",
+                        duration_seconds=gen_time,
+                    )
                     if token_count == 0:
                         new_id = await job_queue.requeue_job(
                             job["job_id"],
@@ -976,6 +989,12 @@ async def worker_websocket(ws: WebSocket):
                     logger.critical(f"Terminal settlement failed for job {job['job_id']} — not acking; " f"leaving for stale-reclaim")
                     await token_stream.publish_error(job["job_id"], "Settlement failed; please retry.")
                     record_job_failed()
+                    route_events.capture_outcome(
+                        job=job,
+                        worker_id=worker_id,
+                        terminal_status="failed",
+                        duration_seconds=gen_time,
+                    )
                     continue
 
                 current_job = None
@@ -993,6 +1012,12 @@ async def worker_websocket(ws: WebSocket):
                     await job_queue.ack_job(job["stream_id"])
                     await ws.send_json({"type": "ack", "id": job["job_id"], "den": den_awarded})
                     record_job_complete(tokens=effective_tokens, den=den_awarded, duration=gen_time)
+                    route_events.capture_outcome(
+                        job=job,
+                        worker_id=worker_id,
+                        terminal_status="succeeded",
+                        duration_seconds=gen_time,
+                    )
                 else:
                     # 'stale_no_payout' / 'duplicate': the job is terminally CLOSED
                     # but this is NOT a paid completion — no DONE-as-success, no den,
@@ -1005,6 +1030,12 @@ async def worker_websocket(ws: WebSocket):
                         await token_stream.publish_error(job["job_id"], "Job could not be settled (already closed); please retry.")
                     await job_queue.ack_job(job["stream_id"])
                     await ws.send_json({"type": "ack", "id": job["job_id"], "den": 0})
+                    route_events.capture_outcome(
+                        job=job,
+                        worker_id=worker_id,
+                        terminal_status="cancelled",
+                        duration_seconds=gen_time,
+                    )
         finally:
             poll_task.cancel()
             refresh_task.cancel()
@@ -1036,6 +1067,11 @@ async def worker_websocket(ws: WebSocket):
             is_validator_probe = _is_assignment_bound_validator_job(current_job)
             if not is_validator_probe:
                 record_job_failed()
+                route_events.capture_outcome(
+                    job=current_job,
+                    worker_id=worker_id,
+                    terminal_status="failed",
+                )
             new_id = await job_queue.requeue_job(
                 job_id,
                 current_job["payload"],
@@ -1305,6 +1341,7 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
             "upload": [{"put_url": s["put_url"], "key": s["key"], "content_type": s["content_type"]} for s in upload_slots],
         },
     )
+    route_events.capture_route(job=job, selected_model=selected_model, worker_id=worker_id)
 
     gen_start = _time.time()
     receive_timeout = audio.AUDIO_WORKER_TIMEOUT if job_type == "audio" else 600
@@ -1336,6 +1373,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 logger.error("Audio worker returned the wrong recipe root for job %s", job_id)
                 await token_stream.publish_error(job_id, "Worker recipe verification failed.")
                 await credits.release_job(job_id)
+                route_events.capture_outcome(
+                    job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
+                )
                 return True
             try:
                 reported = _validated_media_results(msg.get("results"), n)
@@ -1343,6 +1383,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 logger.error("Media output verification failed for job %s: %s", job_id, exc)
                 await token_stream.publish_error(job_id, "Worker output verification failed.")
                 await credits.release_job(job_id)
+                route_events.capture_outcome(
+                    job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
+                )
                 return True
 
             storage_bounds = (
@@ -1359,11 +1402,17 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
             except Exception as exc:
                 logger.error("Media storage verification unavailable for job %s: %s", job_id, exc)
                 await token_stream.publish_error(job_id, "Output verification unavailable; please retry.")
+                route_events.capture_outcome(
+                    job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
+                )
                 return False
             if not uploaded:
                 logger.error("Media output object is missing or invalid for job %s", job_id)
                 await token_stream.publish_error(job_id, "Worker output verification failed.")
                 await credits.release_job(job_id)
+                route_events.capture_outcome(
+                    job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
+                )
                 return True
             outputs = []
             for i, slot in enumerate(upload_slots):
@@ -1406,6 +1455,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 logger.error("Managed worker returned an invalid receipt for job %s", job_id)
                 await token_stream.publish_error(job_id, "Worker receipt verification failed.")
                 await credits.release_job(job_id)
+                route_events.capture_outcome(
+                    job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
+                )
                 return True
             # ATOMIC terminal: worker-payout row + demand settlement in one txn.
             # Media reserves the EXACT cost up front, so success just lets the hold
@@ -1431,6 +1483,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 # leaving the job for stale-reclaim rather than acking unsettled.
                 logger.critical(f"Terminal settlement failed for media job {job_id} — not acking")
                 await token_stream.publish_error(job_id, "Settlement failed; please retry.")
+                route_events.capture_outcome(
+                    job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
+                )
                 return False
 
             if _is_paid_settlement(settle_result):
@@ -1448,6 +1503,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 )
                 await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
                 record_job_complete(tokens=0, den=den_awarded, duration=gen_time)
+                route_events.capture_outcome(
+                    job=job, worker_id=worker_id, terminal_status="succeeded", duration_seconds=gen_time,
+                )
                 return True
 
             # 'stale_no_payout' / 'duplicate': terminally closed, NOT a paid job —
@@ -1457,6 +1515,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
             if _requires_unpaid_terminal_error(settle_result):
                 await token_stream.publish_error(job_id, "Job could not be settled (already closed); please retry.")
             await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+            route_events.capture_outcome(
+                job=job, worker_id=worker_id, terminal_status="cancelled", duration_seconds=gen_time,
+            )
             return True
 
         elif msg_type == "pong":
@@ -1467,6 +1528,7 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
             await token_stream.publish_error(job_id, msg.get("message", "Worker error"))
             record_job_failed()
             await credits.release_job(job_id)  # terminal failure → refund the hold
+            route_events.capture_outcome(job=job, worker_id=worker_id, terminal_status="failed")
             return True
 
 
@@ -1494,6 +1556,7 @@ async def _handle_raw_passthrough(ws: WebSocket, job: dict, selected_model: str,
             "payload": payload,
         },
     )
+    route_events.capture_route(job=job, selected_model=selected_model, worker_id=worker_id)
 
     gen_start = _time.time()
     accumulated: list[str] = []  # raw data strings, for the result hash
@@ -1580,6 +1643,9 @@ async def _handle_raw_passthrough(ws: WebSocket, job: dict, selected_model: str,
                 # instead of acking an unsettled job.
                 logger.critical(f"Terminal settlement failed for raw job {job_id} — not acking")
                 await token_stream.publish_error(job_id, "Settlement failed; please retry.")
+                route_events.capture_outcome(
+                    job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
+                )
                 return False
 
             if _is_paid_settlement(settle_result):
@@ -1587,6 +1653,9 @@ async def _handle_raw_passthrough(ws: WebSocket, job: dict, selected_model: str,
                 await token_stream.publish_done(job_id, usage=usage, full_json=full_json)
                 await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
                 record_job_complete(tokens=effective_tokens, den=den_awarded, duration=gen_time)
+                route_events.capture_outcome(
+                    job=job, worker_id=worker_id, terminal_status="succeeded", duration_seconds=gen_time,
+                )
                 return True
 
             # 'stale_no_payout' / 'duplicate': terminally closed, NOT paid — no
@@ -1596,6 +1665,9 @@ async def _handle_raw_passthrough(ws: WebSocket, job: dict, selected_model: str,
             if _requires_unpaid_terminal_error(settle_result):
                 await token_stream.publish_error(job_id, "Job could not be settled (already closed); please retry.")
             await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+            route_events.capture_outcome(
+                job=job, worker_id=worker_id, terminal_status="cancelled", duration_seconds=gen_time,
+            )
             return True
 
         elif mtype == "pong":
@@ -1611,6 +1683,7 @@ async def _handle_raw_passthrough(ws: WebSocket, job: dict, selected_model: str,
                 await token_stream.publish_error(job_id, message, code=502)
             record_job_failed()
             await credits.release_job(job_id)  # terminal failure → refund the hold
+            route_events.capture_outcome(job=job, worker_id=worker_id, terminal_status="failed")
             return True
 
 

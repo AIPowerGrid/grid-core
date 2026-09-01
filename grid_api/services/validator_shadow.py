@@ -27,6 +27,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..config import get_settings
 from ..database import new_session
+from ..v2.schema import ledger as ledger_t
 from ..v2.schema import validator_assignments as assignments_t
 from ..v2.schema import validator_attestations as attestations_t
 from ..v2.schema import validator_probe_groups as probe_groups_t
@@ -37,7 +38,7 @@ from ..v2.schema import validator_shadow_outcomes as outcomes_t
 from ..v2.schema import validator_shadow_runs as runs_t
 from ..v2.schema import validators as validators_t
 
-POLICY_VERSION = "aipg.validator.shadow.protocol-capability.v1"
+POLICY_VERSION = "aipg.validator.shadow.protocol-capability.v2"
 RUN_HOURS = 168
 MIN_QUALIFICATION_SECONDS = 72 * 3600
 DEFAULT_POLICY_CONFIG: dict[str, Any] = {
@@ -52,6 +53,7 @@ DEFAULT_POLICY_CONFIG: dict[str, Any] = {
     "positive_outcomes": ["healthy"],
     "required_sample_coverage": 0.80,
     "required_terminal_outcome_coverage": 0.80,
+    "required_route_capture_coverage": 0.80,
     "maximum_quorum_gap_seconds": 3600,
     "sample_interval_seconds": 300,
     "run_hours": RUN_HOURS,
@@ -185,6 +187,10 @@ def frozen_policy_config(overrides: Mapping[str, Any] | None = None) -> dict[str
     if not 0.80 <= terminal_coverage <= 1.0:
         raise ValueError("required_terminal_outcome_coverage may not be below 0.80")
     config["required_terminal_outcome_coverage"] = terminal_coverage
+    route_coverage = float(config["required_route_capture_coverage"])
+    if not 0.80 <= route_coverage <= 1.0:
+        raise ValueError("required_route_capture_coverage may not be below 0.80")
+    config["required_route_capture_coverage"] = route_coverage
     config["maximum_quorum_gap_seconds"] = int(config["maximum_quorum_gap_seconds"])
     config["sample_interval_seconds"] = int(config["sample_interval_seconds"])
     config["run_hours"] = int(config["run_hours"])
@@ -1472,7 +1478,7 @@ async def run_report(run_id: str, *, at: datetime | None = None) -> dict[str, An
                     .join(observations_t, observations_t.c.id == outcomes_t.c.observation_id)
                     .where(
                         observations_t.c.run_id == run_id,
-                        outcomes_t.c.finished_at <= current,
+                        outcomes_t.c.finished_at <= report_end,
                     ),
                 )
             )
@@ -1497,6 +1503,18 @@ async def run_report(run_id: str, *, at: datetime | None = None) -> dict[str, An
             .mappings()
             .all()
         )
+        successful_completions = 0
+        if started_at:
+            successful_completions = int(
+                (
+                    await session.execute(
+                        sa.select(sa.func.count()).select_from(ledger_t).where(
+                            ledger_t.c.created >= started_at,
+                            ledger_t.c.created <= report_end,
+                        ),
+                    )
+                ).scalar_one(),
+            )
 
     decisions = {name: 0 for name in sorted(_DECISIONS)}
     reasons: dict[str, int] = {}
@@ -1547,11 +1565,18 @@ async def run_report(run_id: str, *, at: datetime | None = None) -> dict[str, An
     )
     observation_count = len(observations)
     terminal_coverage = len(outcome_rows) / observation_count if observation_count else 0.0
+    captured_successes = int(terminal_counts.get("succeeded", 0))
+    route_capture_coverage = (
+        min(1.0, captured_successes / successful_completions)
+        if successful_completions
+        else (1.0 if captured_successes == 0 else 0.0)
+    )
     gates = {
         "run_completed": run["status"] == "completed",
         "duration_complete": duration >= int(config["run_hours"]) * 3600,
         "observations_present": observation_count > 0,
         "terminal_outcome_coverage": terminal_coverage >= float(config["required_terminal_outcome_coverage"]),
+        "route_capture_coverage": route_capture_coverage >= float(config["required_route_capture_coverage"]),
         "independent_sample_coverage": capacity["coverage"] >= float(config["required_sample_coverage"]),
         "maximum_quorum_gap": max_gap <= int(config["maximum_quorum_gap_seconds"]),
         "all_decisions_replay": replay_failures == 0,
@@ -1585,6 +1610,9 @@ async def run_report(run_id: str, *, at: datetime | None = None) -> dict[str, An
         ],
         "terminal_outcomes": dict(sorted(terminal_counts.items())),
         "terminal_outcome_coverage": terminal_coverage,
+        "production_successful_completions": successful_completions,
+        "captured_successful_routes": captured_successes,
+        "route_capture_coverage": route_capture_coverage,
         "terminal_breakdown": [
             {
                 "actual_model": key[0],

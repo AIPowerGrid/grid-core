@@ -192,8 +192,15 @@ content sanitization, and reward settlement.
   credits, settlement, payouts, rewards, bonds, strikes, and slashing must
   neither import this module nor query its tables. The flag defaults off, the
   CLI is read-only, and a completed run cannot promote itself. Missing expected
-  sample slots count against report coverage. Retention configuration is
-  reserved until a future collector owns a tested pruner.
+  sample slots and successful ledger completions absent from the route capture
+  count against report coverage. `route_events.py` is the neutral, non-awaited
+  producer: after actual dispatch it HMAC-commits job/Redis-delivery identity,
+  snapshots bounded compatible replicas, and writes no prompt, output, account,
+  wallet, worker name, or validator identity. `validator_shadow_collector.py` is
+  the only outbox consumer allowed to import `validator_shadow`; it uses a Redis
+  lease, retries transient faults, records outcomes/capacity, and has no routing
+  or economic output. The Redis outbox is bounded; SQL retention configuration
+  remains reserved until an append-only-compatible pruner is designed and tested.
   Preview group acceptance still records distinct-registration quorum for
   compatibility; independent-operator quorum is a separate explicit signal and
   is not required for acceptance until a later reviewed authority gate.
