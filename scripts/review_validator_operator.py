@@ -27,6 +27,7 @@ async def _run(args) -> None:
             operator_group_id=args.operator_group,
             review_ref=args.review_ref,
             review_days=args.review_days,
+            restart_qualification=args.restart_qualification,
             expected_digest=args.expect_digest,
             apply=args.apply,
         )
@@ -42,9 +43,16 @@ def main() -> None:
     parser.add_argument("--operator-group", help="Opaque opg_* control-group identifier")
     parser.add_argument("--review-ref", required=True, help="Non-sensitive ticket or review reference")
     parser.add_argument("--review-days", type=int, default=30)
+    parser.add_argument(
+        "--restart-qualification",
+        action="store_true",
+        help="With candidate, deliberately reset an already-active qualification window",
+    )
     parser.add_argument("--apply", action="store_true", help="Persist; default is preview-only")
     parser.add_argument("--expect-digest", help="Required with --apply; obtain from a fresh preview")
     args = parser.parse_args()
+    if args.restart_qualification and args.action != "candidate":
+        parser.error("--restart-qualification is valid only with --action candidate")
     if args.apply and not args.expect_digest:
         parser.error("--apply requires --expect-digest from a fresh preview")
     try:

@@ -100,7 +100,10 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   same opaque `opg_*` id to every registration under common control, preview
   every transition, inspect `eligible_to_apply` and `blocking_reasons`, and
   apply with that exact digest. An incomplete verify preview reports progress;
-  the corresponding apply still fails closed. Do not place names, emails,
+  the corresponding apply still fails closed. Re-entering `candidate` while a
+  qualification is active fails closed on apply without the explicit
+  `--restart-qualification` acknowledgement; use that flag on the fresh preview
+  and its matching apply. Do not place names, emails,
   hostnames, IPs, or private review notes in the group id or review ref.
 - Shadow-run mutation uses `manage_validator_shadow_run.py`. Never apply a
   transition from a stale preview, mutable checkout, abbreviated implementation
