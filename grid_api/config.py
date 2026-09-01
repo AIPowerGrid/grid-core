@@ -125,6 +125,9 @@ class GridSettings(BaseSettings):
     validator_shadow_observer_enabled: bool = False
     validator_shadow_sample_seconds: int = Field(default=300, ge=60, le=3600)
     validator_shadow_retention_days: int = Field(default=90, ge=30, le=3650)
+    # HMACs production job/stream identifiers before they enter the private
+    # observer outbox. Required only when the observer is explicitly enabled.
+    validator_shadow_route_hmac_secret: SecretStr | None = None
 
     # Remote-MCP OAuth operational rows are bounded independently of the
     # feature flag so rollback does not leave attacker-created registration
@@ -147,6 +150,10 @@ class GridSettings(BaseSettings):
             raise ValueError("Validator pairing pilot requires an explicit expiry")
         if until is not None and until > datetime.now(UTC) + timedelta(hours=24):
             raise ValueError("Validator pairing pilot expiry must be within 24 hours")
+        if self.validator_shadow_observer_enabled:
+            secret = self.validator_shadow_route_hmac_secret
+            if secret is None or len(secret.get_secret_value()) < 32:
+                raise ValueError("Validator shadow collection requires a route HMAC secret of at least 32 characters")
         return self
 
     @property
