@@ -44,6 +44,7 @@ DEFAULT_REVIEW_DAYS = max(
 MAX_REVIEW_DAYS = 90
 
 GROUP_RE = re.compile(r"^opg_[A-Za-z0-9_-]{8,88}$")
+_REVIEW_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$")
 _ACTIONS = {"candidate", "verify", "reject"}
 
 
@@ -64,6 +65,8 @@ def _aware(value: datetime | None) -> datetime | None:
 def _digest(row: dict[str, Any]) -> str:
     state = {
         "validator_id": row["id"],
+        "account_id": str(row["account_id"]),
+        "signing_wallet": row["signing_wallet"],
         "status": row["status"],
         "software_version": row["software_version"],
         "operator_group_id": row["operator_group_id"],
@@ -175,8 +178,8 @@ async def review_operator(
         )
     if operator_group_id is not None and not GROUP_RE.fullmatch(operator_group_id):
         raise OperatorReviewError("operator_group_id must be an opaque opg_* identifier")
-    if not review_ref or len(review_ref) > 128:
-        raise OperatorReviewError("review_ref is required and must be at most 128 characters")
+    if not review_ref or not _REVIEW_REF_RE.fullmatch(review_ref):
+        raise OperatorReviewError("review_ref must be a non-sensitive opaque reference")
     if review_days < 1 or review_days > MAX_REVIEW_DAYS:
         raise OperatorReviewError(f"review_days must be between 1 and {MAX_REVIEW_DAYS}")
     current = now or _now()
@@ -205,14 +208,17 @@ async def review_operator(
         blocking_reasons: list[str] = []
         required_version, version_supported = cohort_version_status(state["software_version"])
         if action in {"candidate", "verify"} and not version_supported:
-            blocking_reasons.append(
-                f"software version must match frozen cohort baseline {required_version}"
-            )
+            blocking_reasons.append(f"software version must match frozen cohort baseline {required_version}")
         values: dict[str, Any]
         if action == "candidate":
             group_id = operator_group_id or state["operator_group_id"]
             if not group_id or not GROUP_RE.fullmatch(group_id):
                 raise OperatorReviewError("candidate transition requires operator_group_id")
+            if state["status"] != "active":
+                blocking_reasons.append("validator registration is not active")
+            heartbeat = _aware(state["last_heartbeat"])
+            if not heartbeat or heartbeat < (current - timedelta(seconds=SAMPLE_INTERVAL_SECONDS * 2)):
+                blocking_reasons.append("validator heartbeat is not fresh")
             if state["independence_status"] == "candidate" and not restart_qualification:
                 blocking_reasons.append(
                     "candidate qualification is already active; explicitly restart qualification to reset it",
