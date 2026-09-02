@@ -54,6 +54,7 @@ async def db(monkeypatch):
         ),
     )
     monkeypatch.setattr(shadow, "_now", lambda: NOW)
+    monkeypatch.setattr(shadow, "_runtime_build_commit", lambda: "a" * 40)
     try:
         yield
     finally:
@@ -424,6 +425,11 @@ def test_job_reference_is_keyed_and_does_not_expose_job_id():
     assert "job-secret-123" not in one
 
 
+def test_runtime_build_commit_uses_core_health_release_identity(monkeypatch):
+    monkeypatch.setenv("GRID_BUILD_COMMIT", "a" * 40)
+    assert shadow._runtime_build_commit() == "a" * 40
+
+
 @pytest.mark.asyncio
 async def test_authoritative_snapshot_counts_control_groups_once_and_excludes_ineligible_nodes(db):
     await _seed_authoritative_group()
@@ -526,6 +532,32 @@ async def _running_run(monkeypatch):
             observed_at=NOW,
         )
         return await shadow.start_run(RUN_ID, started_at=NOW)
+
+
+@pytest.mark.asyncio
+async def test_run_requires_the_proven_runtime_implementation_commit(db, monkeypatch):
+    monkeypatch.setattr(shadow, "live_start_gate_snapshot", _fake_live_gate())
+    monkeypatch.setattr(shadow, "_runtime_build_commit", lambda: None)
+    with pytest.raises(shadow.ShadowRuntimeMismatch, match="cannot be proven"):
+        await shadow.create_run(
+            run_id=RUN_ID,
+            policy_config=None,
+            implementation_commit="a" * 40,
+            verification_ref="ci://validator-shadow/runtime",
+            verification=_gate(),
+            observed_at=NOW,
+        )
+
+    monkeypatch.setattr(shadow, "_runtime_build_commit", lambda: "b" * 40)
+    with pytest.raises(shadow.ShadowRuntimeMismatch, match="does not match"):
+        await shadow.create_run(
+            run_id=RUN_ID,
+            policy_config=None,
+            implementation_commit="a" * 40,
+            verification_ref="ci://validator-shadow/runtime",
+            verification=_gate(),
+            observed_at=NOW,
+        )
 
 
 @pytest.mark.asyncio
@@ -803,6 +835,7 @@ async def test_observation_outcome_and_sample_are_exactly_idempotent_and_replaya
     assert report["observer_errors"] == [
         {"stage": "capture", "error_code": "outbox_gap", "count": 1},
     ]
+    assert report["gates"]["zero_observer_errors"] is False
     assert report["routing_effect"] == "none"
     assert report["economic_effect"] == "none"
     assert report["automatic_promotion"] is False
@@ -827,6 +860,67 @@ async def test_idempotency_key_reuse_with_different_payload_fails_closed(db, mon
     await shadow._record_observation(**kwargs)
     with pytest.raises(shadow.ShadowConflict):
         await shadow._record_observation(**{**kwargs, "task_class": "code"})
+
+
+@pytest.mark.asyncio
+async def test_mid_run_runtime_change_blocks_durable_writes_close_and_report(db, monkeypatch):
+    await _running_run(monkeypatch)
+    observation = await shadow._record_observation(
+        run_id=RUN_ID,
+        route_ref="9" * 64,
+        job_ref="8" * 64,
+        task_class="simple",
+        modality="text",
+        requested_capability="text.instruction.v1",
+        candidates=_candidates(),
+        evidence=[],
+        actual_model="model-a",
+        actual_worker_id="worker-a",
+        observed_at=NOW + timedelta(minutes=1),
+    )
+    monkeypatch.setattr(shadow, "_runtime_build_commit", lambda: "b" * 40)
+
+    with pytest.raises(shadow.ShadowRuntimeMismatch, match="does not match"):
+        await shadow._record_observation(
+            run_id=RUN_ID,
+            route_ref="7" * 64,
+            job_ref="6" * 64,
+            task_class="simple",
+            modality="text",
+            requested_capability="text.instruction.v1",
+            candidates=_candidates(),
+            evidence=[],
+            actual_model="model-a",
+            actual_worker_id="worker-a",
+            observed_at=NOW + timedelta(minutes=2),
+        )
+    with pytest.raises(shadow.ShadowRuntimeMismatch, match="does not match"):
+        await shadow._record_capacity_sample(
+            run_id=RUN_ID,
+            sampled_at=NOW + timedelta(minutes=5),
+            verified_independent=3,
+            participating_independent=3,
+            finalized_independent_groups=1,
+        )
+    with pytest.raises(shadow.ShadowRuntimeMismatch, match="does not match"):
+        await shadow.record_outcome(
+            observation_id=observation["id"],
+            actual_worker_id="worker-a",
+            terminal_status="succeeded",
+            duration_ms=100,
+            finished_at=NOW + timedelta(minutes=2),
+        )
+    with pytest.raises(shadow.ShadowRuntimeMismatch, match="does not match"):
+        await shadow.record_error(
+            run_id=RUN_ID,
+            stage="capture",
+            error_code="runtime_changed",
+            observed_at=NOW + timedelta(minutes=2),
+        )
+    with pytest.raises(shadow.ShadowRuntimeMismatch, match="does not match"):
+        await shadow.run_report(RUN_ID, at=NOW + timedelta(minutes=2))
+    with pytest.raises(shadow.ShadowRuntimeMismatch, match="does not match"):
+        await shadow.finish_run(RUN_ID, status="failed", ended_at=NOW)
 
 
 @pytest.mark.asyncio
@@ -960,6 +1054,7 @@ async def test_run_cannot_complete_early_and_completion_never_promotes(db, monke
     assert report["automatic_promotion"] is False
     assert report["review_eligible"] is False
     assert report["gates"]["observations_present"] is False
+    assert report["gates"]["production_successes_present"] is False
 
 
 @pytest.mark.asyncio
@@ -1065,6 +1160,7 @@ async def test_report_matches_exact_jobs_instead_of_aggregate_route_count(db, mo
     assert report["unmatched_captured_successful_jobs"] == 1
     assert report["route_capture_coverage"] == 0.0
     assert report["gates"]["route_capture_coverage"] is False
+    assert report["gates"]["zero_unmatched_successful_jobs"] is False
 
 
 @pytest.mark.asyncio
@@ -1113,3 +1209,6 @@ async def test_report_deduplicates_retry_attempts_for_one_job(db, monkeypatch):
     assert report["matched_successful_jobs"] == 1
     assert report["unmatched_captured_successful_jobs"] == 0
     assert report["route_capture_coverage"] == 1.0
+    assert report["gates"]["production_successes_present"] is True
+    assert report["gates"]["zero_unmatched_successful_jobs"] is True
+    assert report["gates"]["zero_observer_errors"] is True

@@ -92,9 +92,12 @@ run.
 5. **Current text scope stays narrow.** Public-template text probes may support
    protocol-conformance or declared-capability observations. They cannot create
    a general quality rank or prove a model family, parameter count, or quant.
-6. **One frozen policy.** The routing policy, evidence window, thresholds, and
-   configuration hash are fixed before a seven-day run. Changing any of them
-   starts a new run.
+6. **One frozen policy and implementation.** The routing policy, evidence
+   window, thresholds, configuration hash, and full Core implementation commit
+   are fixed before a seven-day run. Core proves the executing release identity
+   at every lifecycle, append, and report boundary. An unprovable or different
+   runtime fails closed rather than mixing observer implementations. Changing
+   any frozen input starts a new run.
 7. **No automatic promotion.** A successful report permits a separate routing
    design review only. Rewards, staking, strikes, and slashing remain separate
    projects with their own gates.
@@ -202,6 +205,9 @@ votes. The report is eligible for review only when:
 - at least 80 percent of distinct independently recorded successful ledger jobs
   have an exact matching successful job commitment; duplicate retry attempts
   count once;
+- at least one real successful production ledger job exists in the run window,
+  no captured successful commitment is unmatched, and no observer error was
+  recorded;
 - would-change, reversal, disagreement, and coverage rates are stable enough to
   explain rather than hidden in a global average; and
 - an automated invariant test and production audit confirm zero real routing or

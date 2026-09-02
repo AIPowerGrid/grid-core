@@ -195,7 +195,12 @@ content sanitization, and reward settlement.
   neither import this module nor query its tables. The flag defaults off, the
   CLI is read-only, and a completed run cannot promote itself. Missing expected
   sample slots and successful ledger jobs absent from the exact route capture
-  count against report coverage. `route_commitments.py` domain-separates a
+  count against report coverage. A run's full implementation commit must match
+  Core's proven immutable runtime commit at creation, lifecycle, append, and
+  report boundaries; an unprovable or changed release fails closed. Review also
+  requires at least one real successful ledger job, zero observer errors, and
+  zero unmatched captured-success commitments. `route_commitments.py`
+  domain-separates a
   stable per-job HMAC from a delivery-specific route HMAC; reports intersect
   unique successful job commitments with the ledger, so wrong-job captures and
   duplicate retries cannot satisfy coverage. `route_events.py` is the neutral,

@@ -98,6 +98,10 @@ class ShadowStartGateError(ShadowError):
     """Raised when a run is started without satisfying every frozen gate."""
 
 
+class ShadowRuntimeMismatch(ShadowError):
+    """Raised when the executing Core release cannot prove the run's commit."""
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -870,6 +874,30 @@ def _require_enabled() -> None:
         raise ShadowDisabled("validator shadow collection is disabled")
 
 
+def _runtime_build_commit() -> str | None:
+    """Read the same immutable release identity exposed by Core health."""
+    from ..routers.health import build_commit
+
+    return build_commit()
+
+
+def _require_implementation_commit(run_or_commit: Mapping[str, Any] | str) -> str:
+    """Fail closed unless this process is the release frozen for the run."""
+    expected = (
+        str(run_or_commit.get("implementation_commit") or "")
+        if isinstance(run_or_commit, Mapping)
+        else str(run_or_commit or "")
+    ).strip().lower()
+    if not _HEX_40.fullmatch(expected):
+        raise ShadowRuntimeMismatch("shadow run has an invalid implementation commit")
+    actual = _runtime_build_commit()
+    if actual is None:
+        raise ShadowRuntimeMismatch("validator shadow runtime build commit cannot be proven")
+    if actual != expected:
+        raise ShadowRuntimeMismatch("validator shadow runtime does not match the frozen implementation commit")
+    return actual
+
+
 def _require_run_window(run: Mapping[str, Any], value: datetime, *, label: str) -> None:
     started = _aware(run["started"]) if run.get("started") else None
     scheduled_end = _aware(run["scheduled_end"]) if run.get("scheduled_end") else None
@@ -893,6 +921,7 @@ async def create_run(
     commit = implementation_commit.lower().strip()
     if not _HEX_40.fullmatch(commit):
         raise ValueError("implementation_commit must be a full lowercase git SHA")
+    _require_implementation_commit(commit)
     if not run_id or len(run_id) > 96 or not verification_ref.strip():
         raise ValueError("run_id and verification_ref are required")
     gate = await live_start_gate_snapshot(
@@ -973,6 +1002,7 @@ async def start_run(
                 )
                 if not row:
                     raise ShadowError("shadow run does not exist")
+                _require_implementation_commit(row)
                 if row["status"] == "running":
                     return dict(row)
                 if row["status"] != "draft":
@@ -1050,6 +1080,7 @@ async def _record_observation(
         run = (await session.execute(sa.select(runs_t).where(runs_t.c.id == run_id))).mappings().first()
         if not run or run["status"] != "running":
             raise ShadowError("observations require a running shadow run")
+        _require_implementation_commit(run)
         _require_run_window(run, observed, label="observation time")
         decision = evaluate_advisory(
             candidates=candidates,
@@ -1187,6 +1218,18 @@ async def record_outcome(
         )
         if not observation:
             raise ShadowError("shadow observation does not exist")
+        run = (
+            (
+                await session.execute(
+                    sa.select(runs_t).where(runs_t.c.id == observation["run_id"]),
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if not run:
+            raise ShadowError("shadow run does not exist")
+        _require_implementation_commit(run)
         if finished < _aware(observation["observed_at"]):
             raise ShadowError("terminal outcome cannot precede its observation")
         bound_worker = str(observation["actual_worker_id"] or "")
@@ -1246,6 +1289,7 @@ async def _record_capacity_sample(
         run = (await session.execute(sa.select(runs_t).where(runs_t.c.id == run_id))).mappings().first()
         if not run or run["status"] != "running":
             raise ShadowError("capacity samples require a running shadow run")
+        _require_implementation_commit(run)
         _require_run_window(run, sampled_at, label="capacity sample time")
         quorum_min = int(run["policy_config"]["quorum_min"])
         values = {
@@ -1336,6 +1380,7 @@ async def record_error(
         run = (await session.execute(sa.select(runs_t).where(runs_t.c.id == run_id))).mappings().first()
         if not run or run["status"] != "running":
             raise ShadowError("observer errors require a running shadow run")
+        _require_implementation_commit(run)
         _require_run_window(run, observed, label="observer error time")
         result = await session.execute(
             sa.insert(errors_t).values(**values).returning(errors_t.c.id),
@@ -1370,6 +1415,7 @@ async def finish_run(
             )
             if not row:
                 raise ShadowError("shadow run does not exist")
+            _require_implementation_commit(row)
             if expected_run_state_hash is not None and expected_run_state_hash != run_state_hash(row):
                 raise ShadowConflict("shadow run state changed; preview again")
             if row["status"] == status:
@@ -1503,6 +1549,7 @@ async def run_report(run_id: str, *, at: datetime | None = None) -> dict[str, An
         run = (await session.execute(sa.select(runs_t).where(runs_t.c.id == run_id))).mappings().first()
         if not run:
             raise ShadowError("shadow run does not exist")
+        _require_implementation_commit(run)
         started_at = _aware(run["started"]) if run["started"] else None
         bounded_end = _aware(run["ended"]) if run["ended"] else _aware(run["scheduled_end"]) if run["scheduled_end"] else current
         report_end = min(current, bounded_end)
@@ -1660,11 +1707,14 @@ async def run_report(run_id: str, *, at: datetime | None = None) -> dict[str, An
         "run_completed": run["status"] == "completed",
         "duration_complete": duration >= int(config["run_hours"]) * 3600,
         "observations_present": observation_count > 0,
+        "production_successes_present": successful_completions > 0,
         "terminal_outcome_coverage": terminal_coverage >= float(config["required_terminal_outcome_coverage"]),
         "route_capture_coverage": route_capture_coverage >= float(config["required_route_capture_coverage"]),
+        "zero_unmatched_successful_jobs": not unmatched_captured_refs,
         "independent_sample_coverage": capacity["coverage"] >= float(config["required_sample_coverage"]),
         "maximum_quorum_gap": max_gap <= int(config["maximum_quorum_gap_seconds"]),
         "all_decisions_replay": replay_failures == 0,
+        "zero_observer_errors": not error_counts,
         "zero_mutation_attempts": mutation_attempts == 0,
     }
     return {
