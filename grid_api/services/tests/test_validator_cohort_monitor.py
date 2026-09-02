@@ -93,6 +93,7 @@ def _snapshot():
             "stale_candidates": 0,
             "candidates_ready": 0,
             "fresh_verified": 0,
+            "fresh_unreviewed_baseline": 0,
             "fresh_outdated": 0,
             "duplicate_control_groups": 0,
             "software_versions": [
@@ -139,6 +140,7 @@ def test_snapshot_classifies_cohort_regressions_without_identifiers():
             "candidates": 2,
             "stale_candidates": 1,
             "candidates_ready": 1,
+            "fresh_unreviewed_baseline": 2,
             "fresh_outdated": 1,
             "duplicate_control_groups": 1,
         },
@@ -161,6 +163,7 @@ def test_snapshot_classifies_cohort_regressions_without_identifiers():
         "high_probe_error_rate",
         "candidate_heartbeat_stale",
         "candidate_ready_for_review",
+        "unreviewed_baseline_validators",
         "active_validators_stale",
         "validator_version_drift",
         "duplicate_control_groups",
@@ -214,26 +217,78 @@ async def test_monitor_lease_fails_closed_when_redis_is_unavailable(monkeypatch)
 @pytest.mark.asyncio
 async def test_inspect_cohort_health_uses_only_matured_assignments_and_distinct_evidence(db):
     account_id = uuid4()
+    unreviewed_account_id = uuid4()
+    outdated_account_id = uuid4()
     validator_id = "val_monitor_integration_0001"
     wallet = "0x" + "1" * 40
+    unreviewed_wallet = "0x" + "2" * 40
+    outdated_wallet = "0x" + "3" * 40
     async with await database.new_session() as session:
-        await session.execute(sa.insert(accounts_t).values(id=account_id, wallet=wallet, flags={}))
         await session.execute(
-            sa.insert(validators_t).values(
-                id=validator_id,
-                account_id=account_id,
-                signing_wallet=wallet,
-                software_version="v0.1.0-preview.13",
-                capabilities=["text.generated.v8"],
-                registration_signature="0x" + "11" * 65,
-                status="active",
-                last_heartbeat=NOW,
-                operator_group_id="opg_monitor_integration",
-                independence_status="candidate",
-                qualification_started_at=NOW - timedelta(hours=1),
-                created=NOW - timedelta(days=1),
-                updated=NOW,
-            ),
+            sa.insert(accounts_t),
+            [
+                {"id": account_id, "wallet": wallet, "flags": {}},
+                {
+                    "id": unreviewed_account_id,
+                    "wallet": unreviewed_wallet,
+                    "flags": {},
+                },
+                {
+                    "id": outdated_account_id,
+                    "wallet": outdated_wallet,
+                    "flags": {},
+                },
+            ],
+        )
+        await session.execute(
+            sa.insert(validators_t),
+            [
+                {
+                    "id": validator_id,
+                    "account_id": account_id,
+                    "signing_wallet": wallet,
+                    "software_version": "v0.1.0-preview.13",
+                    "capabilities": ["text.generated.v8"],
+                    "registration_signature": "0x" + "11" * 65,
+                    "status": "active",
+                    "last_heartbeat": NOW,
+                    "operator_group_id": "opg_monitor_integration",
+                    "independence_status": "candidate",
+                    "qualification_started_at": NOW - timedelta(hours=1),
+                    "created": NOW - timedelta(days=1),
+                    "updated": NOW,
+                },
+                {
+                    "id": "val_monitor_unreviewed_baseline",
+                    "account_id": unreviewed_account_id,
+                    "signing_wallet": unreviewed_wallet,
+                    "software_version": "0.1.0-preview.13",
+                    "capabilities": ["text.generated.v8"],
+                    "registration_signature": "0x" + "22" * 65,
+                    "status": "active",
+                    "last_heartbeat": NOW,
+                    "operator_group_id": None,
+                    "independence_status": "unreviewed",
+                    "qualification_started_at": None,
+                    "created": NOW - timedelta(days=1),
+                    "updated": NOW,
+                },
+                {
+                    "id": "val_monitor_unreviewed_outdated",
+                    "account_id": outdated_account_id,
+                    "signing_wallet": outdated_wallet,
+                    "software_version": "v0.1.0-preview.9",
+                    "capabilities": ["text.basic.v1"],
+                    "registration_signature": "0x" + "33" * 65,
+                    "status": "active",
+                    "last_heartbeat": NOW,
+                    "operator_group_id": None,
+                    "independence_status": "unreviewed",
+                    "qualification_started_at": None,
+                    "created": NOW - timedelta(days=1),
+                    "updated": NOW,
+                },
+            ],
         )
         common = {
             "account_id": account_id,
@@ -321,6 +376,8 @@ async def test_inspect_cohort_health_uses_only_matured_assignments_and_distinct_
     assert report["validators"]["candidates"] == 1
     assert report["validators"]["stale_candidates"] == 0
     assert report["validators"]["candidates_ready"] == 0
+    assert report["validators"]["fresh_unreviewed_baseline"] == 1
+    assert report["validators"]["fresh_outdated"] == 1
     assert report["validators"]["duplicate_control_groups"] == 0
     assert report["network"] == {
         "groups_with_evidence": 0,

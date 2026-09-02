@@ -146,6 +146,14 @@ def evaluate_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             ready=int(validators["candidates_ready"]),
             candidates=int(validators["candidates"]),
         )
+    if int(validators["fresh_unreviewed_baseline"]):
+        add(
+            "unreviewed_baseline_validators",
+            "info",
+            "Fresh validators on the frozen cohort release are waiting for operator review.",
+            unreviewed=int(validators["fresh_unreviewed_baseline"]),
+            baseline=str(snapshot["baseline_version"]),
+        )
     if int(validators["stale_active"]):
         add(
             "active_validators_stale",
@@ -205,6 +213,13 @@ async def inspect_cohort_health(
     safe_window = max(1, min(int(window_hours), 24 * 30))
     cutoff = current - timedelta(hours=safe_window)
     fresh_cutoff = current - timedelta(seconds=VALIDATOR_HEARTBEAT_FRESH_SECONDS)
+    normalized_baseline = str(baseline_version or "").strip().removeprefix("v")
+    baseline_match = (
+        sa.func.ltrim(sa.func.trim(validators_t.c.software_version), "v")
+        == normalized_baseline
+        if normalized_baseline
+        else sa.false()
+    )
     matured_filter = sa.and_(
         assignments_t.c.created >= cutoff,
         assignments_t.c.expires < current,
@@ -271,8 +286,16 @@ async def inspect_cohort_health(
                         sa.func.count()
                         .filter(
                             validators_t.c.status == "active",
+                            validators_t.c.independence_status == "unreviewed",
                             validators_t.c.last_heartbeat >= fresh_cutoff,
-                            validators_t.c.software_version != baseline_version,
+                            baseline_match,
+                        )
+                        .label("fresh_unreviewed_baseline"),
+                        sa.func.count()
+                        .filter(
+                            validators_t.c.status == "active",
+                            validators_t.c.last_heartbeat >= fresh_cutoff,
+                            sa.not_(baseline_match),
                         )
                         .label("fresh_outdated"),
                     ),
@@ -396,6 +419,9 @@ async def inspect_cohort_health(
                 "stale_candidates": int(validator_row["stale_candidates"] or 0),
                 "candidates_ready": candidates_ready,
                 "fresh_verified": int(validator_row["fresh_verified"] or 0),
+                "fresh_unreviewed_baseline": int(
+                    validator_row["fresh_unreviewed_baseline"] or 0,
+                ),
                 "fresh_outdated": int(validator_row["fresh_outdated"] or 0),
                 "duplicate_control_groups": duplicate_groups,
                 "software_versions": [{"version": str(row["software_version"]), "validators": int(row["count"])} for row in version_rows],
