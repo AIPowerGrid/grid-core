@@ -180,7 +180,10 @@ content sanitization, and reward settlement.
   `validator_cohort_monitor.py` owns the aggregate, read-only cohort watchdog.
   It measures matured assignment completion, authoritative evidence delivery,
   terminal probe errors, disagreement, stale active/candidate registrations,
-  frozen-baseline version drift, and duplicate reviewed control groups. Its
+  frozen-baseline version drift, fresh baseline registrations waiting for
+  operator review, and duplicate reviewed control groups. Waiting-for-review
+  alerts are counts-only intake prompts; they do not assert independence or
+  start qualification. Its
   Redis lease permits one monitor across all Uvicorn processes and Core
   replicas; a Redis fault skips the pass rather than multiplying query loops.
   The lease has no qualification or authority effect. Its
