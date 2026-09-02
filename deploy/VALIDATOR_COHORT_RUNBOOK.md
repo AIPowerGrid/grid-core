@@ -155,8 +155,11 @@ Production Core can also run the aggregate cohort watchdog with
 `VALIDATOR_COHORT_MONITOR_ENABLED=1`. Every configured interval it evaluates
 expired-assignment completion, accepted authoritative evidence, terminal probe
 errors, validator disagreement, stale active/candidate nodes, software-version
-drift from preview.13, and duplicate reviewed control groups. Alerts fire when
-a condition first appears and when it recovers, rather than on every poll.
+drift from preview.13, fresh unreviewed preview.13 registrations, and duplicate
+reviewed control groups. The unreviewed count tells maintainers that an operator
+may be waiting for intake; it does not prove that those registrations are
+independent and never starts their 72-hour clocks. Alerts fire when a condition
+first appears and when it recovers, rather than on every poll.
 One renewable Redis lease elects a single watchdog across Uvicorn processes and
 Core replicas; if Redis is unavailable, that pass is skipped instead of running
 duplicate database scans.
