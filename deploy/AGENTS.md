@@ -92,9 +92,11 @@ executes an immutable release selected through `/home/aipg/current`.
 - `VALIDATOR_COHORT_MONITOR_ENABLED` starts an aggregate-only read path inside
   Core. It may emit redacted transition alerts for stale candidates, assignment
   completion/evidence regressions, probe errors, disagreement, version drift,
-  and duplicate reviewed control groups. It never changes qualification or any
-  economic/routing state. Keep its interval, window, and frozen baseline in
-  `env.template`, `config.py`, and the cohort runbook aligned.
+  fresh baseline registrations waiting for operator review, and duplicate
+  reviewed control groups. A waiting-for-review count is an intake prompt, not
+  an independence claim or qualification transition. The monitor never changes
+  qualification or any economic/routing state. Keep its interval, window, and
+  frozen baseline in `env.template`, `config.py`, and the cohort runbook aligned.
 - `VALIDATOR_SHADOW_OBSERVER_ENABLED` is a separate, default-off seven-day
   advisory-observation gate. Migrations `0032`, `0033`, and `0034` must all be applied;
   `0032` creates the observer records, `0033` enforces one running experiment,
