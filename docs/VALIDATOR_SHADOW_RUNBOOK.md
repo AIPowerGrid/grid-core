@@ -35,8 +35,12 @@ validator release merely to start this server-side run.
   run cannot start before its draft was created. Core and the database permit
   at most one `running` shadow experiment.
 - The implementation commit is the exact deployed Core commit, not a branch or
-  abbreviated SHA. The verification reference is the immutable GitHub Actions
-  run or job URL that proves the candidate.
+  abbreviated SHA. Core proves the executing runtime against that commit at
+  draft creation, start, every durable append, close, and report generation.
+  An unprovable build identity or mid-run release change stops collection and
+  leaves outbox work pending instead of mixing implementations. The verification
+  reference is the immutable GitHub Actions run or job URL that proves the
+  candidate.
 - Never expose the HMAC secret, database URL, Redis URL, validator identities,
   operator-control reviews, prompts, outputs, or route-event contents.
 - A completed report can be reviewed; it cannot promote itself or change live
@@ -271,6 +275,12 @@ Alert on collector lease loss, sustained stream backlog, observer errors,
 capacity gaps, route-capture loss, replay failure, or any nonzero mutation count.
 Do not repair bad evidence by editing rows or extending the frozen policy. Mark
 the run failed and repeat with a new run ID after fixing the cause.
+
+Any Core deployment during the window is a failed run unless it is the exact
+same immutable implementation commit. Generate the final report from that same
+release. The report fails review when it contains any observer error, no real
+successful production ledger job, or any captured successful job commitment
+that cannot be matched exactly to the run-window ledger.
 
 Every report must state:
 

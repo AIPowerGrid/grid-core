@@ -15,6 +15,15 @@ from scripts import manage_validator_shadow_run as control
 NOW = datetime(2026, 9, 8, 17, 0, tzinfo=UTC)
 
 
+@pytest.fixture(autouse=True)
+def runtime_commit(monkeypatch):
+    monkeypatch.setattr(
+        control.shadow,
+        "_require_implementation_commit",
+        lambda _value: "b" * 40,
+    )
+
+
 def _gate():
     snapshot = {
         "schema": "aipg.validator.shadow-live-start-gate.v1",
