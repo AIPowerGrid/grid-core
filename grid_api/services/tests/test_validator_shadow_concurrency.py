@@ -58,6 +58,7 @@ async def pg(monkeypatch):
         ),
     )
     monkeypatch.setattr(shadow, "_now", lambda: NOW)
+    monkeypatch.setattr(shadow, "_runtime_build_commit", lambda: "a" * 40)
 
     async def fake_live_gate(**kwargs):
         snapshot = {

@@ -72,6 +72,7 @@ async def _prepare(args, at: datetime) -> dict[str, Any]:
         raise ValueError("run id must be a bounded lowercase shadow_* identifier")
     if not VERIFICATION_REF_RE.fullmatch(args.verification_ref):
         raise ValueError("verification ref must be an immutable AIPowerGrid/grid-core Actions run or job URL")
+    shadow._require_implementation_commit(args.implementation_commit)
     verification = _verification(args.verification_json)
     config = shadow.runtime_policy_config()
     gate = await shadow.live_start_gate_snapshot(
@@ -112,6 +113,7 @@ async def _prepare(args, at: datetime) -> dict[str, Any]:
 
 async def _start(args, at: datetime) -> dict[str, Any]:
     row = await shadow.get_run(args.run_id)
+    shadow._require_implementation_commit(row)
     transport = await _transport()
     gate = await shadow.live_start_gate_snapshot(
         verification=_verification_from_gate(row["start_gate"]),
@@ -166,6 +168,7 @@ async def _start(args, at: datetime) -> dict[str, Any]:
 
 async def _finish(args, at: datetime) -> dict[str, Any]:
     row = await shadow.get_run(args.run_id)
+    shadow._require_implementation_commit(row)
     state_hash = shadow.run_state_hash(row)
     scheduled_end = _aware(row.get("scheduled_end"))
     completed_too_early = args.status == "completed" and (scheduled_end is None or at < scheduled_end)
