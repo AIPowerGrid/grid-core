@@ -145,8 +145,11 @@ content sanitization, and reward settlement.
   at least 72 hours of qualification, rate-limited heartbeat coverage, an
   expiring maintainer review, at least one completed probe plus authoritative
   attestation created during that qualification window, and preview-first
-  compare-and-swap transitions. Evidence created before the candidate clock
-  starts cannot satisfy the gate.
+  compare-and-swap transitions bound to the exact account and signing wallet.
+  Candidate review begins only for an active, fresh-heartbeat registration on
+  the frozen cohort release. Evidence created before the candidate clock starts
+  cannot satisfy the gate, and review references are bounded opaque tokens
+  rather than operator identity or private notes.
   A verify preview reports current qualification metrics and every blocking
   reason even before the gate is satisfied; an apply remains fail-closed until
   all blockers clear and requires that preview's exact state digest. Candidate

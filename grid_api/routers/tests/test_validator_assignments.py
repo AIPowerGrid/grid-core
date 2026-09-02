@@ -455,6 +455,110 @@ async def test_operator_review_rejects_outdated_cohort_version(db):
 
 
 @pytest.mark.asyncio
+async def test_candidate_review_requires_active_fresh_validator(db):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, software_version="v0.1.0-preview.13")
+    review_now = datetime.now(UTC)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t)
+            .where(validators_t.c.id == validator_id)
+            .values(
+                status="suspended",
+                last_heartbeat=review_now
+                - timedelta(seconds=validator_operators.SAMPLE_INTERVAL_SECONDS * 3),
+            ),
+        )
+        await session.commit()
+
+    preview = await validator_operators.review_operator(
+        validator_id,
+        action="candidate",
+        operator_group_id="opg_stale_candidate_01",
+        review_ref="review:stale-candidate",
+        apply=False,
+        now=review_now,
+    )
+
+    assert preview["eligible_to_apply"] is False
+    assert preview["blocking_reasons"] == [
+        "validator registration is not active",
+        "validator heartbeat is not fresh",
+    ]
+    with pytest.raises(
+        validator_operators.OperatorReviewError,
+        match="validator registration is not active",
+    ):
+        await validator_operators.review_operator(
+            validator_id,
+            action="candidate",
+            operator_group_id="opg_stale_candidate_01",
+            review_ref="review:stale-candidate",
+            expected_digest=preview["current_digest"],
+            apply=True,
+            now=review_now,
+        )
+
+
+@pytest.mark.parametrize("identity_field", ["account_id", "signing_wallet"])
+@pytest.mark.asyncio
+async def test_operator_review_digest_binds_validator_identity(db, identity_field):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, software_version="v0.1.0-preview.13")
+    preview = await validator_operators.review_operator(
+        validator_id,
+        action="reject",
+        review_ref="review:identity-bound",
+        apply=False,
+    )
+    async with await database.new_session() as session:
+        if identity_field == "account_id":
+            replacement = uuid.uuid4()
+            await session.execute(
+                sa.insert(accounts_t).values(
+                    id=replacement,
+                    wallet=Account.create().address.lower(),
+                    flags={},
+                ),
+            )
+        else:
+            replacement = Account.create().address.lower()
+        await session.execute(
+            sa.update(validators_t).where(validators_t.c.id == validator_id).values(**{identity_field: replacement}),
+        )
+        await session.commit()
+
+    with pytest.raises(validator_operators.OperatorReviewError, match="state changed"):
+        await validator_operators.review_operator(
+            validator_id,
+            action="reject",
+            review_ref="review:identity-bound",
+            expected_digest=preview["current_digest"],
+            apply=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "review_ref",
+    ["ab", "review with spaces", "operator@example.com", "review#private-note"],
+)
+@pytest.mark.asyncio
+async def test_operator_review_rejects_non_opaque_review_refs(db, review_ref):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, software_version="v0.1.0-preview.13")
+
+    with pytest.raises(
+        validator_operators.OperatorReviewError,
+        match="non-sensitive opaque reference",
+    ):
+        await validator_operators.review_operator(
+            validator_id,
+            action="reject",
+            review_ref=review_ref,
+        )
+
+
+@pytest.mark.asyncio
 async def test_candidate_restart_requires_explicit_preview_and_apply(db):
     account_id = uuid.uuid4()
     validator_id = await _register(account_id, software_version="v0.1.0-preview.13")
