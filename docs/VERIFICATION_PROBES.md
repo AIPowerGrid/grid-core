@@ -2,13 +2,17 @@
 
 **Status:** Coordinator canaries plus sealed registered-validator assignments,
 targeted leases, and distinct-identity 3-of-5 quorum are production-live and
-evidence-only on Core `e18b38f9` with Alembic through `0026`. Three first-party
-pilot nodes run published `v0.1.0-preview.3` and report that immutable release
-identity to Core. They proved sealed disclosure, healthy 3-of-5 tool-chain
-quorum, and a fresh healthy post-upgrade echo quorum on 2026-08-27, not
-independent operator control.
+evidence-only on Core `96b5cf24` with Alembic through `0034`. The frozen public
+cohort release remains `v0.1.0-preview.13`; first-party and external nodes are
+producing signed evidence, but operator independence is still separately
+reviewed. Core's `text.fidelity.v1` implementation is deployed with its feature
+flag off, and the matching validator implementation remains source-only rather
+than part of preview.13. The 2026-09-03 cutover preserved the production
+environment and payout/backup timer states, restored all eight worker
+connections, and left protected assignments at `401`, retired Horde routes at
+`410`, and validator economic effect at `none`.
 Economic validator authority, rewards, staking, routing effects, and slashing
-are not live. Media assignments remain default-off.
+are not live. Text-fidelity and media assignments remain default-off.
 
 ## The problem
 

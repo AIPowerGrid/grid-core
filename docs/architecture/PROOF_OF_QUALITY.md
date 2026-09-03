@@ -44,7 +44,7 @@ to grade by machine:
 | Randomized stop-sequence handling | implemented candidate | exact pre-stop output |
 | Hidden code tests and richer schemas | planned | sandboxed compile/test policy, not Core execution |
 | Larger context tiers and token-budget honesty | planned | tokenizer-aware versioned policy |
-| Same-request logprob/reference signal | dark candidate | supporting fidelity metric, never sole authority |
+| Same-request logprob/reference signal | production-deployed, disabled | supporting fidelity metric, never sole authority |
 
 Structured output and tool use are useful quant-sensitive signals because their
 contracts are machine-checkable. They still sample behavior; they do not prove
@@ -114,7 +114,10 @@ against measured performance.
 - **Validator role** — candidate Core and validator implementations include
   wallet-bound registration, dedicated scopes, private assignments,
   hard-targeted text probes, independent scoring, signed durable delivery, and
-  preview 3-of-5 groups. The matching Core release is not production-live.
+  preview 3-of-5 groups. Core `96b5cf24` is production-live with Alembic `0034`;
+  the matching source implementation exists in the validator repository, but
+  the `text.fidelity.v1` lane is disabled and is not part of the frozen
+  preview.13 cohort release.
 - **Text methods** — exact instruction, arithmetic, strict JSON, context
   retrieval, multistep logic, single and two-stage tool calls, and randomized
   stop-sequence compliance are implemented as evidence-only policies.
