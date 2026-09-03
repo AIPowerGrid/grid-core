@@ -44,13 +44,13 @@ to grade by machine:
 | Randomized stop-sequence handling | implemented candidate | exact pre-stop output |
 | Hidden code tests and richer schemas | planned | sandboxed compile/test policy, not Core execution |
 | Larger context tiers and token-budget honesty | planned | tokenizer-aware versioned policy |
-| Perplexity/reference-model signal | research only | supporting metric, never sole authority |
+| Same-request logprob/reference signal | dark candidate | supporting fidelity metric, never sole authority |
 
 Structured output and tool use are useful quant-sensitive signals because their
 contracts are machine-checkable. They still sample behavior; they do not prove
 an exact model family or parameter count.
 
-### Ungameable by construction
+### Anti-gaming measures and limits
 
 A static benchmark is trivially cheated (cache the answers). So:
 
@@ -61,6 +61,20 @@ A static benchmark is trivially cheated (cache the answers). So:
 - **Procedurally generated** — random chess positions, random needle facts,
   random seeds — plus a large, rotating probe bank. Nothing to pre-cache.
 - **Validator-signed, random cadence** — unpredictable timing and origin.
+
+The default-off `text.fidelity.v1` lane also compares a candidate's bounded
+first-token probability distribution with one or two trusted workers serving
+the same model. It uses the same sealed randomized request and deterministic
+sampling parameters on every worker. One reference can only confirm
+consistency; two agreeing references are required before a candidate can be
+called an outlier. Missing logprobs or reference disagreement yields no
+opinion.
+
+This still is not ungameable. Workers control their software, can fabricate
+logprobs, and can recognize or reroute a request that asks for them. The signal
+therefore remains non-economic until production-shaped paid blind audits,
+multiple independent references, and corroborating workload evidence make
+probe-specific behavior materially harder.
 
 ### Scoring -> reputation -> economics
 

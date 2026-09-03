@@ -32,7 +32,16 @@ from ..config import get_settings
 from ..database import new_session
 from ..redis_client import get_redis
 from ..services import accounts as accounts_svc
-from ..services import audio, credits, job_queue, route_events, signing, storage, token_stream
+from ..services import (
+    audio,
+    credits,
+    job_queue,
+    route_events,
+    signing,
+    storage,
+    token_stream,
+    validator_text_fidelity,
+)
 from ..services import ledger as ledger_svc
 from ..services import worker_identity as worker_identity_svc
 from ..services.den import calculate_den, calculate_media_den, count_tokens
@@ -1174,6 +1183,7 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
             usage=gen.get("usage"),
             finish_reason="error",
             grid=grid_meta,
+            logprobs=gen.get("logprobs"),
         )
         await ws.send_json({"type": "ack", "id": job_id, "den": 0})
         return True
@@ -1193,6 +1203,7 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
         usage=gen["usage"],
         finish_reason=gen["finish_reason"],
         grid=grid_meta,
+        logprobs=gen.get("logprobs"),
     )
     await ws.send_json({"type": "ack", "id": job_id, "den": 0})
     return True
@@ -1740,6 +1751,7 @@ def _gen_result(
     client_error=None,
     ttft=None,
     worker_sig=None,
+    logprobs=None,
 ) -> dict:
     """Structured result of one worker generation. On SUCCESS the caller publishes
     DONE only AFTER settlement commits (so the client's completion signal, the
@@ -1760,6 +1772,7 @@ def _gen_result(
         "client_error": client_error,
         "ttft": ttft,
         "worker_sig": worker_sig,
+        "logprobs": logprobs,
     }
 
 
@@ -1790,6 +1803,7 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
     full_text = ""
     full_reasoning = ""
     tool_acc: dict = {}
+    first_logprobs: dict | None = None
     token_count = 0
     usage = None
     last_finish = None
@@ -1820,6 +1834,20 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
                 ttft = _time.time() - recv_start
             delta = msg.get("delta")
             if delta is not None:
+                raw_logprobs = msg.get("logprobs")
+                if first_logprobs is None and isinstance(raw_logprobs, dict):
+                    # Normalize at the trust boundary. Keeping even one raw
+                    # nested item would permit a worker to retain an unbounded
+                    # object in the terminal event.
+                    distribution = validator_text_fidelity.first_distribution(raw_logprobs)
+                    if distribution:
+                        first_logprobs = {
+                            "content": [{
+                                "token": distribution[0]["token"],
+                                "logprob": distribution[0]["logprob"],
+                                "top_logprobs": distribution,
+                            }],
+                        }
                 # Faithful path — accumulate a copy, relay the raw delta as-is.
                 if delta.get("content"):
                     full_text += delta["content"]
@@ -1911,6 +1939,7 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
                 failed=False,
                 ttft=ttft,
                 worker_sig=reported_worker_sig,
+                logprobs=first_logprobs,
             )
 
         elif msg_type == "pong":

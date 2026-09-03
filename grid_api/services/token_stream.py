@@ -140,6 +140,7 @@ async def publish_done(
     finish_reason: str = "stop",
     full_json: dict | None = None,
     grid: dict | None = None,
+    logprobs: dict | None = None,
 ):
     """Signal generation complete via pub/sub + buffer.
 
@@ -163,6 +164,7 @@ async def publish_done(
         # upstream JSON body, returned to the client unchanged.
         "full_json": full_json,
         "grid": grid,
+        "logprobs": logprobs,
     })
 
     pipe = r.pipeline()
