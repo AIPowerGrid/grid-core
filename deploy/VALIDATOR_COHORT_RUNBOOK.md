@@ -59,7 +59,15 @@ Store the mapping from operator to opaque group only in the protected review
 system. Do not encode a name, email, location, wallet, host, or ticket number in
 the group id.
 
-## 2. Start Qualification
+## 2. Attach The Operator Review
+
+A current-version validator starts a non-economic observation window when it
+registers, or on its first supported-version heartbeat after this behavior is
+deployed. Core samples at most one heartbeat per configured interval. Automatic
+observation does not assign a control group, prove independence, or grant
+authority. It only prevents maintainer intake latency from discarding real,
+signer-bound uptime evidence. Core never backfills time or samples from before
+it began observing the node.
 
 Choose a non-sensitive review reference such as `cohort:2026q3:ticket-0001`.
 Preview the transition first:
@@ -86,9 +94,11 @@ $PY scripts/review_validator_operator.py \
   --apply
 ```
 
-Candidate application starts a new qualification clock and clears prior
-heartbeat samples. Do not repeat it to repair a temporarily offline node; doing
-so deliberately restarts the 72-hour window. Core rejects applying a candidate
+For an unreviewed node with an active observation window, candidate application
+attaches the opaque control group and review reference while preserving the
+window and its heartbeat samples. A legacy row with no observation window starts
+one at candidate application. Do not repeat the transition to repair a
+temporarily offline node. Core rejects applying a candidate
 transition when qualification is already active unless the command includes
 `--restart-qualification`. Run a fresh preview with the same flag before its
 matching apply command. Use that flag only when the protected review record says
@@ -106,8 +116,8 @@ registration would not prove continuity of the reviewed operator.
 The node must remain online for at least 72 hours and supply at least 80 percent
 of the bounded heartbeat samples. Heartbeat freshness is checked again at
 verification time. At least one completed assignment and one Core-accepted
-authoritative attestation must also be created after the candidate clock starts;
-historical evidence from before qualification does not count. Workload evidence
+authoritative attestation must also be created after the observation window starts;
+historical evidence from before observation does not count. Workload evidence
 does not replace the time and heartbeat gates.
 
 The operator can inspect its own safe progress with:
@@ -155,10 +165,12 @@ Production Core can also run the aggregate cohort watchdog with
 `VALIDATOR_COHORT_MONITOR_ENABLED=1`. Every configured interval it evaluates
 expired-assignment completion, accepted authoritative evidence, terminal probe
 errors, validator disagreement, stale active/candidate nodes, software-version
-drift from preview.13, fresh unreviewed preview.13 registrations, and duplicate
-reviewed control groups. The unreviewed count tells maintainers that an operator
+drift from preview.13, fresh unreviewed preview.13 registrations awaiting
+common-control review, and duplicate reviewed control groups. The unreviewed
+count tells maintainers that an operator
 may be waiting for intake; it does not prove that those registrations are
-independent and never starts their 72-hour clocks. Alerts fire when a condition
+independent. The monitor never starts observation windows; supported-version
+registration and heartbeat paths do that. Alerts fire when a condition
 first appears and when it recovers, rather than on every poll.
 One renewable Redis lease elects a single watchdog across Uvicorn processes and
 Core replicas; if Redis is unavailable, that pass is skipped instead of running

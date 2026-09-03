@@ -223,12 +223,23 @@ async def review_operator(
                 blocking_reasons.append(
                     "candidate qualification is already active; explicitly restart qualification to reset it",
                 )
+            preserve_observation = bool(
+                state["independence_status"] == "unreviewed"
+                and qualification_started is not None
+                and not restart_qualification
+            )
             values = {
                 "operator_group_id": group_id,
                 "independence_status": "candidate",
-                "qualification_started_at": current,
-                "heartbeat_sample_count": 0,
-                "last_heartbeat_sampled_at": None,
+                "qualification_started_at": (
+                    qualification_started if preserve_observation else current
+                ),
+                "heartbeat_sample_count": (
+                    int(state["heartbeat_sample_count"] or 0) if preserve_observation else 0
+                ),
+                "last_heartbeat_sampled_at": (
+                    state["last_heartbeat_sampled_at"] if preserve_observation else None
+                ),
                 "independence_reviewed_at": None,
                 "independence_expires_at": None,
                 "independence_review_ref": review_ref,
@@ -285,6 +296,12 @@ async def review_operator(
             "software_version_supported": version_supported,
             "review_ref": review_ref,
             "restart_qualification": restart_qualification,
+            "preserves_observation": bool(
+                action == "candidate"
+                and state["independence_status"] == "unreviewed"
+                and qualification_started is not None
+                and not restart_qualification
+            ),
             "economic_effect": "none",
         }
         if apply:
