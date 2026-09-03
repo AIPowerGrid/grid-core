@@ -104,6 +104,11 @@ transport, accounts, stats, health/metrics.
   policy, and validator capability. The separately gated video-fidelity lane is
   default-off and requires a governed deterministic timing recipe, one
   candidate MP4, and two independently controlled bonded references.
+  The `text-fidelity` assignment selector is a separate default-off lane: Core
+  hard-targets one candidate plus configured same-model references and returns
+  only a bounded, committed first-token distribution witness set. It never
+  turns missing logprobs or a lone-reference mismatch into worker-failure
+  evidence.
   Health also exposes privacy-preserving network aggregates over a bounded
   `since_hours` window; never relabel registered validators as independently
   operated validators.
@@ -138,6 +143,9 @@ transport, accounts, stats, health/metrics.
   them draw daily free, promotional, or purchased account credit.
 - `worker_ws.py` must not trust worker-reported counts for rewards or customer
   billing without a server-side cap or verification path.
+- Worker-reported text logprobs are untrusted evidence. Normalize and bound the
+  first distribution before it reaches Redis; never retain an arbitrary nested
+  backend payload or treat it as cryptographic model identity.
 - Media completion must report exactly one unique canonical digest per
   presigned output slot, and every expected R2 object must pass existence,
   content-type, and size validation before payout or demand settlement.

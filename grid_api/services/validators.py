@@ -21,7 +21,7 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
@@ -34,7 +34,7 @@ from ..v2.schema import validator_attestations as attestations_t
 from ..v2.schema import validator_probe_groups as probe_groups_t
 from ..v2.schema import validators as validators_t
 from ..v2.schema import workers as workers_t
-from . import validator_operators
+from . import validator_operators, validator_text_fidelity
 from .validator_bonds import reviewed_runtime_hash, rpc_sources_are_distinct
 
 logger = logging.getLogger("grid_api.validators")
@@ -945,10 +945,10 @@ def _score_dimension(modality: str | None, capability: str | None) -> str:
     normalized_capability = str(capability or "")
     if normalized_capability in _TEXT_PROTOCOL_CAPABILITIES:
         return "protocol_conformance"
-    if normalized_capability.startswith("text."):
-        return "capability"
     if "fidelity" in normalized_capability:
         return "fidelity"
+    if normalized_capability.startswith("text."):
+        return "capability"
     if normalized_modality in {"image", "video", "audio"}:
         return "protocol_conformance"
     return "availability"
@@ -1089,6 +1089,57 @@ def media_validation_policy() -> dict[str, Any]:
         "minimum_quality_pass_rate": settings.validator_media_minimum_quality_pass_rate,
         "max_output_bytes": settings.validator_media_max_output_bytes,
         "probe_timeout_seconds": settings.validator_media_probe_timeout_seconds,
+    }
+
+
+def text_fidelity_policy() -> dict[str, Any]:
+    """Return the explicit, default-off trusted-reference bootstrap gate."""
+    settings = get_settings()
+    configured: list[str] = []
+    malformed = False
+    for value in settings.validator_text_fidelity_reference_worker_ids.split(","):
+        value = value.strip()
+        if not value:
+            continue
+        try:
+            normalized = str(UUID(value))
+        except (TypeError, ValueError, AttributeError):
+            malformed = True
+            continue
+        if normalized not in configured:
+            configured.append(normalized)
+    raw_models = [
+        value.strip()
+        for value in settings.validator_text_fidelity_models.split(",")
+        if value.strip()
+    ]
+    malformed_models = len(raw_models) > 64 or any(len(value) > 255 for value in raw_models)
+    models = list(dict.fromkeys(raw_models))[:64]
+    reasons: list[str] = []
+    if not settings.validator_text_fidelity_enabled:
+        reasons.append("operator gate disabled")
+    if not settings.validator_sealed_assignments_enabled:
+        reasons.append("sealed assignments disabled")
+    if malformed:
+        reasons.append("reference worker allowlist is malformed")
+    if malformed_models:
+        reasons.append("calibrated model allowlist is malformed")
+    if len(configured) < settings.validator_text_fidelity_reference_count:
+        reasons.append("insufficient configured reference workers")
+    if not models:
+        reasons.append("no calibrated models configured")
+    return {
+        "enabled": not reasons,
+        "modality": "text",
+        "capability": validator_text_fidelity.POLICY_ID,
+        "economic_effect": "none",
+        "reasons": reasons,
+        "reference_worker_ids": configured,
+        "reference_count": settings.validator_text_fidelity_reference_count,
+        "models": models,
+        "top_logprobs": settings.validator_text_fidelity_top_logprobs,
+        "max_tokens": settings.validator_text_fidelity_max_tokens,
+        "probe_timeout_seconds": settings.validator_text_fidelity_probe_timeout_seconds,
     }
 
 
@@ -1962,9 +2013,16 @@ def _assignment_to_dict(
             )
             if row["modality"] in {"image", "video"}
             else (
-                "kind", "prompt", "expected_hash", "max_tokens", "temperature",
-                "tools", "tool_choice", "steps", "stop", "function_name",
-                "test_inputs",
+                (
+                    "schema", "kind", "prompt", "reference_worker_ids",
+                    "scoring_policy_id", "request", "comparison",
+                )
+                if row["capability"] == validator_text_fidelity.POLICY_ID
+                else (
+                    "kind", "prompt", "expected_hash", "max_tokens", "temperature",
+                    "tools", "tool_choice", "steps", "stop", "function_name",
+                    "test_inputs",
+                )
             )
         )
         out["challenge"] = {key: challenge[key] for key in keys if key in challenge}
@@ -2217,6 +2275,14 @@ async def issue_assignments(
             active_workers=active_workers,
             limit=safe_limit,
         )
+    if modality == "text-fidelity":
+        return await _issue_text_fidelity_assignments(
+            account_id=account_id,
+            validator_id=validator_id,
+            validator_wallet=validator_wallet,
+            active_workers=active_workers,
+            limit=safe_limit,
+        )
     if modality != "text":
         raise AssignmentError("unsupported validator assignment modality")
 
@@ -2261,6 +2327,7 @@ async def issue_assignments(
                     assignments_t.c.account_id == account_id,
                     assignments_t.c.validator_id == validator_id,
                     assignments_t.c.modality == "text",
+                    assignments_t.c.capability != validator_text_fidelity.POLICY_ID,
                     assignments_t.c.status != "finalized",
                     _assignment_available_for_validator(validator_id, now),
                 )
@@ -2318,6 +2385,7 @@ async def issue_assignments(
                         probe_groups_t.c.target_worker_id == worker_id,
                         probe_groups_t.c.model.in_(candidate_models),
                         probe_groups_t.c.modality == modality,
+                        probe_groups_t.c.capability != validator_text_fidelity.POLICY_ID,
                         probe_groups_t.c.expires >= now,
                         probe_groups_t.c.quorum_status != "finalized",
                     )
@@ -2513,6 +2581,269 @@ async def issue_assignments(
     return {
         "assignments": [_assignment_to_dict(r) for r in rows[:safe_limit]],
         "count": min(len(rows), safe_limit),
+        "targeted_probe_enabled": True,
+        "quorum": await assignment_health(account_id=account_id),
+        "quorum_policy": {
+            "threshold": QUORUM_MIN,
+            "target_validators": QUORUM_TARGET,
+            "distinct_registered_validators": True,
+        },
+        "economic_effect": "none",
+    }
+
+
+async def _issue_text_fidelity_assignments(
+    *,
+    account_id,
+    validator_id: str,
+    validator_wallet: str | None,
+    active_workers: list[dict[str, Any]],
+    limit: int,
+) -> dict[str, Any]:
+    """Allocate dark candidate/reference fingerprint comparisons."""
+    policy = text_fidelity_policy()
+    if not policy["enabled"]:
+        raise AssignmentError("text fidelity validator assignments are not enabled")
+
+    now = _now()
+    expires = now + timedelta(seconds=ASSIGNMENT_TTL_SECONDS)
+    wallet = validator_wallet.lower() if validator_wallet and _ADDR_RE.match(validator_wallet) else None
+    configured_references = list(policy["reference_worker_ids"])
+    reference_count = int(policy["reference_count"])
+    active_by_id = {
+        str(worker.get("worker_id") or worker.get("id") or ""): worker
+        for worker in active_workers
+        if "text" in (worker.get("job_types") or ["text"])
+    }
+
+    async with await new_session() as session:
+        validator_row = (
+            await session.execute(
+                sa.select(
+                    validators_t.c.id,
+                    validators_t.c.capabilities,
+                    validators_t.c.operator_group_id,
+                )
+                .where(validators_t.c.id == validator_id)
+                .with_for_update()
+            )
+        ).mappings().first()
+        if not validator_row:
+            raise AssignmentError("active validator registration required")
+        supported = {str(value) for value in (validator_row["capabilities"] or [])}
+        if validator_text_fidelity.POLICY_ID not in supported:
+            raise AssignmentError("validator has no supported text fidelity capability")
+        await _finalize_due_assignments(session)
+
+        own_worker_ids = {
+            str(row[0])
+            for row in (
+                await session.execute(
+                    sa.select(workers_t.c.id).where(workers_t.c.account_id == account_id)
+                )
+            ).all()
+        }
+        existing = (
+            await session.execute(
+                sa.select(assignments_t).where(
+                    assignments_t.c.account_id == account_id,
+                    assignments_t.c.validator_id == validator_id,
+                    assignments_t.c.modality == "text",
+                    assignments_t.c.capability == validator_text_fidelity.POLICY_ID,
+                    assignments_t.c.status != "finalized",
+                    _assignment_available_for_validator(validator_id, now),
+                )
+                .order_by(assignments_t.c.created.asc())
+                .limit(limit)
+            )
+        ).mappings().all()
+        existing = await _hydrate_assignment_challenges(session, existing)
+        rows = list(existing)
+        existing_keys = {(str(row["target_worker_id"]), row["model"]) for row in existing}
+
+        for worker in _ordered_assignment_workers(active_workers):
+            if len(rows) >= limit:
+                break
+            worker_id = str(worker.get("worker_id") or worker.get("id") or "")
+            worker_name = str(worker.get("name") or "")
+            if (
+                not worker_id
+                or not worker_name
+                or worker_id in own_worker_ids
+                or worker_id in configured_references
+                or "text" not in (worker.get("job_types") or ["text"])
+            ):
+                continue
+            models = list(dict.fromkeys(
+                model for model in (worker.get("models") or [])
+                if isinstance(model, str) and model
+            ))
+            for model in models:
+                if len(rows) >= limit:
+                    break
+                key = (worker_id, model)
+                if model not in policy["models"]:
+                    continue
+                if key in existing_keys:
+                    continue
+                available_references = [
+                    reference_id
+                    for reference_id in configured_references
+                    if reference_id in active_by_id
+                    and model in (active_by_id[reference_id].get("models") or [])
+                    and reference_id != worker_id
+                ]
+                online_references = available_references[:reference_count]
+                if len(online_references) != reference_count:
+                    continue
+
+                if session.bind and session.bind.dialect.name == "postgresql":
+                    lock_key = int.from_bytes(
+                        hashlib.sha256(
+                            f"validator-group:{worker_id}:{model}:text-fidelity".encode()
+                        ).digest()[:8],
+                        byteorder="big",
+                        signed=True,
+                    )
+                    await session.execute(
+                        sa.text("SELECT pg_advisory_xact_lock(:lock_key)"),
+                        {"lock_key": lock_key},
+                    )
+
+                candidate_groups = (
+                    await session.execute(
+                        sa.select(probe_groups_t).where(
+                            probe_groups_t.c.target_worker_id == worker_id,
+                            probe_groups_t.c.model == model,
+                            probe_groups_t.c.modality == "text",
+                            probe_groups_t.c.capability == validator_text_fidelity.POLICY_ID,
+                            probe_groups_t.c.expires >= now,
+                            probe_groups_t.c.quorum_status != "finalized",
+                        )
+                        .order_by(probe_groups_t.c.created.asc())
+                    )
+                ).mappings().all()
+                group = None
+                unfilled_group_exists = False
+                for candidate in candidate_groups:
+                    try:
+                        candidate_challenge = validator_text_fidelity.validate_challenge(
+                            candidate["challenge"] or {}
+                        )
+                    except validator_text_fidelity.FidelityContractError:
+                        continue
+                    candidate_references = candidate_challenge["reference_worker_ids"]
+                    if (
+                        len(candidate_references) != reference_count
+                        or not set(candidate_references).issubset(set(available_references))
+                        or not set(candidate_references).issubset(set(configured_references))
+                    ):
+                        continue
+                    assigned_count = int(
+                        await session.scalar(
+                            sa.select(sa.func.count()).select_from(assignments_t).where(
+                                assignments_t.c.probe_group_id == candidate["id"]
+                            )
+                        )
+                        or 0
+                    )
+                    if assigned_count >= int(candidate["target_validator_count"]):
+                        continue
+                    unfilled_group_exists = True
+                    if not await _operator_already_assigned(
+                        session,
+                        probe_group_id=str(candidate["id"]),
+                        validator_id=validator_id,
+                        operator_group_id=validator_row["operator_group_id"],
+                    ):
+                        group = candidate
+                        break
+                if group is None and unfilled_group_exists:
+                    continue
+
+                if group is None:
+                    if await _text_group_cooldown_active(
+                        session, worker_id=worker_id, model=model, now=now
+                    ):
+                        continue
+                    challenge = validator_text_fidelity.make_challenge(
+                        online_references,
+                        top_logprobs=int(policy["top_logprobs"]),
+                        max_tokens=int(policy["max_tokens"]),
+                    )
+                    group_id = f"prg_{uuid4().hex}"
+                    group_values = {
+                        "id": group_id,
+                        "target_worker_id": worker_id,
+                        "target_worker_name": worker_name,
+                        "model": model,
+                        "modality": "text",
+                        "capability": validator_text_fidelity.POLICY_ID,
+                        "canary_kind": validator_text_fidelity.KIND,
+                        "scoring_policy_id": validator_text_fidelity.POLICY_ID,
+                        "challenge": challenge,
+                        "challenge_hash": _hash_obj({
+                            "group_id": group_id,
+                            "worker_id": worker_id,
+                            "model": model,
+                            "challenge": challenge,
+                        }),
+                        "status": "pending",
+                        "quorum_status": "pending",
+                        "quorum_outcome": None,
+                        "quorum_threshold": QUORUM_MIN,
+                        "target_validator_count": QUORUM_TARGET,
+                        "created": now,
+                        "expires": expires,
+                        "accepted": None,
+                        "disputed": None,
+                        "finalized": None,
+                    }
+                    await session.execute(sa.insert(probe_groups_t).values(**group_values))
+                    group = group_values
+
+                try:
+                    challenge = validator_text_fidelity.validate_challenge(group["challenge"] or {})
+                except validator_text_fidelity.FidelityContractError as exc:
+                    raise AssignmentError("text fidelity probe group is malformed") from exc
+                values = {
+                    "id": f"asg_{uuid4().hex}",
+                    "probe_group_id": group["id"],
+                    "account_id": account_id,
+                    "validator_id": validator_id,
+                    "validator_wallet": wallet,
+                    "grid_nonce": secrets.token_urlsafe(24),
+                    "target_worker_id": worker_id,
+                    "target_worker_name": worker_name,
+                    "model": model,
+                    "modality": "text",
+                    "capability": validator_text_fidelity.POLICY_ID,
+                    "canary_kind": validator_text_fidelity.KIND,
+                    "scoring_policy_id": validator_text_fidelity.POLICY_ID,
+                    "challenge": challenge,
+                    "status": "pending",
+                    "quorum_status": "pending",
+                    "quorum_outcome": None,
+                    "probe_job_id": None,
+                    "probe_status": "not_started",
+                    "probe_attempts": 0,
+                    "probe_lease_expires": None,
+                    "created": now,
+                    "expires": group["expires"],
+                    "probed": None,
+                    "finalized": None,
+                }
+                await session.execute(
+                    sa.insert(assignments_t).values(**{**values, "challenge": {}})
+                )
+                rows.append(values)
+                existing_keys.add(key)
+
+        await session.commit()
+
+    return {
+        "assignments": [_assignment_to_dict(row) for row in rows[:limit]],
+        "count": min(len(rows), limit),
         "targeted_probe_enabled": True,
         "quorum": await assignment_health(account_id=account_id),
         "quorum_policy": {
@@ -3924,6 +4255,12 @@ async def probe_assignment(
         return await _probe_image_assignment(row=row, assignment_id=assignment_id, job_id=job_id)
     if row["modality"] == "video":
         return await _probe_video_assignment(row=row, assignment_id=assignment_id, job_id=job_id)
+    if row["capability"] == validator_text_fidelity.POLICY_ID:
+        return await _probe_text_fidelity_assignment(
+            row=row,
+            assignment_id=assignment_id,
+            job_id=job_id,
+        )
     challenge = row["challenge"] or {}
     prompt = str(challenge.get("prompt") or "")
     started = _now()
@@ -4099,6 +4436,266 @@ async def probe_assignment(
     return result
 
 
+def _verified_text_fidelity_witnesses(
+    row: dict[str, Any],
+    group: dict[str, Any],
+) -> list[dict[str, Any]]:
+    try:
+        witnesses = validator_text_fidelity.validate_witnesses(
+            row.get("challenge") or {},
+            str(row["target_worker_id"]),
+            group.get("probe_witnesses"),
+        )
+    except validator_text_fidelity.FidelityContractError as exc:
+        raise AssignmentError(str(exc)) from exc
+    stored_hash = str(group.get("probe_witness_hash") or "")
+    if not _SHA256_RE.fullmatch(stored_hash) or not secrets.compare_digest(
+        stored_hash,
+        _hash_obj({"witnesses": witnesses}),
+    ):
+        raise AssignmentError("text fidelity witness commitment is invalid")
+    return witnesses
+
+
+async def _run_targeted_text_fidelity_stage(
+    *,
+    row: dict[str, Any],
+    assignment_id: str,
+    job_id: str,
+    role: str,
+    worker_id: str,
+    worker_name: str,
+    challenge: dict[str, Any],
+) -> dict[str, Any]:
+    request_contract = dict(challenge["request"])
+    request = {
+        "model": row["model"],
+        "messages": [{"role": "user", "content": challenge["prompt"]}],
+        **request_contract,
+        "stream": True,
+    }
+    stage_row = {
+        **row,
+        "target_worker_id": worker_id,
+        "target_worker_name": worker_name,
+    }
+    started = _now()
+    stage = await _run_targeted_text_stage(
+        row=stage_row,
+        assignment_id=assignment_id,
+        job_id=job_id,
+        prompt=str(challenge["prompt"]),
+        request=request,
+        timeout_seconds=int(text_fidelity_policy()["probe_timeout_seconds"]),
+    )
+    if stage.get("status") != "completed":
+        return stage
+    grid = stage.get("grid") or {}
+    if (
+        str(grid.get("worker_id") or "") != worker_id
+        or str(grid.get("assignment_id") or "") != assignment_id
+        or str(grid.get("grid_nonce") or "") != str(row["grid_nonce"])
+    ):
+        return {"status": "error", "code": 502, "message": "worker witness binding failed"}
+    full_text = str(stage.get("full_text") or "")
+    if len(full_text.encode("utf-8")) > validator_text_fidelity.MAX_OUTPUT_BYTES:
+        return {"status": "error", "code": 502, "message": "worker output exceeded witness limit"}
+    distribution = validator_text_fidelity.first_distribution(stage.get("logprobs"))
+    if not distribution:
+        return {"status": "error", "code": 422, "message": "backend returned no usable logprobs"}
+    return {
+        "status": "completed",
+        "witness": {
+            "role": role,
+            "worker_id": worker_id,
+            "output_hash": _hash_text(full_text),
+            "finish_reason": str(stage.get("finish_reason") or ""),
+            "distribution": distribution,
+            "latency_ms": int((_now() - started).total_seconds() * 1000),
+        },
+    }
+
+
+async def _probe_text_fidelity_assignment(
+    *,
+    row: dict[str, Any],
+    assignment_id: str,
+    job_id: str,
+) -> dict[str, Any]:
+    """Execute or reuse one candidate/reference text fingerprint witness set."""
+    try:
+        challenge = validator_text_fidelity.validate_challenge(row.get("challenge") or {})
+    except validator_text_fidelity.FidelityContractError as exc:
+        await _mark_probe(job_id, "failed")
+        raise AssignmentError(str(exc)) from exc
+    reference_ids = list(challenge["reference_worker_ids"])
+    if str(row["target_worker_id"]) in reference_ids:
+        await _mark_probe(job_id, "failed")
+        raise AssignmentError("candidate cannot also be a text fidelity reference")
+    try:
+        reference_uuids = [UUID(value) for value in reference_ids]
+    except ValueError as exc:
+        await _mark_probe(job_id, "failed")
+        raise AssignmentError("text fidelity reference identity is invalid") from exc
+    async with await new_session() as session:
+        reference_rows = (
+            await session.execute(
+                sa.select(workers_t.c.id, workers_t.c.name).where(
+                    workers_t.c.id.in_(reference_uuids)
+                )
+            )
+        ).all()
+    names = {str(worker_id): str(name) for worker_id, name in reference_rows}
+    if set(names) != set(reference_ids):
+        await _mark_probe(job_id, "failed")
+        raise AssignmentError("text fidelity reference worker is unavailable")
+
+    group_id = str(row.get("probe_group_id") or "")
+    if not group_id:
+        await _mark_probe(job_id, "failed")
+        raise AssignmentError("text fidelity assignment has no probe group")
+    group_deadline = _aware(row["probe_lease_expires"])
+    group: dict[str, Any] | None = None
+    while _now() < group_deadline:
+        state, observed = await _claim_media_group_execution(
+            group_id=group_id,
+            owner_job_id=job_id,
+            modality="text",
+        )
+        try:
+            _verify_media_group_binding(row, observed)
+        except AssignmentError:
+            if state == "claimed":
+                await _fail_media_group(group_id=group_id, owner_job_id=job_id)
+            await _mark_probe(job_id, "failed")
+            raise
+        if state == "completed":
+            group = observed
+            break
+        if state == "claimed":
+            stages = [
+                (
+                    "candidate",
+                    str(row["target_worker_id"]),
+                    row["target_worker_name"],
+                    job_id,
+                ),
+                *(
+                    ("reference", reference_id, names[reference_id], str(uuid4()))
+                    for reference_id in reference_ids
+                ),
+            ]
+            results = await asyncio.gather(
+                *(
+                    _run_targeted_text_fidelity_stage(
+                        row=row,
+                        assignment_id=assignment_id,
+                        job_id=stage_job_id,
+                        role=role,
+                        worker_id=worker_id,
+                        worker_name=worker_name,
+                        challenge=challenge,
+                    )
+                    for role, worker_id, worker_name, stage_job_id in stages
+                ),
+                return_exceptions=True,
+            )
+            failed = next(
+                (
+                    result
+                    for result in results
+                    if isinstance(result, BaseException)
+                    or not isinstance(result, dict)
+                    or result.get("status") != "completed"
+                ),
+                None,
+            )
+            if failed is not None:
+                await _fail_media_group(group_id=group_id, owner_job_id=job_id)
+                await _mark_probe(job_id, "failed")
+                return {
+                    "status": "error",
+                    "probe_status": "failed",
+                    "assignment_id": assignment_id,
+                    "job_id": job_id,
+                    "message": "text fidelity probe was inconclusive",
+                    "code": 422,
+                    "economic_effect": "none",
+                }
+            try:
+                witnesses = validator_text_fidelity.validate_witnesses(
+                    challenge,
+                    str(row["target_worker_id"]),
+                    [result["witness"] for result in results],
+                )
+                group = await _complete_media_group(
+                    group_id=group_id,
+                    owner_job_id=job_id,
+                    witnesses=witnesses,
+                )
+            except validator_text_fidelity.FidelityContractError as exc:
+                await _fail_media_group(group_id=group_id, owner_job_id=job_id)
+                await _mark_probe(job_id, "failed")
+                raise AssignmentError(str(exc)) from exc
+            break
+        if state == "exhausted":
+            await _mark_probe(job_id, "failed")
+            raise AssignmentError("text fidelity probe group retry limit reached")
+        await asyncio.sleep(0.25)
+
+    if group is None:
+        await _mark_probe(job_id, "timeout")
+        return {
+            "status": "error",
+            "probe_status": "timeout",
+            "assignment_id": assignment_id,
+            "job_id": job_id,
+            "message": "text fidelity probe group timed out",
+            "code": 504,
+            "economic_effect": "none",
+        }
+    witnesses = _verified_text_fidelity_witnesses(row, group)
+    response_commitment = validator_text_fidelity.response_commitment(witnesses)
+    prompt_commitment = validator_text_fidelity.canonical(challenge)
+    evidence = {
+        "assignment_id": assignment_id,
+        "probe_group_id": row["probe_group_id"],
+        "grid_nonce": row["grid_nonce"],
+        "worker_id": row["target_worker_id"],
+        "model": row["model"],
+        "modality": row["modality"],
+        "capability": row["capability"],
+        "canary_kind": row["canary_kind"],
+        "prompt_hash": _hash_text(prompt_commitment),
+        "response_hash": _hash_text(response_commitment),
+    }
+    evidence["evidence_hash"] = _hash_obj(evidence)
+    candidate_latency = int(witnesses[0]["latency_ms"])
+    result = {
+        "status": "completed",
+        "assignment_id": assignment_id,
+        "job_id": job_id,
+        "target_worker_name": row["target_worker_name"],
+        **_assignment_disclosure(row),
+        "witnesses": witnesses,
+        "probe_latency_ms": candidate_latency,
+        **evidence,
+        "economic_effect": "none",
+    }
+    if not await _mark_probe(
+        job_id,
+        "completed",
+        prompt_hash=evidence["prompt_hash"],
+        response_hash=evidence["response_hash"],
+        evidence_hash=evidence["evidence_hash"],
+        verdict="witnessed",
+        latency_ms=candidate_latency,
+        result=result,
+    ):
+        raise AssignmentError("completed text fidelity probe result could not be persisted")
+    return result
+
+
 def _media_response_commitment(witnesses: list[dict[str, Any]]) -> str:
     committed = [
         {
@@ -4210,7 +4807,7 @@ def _verify_media_group_binding(row: dict[str, Any], group: dict[str, Any]) -> N
         and secrets.compare_digest(str(group.get("challenge_hash") or ""), expected_hash)
     )
     if not bound:
-        raise AssignmentError("media assignment does not match its probe group")
+        raise AssignmentError("fidelity assignment does not match its probe group")
 
 
 async def _claim_media_group_execution(
@@ -4219,11 +4816,14 @@ async def _claim_media_group_execution(
     owner_job_id: str,
     modality: str,
 ) -> tuple[str, dict[str, Any]]:
-    """Claim the one GPU execution for a media group or observe its state."""
-    if modality not in {"image", "video"}:
-        raise AssignmentError("unsupported media probe modality")
+    """Claim one shared witness execution for a fidelity probe group."""
+    if modality not in {"text", "image", "video"}:
+        raise AssignmentError("unsupported fidelity probe modality")
     now = _now()
-    policy = media_validation_policy() if modality == "image" else video_validation_policy()
+    if modality == "text":
+        policy = text_fidelity_policy()
+    else:
+        policy = media_validation_policy() if modality == "image" else video_validation_policy()
     lease_seconds = max(PROBE_LEASE_SECONDS, int(policy["probe_timeout_seconds"]) + 120)
     retryable = probe_groups_t.c.probe_status.in_(("not_started", "failed", "timeout"))
     stale_running = sa.and_(
@@ -4257,7 +4857,7 @@ async def _claim_media_group_execution(
             )
         ).mappings().first()
     if not group:
-        raise AssignmentError("media probe group not found")
+        raise AssignmentError("fidelity probe group not found")
     group = dict(group)
     if claimed.rowcount == 1:
         return "claimed", group
@@ -4301,13 +4901,13 @@ async def _complete_media_group(
             )
         ).mappings().first()
     if not group:
-        raise AssignmentError("media probe group not found")
+        raise AssignmentError("fidelity probe group not found")
     group = dict(group)
     if completed.rowcount != 1 and (
         group["probe_status"] != "completed"
         or not secrets.compare_digest(str(group["probe_witness_hash"] or ""), witness_hash)
     ):
-        raise AssignmentError("media probe group lease was lost")
+        raise AssignmentError("fidelity probe group lease was lost")
     return group
 
 
@@ -4326,7 +4926,7 @@ async def _fail_media_group(*, group_id: str, owner_job_id: str, status: str = "
             await session.commit()
     except Exception as exc:
         logger.warning(
-            "failed to mark media probe group=%s status=%s error_type=%s",
+            "failed to mark fidelity probe group=%s status=%s error_type=%s",
             opaque_id(group_id),
             status,
             error_type(exc),
@@ -5041,6 +5641,7 @@ async def _run_targeted_text_stage(
     job_id: str,
     prompt: str,
     request: dict[str, Any],
+    timeout_seconds: int = PROBE_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """Dispatch and witness one economically inert stage on the assigned worker."""
     from . import job_queue, token_stream
@@ -5081,7 +5682,7 @@ async def _run_targeted_text_stage(
 
     chunks: list[str] = []
     try:
-        async for event in token_stream.subscribe_tokens(job_id, timeout=PROBE_TIMEOUT_SECONDS):
+        async for event in token_stream.subscribe_tokens(job_id, timeout=timeout_seconds):
             if event.get("error"):
                 return {
                     "status": "error",
@@ -5098,6 +5699,7 @@ async def _run_targeted_text_stage(
                     "grid": event.get("grid"),
                     "tool_calls": event.get("tool_calls"),
                     "finish_reason": event.get("finish_reason"),
+                    "logprobs": event.get("logprobs"),
                 }
             chunks.append(token_stream.event_content_text(event))
         return {
@@ -5130,6 +5732,19 @@ async def _claim_probe_lease(
     """Atomically claim one bounded probe attempt for an assignment."""
     now = _now()
     lease_expires = now + timedelta(seconds=PROBE_LEASE_SECONDS)
+    text_fidelity_lease_expires = now + timedelta(
+        seconds=max(
+            PROBE_LEASE_SECONDS,
+            int(
+                getattr(
+                    get_settings(),
+                    "validator_text_fidelity_probe_timeout_seconds",
+                    PROBE_TIMEOUT_SECONDS,
+                )
+            )
+            + 120,
+        ),
+    )
     media_lease_expires = now + timedelta(
         seconds=max(
             PROBE_LEASE_SECONDS,
@@ -5166,6 +5781,10 @@ async def _claim_probe_lease(
                 probe_attempts=assignments_t.c.probe_attempts + 1,
                 probe_lease_expires=sa.case(
                     (assignments_t.c.modality.in_(("image", "video")), media_lease_expires),
+                    (
+                        assignments_t.c.capability == validator_text_fidelity.POLICY_ID,
+                        text_fidelity_lease_expires,
+                    ),
                     else_=lease_expires,
                 ),
                 probed=now,
@@ -5225,6 +5844,25 @@ async def _claim_probe_lease(
         if row["modality"] != "text":
             await _mark_probe(job_id, "failed")
             raise AssignmentError("unsupported validator probe modality")
+        if row["capability"] == validator_text_fidelity.POLICY_ID:
+            policy = text_fidelity_policy()
+            try:
+                validator_text_fidelity.validate_challenge(challenge)
+            except validator_text_fidelity.FidelityContractError as exc:
+                await _mark_probe(job_id, "failed")
+                raise AssignmentError(str(exc)) from exc
+            references = challenge.get("reference_worker_ids") or []
+            if (
+                not policy["enabled"]
+                or row["canary_kind"] != validator_text_fidelity.KIND
+                or row["scoring_policy_id"] != validator_text_fidelity.POLICY_ID
+                or len(references) != int(policy["reference_count"])
+                or not set(references).issubset(set(policy["reference_worker_ids"]))
+                or row["model"] not in policy["models"]
+            ):
+                await _mark_probe(job_id, "failed")
+                raise AssignmentError("text fidelity probe gate is not authoritative")
+            return dict(row), job_id
         if not str(challenge.get("prompt") or ""):
             await _mark_probe(job_id, "failed")
             raise AssignmentError("assignment has no prompt")
