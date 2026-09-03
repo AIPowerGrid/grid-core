@@ -506,6 +506,7 @@ async def register_validator(
     if abs(int(now.timestamp()) - signed_ts) > REGISTRATION_MAX_CLOCK_SKEW_SECONDS:
         raise RegistrationError("validator registration timestamp is outside the allowed window")
     capabilities = _registration_capabilities(payload)
+    _, version_supported = validator_operators.cohort_version_status(software_version)
 
     async with await new_session() as session:
         existing = (
@@ -529,6 +530,20 @@ async def register_validator(
         if existing:
             validator_id = existing["id"]
             state = dict(existing)
+            start_observation = bool(
+                state["independence_status"] == "unreviewed"
+                and state["qualification_started_at"] is None
+                and version_supported
+            )
+            observation_values = (
+                {
+                    "qualification_started_at": now,
+                    "heartbeat_sample_count": 1,
+                    "last_heartbeat_sampled_at": now,
+                }
+                if start_observation
+                else {}
+            )
             await session.execute(
                 sa.update(validators_t)
                 .where(validators_t.c.id == validator_id)
@@ -539,20 +554,25 @@ async def register_validator(
                     status="active",
                     last_heartbeat=now,
                     updated=now,
+                    **observation_values,
                 ),
             )
+            state.update(observation_values)
             created = False
         else:
             validator_id = f"val_{uuid4().hex}"
+            qualification_started_at = now if version_supported else None
+            heartbeat_sample_count = 1 if version_supported else 0
+            last_heartbeat_sampled_at = now if version_supported else None
             state = {
                 "id": validator_id,
                 "account_id": account_id,
                 "signing_wallet": wallet,
                 "operator_group_id": None,
                 "independence_status": "unreviewed",
-                "qualification_started_at": None,
-                "heartbeat_sample_count": 0,
-                "last_heartbeat_sampled_at": None,
+                "qualification_started_at": qualification_started_at,
+                "heartbeat_sample_count": heartbeat_sample_count,
+                "last_heartbeat_sampled_at": last_heartbeat_sampled_at,
                 "independence_reviewed_at": None,
                 "independence_expires_at": None,
                 "independence_review_ref": None,
@@ -568,6 +588,9 @@ async def register_validator(
                     registration_signature=normalized_signature,
                     status="active",
                     last_heartbeat=now,
+                    qualification_started_at=qualification_started_at,
+                    heartbeat_sample_count=heartbeat_sample_count,
+                    last_heartbeat_sampled_at=last_heartbeat_sampled_at,
                     created=now,
                     updated=now,
                 ),
@@ -798,9 +821,17 @@ async def heartbeat_validator(
         raise RegistrationError("software_version is invalid")
     normalized_capabilities = _registration_capabilities({"capabilities": capabilities})
     now = _now()
+    _, version_supported = validator_operators.cohort_version_status(software_version)
     sample_cutoff = now - timedelta(seconds=VALIDATOR_OPERATOR_SAMPLE_INTERVAL_SECONDS)
+    start_observation = sa.and_(
+        validators_t.c.independence_status == "unreviewed",
+        validators_t.c.qualification_started_at.is_(None),
+        version_supported,
+    )
     sample_due = sa.and_(
-        validators_t.c.independence_status.in_(("candidate", "verified")),
+        validators_t.c.independence_status.in_(("unreviewed", "candidate", "verified")),
+        validators_t.c.qualification_started_at.is_not(None),
+        version_supported,
         sa.or_(
             validators_t.c.last_heartbeat_sampled_at.is_(None),
             validators_t.c.last_heartbeat_sampled_at <= sample_cutoff,
@@ -814,11 +845,17 @@ async def heartbeat_validator(
                 software_version=software_version,
                 capabilities=normalized_capabilities,
                 last_heartbeat=now,
+                qualification_started_at=sa.case(
+                    (start_observation, now),
+                    else_=validators_t.c.qualification_started_at,
+                ),
                 heartbeat_sample_count=sa.case(
+                    (start_observation, 1),
                     (sample_due, validators_t.c.heartbeat_sample_count + 1),
                     else_=validators_t.c.heartbeat_sample_count,
                 ),
                 last_heartbeat_sampled_at=sa.case(
+                    (start_observation, now),
                     (sample_due, now),
                     else_=validators_t.c.last_heartbeat_sampled_at,
                 ),

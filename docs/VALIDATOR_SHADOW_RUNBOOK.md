@@ -109,11 +109,11 @@ Require the preview to show all of the following:
 - `eligible_to_apply: true` and an empty `blocking_reasons` list;
 - `time_ready`, `coverage_ready`, and `software_version_supported` all true;
 - at least one completed probe and one authoritative attestation created after
-  this candidate window began; and
+  this preserved qualification observation window began; and
 - `economic_effect: none`.
 
 The activity check is qualification-window scoped. Lifetime evidence created
-before the candidate clock started cannot satisfy it. If any field fails, keep
+before the qualification observation started cannot satisfy it. If any field fails, keep
 the node in candidate state and correct or observe the blocker; never edit the
 timestamps, sample counters, or evidence rows.
 
