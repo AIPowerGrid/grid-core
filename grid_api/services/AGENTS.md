@@ -265,6 +265,17 @@ content sanitization, and reward settlement.
   hard-targets one candidate plus two references, freezes three MP4 witnesses,
   and requires reference agreement before candidate comparison. Both lanes
   remain non-economic.
+  `validator_text_fidelity.py` owns a separate default-off text behavioral
+  fingerprint contract. Core sends one sealed temperature-zero request to a
+  candidate and one or two explicitly configured trusted references serving
+  the same explicitly calibrated model, normalizes only the first bounded top-logprob
+  distribution at the worker WebSocket boundary, and freezes the witness set
+  once per quorum group. One reference can produce positive consistency
+  evidence only; a negative outlier verdict requires two references to agree.
+  Missing logprobs, unavailable references, malformed distributions, or
+  reference disagreement are inconclusive. Worker-supplied logprobs are not
+  cryptographic proof of model identity, and this lane has no routing, reward,
+  strike, payout, or slashing effect.
   `validator_bonds.py` owns the default-off Base cache refresh. It verifies all
   WorkerRegistry selectors route through the reviewed Grid Diamond to one
   code-pinned facet release at one mutually finalized block, requires two distinct

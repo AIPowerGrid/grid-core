@@ -27,6 +27,7 @@ router = APIRouter()
 def _capabilities_payload() -> dict[str, Any]:
     media_policy = validators_svc.media_validation_policy()
     video_policy = validators_svc.video_validation_policy()
+    text_fidelity_policy = validators_svc.text_fidelity_policy()
     sealed_assignments = bool(
         getattr(get_settings(), "validator_sealed_assignments_enabled", False),
     )
@@ -55,6 +56,7 @@ def _capabilities_payload() -> dict[str, Any]:
             "worker_terminal_indistinguishable": False,
             "image_fidelity": media_policy["enabled"],
             "video_validation": video_policy["enabled"],
+            "text_fidelity": text_fidelity_policy["enabled"],
             "validator_rewards": False,
             "staking_required": False,
             "epoch_roots": False,
@@ -71,6 +73,12 @@ def _capabilities_payload() -> dict[str, Any]:
                 "capability": video_policy["capability"],
                 "economic_effect": "none",
             },
+        },
+        "text_fidelity": {
+            "enabled": text_fidelity_policy["enabled"],
+            "capability": text_fidelity_policy["capability"],
+            "reference_count": text_fidelity_policy["reference_count"],
+            "economic_effect": "none",
         },
         "probe_policy": {
             "max_attempts": validators_svc.PROBE_MAX_ATTEMPTS,
@@ -379,7 +387,7 @@ async def validator_assignments(
     apikey: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
     limit: int = Query(5, ge=1, le=25),
-    modality: str = Query("text", pattern="^(text|image|video)$"),
+    modality: str = Query("text", pattern="^(text|text-fidelity|image|video)$"),
 ):
     """Return Grid-issued assignments for this validator account.
 

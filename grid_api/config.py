@@ -111,6 +111,15 @@ class GridSettings(BaseSettings):
     # A completed quorum must not immediately manufacture another free probe
     # group for the same worker/model.
     validator_text_group_min_interval_seconds: int = 3600
+    # Dark text-model behavioral fingerprinting. Trusted reference worker IDs
+    # are explicit bootstrap authorities, not a decentralized truth source.
+    validator_text_fidelity_enabled: bool = False
+    validator_text_fidelity_reference_worker_ids: str = ""
+    validator_text_fidelity_models: str = ""
+    validator_text_fidelity_reference_count: int = Field(default=2, ge=1, le=2)
+    validator_text_fidelity_top_logprobs: int = Field(default=10, ge=2, le=20)
+    validator_text_fidelity_max_tokens: int = Field(default=8, ge=1, le=32)
+    validator_text_fidelity_probe_timeout_seconds: int = Field(default=180, ge=30, le=600)
     validator_history_retention_days: int = 90
     validator_history_sweep_seconds: int = 21600
     # Read-only cohort watchdog. It reports aggregate operational drift only;

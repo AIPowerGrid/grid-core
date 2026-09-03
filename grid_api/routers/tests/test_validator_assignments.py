@@ -25,7 +25,7 @@ from sqlalchemy.pool import StaticPool
 from grid_api import auth, database, safe_logging
 from grid_api.ratelimit import limiter
 from grid_api.routers import validator as validator_router
-from grid_api.services import recipes, validator_bonds, validator_operators
+from grid_api.services import recipes, validator_bonds, validator_operators, validator_text_fidelity
 from grid_api.services import validators as validators_svc
 from grid_api.v2.schema import (
     accounts as accounts_t,
@@ -59,6 +59,119 @@ TEST_PRIVATE_KEY = "0x" + "01" * 32
 TEST_WALLET = Account.from_key(TEST_PRIVATE_KEY).address.lower()
 VERIFIER = "worker-registry-v2-957685a"
 BOND_RUNTIME_HASH = validator_bonds.reviewed_runtime_hash(VERIFIER)
+
+
+@pytest.mark.asyncio
+async def test_text_fidelity_allocator_requires_explicit_online_references(db, monkeypatch):
+    account_id = uuid.uuid4()
+    validator_id = await _register(
+        account_id,
+        capabilities=[validator_text_fidelity.POLICY_ID],
+    )
+    candidate_id = str(uuid.uuid4())
+    reference_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+    settings = validators_svc.get_settings()
+    monkeypatch.setattr(settings, "validator_text_fidelity_enabled", True)
+    monkeypatch.setattr(settings, "validator_sealed_assignments_enabled", True)
+    monkeypatch.setattr(
+        settings,
+        "validator_text_fidelity_reference_worker_ids",
+        ",".join(reference_ids),
+    )
+    monkeypatch.setattr(settings, "validator_text_fidelity_reference_count", 2)
+    monkeypatch.setattr(settings, "validator_text_fidelity_models", "model-a")
+    monkeypatch.setattr(settings, "validator_text_fidelity_probe_timeout_seconds", 600)
+
+    active = [
+        {
+            "worker_id": candidate_id,
+            "name": "candidate",
+            "models": ["model-a"],
+            "job_types": ["text"],
+        },
+        *(
+            {
+                "worker_id": reference_id,
+                "name": f"reference-{index}",
+                "models": ["model-a"],
+                "job_types": ["text"],
+            }
+            for index, reference_id in enumerate(reference_ids)
+        ),
+    ]
+    issued = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=active,
+        limit=5,
+        modality="text-fidelity",
+    )
+
+    assert issued["count"] == 1
+    assert issued["assignments"][0]["sealed"] is True
+    async with await database.new_session() as session:
+        group = (
+            (await session.execute(sa.select(probe_groups_t).where(probe_groups_t.c.capability == validator_text_fidelity.POLICY_ID)))
+            .mappings()
+            .one()
+        )
+    assert str(group["target_worker_id"]) == candidate_id
+    assert group["challenge"]["reference_worker_ids"] == reference_ids
+    assert group["challenge"]["request"]["temperature"] == 0
+    assert group["challenge"]["request"]["logprobs"] is True
+
+    claimed, _ = await validators_svc._claim_probe_lease(
+        account_id=account_id,
+        validator_id=validator_id,
+        assignment_id=issued["assignments"][0]["assignment_id"],
+    )
+    remaining = validators_svc._aware(claimed["probe_lease_expires"]) - validators_svc._now()
+    assert remaining.total_seconds() > 710
+
+
+@pytest.mark.asyncio
+async def test_text_fidelity_allocator_fails_closed_without_full_reference_pool(db, monkeypatch):
+    account_id = uuid.uuid4()
+    validator_id = await _register(
+        account_id,
+        capabilities=[validator_text_fidelity.POLICY_ID],
+    )
+    reference_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+    settings = validators_svc.get_settings()
+    monkeypatch.setattr(settings, "validator_text_fidelity_enabled", True)
+    monkeypatch.setattr(settings, "validator_sealed_assignments_enabled", True)
+    monkeypatch.setattr(
+        settings,
+        "validator_text_fidelity_reference_worker_ids",
+        ",".join(reference_ids),
+    )
+    monkeypatch.setattr(settings, "validator_text_fidelity_reference_count", 2)
+    monkeypatch.setattr(settings, "validator_text_fidelity_models", "model-a")
+
+    issued = await validators_svc.issue_assignments(
+        account_id=account_id,
+        validator_id=validator_id,
+        validator_wallet=TEST_WALLET,
+        active_workers=[
+            {
+                "worker_id": str(uuid.uuid4()),
+                "name": "candidate",
+                "models": ["model-a"],
+                "job_types": ["text"],
+            },
+            {
+                "worker_id": reference_ids[0],
+                "name": "only-reference",
+                "models": ["model-a"],
+                "job_types": ["text"],
+            },
+        ],
+        limit=5,
+        modality="text-fidelity",
+    )
+
+    assert issued["count"] == 0
 
 
 @pytest.fixture(autouse=True)

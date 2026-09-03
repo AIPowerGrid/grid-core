@@ -136,10 +136,26 @@ accounts within one worker/capability batch. Text v8 verdicts cover separate
 randomized challenge instances, not byte-identical executions. Core records
 quorum state (`pending`, `accepted`, `disputed`, `finalized`),
 but the whole preview surface has `economic_effect: none`: no routing, reward,
-strike, slash, credit, or payout effect. Text plus feature-gated image-fidelity
-and video-contract assignment paths exist in the candidate. Video remains
-default-off and proves only an objective output contract, not exact model
-fidelity.
+strike, slash, credit, or payout effect. Feature-gated text, image, and video
+fidelity assignment paths exist in the candidate. Every fidelity lane remains
+default-off and non-economic.
+
+The `text.fidelity.v1` pilot sends one sealed randomized continuation request
+with `temperature=0`, `top_p=1`, a fixed per-assignment seed and reasoning
+effort, and bounded native top-logprobs to one candidate and one or two trusted
+same-model references. Core freezes the first-token distributions once per
+shared group; each validator independently computes Jensen-Shannon divergence.
+One reference can support only positive consistency evidence. A failed outlier
+verdict requires two references to agree first. Missing logprobs, unsupported
+backends, malformed evidence, unavailable references, and reference
+disagreement are inconclusive.
+
+This is a behavioral fingerprint, not cryptographic model identification. A
+worker controls its client and can fabricate logprobs or route recognizable
+probes to another backend. The pilot is useful for calibration and raising the
+cost of casual model substitution, but it cannot affect routing, rewards,
+strikes, or slashing. Paid production-shaped blind audits and corroborating
+signals remain the authority gate.
 
 New `text.generated.v8` groups are capability batches, not identical-exam
 groups. The batch fixes one target worker/model, capability, and concrete canary
@@ -254,15 +270,16 @@ Deploy notes / learnings:
 Canaries catch a *broken* worker and sample narrow advertised capabilities. They
 do not establish model identity: a template router, specialist program, or
 same-tier cheaper model can pass. Two stronger
-detectors, both blocked on infrastructure we don't have yet:
+detectors and supporting signals:
 - **Cross-worker consensus** — dispatch the SAME deterministic canary (temp=0, fixed seed)
   to N workers claiming the same model via `preferred_worker` affinity, compare outputs;
   an outlier is running something different. **Blocked: mostly 1 worker/model today** — no
   redundancy to compare. Build the mechanism so it activates when a 2nd worker appears.
-- **Logprob / perplexity fingerprint** — a model has a characteristic token-logprob
-  signature; compare the worker's returned logprobs to a reference. **Blocked: workers
-  don't return logprobs by default; heterogeneous backends (vLLM/ollama/llama.cpp) differ
-  numerically.** Needs a logprob-return contract + per-(model,backend) reference.
+- **Logprob / perplexity fingerprint** — the default-off `text.fidelity.v1`
+  candidate implements a bounded first-token top-logprob comparison against
+  explicit same-model references. It remains research evidence because workers
+  can forge their reported distribution and serving engines can differ
+  numerically. Calibrate per model/backend before broader use.
 - **Throughput fingerprint** (cheap, noisy) — a swapped smaller model runs much faster;
   flag t/s far off the model's historical median. Weak alone (hardware varies), useful as
   a corroborating signal.
