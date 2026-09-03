@@ -324,7 +324,6 @@ async def test_operator_review_requires_qualification_and_compare_and_swap(db):
     assert early_preview["eligible_to_apply"] is False
     assert early_preview["blocking_reasons"] == [
         "minimum qualification time has not elapsed",
-        "heartbeat sample coverage is below minimum",
         "no completed workload in qualification window",
         "no authoritative evidence in qualification window",
     ]
@@ -651,7 +650,7 @@ async def test_candidate_restart_requires_explicit_preview_and_apply(db):
 @pytest.mark.asyncio
 async def test_candidate_heartbeat_sampling_is_rate_limited(db):
     account_id = uuid.uuid4()
-    validator_id = await _register(account_id)
+    validator_id = await _register(account_id, software_version="v0.1.0-preview.13")
     async with await database.new_session() as session:
         await session.execute(
             sa.update(validators_t)
@@ -668,7 +667,7 @@ async def test_candidate_heartbeat_sampling_is_rate_limited(db):
         await validators_svc.heartbeat_validator(
             account_id=account_id,
             signing_wallet=TEST_WALLET,
-            software_version="0.1.0-test",
+            software_version="v0.1.0-preview.13",
             capabilities=["text.basic.v1"],
         )
     async with await database.new_session() as session:
@@ -691,7 +690,7 @@ async def test_candidate_heartbeat_sampling_is_rate_limited(db):
     await validators_svc.heartbeat_validator(
         account_id=account_id,
         signing_wallet=TEST_WALLET,
-        software_version="0.1.0-test",
+        software_version="v0.1.0-preview.13",
         capabilities=["text.basic.v1"],
     )
     async with await database.new_session() as session:
@@ -1046,7 +1045,7 @@ async def test_registration_is_wallet_bound_signed_and_idempotent(db):
     payload = {
         "registration_schema": "aipg.validator.registration.v1",
         "validator": TEST_WALLET,
-        "software_version": "0.1.0-preview",
+        "software_version": "v0.1.0-preview.13",
         "capabilities": ["text.basic.v1"],
         "ts": int(time.time()),
     }
@@ -1068,13 +1067,139 @@ async def test_registration_is_wallet_bound_signed_and_idempotent(db):
     assert second["created"] is False
     assert second["validator_id"] == first["validator_id"]
     assert second["operator_qualification"]["status"] == "unreviewed"
-    assert second["operator_qualification"]["heartbeat_samples"] == 0
+    assert second["operator_qualification"]["heartbeat_samples"] == 1
+    assert second["operator_qualification"]["started_at"] is not None
     assert second["operator_qualification"]["independent_vote_eligible"] is False
     assert "operator_group_id" not in json.dumps(second)
     assert "independence_review_ref" not in json.dumps(second)
     async with await database.new_session() as session:
         count = await session.scalar(sa.select(sa.func.count()).select_from(validators_t))
     assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_unreviewed_supported_validator_starts_observation_on_first_heartbeat(db, monkeypatch):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, software_version="0.1.0-test")
+    started = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(validators_svc, "_now", lambda: started)
+
+    await validators_svc.heartbeat_validator(
+        account_id=account_id,
+        signing_wallet=TEST_WALLET,
+        software_version="v0.1.0-preview.13",
+        capabilities=["text.basic.v1"],
+    )
+
+    async with await database.new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(validators_t).where(validators_t.c.id == validator_id),
+            )
+        ).mappings().one()
+    assert validator_operators._aware(row["qualification_started_at"]) == started
+    assert row["heartbeat_sample_count"] == 1
+    assert validator_operators._aware(row["last_heartbeat_sampled_at"]) == started
+    assert row["independence_status"] == "unreviewed"
+    assert row["operator_group_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_unreviewed_observation_samples_are_rate_limited_and_version_gated(db, monkeypatch):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, software_version="v0.1.0-preview.13")
+    async with await database.new_session() as session:
+        started = validator_operators._aware(
+            await session.scalar(
+                sa.select(validators_t.c.qualification_started_at).where(
+                    validators_t.c.id == validator_id,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(validators_svc, "_now", lambda: started + timedelta(minutes=1))
+    await validators_svc.heartbeat_validator(
+        account_id=account_id,
+        signing_wallet=TEST_WALLET,
+        software_version="v0.1.0-preview.13",
+        capabilities=["text.basic.v1"],
+    )
+    monkeypatch.setattr(validators_svc, "_now", lambda: started + timedelta(minutes=6))
+    await validators_svc.heartbeat_validator(
+        account_id=account_id,
+        signing_wallet=TEST_WALLET,
+        software_version="v0.1.0-preview.12",
+        capabilities=["text.basic.v1"],
+    )
+    monkeypatch.setattr(validators_svc, "_now", lambda: started + timedelta(minutes=11))
+    await validators_svc.heartbeat_validator(
+        account_id=account_id,
+        signing_wallet=TEST_WALLET,
+        software_version="v0.1.0-preview.13",
+        capabilities=["text.basic.v1"],
+    )
+
+    async with await database.new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(validators_t).where(validators_t.c.id == validator_id),
+            )
+        ).mappings().one()
+    assert validator_operators._aware(row["qualification_started_at"]) == started
+    assert row["heartbeat_sample_count"] == 2
+    assert validator_operators._aware(row["last_heartbeat_sampled_at"]) == (
+        started + timedelta(minutes=11)
+    )
+
+
+@pytest.mark.asyncio
+async def test_candidate_review_preserves_automatic_observation_window(db):
+    account_id = uuid.uuid4()
+    started = datetime.now(UTC) - timedelta(hours=48)
+    review_now = started + timedelta(hours=48)
+    validator_id = await _register(account_id, software_version="v0.1.0-preview.13")
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t)
+            .where(validators_t.c.id == validator_id)
+            .values(
+                heartbeat_sample_count=500,
+                qualification_started_at=started,
+                last_heartbeat_sampled_at=review_now,
+                last_heartbeat=review_now,
+            ),
+        )
+        await session.commit()
+
+    preview = await validator_operators.review_operator(
+        validator_id,
+        action="candidate",
+        operator_group_id="opg_auto_observe_01",
+        review_ref="review:auto-observe-01",
+        now=review_now,
+    )
+    assert preview["eligible_to_apply"] is True
+    assert preview["preserves_observation"] is True
+    await validator_operators.review_operator(
+        validator_id,
+        action="candidate",
+        operator_group_id="opg_auto_observe_01",
+        review_ref="review:auto-observe-01",
+        expected_digest=preview["current_digest"],
+        apply=True,
+        now=review_now,
+    )
+
+    async with await database.new_session() as session:
+        row = (
+            await session.execute(
+                sa.select(validators_t).where(validators_t.c.id == validator_id),
+            )
+        ).mappings().one()
+    assert row["independence_status"] == "candidate"
+    assert validator_operators._aware(row["qualification_started_at"]) == started
+    assert row["heartbeat_sample_count"] == 500
+    assert validator_operators._aware(row["last_heartbeat_sampled_at"]) == review_now
 
 
 @pytest.mark.asyncio

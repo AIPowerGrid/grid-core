@@ -82,6 +82,14 @@ vote eligibility. It never returns the opaque common-control group or private
 review reference. Operators can therefore monitor the 72-hour gate without
 turning private correlation data into a public identifier.
 
+Core begins the non-economic observation window automatically for a registration
+running the frozen cohort version and samples later supported-version heartbeats
+at a bounded interval. A later maintainer candidate review preserves that
+observed window while attaching the private common-control group. Observation
+alone never establishes independence or grants routing, reward, strike, payout,
+or slashing authority, and Core does not backfill samples from before the live
+observation path saw them.
+
 ## Evidence Invariants
 
 Authoritative evidence must match all of:

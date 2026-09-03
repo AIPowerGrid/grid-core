@@ -688,8 +688,10 @@ retention is not off-host disaster recovery.
 
 ## Next Controlled Sequence
 
-1. Recruit 5-10 unrelated preview operators, mark reviewed registrations as
-   candidates, and prove that they can complete self-service onboarding. The
+1. Recruit 5-10 unrelated preview operators and collect supported-version
+   qualification evidence from registration onward. Attach reviewed
+   common-control groups without resetting valid observation windows, then prove
+   that they can complete self-service onboarding. The
    three first-party nodes remain one control domain and cannot satisfy the
    independent-operator gate.
 2. Prove the first unattended backup timer run, copy an encrypted snapshot
