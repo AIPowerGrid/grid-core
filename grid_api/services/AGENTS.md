@@ -58,9 +58,11 @@ content sanitization, and reward settlement.
   poll secret locally; Core stores only their hashes, installs only
   `worker.connect`, and removes the key expiry only after manager ACK.
 - **Worker setup canary:** `worker_canaries.py` runs a randomized,
-  hard-targeted text round trip for the exact manager-bound rig. It is
-  five-minute gated per worker, accepts no caller prompt or target, and writes
-  no credit reservation, ledger row, den, strike, validator evidence, or
+  hard-targeted text round trip or a governed image/video/audio render for the
+  exact manager-bound rig. Media checks require the expected presigned object
+  and managed-worker receipt, then remove the temporary output. The canary is
+  five-minute gated per worker, accepts no caller prompt, model, modality, or
+  target, and writes no credit reservation, ledger row, den, strike, validator evidence, or
   quality claim.
 - **Validator account association:** `validator_pairing.py` owns optional,
   non-economic visibility links from an enrolled node to a separate human

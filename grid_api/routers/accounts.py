@@ -1619,6 +1619,7 @@ async def run_worker_self_canary(
                         workers_table.c.name,
                         workers_table.c.type,
                         workers_table.c.models,
+                        workers_table.c.capabilities,
                     ).where(
                         workers_table.c.account_id.in_(family),
                         workers_table.c.name == worker_name,
@@ -1630,12 +1631,10 @@ async def run_worker_self_canary(
         )
     if worker is None:
         raise HTTPException(404, detail="Bound worker has not registered")
-    if worker["type"] != "text":
-        raise HTTPException(409, detail="Connectivity canary supports text workers only")
     models = worker["models"] if isinstance(worker["models"], list) else []
     models = [item for item in models if isinstance(item, str) and item][:32]
     if not models:
-        raise HTTPException(409, detail="Bound worker advertises no text model")
+        raise HTTPException(409, detail="Bound worker advertises no model")
 
     try:
         from .stats import _active_workers
@@ -1650,10 +1649,29 @@ async def run_worker_self_canary(
         raise HTTPException(409, detail="Bound worker is not online")
 
     try:
-        return await worker_canaries.run_text_connectivity_canary(
-            worker_id=str(worker["id"]),
-            worker_name=str(worker["name"]),
-            model=models[0],
+        worker_id = str(worker["id"])
+        registered_name = str(worker["name"])
+        if worker["type"] == "text":
+            return await worker_canaries.run_text_connectivity_canary(
+                worker_id=worker_id,
+                worker_name=registered_name,
+                model=models[0],
+            )
+        capabilities = worker["capabilities"] if isinstance(worker["capabilities"], dict) else {}
+        advertised = capabilities.get("job_types")
+        if not isinstance(advertised, list):
+            advertised = [worker["type"]]
+        job_type = next(
+            (item for item in ("audio", "image", "video") if item in advertised),
+            None,
+        )
+        if job_type is None:
+            raise HTTPException(409, detail="Bound worker has no supported canary modality")
+        return await worker_canaries.run_media_connectivity_canary(
+            worker_id=worker_id,
+            worker_name=registered_name,
+            models=models,
+            job_type=job_type,
         )
     except worker_canaries.WorkerCanaryRateLimited:
         raise HTTPException(429, detail="Worker canary recently started; try again later")
