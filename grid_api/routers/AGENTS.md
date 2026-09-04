@@ -59,11 +59,15 @@ transport, accounts, stats, health/metrics.
   scoped to the payout wallet), immutable deposit history/config, and deposit
   claims (USDC launch rail, bounded expiring-price AIPG, actual-USDC
   swap-receipt ETH, and operator-only buffered ETH).
-  `GET /v1/workers/self` accepts only a manager-issued `worker.connect`
-  credential and returns the exact bound rig's online/jobs/den state plus a
-  redacted account-level payout lifecycle summary. It never grants account
-  reads, enumerates
-  sibling workers, or exposes payout addresses, amounts, balances, or hashes.
+  `GET /v1/workers/self` and `POST /v1/workers/self/canary` accept only a
+  manager-issued `worker.connect`
+  credential. The status route returns the exact bound rig's online/jobs/den
+  state plus a redacted account-level payout lifecycle summary; the canary runs
+  one randomized, hard-targeted, economically inert text connectivity check. It accepts
+  no caller-selected prompt, model, or worker and makes no model-identity,
+  intelligence, or quality claim. These routes never grant account
+  reads, enumerate sibling workers, or expose payout addresses, amounts,
+  balances, or hashes.
   `POST /v1/accounts/session` is the retired internal-token bridge. It
   resolves on exactly one authoritative identity (`oauth_sub` first, then
   wallet, then verified email only when it is the sole identity); supplemental
@@ -260,6 +264,10 @@ expired or out-of-scope pilots return 503 without revealing membership.
 
 - New endpoint -> add a contract test; wire auth + rate limit; route media via `services/media.py`,
   text via `services/job_queue` + `token_stream`.
+- Worker self-canaries are setup evidence only. They must hard-target the exact
+  manager-bound online text worker, carry randomized Core-only binding, remain
+  rate-limited, and terminate through the dedicated `den: 0` path. Malformed
+  canary metadata must be acknowledged as an error before ordinary settlement.
 - OAuth registration and token requests must stay explicitly body-bounded before
   parsing. Never redirect an error to an unvalidated URI, expose a plaintext
   request/code capability, accept a confidential-client secret, or weaken S256

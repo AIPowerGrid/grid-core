@@ -134,6 +134,21 @@ def _is_assignment_bound_validator_job(job: dict) -> bool:
     return job.get("job_type", "text") == "text"
 
 
+def _is_worker_self_canary_job(job: dict) -> bool:
+    """Recognize only the complete Core-issued worker self-canary envelope."""
+    payload = job.get("payload") or {}
+    if payload.get("_worker_self_canary") is not True or not job.get("hard_target_worker"):
+        return False
+    required = (
+        payload.get("_worker_self_canary_id"),
+        payload.get("_worker_self_canary_nonce"),
+    )
+    return (
+        job.get("job_type", "text") == "text"
+        and all(isinstance(value, str) and value for value in required)
+    )
+
+
 def _media_result_commitment(job_type: str, payload: dict, outputs: list[dict]):
     output_hashes = [item.get("sha256") or item["key"] for item in outputs]
     if job_type == "audio":
@@ -685,9 +700,9 @@ async def worker_websocket(ws: WebSocket):
                 # Got a job → dispatch it (model check + text/media paths below).
 
                 # ── Worker targeting ──
-                # Validator probes use hard targeting. If Redis hands the job to
-                # any other worker, that worker must not execute it and create
-                # evidence for the wrong target.
+                # Validator probes and setup canaries use hard targeting. If
+                # Redis hands the job to any other worker, that worker must not
+                # execute it and create evidence for the wrong target.
                 hard_target = job.get("hard_target_worker", "")
                 if hard_target and hard_target != worker_name:
                     if await _worker_online(hard_target):
@@ -796,6 +811,37 @@ async def worker_websocket(ws: WebSocket):
                     continue
 
                 # ── Text path ──
+                if (job.get("payload") or {}).get("_worker_self_canary") is not None:
+                    # Malformed canary metadata must not fall through to ordinary
+                    # settlement and accidentally mint den or a ledger row.
+                    if not _is_worker_self_canary_job(job):
+                        await token_stream.publish_error(
+                            job["job_id"],
+                            "Invalid worker connectivity canary.",
+                            code=400,
+                        )
+                        await job_queue.ack_job(
+                            job["stream_id"],
+                            stream=job.get("stream"),
+                        )
+                        await credits.release_job(job["job_id"])
+                        current_job = None
+                        continue
+                    ok = await _handle_worker_self_canary(
+                        ws,
+                        job,
+                        selected_model,
+                        worker_id,
+                        worker_info,
+                    )
+                    if ok:
+                        await job_queue.ack_job(
+                            job["stream_id"],
+                            stream=job.get("stream"),
+                        )
+                    current_job = None
+                    continue
+
                 if _is_assignment_bound_validator_job(job):
                     ok = await _handle_validator_probe(ws, job, selected_model, worker_id, worker_info)
                     if ok:
@@ -1203,6 +1249,59 @@ async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str,
         usage=gen["usage"],
         finish_reason=gen["finish_reason"],
         grid=grid_meta,
+        logprobs=gen.get("logprobs"),
+    )
+    await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+    return True
+
+
+async def _handle_worker_self_canary(
+    ws: WebSocket,
+    job: dict,
+    selected_model: str,
+    worker_id: str,
+    worker_info: dict,
+) -> bool:
+    """Run a Core-issued setup canary without billing, den, ledger, or strikes."""
+    job_id = job["job_id"]
+    payload = job["payload"]
+    worker_payload = {
+        key: value
+        for key, value in payload.items()
+        if not key.startswith("_worker_self_canary")
+    }
+    await ws.send_json(
+        {
+            "type": "job",
+            "id": job_id,
+            "model": selected_model,
+            "payload": worker_payload,
+        },
+    )
+
+    gen = await _handle_worker_generation(ws, job, worker_info)
+    if gen["client_error"] is not None or gen["failed"]:
+        await token_stream.publish_error(
+            job_id,
+            "Worker connectivity canary failed.",
+            code=400 if gen["client_error"] is not None else 502,
+        )
+        await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+        return True
+
+    await token_stream.publish_done(
+        job_id,
+        gen["full_text"],
+        gen["full_reasoning"],
+        tool_calls=gen["tool_calls"],
+        usage=gen["usage"],
+        finish_reason=gen["finish_reason"],
+        grid={
+            "worker_id": worker_id,
+            "canary_id": payload.get("_worker_self_canary_id"),
+            "grid_nonce": payload.get("_worker_self_canary_nonce"),
+            "economic_effect": "none",
+        },
         logprobs=gen.get("logprobs"),
     )
     await ws.send_json({"type": "ack", "id": job_id, "den": 0})

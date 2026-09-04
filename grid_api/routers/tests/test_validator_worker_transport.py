@@ -42,6 +42,152 @@ def test_validator_economic_bypass_requires_core_hard_target_metadata():
     assert not worker_ws._is_assignment_bound_validator_job(job)
 
 
+def test_worker_self_canary_requires_complete_hard_targeted_text_envelope():
+    job = {
+        "job_type": "text",
+        "hard_target_worker": "rig-a",
+        "payload": {
+            "_worker_self_canary": True,
+            "_worker_self_canary_id": "self-secret",
+            "_worker_self_canary_nonce": "nonce-secret",
+        },
+    }
+    assert worker_ws._is_worker_self_canary_job(job)
+
+    job["hard_target_worker"] = ""
+    assert not worker_ws._is_worker_self_canary_job(job)
+    job["hard_target_worker"] = "rig-a"
+    job["payload"].pop("_worker_self_canary_nonce")
+    assert not worker_ws._is_worker_self_canary_job(job)
+    job["payload"]["_worker_self_canary_nonce"] = "nonce-secret"
+    job["job_type"] = "image"
+    assert not worker_ws._is_worker_self_canary_job(job)
+
+
+@pytest.mark.asyncio
+async def test_worker_self_canary_is_private_and_economically_inert(monkeypatch):
+    ws = _WebSocket()
+    job_id = str(uuid.uuid4())
+    job = {
+        "job_id": job_id,
+        "payload": {
+            "request": {"model": "model-a", "messages": []},
+            "api_format": "openai-chat",
+            "prompt": "ordinary-looking request",
+            "max_length": 32,
+            "temperature": 0,
+            "_worker_self_canary": True,
+            "_worker_self_canary_id": "self-secret",
+            "_worker_self_canary_nonce": "nonce-secret",
+        },
+    }
+
+    async def generation(*_args):
+        return {
+            "client_error": None,
+            "failed": False,
+            "grid_meta": {"worker": "untrusted"},
+            "full_text": "ok",
+            "full_reasoning": "",
+            "tool_calls": [],
+            "usage": {},
+            "finish_reason": "stop",
+            "logprobs": None,
+        }
+
+    published = []
+
+    async def publish_done(*args, **kwargs):
+        published.append((args, kwargs))
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("worker self-canaries must never touch economics")
+
+    def forbidden_sync(*_args, **_kwargs):
+        raise AssertionError("worker self-canaries must never touch success metrics")
+
+    monkeypatch.setattr(worker_ws, "_handle_worker_generation", generation)
+    monkeypatch.setattr(worker_ws.token_stream, "publish_done", publish_done)
+    monkeypatch.setattr(worker_ws.credits, "record_and_settle", forbidden)
+    monkeypatch.setattr(worker_ws.credits, "release_job", forbidden)
+    monkeypatch.setattr(worker_ws, "record_job_complete", forbidden_sync)
+    monkeypatch.setattr(worker_ws, "record_job_failed", forbidden_sync)
+
+    assert await worker_ws._handle_worker_self_canary(
+        ws,
+        job,
+        "model-a",
+        "worker-secret",
+        {"name": "rig-a"},
+    )
+
+    dispatched = ws.sent[0]
+    assert dispatched["payload"] == {
+        "request": {"model": "model-a", "messages": []},
+        "api_format": "openai-chat",
+        "prompt": "ordinary-looking request",
+        "max_length": 32,
+        "temperature": 0,
+    }
+    assert "canary" not in str(dispatched).lower()
+    assert published[0][1]["grid"] == {
+        "worker_id": "worker-secret",
+        "canary_id": "self-secret",
+        "grid_nonce": "nonce-secret",
+        "economic_effect": "none",
+    }
+    assert ws.sent[-1] == {"type": "ack", "id": job_id, "den": 0}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "generation",
+    [
+        {"client_error": "bad request", "failed": True},
+        {"client_error": None, "failed": True},
+    ],
+)
+async def test_worker_self_canary_failure_is_closed_without_economics(monkeypatch, generation):
+    ws = _WebSocket()
+    job_id = str(uuid.uuid4())
+    job = {
+        "job_id": job_id,
+        "payload": {
+            "request": {"model": "model-a", "messages": []},
+            "_worker_self_canary": True,
+            "_worker_self_canary_id": "self-secret",
+            "_worker_self_canary_nonce": "nonce-secret",
+        },
+    }
+
+    async def generation_result(*_args):
+        return generation
+
+    published = []
+
+    async def publish_error(*args, **kwargs):
+        published.append((args, kwargs))
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("worker self-canaries must never touch economics")
+
+    monkeypatch.setattr(worker_ws, "_handle_worker_generation", generation_result)
+    monkeypatch.setattr(worker_ws.token_stream, "publish_error", publish_error)
+    monkeypatch.setattr(worker_ws.credits, "record_and_settle", forbidden)
+    monkeypatch.setattr(worker_ws.credits, "release_job", forbidden)
+
+    assert await worker_ws._handle_worker_self_canary(
+        ws,
+        job,
+        "model-a",
+        "worker-secret",
+        {"name": "rig-a"},
+    )
+    assert published[0][0][0] == job_id
+    assert published[0][1]["code"] in {400, 502}
+    assert ws.sent[-1] == {"type": "ack", "id": job_id, "den": 0}
+
+
 @pytest.mark.asyncio
 async def test_validator_probe_hides_assignment_metadata_in_worker_dispatch(monkeypatch):
     ws = _WebSocket()
