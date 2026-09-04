@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from grid_api.routers import health, stats
-from grid_api.v2.schema import metadata, workers
+from grid_api.v2.schema import accounts, api_keys, metadata, workers
 
 
 class _Redis:
@@ -195,6 +195,49 @@ async def test_operator_funnel_uses_completed_seven_day_cohort(monkeypatch):
         await connection.run_sync(metadata.create_all)
     try:
         async with sessions() as session:
+            account_ids = [uuid4() for _ in range(5)]
+            await session.execute(
+                sa.insert(accounts),
+                [
+                    {
+                        "id": account_id,
+                        "flags": {},
+                        "created": now - timedelta(days=20),
+                    }
+                    for account_id in account_ids
+                ],
+            )
+            await session.execute(
+                sa.insert(api_keys),
+                [
+                    {
+                        "hash": f"{index:064x}",
+                        "account_id": account_ids[index],
+                        "label": f"worker:rig-{index}",
+                        "is_session": False,
+                        "key_kind": "worker",
+                        "service_id": None,
+                        "scopes": ["worker.connect"],
+                        "created": created,
+                        "expires_at": expires_at,
+                        "revoked": revoked,
+                    }
+                    for index, (created, expires_at, revoked) in enumerate(
+                        [
+                            (now - timedelta(days=12), None, False),
+                            (now - timedelta(days=2), None, False),
+                            (now - timedelta(days=1), now + timedelta(hours=1), False),
+                            (now - timedelta(days=1), None, True),
+                            (now - timedelta(days=1), None, False),
+                        ]
+                    )
+                ],
+            )
+            await session.execute(
+                sa.update(api_keys)
+                .where(api_keys.c.account_id == account_ids[4])
+                .values(label="dashboard", key_kind="user", scopes=["inference.submit"]),
+            )
             values = []
             for index, (first_seen, last_seen) in enumerate(
                 [
@@ -232,6 +275,11 @@ async def test_operator_funnel_uses_completed_seven_day_cohort(monkeypatch):
 
         assert result["registered_total"] == 4
         assert result["registered_last_7d"] == 1
+        assert result["setup_completion"] == {
+            "completed_total": 3,
+            "completed_last_7d": 2,
+            "definition": "distinct_worker_labels_with_manager_enrollment_ack",
+        }
         assert result["seven_day_retention"]["eligible"] == 3
         assert result["seven_day_retention"]["retained"] == 1
         assert result["seven_day_retention"]["rate"] == pytest.approx(
@@ -239,7 +287,7 @@ async def test_operator_funnel_uses_completed_seven_day_cohort(monkeypatch):
         )
         assert result["measurement_limits"] == {
             "downloads": "github_releases",
-            "local_setup_completion": "not_collected",
+            "local_setup_completion": "manager_enrollment_ack_only",
         }
     finally:
         await engine.dispose()

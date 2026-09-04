@@ -19,6 +19,7 @@ from fastapi import APIRouter
 
 from ..database import new_session
 from ..redis_client import get_redis
+from ..v2.schema import api_keys as api_keys_table
 from ..v2.schema import ledger as ledger_table
 from ..v2.schema import payouts as payouts_table
 from ..v2.schema import workers as workers_table
@@ -65,6 +66,7 @@ async def _operator_funnel(now: datetime | None = None) -> dict:
     cohort_start = cohort_end - timedelta(days=OPERATOR_COHORT_DAYS)
     recent_start = current - timedelta(days=OPERATOR_RETENTION_DAYS)
     w = workers_table
+    k = api_keys_table
     async with await new_session() as session:
         summary = (
             await session.execute(
@@ -87,6 +89,25 @@ async def _operator_funnel(now: datetime | None = None) -> dict:
                 ),
             )
         ).mappings().all()
+        setup_summary = (
+            await session.execute(
+                sa.select(
+                    sa.func.count(sa.distinct(k.c.label)).label("completed_total"),
+                    sa.func.count(
+                        sa.distinct(
+                            sa.case(
+                                (k.c.created >= recent_start, k.c.label),
+                                else_=None,
+                            ),
+                        ),
+                    ).label("completed_last_7d"),
+                ).where(
+                    k.c.key_kind == "worker",
+                    k.c.label.like("worker:%"),
+                    k.c.expires_at.is_(None),
+                ),
+            )
+        ).mappings().one()
 
     retained = sum(
         1
@@ -100,6 +121,11 @@ async def _operator_funnel(now: datetime | None = None) -> dict:
         "schema": "aipg.operator.funnel.v1",
         "registered_total": int(summary["registered_total"] or 0),
         "registered_last_7d": int(summary["registered_last_7d"] or 0),
+        "setup_completion": {
+            "completed_total": int(setup_summary["completed_total"] or 0),
+            "completed_last_7d": int(setup_summary["completed_last_7d"] or 0),
+            "definition": "distinct_worker_labels_with_manager_enrollment_ack",
+        },
         "seven_day_retention": {
             "cohort_start": cohort_start.isoformat(),
             "cohort_end": cohort_end.isoformat(),
@@ -110,7 +136,7 @@ async def _operator_funnel(now: datetime | None = None) -> dict:
         },
         "measurement_limits": {
             "downloads": "github_releases",
-            "local_setup_completion": "not_collected",
+            "local_setup_completion": "manager_enrollment_ack_only",
         },
     }
 
