@@ -1,11 +1,16 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from grid_api.routers import health, stats
+from grid_api.v2.schema import metadata, workers
 
 
 class _Redis:
@@ -111,6 +116,17 @@ async def test_network_status_is_redacted_and_reports_readiness(monkeypatch):
 
     monkeypatch.setattr(stats, "new_session", _session)
     monkeypatch.setattr(stats, "build_commit", lambda: "a" * 40)
+    operator_funnel = {
+        "schema": "aipg.operator.funnel.v1",
+        "registered_total": 8,
+        "registered_last_7d": 3,
+        "seven_day_retention": {"eligible": 2, "retained": 1, "rate": 0.5},
+    }
+    monkeypatch.setattr(
+        stats,
+        "_operator_funnel",
+        lambda *_: _async_value(operator_funnel),
+    )
 
     result = await stats.status_network()
 
@@ -119,6 +135,7 @@ async def test_network_status_is_redacted_and_reports_readiness(monkeypatch):
     assert result["capacity"]["workers_online"] == 1
     assert result["capacity"]["models_below_target"] == ["model-a"]
     assert result["validators"] == validator_health
+    assert result["operators"] == operator_funnel
     assert result["payouts"]["aipg_paid"] == 12.5
     assert result["charging"]["mode"] in {"off", "allowlist", "on"}
     assert result["incidents"] == []
@@ -144,6 +161,7 @@ async def test_network_status_degrades_without_runtime_dependencies(monkeypatch)
     monkeypatch.setattr(stats, "_active_workers", _broken)
     monkeypatch.setattr(stats, "status_models", _broken)
     monkeypatch.setattr(stats, "new_session", _broken)
+    monkeypatch.setattr(stats, "_operator_funnel", _broken)
     from grid_api.services import validators
 
     monkeypatch.setattr(validators, "public_health", _broken)
@@ -160,7 +178,71 @@ async def test_network_status_degrades_without_runtime_dependencies(monkeypatch)
         "model_status_unavailable",
         "validator_status_unavailable",
         "payout_status_unavailable",
+        "operator_funnel_unavailable",
     }
+
+
+@pytest.mark.asyncio
+async def test_operator_funnel_uses_completed_seven_day_cohort(monkeypatch):
+    now = datetime(2026, 9, 4, 12, tzinfo=timezone.utc)
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(metadata.create_all)
+    try:
+        async with sessions() as session:
+            values = []
+            for index, (first_seen, last_seen) in enumerate(
+                [
+                    (now - timedelta(days=10), now - timedelta(days=2)),
+                    (now - timedelta(days=9), now - timedelta(days=3)),
+                    (now - timedelta(days=8), None),
+                    (now - timedelta(days=2), now - timedelta(hours=1)),
+                ]
+            ):
+                values.append(
+                    {
+                        "id": uuid4(),
+                        "account_id": None,
+                        "name": f"worker-{index}",
+                        "type": "text",
+                        "wallet": None,
+                        "models": ["model-a"],
+                        "capabilities": {"job_types": ["text"]},
+                        "bridge_agent": "test",
+                        "maintenance": False,
+                        "first_seen": first_seen,
+                        "last_seen": last_seen,
+                        "jobs_completed": 0,
+                        "den_earned": 0.0,
+                    }
+                )
+            await session.execute(sa.insert(workers), values)
+            await session.commit()
+
+        async def _session():
+            return sessions()
+
+        monkeypatch.setattr(stats, "new_session", _session)
+        result = await stats._operator_funnel(now)
+
+        assert result["registered_total"] == 4
+        assert result["registered_last_7d"] == 1
+        assert result["seven_day_retention"]["eligible"] == 3
+        assert result["seven_day_retention"]["retained"] == 1
+        assert result["seven_day_retention"]["rate"] == pytest.approx(
+            1 / 3, abs=0.0001
+        )
+        assert result["measurement_limits"] == {
+            "downloads": "github_releases",
+            "local_setup_completion": "not_collected",
+        }
+    finally:
+        await engine.dispose()
 
 
 async def _async_value(value):
