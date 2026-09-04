@@ -59,6 +59,11 @@ transport, accounts, stats, health/metrics.
   scoped to the payout wallet), immutable deposit history/config, and deposit
   claims (USDC launch rail, bounded expiring-price AIPG, actual-USDC
   swap-receipt ETH, and operator-only buffered ETH).
+  `GET /v1/workers/self` accepts only a manager-issued `worker.connect`
+  credential and returns the exact bound rig's online/jobs/den state plus a
+  redacted account-level payout lifecycle summary. It never grants account
+  reads, enumerates
+  sibling workers, or exposes payout addresses, amounts, balances, or hashes.
   `POST /v1/accounts/session` is the retired internal-token bridge. It
   resolves on exactly one authoritative identity (`oauth_sub` first, then
   wallet, then verified email only when it is the sole identity); supplemental
