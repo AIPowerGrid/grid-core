@@ -308,6 +308,96 @@ async def test_worker_self_canary_uses_exact_bound_online_worker(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_worker_self_canary_selects_bound_media_modality(monkeypatch):
+    now = datetime.now(UTC)
+    account_id = uuid4()
+    worker_id = uuid4()
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(metadata.create_all)
+    try:
+        async with sessions() as session:
+            await session.execute(
+                sa.insert(accounts_table).values(
+                    id=account_id,
+                    username="media-operator",
+                    flags={},
+                    created=now,
+                ),
+            )
+            await session.execute(
+                sa.insert(workers).values(
+                    id=worker_id,
+                    account_id=account_id,
+                    name="audio-rig",
+                    type="media",
+                    models=["ace-step-v1.5-xl-turbo"],
+                    capabilities={"job_types": ["audio"]},
+                    maintenance=False,
+                    first_seen=now,
+                    last_seen=now,
+                ),
+            )
+            await session.commit()
+
+        async def new_session():
+            return sessions()
+
+        async def authenticate(_key, *, required_scope):
+            assert required_scope == "worker.connect"
+            return {
+                "source": "v2",
+                "key_kind": "worker",
+                "key_label": "worker:audio-rig",
+                "account_id": account_id,
+            }
+
+        async def active_workers():
+            return [{"worker_id": str(worker_id), "name": "audio-rig"}]
+
+        observed = {}
+
+        async def run_canary(**kwargs):
+            observed.update(kwargs)
+            return {
+                "schema": "aipg.worker.canary.v1",
+                "status": "passed",
+                "economic_effect": "none",
+            }
+
+        monkeypatch.setattr(accounts, "new_session", new_session)
+        monkeypatch.setattr(accounts.accounts_svc, "authenticate", authenticate)
+        monkeypatch.setattr(stats, "_active_workers", active_workers)
+        monkeypatch.setattr(
+            accounts.worker_canaries,
+            "run_media_connectivity_canary",
+            run_canary,
+        )
+
+        handler = getattr(
+            accounts.run_worker_self_canary,
+            "__wrapped__",
+            accounts.run_worker_self_canary,
+        )
+        result = await handler(_request(), apikey="grid_worker_test", authorization=None)
+
+        assert result["status"] == "passed"
+        assert observed == {
+            "worker_id": str(worker_id),
+            "worker_name": "audio-rig",
+            "models": ["ace-step-v1.5-xl-turbo"],
+            "job_type": "audio",
+        }
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_worker_self_canary_rejects_offline_worker_before_dispatch(monkeypatch):
     now = datetime.now(UTC)
     account_id = uuid4()

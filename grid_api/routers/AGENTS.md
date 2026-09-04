@@ -63,7 +63,8 @@ transport, accounts, stats, health/metrics.
   manager-issued `worker.connect`
   credential. The status route returns the exact bound rig's online/jobs/den
   state plus a redacted account-level payout lifecycle summary; the canary runs
-  one randomized, hard-targeted, economically inert text connectivity check. It accepts
+  one randomized, hard-targeted, economically inert text or governed media
+  connectivity check selected from the rig's advertised capabilities. It accepts
   no caller-selected prompt, model, or worker and makes no model-identity,
   intelligence, or quality claim. These routes never grant account
   reads, enumerate sibling workers, or expose payout addresses, amounts,
@@ -265,9 +266,12 @@ expired or out-of-scope pilots return 503 without revealing membership.
 - New endpoint -> add a contract test; wire auth + rate limit; route media via `services/media.py`,
   text via `services/job_queue` + `token_stream`.
 - Worker self-canaries are setup evidence only. They must hard-target the exact
-  manager-bound online text worker, carry randomized Core-only binding, remain
+  manager-bound online text or media worker, carry randomized Core-only binding, remain
   rate-limited, and terminate through the dedicated `den: 0` path. Malformed
   canary metadata must be acknowledged as an error before ordinary settlement.
+  Media canaries use only governed source-free recipes, verify the expected
+  upload and required managed-worker receipt, bound execution below the Core
+  observation timeout, and best-effort delete their temporary output.
 - OAuth registration and token requests must stay explicitly body-bounded before
   parsing. Never redirect an error to an unvalidated URI, expose a plaintext
   request/code capability, accept a confidential-client secret, or weaken S256
