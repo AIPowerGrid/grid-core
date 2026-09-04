@@ -21,6 +21,7 @@ from ..database import new_session
 from ..redis_client import get_redis
 from ..v2.schema import ledger as ledger_table
 from ..v2.schema import payouts as payouts_table
+from ..v2.schema import workers as workers_table
 from .health import build_commit
 
 logger = logging.getLogger("grid_api.stats")
@@ -30,6 +31,8 @@ router = APIRouter()
 WORKER_STATUS_PREFIX = "grid:worker:"
 WORKER_STATUS_SUFFIX = ":status"
 WORKER_ACTIVE_SET = "grid:workers:active"
+OPERATOR_RETENTION_DAYS = 7
+OPERATOR_COHORT_DAYS = 7
 
 
 async def _active_workers() -> list[dict]:
@@ -42,6 +45,74 @@ async def _active_workers() -> list[dict]:
         else:
             await r.srem(WORKER_ACTIVE_SET, wid)
     return out
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+async def _operator_funnel(now: datetime | None = None) -> dict:
+    """Aggregate worker adoption without collecting client-side telemetry.
+
+    Seven-day retention uses the completed rolling cohort: workers first seen
+    7-14 days ago count as retained only when Core later observed them at least
+    seven days after registration.
+    """
+    current = _as_utc(now or datetime.now(timezone.utc))
+    cohort_end = current - timedelta(days=OPERATOR_RETENTION_DAYS)
+    cohort_start = cohort_end - timedelta(days=OPERATOR_COHORT_DAYS)
+    recent_start = current - timedelta(days=OPERATOR_RETENTION_DAYS)
+    w = workers_table
+    async with await new_session() as session:
+        summary = (
+            await session.execute(
+                sa.select(
+                    sa.func.count().label("registered_total"),
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            sa.case((w.c.first_seen >= recent_start, 1), else_=0),
+                        ),
+                        0,
+                    ).label("registered_last_7d"),
+                ),
+            )
+        ).mappings().one()
+        cohort = (
+            await session.execute(
+                sa.select(w.c.first_seen, w.c.last_seen).where(
+                    w.c.first_seen >= cohort_start,
+                    w.c.first_seen < cohort_end,
+                ),
+            )
+        ).mappings().all()
+
+    retained = sum(
+        1
+        for row in cohort
+        if row["last_seen"] is not None
+        and _as_utc(row["last_seen"])
+        >= _as_utc(row["first_seen"]) + timedelta(days=OPERATOR_RETENTION_DAYS)
+    )
+    eligible = len(cohort)
+    return {
+        "schema": "aipg.operator.funnel.v1",
+        "registered_total": int(summary["registered_total"] or 0),
+        "registered_last_7d": int(summary["registered_last_7d"] or 0),
+        "seven_day_retention": {
+            "cohort_start": cohort_start.isoformat(),
+            "cohort_end": cohort_end.isoformat(),
+            "eligible": eligible,
+            "retained": retained,
+            "rate": round(retained / eligible, 4) if eligible else None,
+            "definition": "last_seen_at_least_7d_after_first_seen",
+        },
+        "measurement_limits": {
+            "downloads": "github_releases",
+            "local_setup_completion": "not_collected",
+        },
+    }
 
 
 @router.get("/v1/workers")
@@ -385,6 +456,17 @@ async def status_network():
             "summary": "Public payout totals are unavailable.",
         })
 
+    operator_funnel = None
+    try:
+        operator_funnel = await _operator_funnel(generated)
+    except Exception:
+        incidents.append({
+            "code": "operator_funnel_unavailable",
+            "component": "workers",
+            "severity": "minor",
+            "summary": "Aggregate worker adoption telemetry is unavailable.",
+        })
+
     model_capacity = [
         {
             "name": item["name"],
@@ -424,6 +506,7 @@ async def status_network():
             "models": model_capacity,
         },
         "validators": validator_health,
+        "operators": operator_funnel,
         "payouts": payout_totals,
         "charging": {
             "mode": credits.charging_mode(),
