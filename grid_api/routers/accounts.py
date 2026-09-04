@@ -1458,6 +1458,145 @@ async def get_account_workers(
     }
 
 
+async def _require_worker_self(
+    apikey: Optional[str],
+    authorization: Optional[str],
+) -> tuple[dict, str]:
+    """Resolve a manager credential to the one rig encoded in its key label."""
+    user = await accounts_svc.authenticate(
+        extract_api_key(apikey, authorization),
+        required_scope="worker.connect",
+    )
+    label = str(user.get("key_label") or "")
+    if (
+        user.get("source") != "v2"
+        or user.get("key_kind") != "worker"
+        or not label.startswith("worker:")
+        or not label.removeprefix("worker:")
+    ):
+        raise HTTPException(403, detail="A worker-only credential is required")
+    return user, label.removeprefix("worker:")
+
+
+@router.get("/v1/workers/self")
+@limiter.limit("60/minute")
+async def get_worker_self_status(
+    request: Request,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Return operational state for exactly the rig bound to a worker key.
+
+    This endpoint deliberately does not grant account.read. It exposes no
+    account identity, sibling workers, payout address, balances, payout amount,
+    or transaction history.
+    """
+    user, worker_name = await _require_worker_self(apikey, authorization)
+    async with await new_session() as session:
+        family = await identities_svc.account_family_ids(
+            user["account_id"],
+            session=session,
+        )
+        worker = (
+            (
+                await session.execute(
+                    sa.select(
+                        workers_table.c.id,
+                        workers_table.c.name,
+                        workers_table.c.type,
+                        workers_table.c.models,
+                        workers_table.c.capabilities,
+                        workers_table.c.last_seen,
+                        workers_table.c.maintenance,
+                    ).where(
+                        workers_table.c.account_id.in_(family),
+                        workers_table.c.name == worker_name,
+                    ),
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if worker is None:
+            raise HTTPException(404, detail="Bound worker has not registered")
+
+        totals = (
+            (
+                await session.execute(
+                    sa.select(
+                        sa.func.coalesce(sa.func.sum(ledger_table.c.den), 0.0).label("den"),
+                        sa.func.count().label("jobs"),
+                    ).where(ledger_table.c.worker_id == worker["id"]),
+                )
+            )
+            .mappings()
+            .one()
+        )
+        latest_payout = (
+            (
+                await session.execute(
+                    sa.select(
+                        payouts_table.c.status,
+                        payouts_table.c.paid,
+                    )
+                    .where(payouts_table.c.account_id.in_(family))
+                    .order_by(payouts_table.c.created.desc())
+                    .limit(1),
+                )
+            )
+            .mappings()
+            .first()
+        )
+
+    online: bool | None
+    try:
+        from .stats import _active_workers
+
+        online = str(worker["id"]) in {
+            str(row.get("worker_id")) for row in await _active_workers()
+        }
+    except Exception:
+        logger.debug("worker self status: presence lookup failed", exc_info=True)
+        online = None
+
+    capabilities = worker["capabilities"] or {}
+    models = worker["models"] if isinstance(worker["models"], list) else []
+    models = [item for item in models if isinstance(item, str)][:32]
+    job_types = capabilities.get("job_types") if isinstance(capabilities, dict) else None
+    if not isinstance(job_types, list) or not all(isinstance(item, str) for item in job_types):
+        job_types = [worker["type"]] if isinstance(worker["type"], str) else []
+    job_types = job_types[:8]
+    payout_status = (
+        latest_payout["status"]
+        if latest_payout is not None
+        else ("not_started" if user.get("payout_wallet") else "wallet_required")
+    )
+    paid_at = (
+        latest_payout["paid"].isoformat()
+        if latest_payout is not None and latest_payout["paid"] is not None
+        else None
+    )
+    return {
+        "schema": "aipg.worker.self.v1",
+        "worker": {
+            "name": worker["name"],
+            "online": online,
+            "maintenance": bool(worker["maintenance"]),
+            "last_seen": worker["last_seen"].isoformat() if worker["last_seen"] else None,
+            "models": models,
+            "job_types": job_types,
+            "jobs_completed": int(totals["jobs"] or 0),
+            "den_recorded": round(float(totals["den"] or 0.0), 4),
+        },
+        "payout": {
+            "scope": "account",
+            "wallet_configured": bool(user.get("payout_wallet")),
+            "latest_status": payout_status,
+            "last_paid_at": paid_at,
+        },
+    }
+
+
 @router.get("/v1/account/payouts")
 async def get_account_payouts(
     apikey: Optional[str] = Header(None),
