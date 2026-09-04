@@ -60,6 +60,7 @@ WORKER_ACTIVE_SET = "grid:workers:active"
 # affinity). Refreshed on every heartbeat; TTL-reaped if a worker vanishes.
 WORKER_ONLINE_BY_NAME = "grid:worker:online:"
 RETIRED_WORKER_MODEL_PREFIXES = ("flux.1-krea-dev", "flux1-krea-dev")
+WORKER_SELF_CANARY_MEDIA_TIMEOUT_SECONDS = 840
 
 
 async def _worker_online(worker_name: str) -> bool:
@@ -143,10 +144,12 @@ def _is_worker_self_canary_job(job: dict) -> bool:
         payload.get("_worker_self_canary_id"),
         payload.get("_worker_self_canary_nonce"),
     )
-    return (
-        job.get("job_type", "text") == "text"
-        and all(isinstance(value, str) and value for value in required)
-    )
+    return job.get("job_type", "text") in {
+        "text",
+        "image",
+        "video",
+        "audio",
+    } and all(isinstance(value, str) and value for value in required)
 
 
 def _media_result_commitment(job_type: str, payload: dict, outputs: list[dict]):
@@ -778,7 +781,24 @@ async def worker_websocket(ws: WebSocket):
                 # ── Media path (image/video/audio/3D) ──
                 if job.get("job_type", "text") != "text":
                     async with job_queue.maintain_job_claim(job):
-                        if _is_assignment_bound_validator_job(job):
+                        if (job.get("payload") or {}).get("_worker_self_canary") is not None:
+                            if not _is_worker_self_canary_job(job):
+                                await token_stream.publish_error(
+                                    job["job_id"],
+                                    "Invalid worker connectivity canary.",
+                                    code=400,
+                                )
+                                await credits.release_job(job["job_id"])
+                                ok = True
+                            else:
+                                ok = await _handle_worker_self_canary_media(
+                                    ws,
+                                    job,
+                                    selected_model,
+                                    worker_id,
+                                    worker_info,
+                                )
+                        elif _is_assignment_bound_validator_job(job):
                             ok = await _handle_validator_media_probe(
                                 ws,
                                 job,
@@ -1306,6 +1326,163 @@ async def _handle_worker_self_canary(
     )
     await ws.send_json({"type": "ack", "id": job_id, "den": 0})
     return True
+
+
+async def _handle_worker_self_canary_media(
+    ws: WebSocket,
+    job: dict,
+    selected_model: str,
+    worker_id: str,
+    worker_info: dict,
+) -> bool:
+    """Exercise one exact media worker without billing, den, evidence, or metrics."""
+    import time as _time
+
+    job_id = job["job_id"]
+    payload = job["payload"]
+    job_type = str(job.get("job_type") or "")
+    ext = {"image": "webp", "video": "mp4", "audio": "wav"}.get(job_type)
+    if ext is None:
+        await token_stream.publish_error(job_id, "Unsupported worker connectivity canary.")
+        await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+        return True
+    worker_payload = {
+        key: value
+        for key, value in payload.items()
+        if not key.startswith("_worker_self_canary")
+    }
+    try:
+        slots = storage.presign_outputs(
+            job_id,
+            1,
+            ext,
+            expires=audio.AUDIO_UPLOAD_URL_TTL if job_type == "audio" else 900,
+            job_type=job_type,
+        )
+    except Exception:
+        logger.error("worker media canary presign failed")
+        await token_stream.publish_error(job_id, "Canary storage unavailable.")
+        await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+        return True
+
+    await ws.send_json(
+        {
+            "type": "job",
+            "id": job_id,
+            "job_type": job_type,
+            "model": selected_model,
+            "payload": worker_payload,
+            "upload": [
+                {
+                    "put_url": slots[0]["put_url"],
+                    "key": slots[0]["key"],
+                    "content_type": slots[0]["content_type"],
+                },
+            ],
+        },
+    )
+    started = _time.monotonic()
+    deadline = started + WORKER_SELF_CANARY_MEDIA_TIMEOUT_SECONDS
+    try:
+        try:
+            while True:
+                remaining = deadline - _time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                msg = await asyncio.wait_for(ws.receive_json(), timeout=remaining)
+                msg_type = msg.get("type")
+                if msg_type in {"progress", "pong"}:
+                    continue
+                if msg_type == "error":
+                    await token_stream.publish_error(
+                        job_id,
+                        "Worker connectivity canary failed.",
+                    )
+                    await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+                    return True
+                if msg_type != "done":
+                    continue
+                if (
+                    job_type == "audio"
+                    and msg.get("recipe_root") != payload.get("recipe_root")
+                ):
+                    await token_stream.publish_error(
+                        job_id,
+                        "Worker canary recipe verification failed.",
+                    )
+                    await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+                    return True
+                try:
+                    reported = _validated_media_results(msg.get("results"), 1)[0]
+                    storage_bounds = (
+                        {
+                            "min_bytes": audio.MIN_WAV_BYTES,
+                            "max_bytes": audio.MAX_AUDIO_BYTES,
+                        }
+                        if job_type == "audio"
+                        else {"min_bytes": 1}
+                    )
+                    present = await asyncio.to_thread(
+                        storage.uploaded_outputs_present,
+                        slots,
+                        **storage_bounds,
+                    )
+                    if not present:
+                        raise ValueError("canary output is missing")
+                    result_hash = ledger_svc.canonical_hash(
+                        _media_result_commitment(job_type, payload, [reported]),
+                    )
+                    if (
+                        _requires_signed_receipt(job_type, worker_info)
+                        and not signing.verify_worker_sig(
+                            job_id,
+                            result_hash,
+                            msg.get("worker_sig"),
+                            _receipt_signers(worker_info),
+                        )
+                    ):
+                        raise ValueError("canary receipt is invalid")
+                except Exception:
+                    logger.error("worker media canary output verification failed")
+                    await token_stream.publish_error(
+                        job_id,
+                        "Worker canary output verification failed.",
+                    )
+                    await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+                    return True
+
+                await token_stream.publish_done(
+                    job_id,
+                    json.dumps(
+                        {
+                            "output_sha256": reported["sha256"],
+                            "content_type": slots[0]["content_type"],
+                        },
+                    ),
+                    grid={
+                        "worker_id": worker_id,
+                        "canary_id": payload.get("_worker_self_canary_id"),
+                        "grid_nonce": payload.get("_worker_self_canary_nonce"),
+                        "economic_effect": "none",
+                    },
+                )
+                logger.info(
+                    "worker media canary completed worker=%s modality=%s latency_ms=%s",
+                    worker_id,
+                    job_type,
+                    int((_time.monotonic() - started) * 1000),
+                )
+                await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+                return True
+        except TimeoutError:
+            await token_stream.publish_error(job_id, "Worker connectivity canary timed out.")
+            await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+            return True
+    finally:
+        try:
+            await asyncio.to_thread(storage.delete_outputs, slots)
+        except Exception:
+            logger.warning("worker media canary output cleanup failed")
 
 
 async def _handle_validator_media_probe(

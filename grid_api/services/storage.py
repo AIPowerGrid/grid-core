@@ -138,6 +138,16 @@ def uploaded_outputs_present(
     return True
 
 
+def delete_outputs(slots: list[dict]) -> None:
+    """Delete exact temporary output slots after an internal setup canary."""
+    client = _client()
+    bucket = media_bucket()
+    for slot in slots:
+        key = str(slot.get("key") or "")
+        if key:
+            client.delete_object(Bucket=bucket, Key=key)
+
+
 def freeze_validator_output(
     slot: dict,
     *,

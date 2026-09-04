@@ -85,3 +85,23 @@ def test_validator_output_rejects_oversize_before_copy(monkeypatch):
         )
 
     assert [kind for kind, _kwargs in client.calls] == ["head"]
+
+
+def test_delete_outputs_removes_only_exact_nonempty_slot_keys(monkeypatch):
+    client = _StorageClient()
+    monkeypatch.setattr(storage, "_client", lambda: client)
+    monkeypatch.setattr(storage, "media_bucket", lambda: "media")
+
+    storage.delete_outputs(
+        [
+            {"key": "audio/canary/0.wav"},
+            {"key": ""},
+            {},
+            {"key": "image/canary/0.webp"},
+        ],
+    )
+
+    assert client.calls == [
+        ("delete", {"Bucket": "media", "Key": "audio/canary/0.wav"}),
+        ("delete", {"Bucket": "media", "Key": "image/canary/0.webp"}),
+    ]

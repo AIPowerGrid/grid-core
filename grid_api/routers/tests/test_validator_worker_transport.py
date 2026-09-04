@@ -42,7 +42,7 @@ def test_validator_economic_bypass_requires_core_hard_target_metadata():
     assert not worker_ws._is_assignment_bound_validator_job(job)
 
 
-def test_worker_self_canary_requires_complete_hard_targeted_text_envelope():
+def test_worker_self_canary_requires_complete_hard_targeted_envelope():
     job = {
         "job_type": "text",
         "hard_target_worker": "rig-a",
@@ -61,6 +61,8 @@ def test_worker_self_canary_requires_complete_hard_targeted_text_envelope():
     assert not worker_ws._is_worker_self_canary_job(job)
     job["payload"]["_worker_self_canary_nonce"] = "nonce-secret"
     job["job_type"] = "image"
+    assert worker_ws._is_worker_self_canary_job(job)
+    job["job_type"] = "3d"
     assert not worker_ws._is_worker_self_canary_job(job)
 
 
@@ -185,6 +187,143 @@ async def test_worker_self_canary_failure_is_closed_without_economics(monkeypatc
     )
     assert published[0][0][0] == job_id
     assert published[0][1]["code"] in {400, 502}
+    assert ws.sent[-1] == {"type": "ack", "id": job_id, "den": 0}
+
+
+@pytest.mark.asyncio
+async def test_worker_media_self_canary_verifies_output_and_stays_economically_inert(monkeypatch):
+    job_id = str(uuid.uuid4())
+    ws = _WebSocket(
+        [
+            {
+                "type": "done",
+                "recipe_root": worker_ws.audio.ACE_STEP_RECIPE_ROOT,
+                "results": [{"index": 0, "sha256": "a" * 64, "seed": 7}],
+                "worker_sig": "signed",
+            },
+        ],
+    )
+    job = {
+        "job_id": job_id,
+        "job_type": "audio",
+        "hard_target_worker": "audio-rig",
+        "payload": {
+            "prompt": "ordinary audio request",
+            "lyrics": "",
+            "seconds": 10,
+            "inference_steps": 1,
+            "n": 1,
+            "seed": 7,
+            "recipe_root": worker_ws.audio.ACE_STEP_RECIPE_ROOT,
+            "_worker_self_canary": True,
+            "_worker_self_canary_id": "self-secret",
+            "_worker_self_canary_nonce": "nonce-secret",
+        },
+    }
+    slots = [
+        {
+            "put_url": "https://put.example/canary",
+            "key": f"audio/{job_id}/0.wav",
+            "content_type": "audio/wav",
+        },
+    ]
+    deleted = []
+    published = []
+    monkeypatch.setattr(worker_ws.storage, "presign_outputs", lambda *_a, **_k: slots)
+    monkeypatch.setattr(worker_ws.storage, "uploaded_outputs_present", lambda *_a, **_k: True)
+    monkeypatch.setattr(worker_ws.storage, "delete_outputs", lambda value: deleted.extend(value))
+    monkeypatch.setattr(worker_ws.signing, "verify_worker_sig", lambda *_a, **_k: "0xverified")
+
+    async def publish_done(*args, **kwargs):
+        published.append((args, kwargs))
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("media self-canaries must never touch economics")
+
+    def forbidden_sync(*_args, **_kwargs):
+        raise AssertionError("media self-canaries must never touch success metrics")
+
+    monkeypatch.setattr(worker_ws.token_stream, "publish_done", publish_done)
+    monkeypatch.setattr(worker_ws.credits, "record_and_settle", forbidden)
+    monkeypatch.setattr(worker_ws.credits, "release_job", forbidden)
+    monkeypatch.setattr(worker_ws, "record_job_complete", forbidden_sync)
+    monkeypatch.setattr(worker_ws, "record_job_failed", forbidden_sync)
+
+    assert await worker_ws._handle_worker_self_canary_media(
+        ws,
+        job,
+        worker_ws.audio.DEFAULT_AUDIO_MODEL,
+        "worker-secret",
+        {
+            "name": "audio-rig",
+            "signer_address": "0x" + "2" * 40,
+            "worker_profile": {"digest": "b" * 64},
+        },
+    )
+
+    dispatched = ws.sent[0]
+    assert dispatched["job_type"] == "audio"
+    assert not any(key.startswith("_worker_self_canary") for key in dispatched["payload"])
+    assert deleted == slots
+    body = json.loads(published[0][0][1])
+    assert body == {"output_sha256": "a" * 64, "content_type": "audio/wav"}
+    assert published[0][1]["grid"] == {
+        "worker_id": "worker-secret",
+        "canary_id": "self-secret",
+        "grid_nonce": "nonce-secret",
+        "economic_effect": "none",
+    }
+    assert ws.sent[-1] == {"type": "ack", "id": job_id, "den": 0}
+
+
+@pytest.mark.asyncio
+async def test_worker_media_self_canary_times_out_terminally_and_cleans_up(monkeypatch):
+    job_id = str(uuid.uuid4())
+    ws = _WebSocket()
+
+    async def time_out():
+        raise TimeoutError
+
+    ws.receive_json = time_out
+    job = {
+        "job_id": job_id,
+        "job_type": "audio",
+        "hard_target_worker": "audio-rig",
+        "payload": {
+            "n": 1,
+            "recipe_root": worker_ws.audio.ACE_STEP_RECIPE_ROOT,
+            "_worker_self_canary": True,
+            "_worker_self_canary_id": "self-secret",
+            "_worker_self_canary_nonce": "nonce-secret",
+        },
+    }
+    slots = [
+        {
+            "put_url": "https://put.example/canary",
+            "key": f"audio/{job_id}/0.wav",
+            "content_type": "audio/wav",
+        },
+    ]
+    deleted = []
+    errors = []
+    monkeypatch.setattr(worker_ws.storage, "presign_outputs", lambda *_a, **_k: slots)
+    monkeypatch.setattr(worker_ws.storage, "delete_outputs", lambda value: deleted.extend(value))
+
+    async def publish_error(*args, **kwargs):
+        errors.append((args, kwargs))
+
+    monkeypatch.setattr(worker_ws.token_stream, "publish_error", publish_error)
+
+    assert await worker_ws._handle_worker_self_canary_media(
+        ws,
+        job,
+        worker_ws.audio.DEFAULT_AUDIO_MODEL,
+        "worker-secret",
+        {"name": "audio-rig"},
+    )
+
+    assert "timed out" in errors[0][0][1]
+    assert deleted == slots
     assert ws.sent[-1] == {"type": "ack", "id": job_id, "den": 0}
 
 
