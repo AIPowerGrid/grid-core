@@ -90,9 +90,12 @@ transport, accounts, stats, health/metrics.
   NEVER customer wallet/account), and `GET /v1/status/network` (public,
   privacy-safe worker/model capacity, validator aggregates, charging mode,
   payout totals, current component incidents, decentralization advisories, and
-  privacy-safe registration plus rolling seven-day worker-retention aggregates.
-  Download counts remain owned by GitHub Releases and local wizard completion
-  is not collected.
+  privacy-safe manager-enrollment completion, registration, and rolling
+  seven-day worker-retention aggregates. A setup completion is counted only
+  after the manager ACK permanently activates its bound `worker.connect`
+  credential. Distinct rig labels are counted even if that credential is later
+  rotated or revoked; abandoned temporary credentials do not count. Download
+  counts remain owned by GitHub Releases.
 - `validator.py` - validator assignment-bound evidence surface:
   `GET /v1/validator/capabilities`, signed linked-wallet registration/status/
   heartbeat, signed self-suspension and linked replacement-wallet rotation,
