@@ -85,7 +85,8 @@ async def submit_job(
 
     `preferred_worker` (a worker NAME, ownership-checked by the caller) lets the
     job express soft affinity — see MAX_AFFINITY_BOUNCE. Empty = no preference.
-    `hard_target_worker` is used by validator probes and forbids fallback.
+    `hard_target_worker` is used by validator probes and setup canaries and
+    forbids fallback.
     `progress_token` (a client-chosen id) lets the worker's live % be polled at
     GET /v1/progress/{token} while the job runs.
     """

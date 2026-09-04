@@ -208,3 +208,178 @@ async def test_worker_self_is_exactly_bound_and_redacts_account_payout(monkeypat
             assert secret not in rendered
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_worker_self_canary_uses_exact_bound_online_worker(monkeypatch):
+    now = datetime.now(UTC)
+    account_id = uuid4()
+    worker_id = uuid4()
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(metadata.create_all)
+    try:
+        async with sessions() as session:
+            await session.execute(
+                sa.insert(accounts_table).values(
+                    id=account_id,
+                    username="operator",
+                    flags={},
+                    created=now,
+                ),
+            )
+            await session.execute(
+                sa.insert(workers).values(
+                    id=worker_id,
+                    account_id=account_id,
+                    name="rig-a",
+                    type="text",
+                    models=["model-a", "model-b"],
+                    capabilities={"job_types": ["text"]},
+                    maintenance=False,
+                    first_seen=now,
+                    last_seen=now,
+                ),
+            )
+            await session.commit()
+
+        async def new_session():
+            return sessions()
+
+        async def authenticate(key, *, required_scope):
+            assert key == "grid_worker_test"
+            assert required_scope == "worker.connect"
+            return {
+                "source": "v2",
+                "key_kind": "worker",
+                "key_label": "worker:rig-a",
+                "account_id": account_id,
+            }
+
+        async def active_workers():
+            return [
+                {"worker_id": str(uuid4()), "name": "unrelated"},
+                {"worker_id": str(worker_id), "name": "rig-a"},
+            ]
+
+        observed = {}
+
+        async def run_canary(**kwargs):
+            observed.update(kwargs)
+            return {
+                "schema": "aipg.worker.canary.v1",
+                "status": "passed",
+                "economic_effect": "none",
+            }
+
+        monkeypatch.setattr(accounts, "new_session", new_session)
+        monkeypatch.setattr(accounts.accounts_svc, "authenticate", authenticate)
+        monkeypatch.setattr(stats, "_active_workers", active_workers)
+        monkeypatch.setattr(
+            accounts.worker_canaries,
+            "run_text_connectivity_canary",
+            run_canary,
+        )
+
+        handler = getattr(
+            accounts.run_worker_self_canary,
+            "__wrapped__",
+            accounts.run_worker_self_canary,
+        )
+        result = await handler(
+            _request(),
+            apikey="grid_worker_test",
+            authorization=None,
+        )
+
+        assert result["status"] == "passed"
+        assert observed == {
+            "worker_id": str(worker_id),
+            "worker_name": "rig-a",
+            "model": "model-a",
+        }
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_worker_self_canary_rejects_offline_worker_before_dispatch(monkeypatch):
+    now = datetime.now(UTC)
+    account_id = uuid4()
+    worker_id = uuid4()
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(metadata.create_all)
+    try:
+        async with sessions() as session:
+            await session.execute(
+                sa.insert(accounts_table).values(
+                    id=account_id,
+                    username="operator",
+                    flags={},
+                    created=now,
+                ),
+            )
+            await session.execute(
+                sa.insert(workers).values(
+                    id=worker_id,
+                    account_id=account_id,
+                    name="rig-a",
+                    type="text",
+                    models=["model-a"],
+                    capabilities={"job_types": ["text"]},
+                    maintenance=False,
+                    first_seen=now,
+                    last_seen=now,
+                ),
+            )
+            await session.commit()
+
+        async def new_session():
+            return sessions()
+
+        async def authenticate(_key, *, required_scope):
+            assert required_scope == "worker.connect"
+            return {
+                "source": "v2",
+                "key_kind": "worker",
+                "key_label": "worker:rig-a",
+                "account_id": account_id,
+            }
+
+        async def active_workers():
+            return []
+
+        async def forbidden(**_kwargs):
+            raise AssertionError("offline workers must not receive a canary")
+
+        monkeypatch.setattr(accounts, "new_session", new_session)
+        monkeypatch.setattr(accounts.accounts_svc, "authenticate", authenticate)
+        monkeypatch.setattr(stats, "_active_workers", active_workers)
+        monkeypatch.setattr(
+            accounts.worker_canaries,
+            "run_text_connectivity_canary",
+            forbidden,
+        )
+
+        handler = getattr(
+            accounts.run_worker_self_canary,
+            "__wrapped__",
+            accounts.run_worker_self_canary,
+        )
+        with pytest.raises(HTTPException) as exc:
+            await handler(_request(), apikey="grid_worker_test", authorization=None)
+        assert exc.value.status_code == 409
+        assert exc.value.detail == "Bound worker is not online"
+    finally:
+        await engine.dispose()

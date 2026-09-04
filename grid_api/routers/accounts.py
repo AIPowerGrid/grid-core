@@ -31,7 +31,7 @@ from ..auth import extract_api_key
 from ..database import new_session
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
-from ..services import economics
+from ..services import economics, worker_canaries
 from ..services import identities as identities_svc
 from ..v2.schema import accounts as accounts_table
 from ..v2.schema import api_keys as api_keys_table
@@ -1595,6 +1595,70 @@ async def get_worker_self_status(
             "last_paid_at": paid_at,
         },
     }
+
+
+@router.post("/v1/workers/self/canary")
+@limiter.limit("12/hour")
+async def run_worker_self_canary(
+    request: Request,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Run one economically inert connectivity canary on the exact bound rig."""
+    user, worker_name = await _require_worker_self(apikey, authorization)
+    async with await new_session() as session:
+        family = await identities_svc.account_family_ids(
+            user["account_id"],
+            session=session,
+        )
+        worker = (
+            (
+                await session.execute(
+                    sa.select(
+                        workers_table.c.id,
+                        workers_table.c.name,
+                        workers_table.c.type,
+                        workers_table.c.models,
+                    ).where(
+                        workers_table.c.account_id.in_(family),
+                        workers_table.c.name == worker_name,
+                    ),
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if worker is None:
+        raise HTTPException(404, detail="Bound worker has not registered")
+    if worker["type"] != "text":
+        raise HTTPException(409, detail="Connectivity canary supports text workers only")
+    models = worker["models"] if isinstance(worker["models"], list) else []
+    models = [item for item in models if isinstance(item, str) and item][:32]
+    if not models:
+        raise HTTPException(409, detail="Bound worker advertises no text model")
+
+    try:
+        from .stats import _active_workers
+
+        online = str(worker["id"]) in {
+            str(row.get("worker_id")) for row in await _active_workers()
+        }
+    except Exception:
+        logger.debug("worker self canary: presence lookup failed", exc_info=True)
+        raise HTTPException(503, detail="Worker presence is unavailable")
+    if not online:
+        raise HTTPException(409, detail="Bound worker is not online")
+
+    try:
+        return await worker_canaries.run_text_connectivity_canary(
+            worker_id=str(worker["id"]),
+            worker_name=str(worker["name"]),
+            model=models[0],
+        )
+    except worker_canaries.WorkerCanaryRateLimited:
+        raise HTTPException(429, detail="Worker canary recently started; try again later")
+    except worker_canaries.WorkerCanaryUnavailable:
+        raise HTTPException(503, detail="Worker connectivity canary is unavailable")
 
 
 @router.get("/v1/account/payouts")
