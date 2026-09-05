@@ -25,6 +25,8 @@ for humans and agents.
 - `architecture/PAID_VALIDATOR_AUDITS.md` - accepted default-off compensated
   audit rail: private server-side job binding, PostgreSQL budget reservations,
   ordinary worker economics, atomic settlement, and quality-promotion gates.
+- `architecture/VALIDATOR_COMPENSATION_PILOT.md` - proposed validator-operator
+  compensation, non-sendable offline simulation and gates before any payment.
 - `architecture/NETWORK_READINESS.md` - current implementation and rollout
   status for validator, worker-growth, economics, blockchain, and operations
   requirements.
