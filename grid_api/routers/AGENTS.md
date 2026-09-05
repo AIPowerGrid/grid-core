@@ -111,7 +111,9 @@ transport, accounts, stats, health/metrics.
   `GET /v1/validator/assignments/health`. The unauthenticated
   `GET /v1/validator/public/{validator_id}` exposes only a shareable validator
   ID's rounded heartbeat, version, aggregate activity, qualification progress,
-  and actionable status; it never returns account, wallet, signature, operator
+  and actionable status. Mature candidates are prompted to request maintainer
+  review without receiving independence or economic authority; operational
+  repair/upgrade actions retain precedence. It never returns account, wallet, signature, operator
   group, review reference, assignment, or evidence data. Health separates probe,
   accepted-evidence, worker-pass, quorum, finalization, and aggregate validator
   liveness stages. Shared 3-of-5 quorum remains preview-only with no
