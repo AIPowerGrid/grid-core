@@ -60,6 +60,13 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Work Guidance
 
+- During a reviewed validator upgrade, set `VALIDATOR_COHORT_UPGRADE_VERSION`
+  to one exact release tag while preserving `VALIDATOR_COHORT_BASELINE_VERSION`.
+  Verify both versions remain eligible and preserve stored qualification history.
+  Shadow observation must stay disabled during this overlap. After migration,
+  promote the new baseline and clear the upgrade setting; restarting a node must
+  never reset its signing identity or qualification timestamps.
+
 - When adding services, document ports, health checks, restart behavior, and
   firewall/nginx impact.
 - `GRID_SALT` stays server-side. The developer console has no local DB/salt path

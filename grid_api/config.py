@@ -128,6 +128,12 @@ class GridSettings(BaseSettings):
     validator_cohort_monitor_seconds: int = Field(default=300, ge=60, le=3600)
     validator_cohort_monitor_window_hours: int = Field(default=24, ge=1, le=720)
     validator_cohort_baseline_version: str = "v0.1.0-preview.13"
+    # One exact reviewed release may overlap the baseline during an upgrade.
+    validator_cohort_upgrade_version: str = Field(
+        default="",
+        pattern=r"^(?:v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:preview|alpha|beta|rc)\.[0-9]+)?)?$",
+        max_length=64,
+    )
     # Seven-day advisory comparison. Schema and report tooling may be deployed
     # while false; no run can start and no observation can be written until the
     # three-independent-operator gate is separately frozen and this is enabled.
@@ -152,6 +158,12 @@ class GridSettings(BaseSettings):
     grid_alert_discord_webhook: SecretStr | None = None
     grid_alert_queue_size: int = 256
     grid_alert_dedupe_seconds: int = 300
+
+    @model_validator(mode="after")
+    def validate_validator_upgrade(self):
+        if self.validator_cohort_upgrade_version and self.validator_shadow_observer_enabled:
+            raise ValueError("validator version overlap requires shadow observation disabled")
+        return self
 
     @model_validator(mode="after")
     def validate_pairing_canary(self):
