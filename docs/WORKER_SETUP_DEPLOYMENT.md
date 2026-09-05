@@ -40,6 +40,8 @@ Each request produced one uniquely identified setup job. Queries against those
 exact job IDs found zero completion-ledger rows and zero credit reservations.
 The media outputs were checked by Core's normal self-canary output path. These
 results establish connectivity, not model quality or public media qualification.
+Separate storage HEAD checks returned `404` for each of the three exact
+temporary objects after completion, confirming cleanup.
 
 ## Text release follow-up
 
@@ -60,10 +62,12 @@ A supervised candidate check also found GPT-OSS interpreting the old word
 follow-up describes a public generated test label and compares UTF-8 bytes so
 non-ASCII responses remain ordinary mismatches rather than scorer exceptions.
 
-The revised candidate passed a separate supervised check against qwen3-27b
-in 1.0 seconds, with zero ledger rows and reservations for its exact job. That
-check loaded the candidate only in an operator process and exercised the
-deployed transport; it did not replace the production application module.
+The revised candidate passed separate supervised checks against qwen3-27b
+in 1.0 seconds and gpt-oss-120b in 1.6 seconds, with zero ledger rows and
+reservations for their exact jobs. Those checks loaded the candidate only in
+an operator process and exercised the deployed transport; they did not replace
+the production application module. Retests respected the existing worker
+cooldown; no rate-limit key was cleared to run them.
 
 Local service/router verification passed 881 tests with 73 environment-dependent
 skips. The focused self-status, canary, and worker-transport subset passed all
