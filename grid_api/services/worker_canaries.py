@@ -23,6 +23,8 @@ from . import audio, job_queue, recipes, token_stream
 CANARY_COOLDOWN_SECONDS = 300
 CANARY_TIMEOUT_SECONDS = 180
 MEDIA_CANARY_TIMEOUT_SECONDS = 900
+# Reasoning models spend completion tokens before producing the short answer.
+CANARY_MAX_COMPLETION_TOKENS = 512
 CANARY_MAX_OUTPUT_CHARS = 256
 _CANARY_PREFIX = "grid:worker:self-canary:"
 
@@ -107,19 +109,22 @@ async def run_text_connectivity_canary(
     canary_id = f"self_{uuid4().hex}"
     grid_nonce = secrets.token_urlsafe(24)
     expected = f"aipg-{secrets.token_hex(10)}"
-    prompt = f"Reply with exactly this token and nothing else: {expected}"
+    prompt = (
+        "This is a connectivity check using a public, randomly generated test label. "
+        f"Reply with the label only, without commentary: {expected}"
+    )
     job_id = str(uuid4())
     payload = {
         "request": {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 32,
+            "max_tokens": CANARY_MAX_COMPLETION_TOKENS,
             "temperature": 0,
             "stream": True,
         },
         "api_format": "openai-chat",
         "prompt": prompt,
-        "max_length": 32,
+        "max_length": CANARY_MAX_COMPLETION_TOKENS,
         "temperature": 0,
         "_worker_self_canary": True,
         "_worker_self_canary_id": canary_id,
@@ -202,7 +207,9 @@ async def run_text_connectivity_canary(
             output = (full_text or "".join(chunks))[:CANARY_MAX_OUTPUT_CHARS].strip()
             if len(output) >= 2 and output[0] == output[-1] and output[0] in {'"', "'"}:
                 output = output[1:-1].strip()
-            exact = not output_too_long and secrets.compare_digest(output, expected)
+            exact = not output_too_long and secrets.compare_digest(
+                output.encode("utf-8"), expected.encode("utf-8"),
+            )
             return _result(
                 status="passed" if exact else "failed",
                 worker_name=worker_name,
@@ -213,6 +220,8 @@ async def run_text_connectivity_canary(
                     if exact
                     else "output_too_long"
                     if output_too_long
+                    else "output_budget_exhausted"
+                    if event.get("finish_reason") == "length"
                     else "output_mismatch"
                 ),
             )
