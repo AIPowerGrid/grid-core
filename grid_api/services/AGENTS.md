@@ -33,6 +33,9 @@ content sanitization, and reward settlement.
   `validator_audit_budgets.py` (default-dark compensated-audit budget,
   terminal, and ledger-aware expiry lifecycle; the ordinary worker terminal
   imports it, but no scheduler can create audit work yet),
+  `validator_compensation_preview.py` (pure offline allocation simulation over
+  unverified reviewer snapshots, with integer caps and assignment/operator-group
+  deduplication; no economic authority, database writes, recipient or sender),
   `holdings.py` (cached on-chain AIPG balance + Chainlink ETH/USD),
   `deposits.py` (atomic Base funding receipts from verified account wallets
   plus USDC, bounded AIPG, and conversion-gated ETH claims),
