@@ -30,6 +30,9 @@ executes an immutable release selected through `/home/aipg/current`.
 ## Local Contracts
 
 - Env names in `env.template`, systemd, code, and docs must match exactly.
+- `GRID_CHARGING_ALL_MODEL_SERVICES` is a JSON array of exact capped direct
+  service IDs, empty by default. Use this for sponsored auto-model demos without
+  expanding the user/model charging cohort. `GRID_CHARGING_MODE=off` still wins.
 - Promotional spending requires both the global emergency gate and a non-empty
   exact `GRID_PROMO_SPENDABLE_CAMPAIGNS` allowlist. Never use or emulate a
   wildcard; enable reviewed builder cohorts independently of welcome grants.
