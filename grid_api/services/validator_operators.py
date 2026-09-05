@@ -88,16 +88,16 @@ def _cohort_versions() -> tuple[str, tuple[str, ...]]:
     if not baseline.removeprefix("v"):
         return baseline, ()
     upgrade = str(getattr(settings, "validator_cohort_upgrade_version", "") or "").strip()
-    versions = tuple(dict.fromkeys(
-        value.removeprefix("v") for value in (baseline, upgrade) if value
-    ))
+    versions = tuple(
+        dict.fromkeys(value.removeprefix("v") for value in (baseline, upgrade) if value)
+    )
     return baseline, versions
 
 
 def cohort_version_status(software_version: str | None) -> tuple[str, bool]:
     """Accept the baseline and one explicitly reviewed upgrade, never newer tags by range."""
     baseline, versions = _cohort_versions()
-    current = str(software_version or "").strip()
+    current = str(software_version or "").strip(" ")
     normalized_current = current.removeprefix("v")
     return baseline, normalized_current in versions
 
@@ -107,7 +107,8 @@ def cohort_version_filter(column):
     _, versions = _cohort_versions()
     if not versions:
         return sa.false()
-    return sa.func.trim(column).in_([tag for version in versions for tag in (version, f"v{version}")])
+    tags = [tag for version in versions for tag in (version, f"v{version}")]
+    return sa.func.trim(column).in_(tags)
 
 
 def qualification_metrics(row: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:

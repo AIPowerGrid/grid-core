@@ -29,6 +29,7 @@ def test_upgrade_python_and_sql_eligibility_agree(monkeypatch, upgrade):
         "v0.1.0-preview.9",
         "v0.1.0-dev",
         "vv0.1.0-preview.13",
+        "\tv0.1.0-preview.13\n",
         "",
         None,
     ]
