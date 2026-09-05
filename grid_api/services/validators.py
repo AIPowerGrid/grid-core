@@ -288,9 +288,15 @@ async def public_validator_status(validator_id: str) -> dict[str, Any]:
         )
     elif qualification_status == "candidate":
         summary = "qualifying"
-        next_action = (
-            "Keep this validator online until its time and heartbeat coverage gates are complete."
-        )
+        if qualification["time_ready"] and qualification["coverage_ready"]:
+            next_action = (
+                "Time and heartbeat coverage are complete. Request maintainer review "
+                "using only this public validator ID; keep the node online."
+            )
+        else:
+            next_action = (
+                "Keep this validator online until its time and heartbeat coverage gates are complete."
+            )
     elif review_current:
         summary = "verified"
         next_action = "No operator action is currently required."
