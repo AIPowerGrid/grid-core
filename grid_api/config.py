@@ -26,6 +26,9 @@ class GridSettings(BaseSettings):
     grid_api_host: str = "0.0.0.0"
     grid_api_port: int = 7002
 
+    # Exact direct-service IDs only; never delegated users. Empty is dark.
+    grid_charging_all_model_services: list[str] = Field(default_factory=list, max_length=20)
+
     # Timeouts
     job_timeout_seconds: int = 300  # 5 min max generation time
     worker_ping_interval: int = 30  # Keepalive ping every 30s
