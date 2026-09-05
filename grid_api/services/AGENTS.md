@@ -177,7 +177,12 @@ content sanitization, and reward settlement.
   minute-rounded heartbeat, software version plus the frozen required cohort
   version and compatibility status, aggregate assignment/attestation counts,
   redacted qualification progress, and a bounded next action. An online stale
-  version must receive an upgrade action before cohort-review guidance. Wallets,
+  version must receive an upgrade action before cohort-review guidance. A fresh,
+  supported candidate whose time and coverage gates are complete is directed to
+  maintainer review, not told to wait indefinitely. That read-only guidance
+  preserves candidate status and does not prove accepted work, operator control,
+  or independent eligibility; the existing review transition checks those gates.
+  Wallets,
   account IDs, signatures, operator groups, review refs, raw assignments, and
   evidence remain private.
   Candidate and verify transitions require the frozen cohort version from typed
