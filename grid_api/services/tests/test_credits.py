@@ -15,11 +15,60 @@ The DB-backed credit/debit/balance paths are integration-tested separately
 """
 
 import pytest
+from types import SimpleNamespace
 
 from grid_api.services import credits, pricing
 
 
 PRICED_MODEL = "deepseek-v4-flash"  # in the price book → quote > 0
+
+
+@pytest.fixture
+def homepage_service(monkeypatch):
+    monkeypatch.setattr(credits, "get_settings", lambda: SimpleNamespace(grid_charging_all_model_services=["homepage-demo"]))
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "allowlist")
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_ACCOUNTS", frozenset({"image-user"}))
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_SERVICES", frozenset())
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_MODELS", frozenset({"z-image-turbo"}))
+    return {"account_id": "demo-account", "service_id": "homepage-demo", "key_kind": "service",
+            "scopes": ["inference.submit", "inference.service_submit"],
+            "service_limits": {"per_request_micro": 10000, "daily_micro": 500000}}
+
+
+def test_all_model_service_is_scoped_and_honest(homepage_service, monkeypatch):
+    user = homepage_service
+    assert credits.charging_enabled_for(user, PRICED_MODEL)
+    assert credits.service_budget_policy(user) == {
+        "version": 1, "all_models_charged": True, "per_request_micro": 10000, "daily_micro": 500000,
+    }
+    assert not credits.charging_enabled_for({"account_id": "image-user"}, PRICED_MODEL)
+    assert credits.charging_enabled_for({"account_id": "image-user"}, "z-image-turbo")
+    assert not credits.charging_enabled_for({**user, "service_id": "other-service"}, PRICED_MODEL)
+    for change in ({"key_kind": "delegated_user"}, {"scopes": ["inference.submit"]}, {"service_limits": {}},
+                   {"service_limits": {"per_request_micro": 0, "daily_micro": 500000}},
+                   {"service_limits": {"per_request_micro": True, "daily_micro": 500000}}):
+        candidate = {**user, **change}
+        assert not credits.charging_enabled_for(candidate, PRICED_MODEL)
+        assert credits.service_budget_policy(candidate) is None
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "off")
+    assert not credits.charging_enabled_for(user, PRICED_MODEL)
+    assert credits.service_budget_policy(user)["all_models_charged"] is False
+
+
+@pytest.mark.asyncio
+async def test_all_model_service_reaches_ceiling_before_dispatch(homepage_service, monkeypatch):
+    from unittest.mock import AsyncMock
+    limit = AsyncMock(return_value=(False, "service daily spending ceiling exceeded"))
+    monkeypatch.setattr(credits.service_limits, "authorize", limit)
+    monkeypatch.setattr(credits, "holder_discount_bps", AsyncMock(return_value=0))
+    monkeypatch.setattr(credits, "_economic_alert", lambda *a, **kw: None)
+    result = await credits.authorize_request(homepage_service, PRICED_MODEL, 1000, 1024, "budget-test")
+    assert result["ok"] is False and result["status"] == "service_limit"
+    limit.assert_awaited_once()
+    assert limit.call_args.args[1] > 0
+    assert limit.call_args.args[2] == "budget-test"
+    result = await credits.authorize_request(homepage_service, "unpriced-model", 1, 1, "unpriced-test")
+    assert result["ok"] is False and result["status"] == "unpriced"
 
 
 def test_charging_policy_modes(monkeypatch):
