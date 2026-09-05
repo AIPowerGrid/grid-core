@@ -428,6 +428,13 @@ content sanitization, and reward settlement.
 - Service ceilings are exposure reservations keyed by job id: reserve before
   dispatch, reduce to actual text spend on success, and release on 402/no-work
   terminals. Redis failure stays conservative until the day bucket expires.
+- `GRID_CHARGING_ALL_MODEL_SERVICES` is a default-empty JSON list of exact
+  direct-service IDs allowed to charge across models in allowlist mode. Both
+  positive server-owned ceilings and `inference.service_submit` are required;
+  delegated users and ordinary cohorts retain the model restriction. Global
+  `off` still wins. The authenticated credit summary exposes a versioned
+  `service_budget` with actual caps and `all_models_charged`; this reports
+  policy, not remaining capacity. Unpriced requests still reject before dispatch.
 - Price coverage is modality-specific. A model entry with only a video rate is
   unpriced for image/text, and positive quotes round up to one micro-USD rather
   than silently becoming free.
