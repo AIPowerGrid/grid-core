@@ -82,22 +82,32 @@ def _digest(row: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _cohort_versions() -> tuple[str, tuple[str, ...]]:
+    settings = get_settings()
+    baseline = str(settings.validator_cohort_baseline_version or "").strip()
+    if not baseline.removeprefix("v"):
+        return baseline, ()
+    upgrade = str(getattr(settings, "validator_cohort_upgrade_version", "") or "").strip()
+    versions = tuple(dict.fromkeys(
+        value.removeprefix("v") for value in (baseline, upgrade) if value
+    ))
+    return baseline, versions
+
+
 def cohort_version_status(software_version: str | None) -> tuple[str, bool]:
-    """Return the frozen cohort baseline and whether this node matches it."""
-    baseline = str(get_settings().validator_cohort_baseline_version or "").strip()
+    """Accept the baseline and one explicitly reviewed upgrade, never newer tags by range."""
+    baseline, versions = _cohort_versions()
     current = str(software_version or "").strip()
-    normalized_baseline = baseline.removeprefix("v")
     normalized_current = current.removeprefix("v")
-    return baseline, bool(normalized_baseline and normalized_current == normalized_baseline)
+    return baseline, normalized_current in versions
 
 
 def cohort_version_filter(column):
-    """Return a SQL predicate matching the configured cohort baseline."""
-    baseline, _ = cohort_version_status(None)
-    normalized_baseline = baseline.removeprefix("v")
-    if not normalized_baseline:
+    """Match exactly the same release strings as the Python eligibility check."""
+    _, versions = _cohort_versions()
+    if not versions:
         return sa.false()
-    return sa.func.ltrim(sa.func.trim(column), "v") == normalized_baseline
+    return sa.func.trim(column).in_([tag for version in versions for tag in (version, f"v{version}")])
 
 
 def qualification_metrics(row: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
