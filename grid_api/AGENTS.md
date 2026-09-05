@@ -49,6 +49,8 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   local file. Never infer this authority from `GRID_DIAMOND_ADDRESS`.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
+  Typed `grid_charging_all_model_services` selects only bounded direct-service
+  principals for model-independent charging; default empty, global off wins.
 - **OAuth storage:** public client registration and authorization requests are
   operational state, not permanent identity or economic records. The lifecycle
   sweeper removes day-old authorization rows and never-used orphan clients even

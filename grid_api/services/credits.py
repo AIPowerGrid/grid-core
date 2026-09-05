@@ -31,6 +31,7 @@ import os
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
+from ..config import get_settings
 from ..database import new_session
 from ..safe_logging import error_type, opaque_id
 from ..v2.schema import accounts as accounts_t
@@ -82,7 +83,8 @@ def charging_enabled_for(user: dict | None = None, model: str | None = None) -> 
     account. The service allowlist is reserved for an explicitly scoped direct
     service principal; it must never make every user behind that service
     chargeable. The optional model list narrows that cohort and never enables
-    charging by itself.
+    charging by itself. Explicit bounded all-model services bypass only that
+    model restriction, never the global off switch or delegated-user boundary.
     """
     mode = charging_mode()
     if mode == "off":
@@ -96,6 +98,8 @@ def charging_enabled_for(user: dict | None = None, model: str | None = None) -> 
         user.get("key_kind") == "service"
         and "inference.service_submit" in set(user.get("scopes") or [])
     )
+    if _all_model_service(user):
+        return True
     selected = (
         bool(service_id and service_id in CHARGING_ALLOW_SERVICES)
         if direct_service
@@ -106,6 +110,34 @@ def charging_enabled_for(user: dict | None = None, model: str | None = None) -> 
     if CHARGING_ALLOW_MODELS and model is not None:
         return str(model or "").lower() in CHARGING_ALLOW_MODELS
     return True
+
+
+def _direct_service_limits(user: dict) -> dict | None:
+    if (
+        user.get("key_kind") != "service"
+        or not user.get("service_id")
+        or "inference.service_submit" not in (user.get("scopes") or [])
+    ):
+        return None
+    limits = user.get("service_limits") or {}
+    if not all(type(limits.get(k)) is int and limits[k] > 0 for k in ("per_request_micro", "daily_micro")):
+        return None
+    return {k: limits[k] for k in ("per_request_micro", "daily_micro")}
+
+
+def _all_model_service(user: dict) -> bool:
+    return _direct_service_limits(user) is not None and str(user.get("service_id")).lower() in {
+        value.strip().lower() for value in get_settings().grid_charging_all_model_services
+    }
+
+
+def service_budget_policy(user: dict) -> dict | None:
+    """Authenticated policy, not a claim that any daily capacity remains."""
+    limits = _direct_service_limits(user)
+    if limits is None:
+        return None
+    all_models = charging_mode() == "on" or (charging_mode() == "allowlist" and _all_model_service(user))
+    return {"version": 1, "all_models_charged": all_models, **limits}
 
 
 def _economic_alert(kind: str, severity: str, summary: str, *, account=None, job=None, **fields) -> None:
@@ -255,6 +287,7 @@ async def account_credit_summary(user: dict) -> dict:
         "total_preview_usd": _usd(preview),
         "charging_enabled": charging_enabled_for(user),
         "charging_mode": charging_mode(),
+        "service_budget": service_budget_policy(user),
     }
 
 
