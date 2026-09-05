@@ -1218,7 +1218,11 @@ async def test_unreviewed_supported_validator_starts_observation_on_first_heartb
 
 
 @pytest.mark.asyncio
-async def test_unreviewed_observation_samples_are_rate_limited_and_version_gated(db, monkeypatch):
+@pytest.mark.parametrize("final_version", ["v0.1.0-preview.13", "v0.1.0-preview.14"])
+async def test_unreviewed_observation_samples_are_rate_limited_and_version_gated(db, monkeypatch, final_version):
+    monkeypatch.setattr(
+        validator_operators.get_settings(), "validator_cohort_upgrade_version", "v0.1.0-preview.14"
+    )
     account_id = uuid.uuid4()
     validator_id = await _register(account_id, software_version="v0.1.0-preview.13")
     async with await database.new_session() as session:
@@ -1248,7 +1252,7 @@ async def test_unreviewed_observation_samples_are_rate_limited_and_version_gated
     await validators_svc.heartbeat_validator(
         account_id=account_id,
         signing_wallet=TEST_WALLET,
-        software_version="v0.1.0-preview.13",
+        software_version=final_version,
         capabilities=["text.basic.v1"],
     )
 

@@ -66,6 +66,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 
 ## Work Guidance
 
+- Validator cohort upgrades may overlap one explicitly configured release with
+  the baseline. Configuration rejects overlap while shadow observation is enabled.
+  Never implicitly accept all newer or development versions.
+
 - Config: a typed `config.py` is the target; feature-specific env reads remain
   scattered across the tree. Keep `deploy/env.template` current and consolidate
   rather than adding another ad-hoc `getenv`.

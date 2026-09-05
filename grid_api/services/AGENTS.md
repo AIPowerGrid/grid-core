@@ -502,6 +502,12 @@ content sanitization, and reward settlement.
 
 ## Work Guidance
 
+- Cohort version eligibility accepts the frozen baseline plus at most one exact
+  reviewed upgrade version. Python and SQL must agree, including malformed
+  prefixes. This preserves existing qualification clocks during a rolling upgrade;
+  it neither grants independence review nor activates authority. Malformed text
+  fidelity reference IDs must produce a contract error, never a TypeError.
+
 - Adding economic logic -> add/extend tests under `tests/` or `settlement/tests/`.
 - Safety work should be a layered pre/post-dispatch content policy; do not
   overload `sanitizer.py`.
