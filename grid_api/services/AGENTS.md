@@ -64,6 +64,11 @@ content sanitization, and reward settlement.
   five-minute gated per worker, accepts no caller prompt, model, modality, or
   target, and writes no credit reservation, ledger row, den, strike, validator evidence, or
   quality claim.
+  Text setup permits at most 512 completion tokens so reasoning backends can
+  reach their answer; only the bounded visible answer is compared. A truncated
+  mismatching result reports `output_budget_exhausted`, never a quality verdict.
+  Challenges identify their label as public test data. Compare UTF-8 bytes so
+  non-ASCII responses fail as mismatches instead of crashing the scorer.
 - **Validator account association:** `validator_pairing.py` owns optional,
   non-economic visibility links from an enrolled node to a separate human
   account. One ten-minute pairing slot per node, immutable browser approval,
