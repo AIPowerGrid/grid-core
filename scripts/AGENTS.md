@@ -40,6 +40,11 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - `review_validator_operator.py` - preview-first, digest-bound candidate,
   verify, or reject transition for an opaque validator control group. It never
   publishes operator identity or grants economic authority.
+- `preview_validator_compensation.py` - POSIX-only offline allocation simulation
+  over a bounded private reviewer snapshot. It has no network/database/sender,
+  rejects conflicting assignment replays, shares caps across an operator's nodes,
+  and exclusively creates a private non-sendable output. Stdout is aggregate only.
+  It does not authenticate the input or provide durable payment idempotency.
 - `review_validator_reference.py` - preview-first, digest-bound quality review
   and activate/pause/revoke workflow for a media reference worker. It never
   fabricates bond evidence or grants economic authority.
