@@ -3329,6 +3329,92 @@ async def test_public_validator_status_is_redacted_and_reports_qualification(db)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "hours,samples,expected_review",
+    [(72, 692, True), (72, 691, False), (71, 1000, False), (72, 0, False)],
+)
+async def test_public_candidate_next_action_tracks_gates_without_granting_review(
+    db, monkeypatch, hours, samples, expected_review
+):
+    validator_id = await _register(uuid.uuid4())
+    now = datetime(2026, 9, 5, 19, tzinfo=UTC)
+    monkeypatch.setattr(validators_svc, "_now", lambda: now)
+    monkeypatch.setattr(validator_operators, "MIN_QUALIFICATION_SECONDS", 72 * 3600)
+    monkeypatch.setattr(validator_operators, "SAMPLE_INTERVAL_SECONDS", 300)
+    monkeypatch.setattr(validator_operators, "MIN_SAMPLE_COVERAGE", 0.8)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t).where(validators_t.c.id == validator_id).values(
+                independence_status="candidate",
+                operator_group_id="opg_private_review_01",
+                independence_review_ref="private:review-next-step",
+                qualification_started_at=now - timedelta(hours=hours),
+                heartbeat_sample_count=samples,
+                last_heartbeat_sampled_at=now,
+                last_heartbeat=now,
+                software_version="v0.1.0-preview.13",
+            )
+        )
+        await session.commit()
+        before = dict((await session.execute(
+            sa.select(validators_t).where(validators_t.c.id == validator_id)
+        )).mappings().one())
+
+    body = await validators_svc.public_validator_status(validator_id)
+
+    assert body["summary"] == "qualifying"
+    assert ("Request maintainer review" in body["next_action"]) is expected_review
+    assert ("until its time" in body["next_action"]) is not expected_review
+    assert body["qualification"]["status"] == "candidate"
+    assert body["qualification"]["review_current"] is False
+    assert body["qualification"]["independent_vote_eligible"] is False
+    assert body["economic_effect"] == "none"
+    assert body["activity"] == {"assigned": 0, "completed": 0, "attested": 0}
+    assert "opg_private_review_01" not in json.dumps(body)
+    assert "private:review-next-step" not in json.dumps(body)
+    async with await database.new_session() as session:
+        after = dict((await session.execute(
+            sa.select(validators_t).where(validators_t.c.id == validator_id)
+        )).mappings().one())
+    assert after == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,heartbeat_age,version,summary",
+    [
+        ("suspended", 0, "v0.1.0-preview.13", "inactive"),
+        ("active", 3600, "v0.1.0-preview.13", "offline"),
+        ("active", 0, "v0.1.0-preview.9", "upgrade_required"),
+    ],
+)
+async def test_mature_candidate_still_prioritizes_operational_repairs(
+    db, monkeypatch, status, heartbeat_age, version, summary
+):
+    validator_id = await _register(uuid.uuid4())
+    now = datetime(2026, 9, 5, 19, tzinfo=UTC)
+    monkeypatch.setattr(validators_svc, "_now", lambda: now)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t).where(validators_t.c.id == validator_id).values(
+                status=status,
+                independence_status="candidate",
+                qualification_started_at=now - timedelta(days=4),
+                heartbeat_sample_count=2000,
+                last_heartbeat=now - timedelta(seconds=heartbeat_age),
+                software_version=version,
+            )
+        )
+        await session.commit()
+    body = await validators_svc.public_validator_status(validator_id)
+    assert body["qualification"]["time_ready"] is True
+    assert body["qualification"]["coverage_ready"] is True
+    assert body["summary"] == summary
+    assert "Request maintainer review" not in body["next_action"]
+    assert body["qualification"]["independent_vote_eligible"] is False
+
+
+@pytest.mark.asyncio
 async def test_public_validator_status_prioritizes_required_upgrade(db):
     account_id = uuid.uuid4()
     validator_id = await _register(account_id, software_version="v0.1.0-preview.9")
