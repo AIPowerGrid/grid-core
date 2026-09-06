@@ -4,6 +4,7 @@
 """Auto eligibility is checked before quota, paid reservation, or dispatch."""
 
 from unittest.mock import AsyncMock
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -84,3 +85,30 @@ async def test_x402_requires_price_even_when_global_charging_off(monkeypatch, se
         await o._handle_chat_completions_for_user(request, {}, x402_payment=({}, {}))
     assert exc.value.status_code == 503
     setup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_capped_all_model_service_filters_unpriced_candidates(monkeypatch, setup):
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "allowlist")
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_MODELS", frozenset({"qwen3-27b"}))
+    monkeypatch.setattr(credits, "get_settings", lambda: SimpleNamespace(
+        grid_charging_all_model_services=["website-homepage-demo"],
+    ))
+    monkeypatch.setenv("GRID_ROUTING_PIN", "gpt-oss-20b")
+    monkeypatch.setattr(o, "get_available_models", AsyncMock(return_value=["gpt-oss-20b", "qwen3-27b"]))
+    user = {"service_id": "website-homepage-demo", "key_kind": "service",
+            "scopes": ["inference.service_submit"],
+            "service_limits": {"per_request_micro": 10000, "daily_micro": 500000}}
+    request = ChatCompletionRequest(model="auto", messages=[{"role": "user", "content": "hello"}])
+    with pytest.raises(ReachedQuota):
+        await o._handle_chat_completions_for_user(request, user)
+    assert request.model == "qwen3-27b"
+
+
+@pytest.mark.asyncio
+async def test_qwen_offline_selects_priced_backup(monkeypatch, setup):
+    monkeypatch.setattr(o, "get_available_models", AsyncMock(return_value=["gpt-oss-20b", "gpt-oss-120b"]))
+    request = ChatCompletionRequest(model="auto", messages=[{"role": "user", "content": "hello"}])
+    with pytest.raises(ReachedQuota):
+        await o._handle_chat_completions_for_user(request, {})
+    assert request.model == "gpt-oss-120b"
