@@ -22,6 +22,15 @@ class InvalidObservation(ValueError):
     pass
 
 
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise InvalidObservation
+        result[key] = value
+    return result
+
+
 def _token(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise InvalidObservation
@@ -40,8 +49,7 @@ def _token(value: Any) -> dict[str, Any]:
         raw = value["bytes"]
         # Null byte representations are permitted by compatible APIs.
         if raw is not None and (
-            not isinstance(raw, list) or len(raw) > MAX_TOKEN_BYTES
-            or any(type(b) is not int or not 0 <= b <= 255 for b in raw)
+            not isinstance(raw, list) or len(raw) > MAX_TOKEN_BYTES or any(type(b) is not int or not 0 <= b <= 255 for b in raw)
         ):
             raise InvalidObservation
         result["bytes"] = list(raw) if raw is not None else None
@@ -61,7 +69,7 @@ def read_logprobs(data: str) -> dict[str, Any]:
     try:
         if len(data.encode("utf-8")) > MAX_EVENT_BYTES:
             raise InvalidObservation
-        event = json.loads(data)
+        event = json.loads(data, object_pairs_hook=_unique_object)
         if not isinstance(event, dict):
             raise InvalidObservation
         if event.get("type") != "response.output_text.delta":
@@ -121,7 +129,7 @@ class ResponsesObservation:
             self._bytes += size
             if size > MAX_EVENT_BYTES or self._bytes > MAX_STREAM_BYTES:
                 raise ObservationLimit
-            event = json.loads(data)
+            event = json.loads(data, object_pairs_hook=_unique_object)
             if not isinstance(event, dict):
                 raise InvalidObservation
             kind = event.get("type")
@@ -138,9 +146,12 @@ class ResponsesObservation:
             indices = (event.get("output_index"), event.get("content_index"))
             item_id = event.get("item_id")
             if (
-                type(sequence) is not int or not self._sequence < sequence < 2**53
+                type(sequence) is not int
+                or not self._sequence < sequence < 2**53
                 or any(type(i) is not int or not 0 <= i < 1024 for i in indices)
-                or not isinstance(item_id, str) or not 0 < len(item_id) <= 128
+                or not isinstance(item_id, str)
+                or not 0 < len(item_id) <= 128
+                or len(item_id.encode("utf-8")) > 128
             ):
                 raise InvalidObservation
             part = (item_id, *indices)
@@ -158,15 +169,17 @@ class ResponsesObservation:
             self._positions += len(observation["positions"])
             if self._positions > MAX_POSITIONS or len(self.events) >= MAX_DELTA_EVENTS:
                 raise ObservationLimit
-            self.events.append({
-                "sequence_number": sequence,
-                "item_id": item_id,
-                "output_index": indices[0],
-                "content_index": indices[1],
-                "visible_prefix_sha256": hashlib.sha256(self.text.encode("utf-8")).hexdigest(),
-                "delta": delta,
-                **observation,
-            })
+            self.events.append(
+                {
+                    "sequence_number": sequence,
+                    "item_id": item_id,
+                    "output_index": indices[0],
+                    "content_index": indices[1],
+                    "visible_prefix_sha256": hashlib.sha256(self.text.encode("utf-8")).hexdigest(),
+                    "delta": delta,
+                    **observation,
+                },
+            )
             self.text += delta
         except (ValueError, TypeError, OverflowError, RecursionError, UnicodeError) as exc:
             if isinstance(exc, ObservationLimit):

@@ -71,6 +71,48 @@ validator repo's local `RESPONSES_QUALIFICATION.md` for its checks and limits.
 
 ## Implementation
 
+### End-to-End Fault Qualification
+
+A local synthetic SSE backend exercised the unchanged released v0.3.8 worker
+over actual HTTP and WebSocket sockets, the Core collector, disposable Redis
+queue/replay, and the independent validator reader. These are transport fixtures,
+not native model outputs or public signed assignments.
+
+The first 18-case run found four mismatches: duplicate probability/event JSON
+keys were accepted, and over-byte-limit or invalid-Unicode item IDs were labeled
+available even though the validator rejected them. Core now rejects duplicate
+keys at any depth and checks item IDs against the reader's UTF-8 byte contract.
+Seven regression cases cover those failures, nested alternative duplicates,
+and valid identifiers exactly at the byte limit. Five failed before the fix.
+
+The final formatted source passed all 18 transport cases: two valid controls,
+missing/empty/malformed/over-count probabilities, positive/boolean/NaN values,
+both invalid identifiers, duplicate keys, replay, missing/extra terminal events,
+and oversized event/text payloads. Invalid cases became unavailable, never
+failed-worker scores. Oversized streams closed their test connection; a later
+control passed on a new connection. This is not same-socket recovery proof.
+Queue entries were acknowledged, Redis replay matched the collected envelope,
+and guarded economic/health functions were never called. The owned Redis and
+test listeners stopped. Production workers and state were not changed.
+
+Private evidence SHA-256:
+
+- Original failing run:
+  `b213b15e8ec4b0f2d8bb8cc9bbc2e64267245b9b5e13bc21b95f5971a6d6a9d4`.
+- Final formatted-source fault run:
+  `5c5b74e29810779a193c039b15a02fc66077ba846d0a59a7c2d81959403ccf8a`.
+- Fresh LM Studio follow-up after the logic fix:
+  `0d876097e861cdc858aa907b075eb7a681c8d78dc8ae59a579aa8cb4a9de7e03`.
+  It preserved seven native probability positions and one explicit missing
+  delta, and again rejected the throwaway diagnostic as a network attestation.
+
+The final focused five-file regression suite passed 122 tests with no skips,
+including the optional private capture replay. Ruff and Black checks passed.
+The full Grid suite and public assignment/signing loop were not rerun by this
+narrow parser fix; the remaining gates below still apply.
+
+### Components
+
 - `validator_responses.py`: bounded per-event parsing and whole-stream
   accumulation, explicit missing-position gaps, output-item/sequence binding,
   visible-prefix hashes and distinct terminal availability.
