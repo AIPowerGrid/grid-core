@@ -23,6 +23,7 @@ def test_simple_short_goes_light():
     assert meta["task_class"] == "simple"
     assert meta["effort"] == "light"
     assert model in AVAIL and meta["fallback"] is False
+    assert model == "qwen3-27b"
 
 
 def test_code_detected():
@@ -60,7 +61,7 @@ def test_variant_quality_forces_heavy():
     assert meta["effort"] == "heavy"
 
 
-def test_never_fails_when_a_worker_is_online():
+def test_falls_back_to_curated_online_model():
     # Only a model that isn't first-choice for "code" is online — must still resolve.
     model, meta = _route("auto", "write code", avail=["deepseek-v4-flash-nvfp4"])
     assert model == "deepseek-v4-flash-nvfp4"
@@ -68,13 +69,14 @@ def test_never_fails_when_a_worker_is_online():
 
 def test_offline_candidate_skipped():
     # Preferred heavy models offline → falls back to an online one, flagged.
-    model, meta = _route("auto:quality", "solve step by step", avail=["gpt-oss-20b"])
-    assert model == "gpt-oss-20b"
+    model, meta = _route("auto:quality", "solve step by step", avail=["deepseek-v4-flash-nvfp4"])
+    assert model == "deepseek-v4-flash-nvfp4"
+    assert meta["fallback"] is True
 
 
 def test_env_pin_forces_model(monkeypatch):
     monkeypatch.setenv("GRID_ROUTING_PIN", "qwen3-27b")
-    model, meta = _route("auto", "hi there")  # would normally be gpt-oss-20b
+    model, meta = _route("auto", "hi there")
     assert model == "qwen3-27b"
     assert meta["pinned"] is True
 
@@ -87,25 +89,44 @@ def test_pin_ignored_when_offline(monkeypatch):
 
 
 def test_scores_override_curated_order():
-    # 'code' light tier curates gpt-oss-20b first, but if deepseek scores higher
-    # among online candidates it should win. (Put both in the default light tier.)
-    scores = {"gpt-oss-20b": {"score": 0.2}, "deepseek-v4-flash-nvfp4": {"score": 0.9}}
-    model, meta = r.resolve_auto("auto", "hi there", AVAIL, scores=scores)
+    # Scores may reorder peers in the same heavy tier, not bypass the tier.
+    scores = {"gpt-oss-120b": {"score": 0.2}, "deepseek-v4-flash-nvfp4": {"score": 0.9}}
+    model, meta = r.resolve_auto("auto:quality", "hi there", AVAIL, scores=scores)
     assert meta["scored"] is True
     assert model == "deepseek-v4-flash-nvfp4"  # higher score beats curated order
     assert meta.get("score") == 0.9
 
 
 def test_scores_tie_breaks_to_curated_order():
-    scores = {"gpt-oss-20b": {"score": 0.5}, "deepseek-v4-flash-nvfp4": {"score": 0.5}}
-    model, _ = r.resolve_auto("auto", "hi there", AVAIL, scores=scores)
-    assert model == "gpt-oss-20b"  # curated first wins the tie
+    scores = {"gpt-oss-120b": {"score": 0.5}, "deepseek-v4-flash-nvfp4": {"score": 0.5}}
+    model, _ = r.resolve_auto("auto:quality", "hi there", AVAIL, scores=scores)
+    assert model == "gpt-oss-120b"  # curated first wins the tie
 
 
 def test_no_scores_uses_curated_order():
     model, meta = r.resolve_auto("auto", "hi there", AVAIL, scores=None)
-    assert model == "gpt-oss-20b"
+    assert model == "qwen3-27b"
     assert meta["scored"] is False
+
+
+def test_speed_cannot_override_qwen_default():
+    model, _ = r.resolve_auto("auto", "hello", AVAIL, scores={
+        "qwen3-27b": {"score": -1}, "gpt-oss-120b": {"score": 100},
+    })
+    assert model == "qwen3-27b"
+
+
+def test_speed_cannot_override_reasoning_tier():
+    model, _ = r.resolve_auto("auto", "solve step by step", AVAIL, scores={
+        "deepseek-v4-flash-nvfp4": {"score": 100},
+    })
+    assert model in ["gpt-oss-120b", "qwen3-27b"]
+
+
+@pytest.mark.parametrize("available", [[], ["Smollm-135m"], ["unknown-fast-model"]])
+def test_no_arbitrary_fallback(available):
+    with pytest.raises(r.NoEligibleModel):
+        _route("auto", "hi", available)
 
 
 def test_pick_worker_single_is_noop():
