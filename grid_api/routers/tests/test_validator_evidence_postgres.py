@@ -47,7 +47,7 @@ async def prepare(count=1):
     prepared = []
     for account, validator, wallet, key in validators:
         issued = await svc.issue_assignments(
-            account_id=account, validator_id=validator, validator_wallet=wallet, active_workers=workers, limit=1
+            account_id=account, validator_id=validator, validator_wallet=wallet, active_workers=workers, limit=1,
         )
         assignment = issued["assignments"][0]
         payload = {
@@ -71,7 +71,7 @@ async def prepare(count=1):
             await session.execute(
                 sa.update(assignments)
                 .where(assignments.c.id == assignment["assignment_id"])
-                .values(probe_status="completed", probe_evidence_hash="a" * 64, probe_verdict="healthy")
+                .values(probe_status="completed", probe_evidence_hash="a" * 64, probe_verdict="healthy"),
             )
             await session.commit()
         prepared.append((account, validator, key, payload))
