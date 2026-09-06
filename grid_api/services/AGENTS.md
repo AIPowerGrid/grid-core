@@ -298,6 +298,10 @@ content sanitization, and reward settlement.
   contract. Core dispatches these probes before ordinary raw settlement and
   commits only bounded observations to its Redis replay buffer. Per-event and
   whole-stream limits bound memory; missing probabilities remain explicit gaps.
+  Duplicate JSON keys at any depth are unusable, never last-value-wins.
+  Message item identifiers must be valid UTF-8 within 128 bytes, matching the
+  independent reader. Invalid metadata yields unavailable evidence, not an
+  available envelope that the validator cannot consume.
   The envelope retains native probabilities, byte sequences, delta/sequence/item
   indices and visible-prefix hashes, not hidden reasoning or a proven full model
   context. It is incompatible with the chat first-distribution scorer by design.

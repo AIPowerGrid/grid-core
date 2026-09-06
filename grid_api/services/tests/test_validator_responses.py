@@ -17,13 +17,21 @@ from grid_api.services.validator_responses import (
 
 
 def event():
-    return {"type": "response.output_text.delta", "delta": "Blue", "logprobs": [{
-        "token": "Blue", "logprob": -0.127, "bytes": [66, 108, 117, 101],
-        "top_logprobs": [
-            {"token": "Blue", "logprob": -0.127, "bytes": [66, 108, 117, 101]},
-            {"token": "Green", "logprob": -4.125, "bytes": None},
+    return {
+        "type": "response.output_text.delta",
+        "delta": "Blue",
+        "logprobs": [
+            {
+                "token": "Blue",
+                "logprob": -0.127,
+                "bytes": [66, 108, 117, 101],
+                "top_logprobs": [
+                    {"token": "Blue", "logprob": -0.127, "bytes": [66, 108, 117, 101]},
+                    {"token": "Green", "logprob": -4.125, "bytes": None},
+                ],
+            },
         ],
-    }]}
+    }
 
 
 def test_preserves_selected_and_alternatives_without_renormalization():
@@ -40,7 +48,9 @@ def test_missing_is_unavailable_not_failed(value):
     source = event()
     source["logprobs"] = value
     assert read_logprobs(json.dumps(source)) == {
-        "positions": [], "status": "unavailable", "reason": "missing_logprobs",
+        "positions": [],
+        "status": "unavailable",
+        "reason": "missing_logprobs",
     }
 
 
@@ -111,17 +121,56 @@ def stream_delta(**changes):
     return {**event(), "sequence_number": 1, "item_id": "msg-test", "output_index": 0, "content_index": 0, **changes}
 
 
-@pytest.mark.parametrize("changes", [
-    {"sequence_number": True}, {"sequence_number": -1}, {"sequence_number": 2**53},
-    {"item_id": "x" * 129}, {"output_index": True}, {"content_index": -1},
-    {"delta": []},
-])
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"sequence_number": True},
+        {"sequence_number": -1},
+        {"sequence_number": 2**53},
+        {"item_id": "x" * 129},
+        {"item_id": "\u00e9" * 65},
+        {"item_id": "\ud800"},
+        {"output_index": True},
+        {"content_index": -1},
+        {"delta": []},
+    ],
+)
 def test_bad_delta_binding_is_unavailable(changes):
     observation = ResponsesObservation()
     observation.add(json.dumps(stream_delta(**changes)))
     observation.add('{"type":"response.completed"}')
     assert observation.result()["status"] == "unavailable"
     assert observation.result()["reason"] == "malformed_event"
+
+
+@pytest.mark.parametrize("item_id", ["x" * 128, "\u00e9" * 64])
+def test_item_id_accepts_exact_utf8_byte_limit(item_id):
+    observation = ResponsesObservation()
+    observation.add(json.dumps(stream_delta(item_id=item_id)))
+    observation.add('{"type":"response.completed"}')
+    assert observation.result()["status"] == "available"
+    assert observation.events[0]["item_id"] == item_id
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ('"sequence_number": 1', '"sequence_number": 2, "sequence_number": 1'),
+        ('"logprob": -0.127', '"logprob": -8, "logprob": -0.127'),
+        ('"logprob": -4.125', '"logprob": -9, "logprob": -4.125'),
+    ],
+)
+def test_duplicate_json_keys_are_not_last_value_wins(old, new):
+    raw = json.dumps(stream_delta())
+    assert old in raw
+    raw = raw.replace(old, new)
+    assert read_logprobs(raw)["status"] == "unavailable"
+    observation = ResponsesObservation()
+    observation.add(raw)
+    observation.add('{"type":"response.completed"}')
+    assert observation.result()["status"] == "unavailable"
+    assert observation.result()["reason"] == "malformed_event"
+    assert observation.events == []
 
 
 def test_replayed_sequence_is_not_counted_twice():
