@@ -303,6 +303,12 @@ expired or out-of-scope pilots return 503 without revealing membership.
 ## Verification
 
 - `pytest grid_api/routers/`.
+- `tests/test_validator_evidence_postgres.py` requires disposable
+  `VALIDATORS_TEST_DB_URL`: signed binding/identity corruption, expired or
+  unfinished probes, concurrent duplicate/conflicting votes, and disagreement.
+  It synthesizes completed probe evidence and tests the storage service, not
+  HTTP authentication, model fidelity, or compensation. CI supplies PostgreSQL
+  16; local PostgreSQL 14 results are supplementary, not release qualification.
 - Worker pairing/auth changes: include
   `grid_api/routers/tests/test_worker_enrollment_contract.py` and the service
   lifecycle tests before the full suite.
