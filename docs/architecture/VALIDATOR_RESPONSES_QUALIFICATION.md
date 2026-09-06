@@ -53,6 +53,22 @@ completion endpoints. They must not be generalized to streaming Responses.
 Neither successful transport nor enabling logprobs qualifies a worker as a
 trusted model reference.
 
+### Fresh Local Component Follow-Up
+
+Two subsequent fresh requests traversed the released worker over a real
+loopback WebSocket, this Core collector/Redis, and the independent validator
+`responses_observation.py` checker. Both preserved seven native positions and
+one missing first-word delta. The second private report SHA256 is
+`763886b028471dac96641ee23647216484157c7458000486d55c6da24186ef83`.
+It also proves EIP-191 recovery of a throwaway-key transport diagnostic and
+rejection of that diagnostic by Core's network-attestation normalizer.
+
+This advances fresh component transport beyond replay. It still bypasses the
+production registration handshake, public assignment API, validator assignment
+loop, outbox and attestation submission. No production credentials or state
+were used. The new independent reader is not an advertised scorer; see the
+validator repo's local `RESPONSES_QUALIFICATION.md` for its checks and limits.
+
 ## Implementation
 
 - `validator_responses.py`: bounded per-event parsing and whole-stream
