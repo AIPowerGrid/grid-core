@@ -5648,21 +5648,34 @@ async def _run_targeted_text_stage(
     prompt: str,
     request: dict[str, Any],
     timeout_seconds: int = PROBE_TIMEOUT_SECONDS,
+    api_format: str = "openai-chat",
 ) -> dict[str, Any]:
     """Dispatch and witness one economically inert stage on the assigned worker."""
     from . import job_queue, token_stream
 
+    if api_format not in {"openai-chat", "openai-responses"}:
+        raise ValueError("unsupported validator text probe format")
+    if api_format == "openai-responses" and (
+        request.get("stream") is not True
+        or type(request.get("max_output_tokens")) is not int
+        or not 1 <= request["max_output_tokens"] <= 256
+        or type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 300
+        or not row.get("target_worker_id")
+    ):
+        raise ValueError("Responses qualification requires a bounded streaming request")
     payload = {
         "request": request,
-        "api_format": "openai-chat",
+        "api_format": api_format,
         "prompt": prompt,
-        "max_length": int(request.get("max_tokens") or 32),
+        "max_length": int(request.get("max_output_tokens" if api_format == "openai-responses" else "max_tokens") or 32),
         "temperature": float(request.get("temperature") or 0),
         "_validator_probe": True,
         "_validator_assignment_id": assignment_id,
         "_validator_probe_group_id": row["probe_group_id"],
         "_validator_grid_nonce": row["grid_nonce"],
     }
+    if api_format == "openai-responses":
+        payload["_validator_timeout_seconds"] = timeout_seconds
     try:
         await job_queue.submit_job(
             job_id,
@@ -5697,6 +5710,16 @@ async def _run_targeted_text_stage(
                     "code": event.get("code", 502),
                 }
             if event.get("text") == token_stream.DONE_SENTINEL:
+                if api_format == "openai-responses":
+                    binding = event.get("grid")
+                    expected = {
+                        "worker_id": str(row["target_worker_id"]),
+                        "assignment_id": assignment_id,
+                        "grid_nonce": row["grid_nonce"],
+                        "economic_effect": "none",
+                    }
+                    if not isinstance(binding, dict) or any(binding.get(key) != value for key, value in expected.items()):
+                        return {"status": "error", "code": 502, "message": "worker witness binding failed"}
                 return {
                     "status": "completed",
                     "full_text": event.get("full_text") or "".join(chunks),
