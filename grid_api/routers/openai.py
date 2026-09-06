@@ -41,7 +41,7 @@ from .. import format as fmt
 from ..models.openai import ChatCompletionRequest, ModelInfo, ModelListResponse
 from ..services import accounts as accounts_svc
 from ..services import concurrency
-from ..services import credits, den, job_queue, media, quota, recipes, token_stream
+from ..services import credits, den, job_queue, media, pricing, quota, recipes, token_stream
 from ..services.sanitizer import sanitize_messages
 from .worker_ws import get_available_models
 from ..services import router as router_svc
@@ -388,8 +388,18 @@ async def _handle_chat_completions_for_user(
     # model name is never silently swapped. routing_meta rides the `grid` block.
     routing_meta = None
     if request.model in router_svc.AUTO_MODELS:
+        # Billing remains authoritative at reserve time. Exclude models already
+        # known to be unbillable before ranking, rather than choosing a 402.
+        eligible = [m for m in available if pricing.is_priced_for(m, "text")
+                    or (x402_payment is None and not credits.charging_enabled_for(user, m))]
         route_text = _messages_to_prompt([m.model_dump(exclude_none=True) for m in request.messages])
-        request.model, routing_meta = await router_svc.resolve_auto_async(request.model, route_text, available)
+        try:
+            request.model, routing_meta = await router_svc.resolve_auto_async(request.model, route_text, eligible)
+        except router_svc.NoEligibleModel:
+            raise HTTPException(
+                status_code=503,
+                detail="No eligible auto model is currently available. Please try again shortly.",
+            ) from None
 
     # Resolve model. Never silently substitute — a client asking for
     # llama-70b must not receive output from whatever random model happens

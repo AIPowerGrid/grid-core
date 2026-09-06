@@ -481,6 +481,11 @@ content sanitization, and reward settlement.
 - `router.py` must not read validator attestations into model or replica scores.
   Until blind quality evidence and a reviewed activation policy exist, `auto`
   routing may use curated tiers plus Grid-measured throughput/latency only.
+- Ordinary light chat/code and the default light tier prefer `qwen3-27b`.
+  Model scoring ranks only within the first nonempty eligible curated tier;
+  never flatten tiers or fall back to an arbitrary connected model. Operator
+  pins remain subject to the caller's eligibility list. Missing curated
+  capacity raises `NoEligibleModel`, not a fabricated model identity.
 - Random challenge values prevent answer replay, not template recognition. Do
   not describe generated canaries as blind workload validation or proof of a
   model family. Protocol-conformance evidence must remain separate from
