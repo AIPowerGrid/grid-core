@@ -156,6 +156,10 @@ transport, accounts, stats, health/metrics.
 - Demand billing must be applied uniformly across all paid inference entry
   points before live charging. Do not add a new work-submitting route without
   reserve/reconcile or an explicit no-charge policy.
+- Chat `auto*` routing excludes models without an applicable text price when
+  the request is chargeable (always for x402), before ranking or quota use.
+  No eligible curated model returns 503 before dispatch. Explicit model names
+  remain unchanged and retain the normal authorization/reservation checks.
 - x402 requests must use the external reservation path and return the final
   grid-counted micro-USD amount through the SDK settlement override. Never let
   them draw daily free, promotional, or purchased account credit.
