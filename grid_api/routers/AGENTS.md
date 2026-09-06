@@ -36,6 +36,14 @@ transport, accounts, stats, health/metrics.
   Assignment-bound image/video probes branch before ordinary media settlement: they
   strip all `_validator_*` metadata, freeze the uploaded object through Core,
   acknowledge with `den: 0`, and never touch customer or worker economics.
+  Assignment-bound text probes branch before ordinary raw passthrough as well.
+  The internal Responses qualification adapter captures bounded native
+  output-text probabilities through the dedicated no-den collector; it never
+  invokes the paid passthrough handler. Missing or partial observations do not
+  become failed-worker votes. Time/size overruns cancel and close the socket so
+  late frames cannot contaminate a subsequent job. No public assignment policy
+  currently selects this adapter, and its observations cannot feed the existing
+  chat first-token score without separate context-alignment calibration.
   The separate compensated-audit hold, when present for an ordinary job UUID,
   settles through the exact text/media/passthrough paid terminal: ordinary frame,
   nonzero den acknowledgement, and no worker-visible audit marker. No scheduler
@@ -168,6 +176,10 @@ transport, accounts, stats, health/metrics.
 - Worker-reported text logprobs are untrusted evidence. Normalize and bound the
   first distribution before it reaches Redis; never retain an arbitrary nested
   backend payload or treat it as cryptographic model identity.
+  Responses qualification instead preserves bounded native per-delta records,
+  missing-probability gaps, sequence/item indices, and visible-prefix hashes.
+  These hashes are not full model-context commitments: hidden reasoning,
+  tokenizer and chat-template equivalence remain unverified.
 - Media completion must report exactly one unique canonical digest per
   presigned output slot, and every expected R2 object must pass existence,
   content-type, and size validation before payout or demand settlement.

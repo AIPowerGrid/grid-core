@@ -21,6 +21,9 @@ validation, worker incentives, and trust boundaries.
   economic gates.
 - `VALIDATOR_ANTI_GAMING.md` - executable hostile-worker baseline, public-probe
   limitations, blind-audit contract, and the quality-evidence promotion gate.
+- `VALIDATOR_RESPONSES_QUALIFICATION.md` - local native-logprob transport proof,
+  isolated Redis capture replay, honest coverage gaps and remaining live
+  assignment/runtime/calibration gates. Not a public scoring policy.
 - `VALIDATOR_SHADOW_AUTHORITY.md` - default-off seven-day advisory-routing
   observation contract after three independently qualified operators. It owns
   the no-side-effect boundary, eligible evidence, replayable decision record,

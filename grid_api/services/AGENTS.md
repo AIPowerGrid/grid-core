@@ -291,6 +291,24 @@ content sanitization, and reward settlement.
   reference disagreement are inconclusive. Worker-supplied logprobs are not
   cryptographic proof of model identity, and this lane has no routing, reward,
   strike, payout, or slashing effect.
+  `validator_responses.py` owns the bounded native Responses observation reader
+  and stream accumulator. The internal `_run_targeted_text_stage` can explicitly
+  select streaming `openai-responses` for qualification (at most 256 output
+  tokens, 300 seconds); public assignment selectors still use the existing chat
+  contract. Core dispatches these probes before ordinary raw settlement and
+  commits only bounded observations to its Redis replay buffer. Per-event and
+  whole-stream limits bound memory; missing probabilities remain explicit gaps.
+  The envelope retains native probabilities, byte sequences, delta/sequence/item
+  indices and visible-prefix hashes, not hidden reasoning or a proven full model
+  context. It is incompatible with the chat first-distribution scorer by design.
+  No public Responses fidelity policy, runtime attestation adapter, calibrated
+  comparison, or live deployment is established by this transport work.
+  Tests cover unavailable/partial observations, terminal duplication, malformed
+  input, bounded streams, economic isolation, and a real disposable Redis
+  queue/collector/replay round trip. `test_validator_responses_redis.py` skips its
+  isolated Redis tests if `redis-server` is absent; the separate optional
+  `VALIDATOR_RESPONSES_CAPTURE` test accepts a private recorded worker capture.
+  A recorded replay is not a live end-to-end validator attestation.
   `validator_bonds.py` owns the default-off Base cache refresh. It verifies all
   WorkerRegistry selectors route through the reviewed Grid Diamond to one
   code-pinned facet release at one mutually finalized block, requires two distinct
