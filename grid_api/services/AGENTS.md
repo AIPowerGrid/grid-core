@@ -369,6 +369,13 @@ content sanitization, and reward settlement.
   insufficient: a current independent review, fresh heartbeat, and explicit
   signing-wallet allowlist are mandatory. No scheduler or public endpoint may
   create compensated work until the separate configuration/dispatch gate lands.
+  `tests/test_paid_validator_audit_postgres.py` exercises the worker-ledger/audit
+  terminal against a disposable PostgreSQL with one private schema per test.
+  It observes blocked backend transactions before releasing a job lock, checks
+  twenty duplicate completions and release/success races, and terminates only
+  its own transaction backend before commit to prove both halves roll back.
+  These tests neither send validator compensation nor replace migration/HTTP
+  integration coverage. Their cleanup drops only the test's generated schema.
 - A successful Base funding claim atomically writes its immutable
   `grid_deposits` receipt and purchased-credit ledger movement. AIPG valuation
   must use a fresh operator epoch plus hard transaction/account/network caps;
