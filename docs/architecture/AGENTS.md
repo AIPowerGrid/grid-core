@@ -53,7 +53,8 @@ validation, worker incentives, and trust boundaries.
   recovery exist dark; scheduling, scoring, and classifier gates remain absent.
 - `VALIDATOR_COMPENSATION_PILOT.md` - capped operator compensation, implemented
   dark PostgreSQL contracts/allocations, offline simulation and remaining
-  recipient/sender gates. Not worker-audit funding or payment approval.
+  recipient-consent backend and remaining operator UI/sender gates.
+  Not worker-audit funding or payment approval.
 - `MEDIA_VALIDATION_V1.md` - accepted fail-closed image/video validation design:
   private challenges, cached bond eligibility, rotating references, Core object
   hashing, validator fetch defenses, dark validator-side modality scoring, and

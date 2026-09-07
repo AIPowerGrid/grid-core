@@ -27,7 +27,8 @@ for humans and agents.
   ordinary worker economics, atomic settlement, and quality-promotion gates.
 - `architecture/VALIDATOR_COMPENSATION_PILOT.md` - validator-operator pilot,
   private PostgreSQL allocation contract, legacy offline simulation and the
-  remaining recipient/sender/approval gates before any payment.
+  signed recipient-consent backend and remaining UI/sender/approval gates
+  before any payment.
 - `architecture/NETWORK_READINESS.md` - current implementation and rollout
   status for validator, worker-growth, economics, blockchain, and operations
   requirements.

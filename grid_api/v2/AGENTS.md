@@ -151,6 +151,13 @@ validator shadow-observation records.
   the signed attestation preserve the work commitment after operational
   assignment pruning. Account beneficiaries are frozen, but their signing
   wallets are not implicitly payment recipients. No sender is implemented.
+- `grid_validator_compensation_recipients`, added empty by `0037`, stores one
+  immutable, dual-signed and maintainer-approved recipient per allocation.
+  Composite beneficiary and unique allocation-hash foreign keys preserve its
+  accounting references. The proof commits exact Base token/amount, destination
+  and signature window; the service reconciles both commitments on every replay.
+  No nonce, transaction or worker-payout row is created. Retain this financial
+  consent history on rollback; downgrade refuses a nonempty table.
 - New columns need explicit migrations, tests, and backfill/default strategy for
   existing rows.
 - Do not store plaintext API keys, private keys, or worker secrets.
