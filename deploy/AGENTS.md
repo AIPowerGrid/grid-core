@@ -65,9 +65,11 @@ executes an immutable release selected through `/home/aipg/current`.
 
 - During a reviewed validator upgrade, set `VALIDATOR_COHORT_UPGRADE_VERSION`
   to one exact release tag while preserving `VALIDATOR_COHORT_BASELINE_VERSION`.
-  Verify both versions remain eligible and preserve stored qualification history.
+  For two reviewed upgrades, clear the singular setting and use the JSON-array
+  `VALIDATOR_COHORT_UPGRADE_VERSIONS` (at most two distinct exact release tags).
+  Never set both. Verify all listed versions remain eligible and preserve stored qualification history.
   Shadow observation must stay disabled during this overlap. After migration,
-  promote the new baseline and clear the upgrade setting; restarting a node must
+  promote the new baseline and clear both upgrade settings; restarting a node must
   never reset its signing identity or qualification timestamps.
 
 - When adding services, document ports, health checks, restart behavior, and

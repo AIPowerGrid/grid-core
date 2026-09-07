@@ -13,7 +13,8 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from grid_api.services import validator_operators
+from grid_api.config import GridSettings
+from grid_api.services import validator_operators, validators
 from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import metadata
 from grid_api.v2.schema import validators as validators_t
@@ -24,6 +25,71 @@ pytestmark = pytest.mark.skipif(
     not PG_URL.startswith("postgresql"),
     reason="set VALIDATORS_TEST_DB_URL to a disposable PostgreSQL database",
 )
+
+
+@pytest.mark.asyncio
+async def test_reviewed_version_transition_preserves_history_on_postgres(pg, monkeypatch):
+    started = datetime(2026, 9, 1, 12, tzinfo=UTC)
+    account_id = uuid4()
+    validator_id = "val_" + uuid4().hex
+    wallet = "0x" + "2" * 40
+    settings = GridSettings(_env_file=None, validator_cohort_upgrade_version="v0.1.0-preview.15")
+    monkeypatch.setattr(validator_operators, "get_settings", lambda: settings)
+
+    async def new_session():
+        return pg()
+
+    monkeypatch.setattr(validators, "new_session", new_session)
+    async with pg() as session:
+        await session.execute(sa.insert(accounts_t).values(id=account_id, flags={}))
+        await session.execute(sa.insert(validators_t).values(
+            id=validator_id, account_id=account_id, signing_wallet=wallet,
+            software_version="v0.1.0-preview.15", capabilities=["text.generated.v8"],
+            registration_signature="fixture", status="active", last_heartbeat=started,
+            independence_status="unreviewed", qualification_started_at=started,
+            heartbeat_sample_count=10, last_heartbeat_sampled_at=started,
+            created=started, updated=started,
+        ))
+        await session.commit()
+
+    settings = GridSettings(_env_file=None, validator_cohort_upgrade_versions=["v0.1.0-preview.15", "v0.1.0-preview.16"])
+    expected_samples = 10
+    for index, (version, eligible) in enumerate([
+        ("v0.1.0-preview.13", True), ("v0.1.0-preview.15", True),
+        ("v0.1.0-preview.16", True), ("v0.1.0-preview.17", False),
+        ("vv0.1.0-preview.16", False), ("0.1.0-preview.16", True),
+    ], start=1):
+        now = started + timedelta(minutes=index * 6)
+        monkeypatch.setattr(validators, "_now", lambda: now)
+        result = await validators.heartbeat_validator(
+            account_id=account_id, signing_wallet=wallet, software_version=version,
+            capabilities=["text.generated.v8"],
+        )
+        expected_samples += int(eligible)
+        assert result["economic_effect"] == "none"
+        async with pg() as session:
+            row = (await session.execute(sa.select(validators_t).where(validators_t.c.id == validator_id))).mappings().one()
+            sql_eligible = await session.scalar(sa.select(validator_operators.cohort_version_filter(sa.literal(version))))
+        assert bool(sql_eligible) == validator_operators.cohort_version_status(version)[1] == eligible
+        assert row["qualification_started_at"] == started
+        assert row["heartbeat_sample_count"] == expected_samples
+        assert row["signing_wallet"] == wallet
+        assert row["account_id"] == account_id
+        assert row["independence_status"] == "unreviewed"
+        assert row["operator_group_id"] is None
+        assert row["independence_reviewed_at"] is None
+
+    # Rollback restores the previous eligibility policy without rewriting history.
+    settings = GridSettings(_env_file=None, validator_cohort_upgrade_version="v0.1.0-preview.15")
+    monkeypatch.setattr(validators, "_now", lambda: started + timedelta(hours=1))
+    await validators.heartbeat_validator(
+        account_id=account_id, signing_wallet=wallet, software_version="v0.1.0-preview.16",
+        capabilities=["text.generated.v8"],
+    )
+    async with pg() as session:
+        row = (await session.execute(sa.select(validators_t).where(validators_t.c.id == validator_id))).mappings().one()
+    assert row["qualification_started_at"] == started
+    assert row["heartbeat_sample_count"] == expected_samples
 
 
 @pytest_asyncio.fixture
