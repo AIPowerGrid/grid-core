@@ -228,7 +228,12 @@ transport, accounts, stats, health/metrics.
   Additive sampling/freshness metadata distinguishes vote counts from retained
   probe groups and completed-probe age from receipt age. Do not turn null
   confidence intervals or independent sample counts into zero or a green
-  confidence indicator. The route remains active-validator and scope gated.
+  confidence indicator. `/v1/validator/scorecards` remains active-validator and
+  `validator.read` gated. `/v1/account/validator-scorecards` exposes the same
+  redacted network aggregates to authenticated v2 `account.read` credentials,
+  including Google-only and service-refreshed user sessions without a node.
+  This grants no private assignment health, registration, probe, work or
+  attestation authority; those existing node routes retain their gates.
 - Public-template validator probes are adversarially reproducible by parsers and
   probe-aware model switching. Keep the hostile-worker contract test in CI and
   never mark these generated probes as quality-eligible.

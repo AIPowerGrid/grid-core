@@ -493,6 +493,33 @@ async def submit_attestation(
     }
 
 
+@router.get("/v1/account/validator-scorecards")
+@limiter.limit("30/minute")
+async def account_validator_scorecards(
+    request: Request,
+    apikey: str | None = Header(None),
+    authorization: str | None = Header(None),
+    limit: int = Query(100, ge=1, le=500),
+    since_hours: int = Query(168, ge=1, le=24 * 90),
+    worker_id: str | None = Query(None, max_length=64),
+    model: str | None = Query(None, max_length=255),
+    authority: str = Query("all", pattern="^(all|preview|authoritative)$"),
+):
+    """Read redacted network evidence without registering a validator node.
+
+    Account-read authority grants no private assignment health, node identity,
+    work allocation, probe execution or attestation permission.
+    """
+    await _validator_user(apikey, authorization, required_scope="account.read")
+    return await validators_svc.scorecards(
+        limit=limit,
+        since_hours=since_hours,
+        worker_id=worker_id,
+        model=model,
+        authority=authority,
+    )
+
+
 @router.get("/v1/validator/scorecards")
 @limiter.limit("30/minute")
 async def validator_scorecards(
