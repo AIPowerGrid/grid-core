@@ -899,6 +899,8 @@ validators = sa.Table(
     sa.Column("qualification_started_at", sa.DateTime(timezone=True), nullable=True),
     sa.Column("heartbeat_sample_count", sa.Integer, nullable=False, default=0),
     sa.Column("last_heartbeat_sampled_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("heartbeat_window_started_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("heartbeat_window_samples", PortableJSON, nullable=False, default=list, server_default="[]"),
     sa.Column("independence_reviewed_at", sa.DateTime(timezone=True), nullable=True),
     sa.Column("independence_expires_at", sa.DateTime(timezone=True), nullable=True, index=True),
     sa.Column("independence_review_ref", sa.String(128), nullable=True),

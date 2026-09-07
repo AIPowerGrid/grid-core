@@ -42,6 +42,9 @@ DEFAULT_REVIEW_DAYS = max(
     int(os.getenv("VALIDATOR_OPERATOR_REVIEW_DAYS", "30") or 30),
 )
 MAX_REVIEW_DAYS = 90
+RECOVERY_WINDOW_SECONDS = 72 * 3600
+RECOVERY_BUCKET_SECONDS = 300
+RECOVERY_BUCKET_COUNT = RECOVERY_WINDOW_SECONDS // RECOVERY_BUCKET_SECONDS
 
 GROUP_RE = re.compile(r"^opg_[A-Za-z0-9_-]{8,88}$")
 _REVIEW_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$")
@@ -74,6 +77,8 @@ def _digest(row: dict[str, Any]) -> str:
         "qualification_started_at": str(row["qualification_started_at"] or ""),
         "heartbeat_sample_count": int(row["heartbeat_sample_count"] or 0),
         "last_heartbeat_sampled_at": str(row["last_heartbeat_sampled_at"] or ""),
+        "heartbeat_window_started_at": str(row.get("heartbeat_window_started_at") or ""),
+        "heartbeat_window_samples": row.get("heartbeat_window_samples") or [],
         "independence_reviewed_at": str(row["independence_reviewed_at"] or ""),
         "independence_expires_at": str(row["independence_expires_at"] or ""),
         "independence_review_ref": row["independence_review_ref"],
@@ -110,6 +115,26 @@ def cohort_version_filter(column):
     return sa.func.trim(column).in_(tags)
 
 
+def _recent_buckets(row: dict[str, Any], current: datetime) -> list[int]:
+    end = int(current.timestamp()) // RECOVERY_BUCKET_SECONDS
+    raw = row.get("heartbeat_window_samples")
+    if not isinstance(raw, list) or len(raw) > RECOVERY_BUCKET_COUNT:
+        return []
+    return sorted({bucket for bucket in raw if type(bucket) is int and end - RECOVERY_BUCKET_COUNT < bucket <= end})
+
+
+def record_recent_heartbeat(row: dict[str, Any], *, now: datetime) -> dict[str, Any]:
+    """Called only for a supported heartbeat under the validator's row lock."""
+    bucket = int(now.timestamp()) // RECOVERY_BUCKET_SECONDS
+    samples = _recent_buckets(row, now)
+    if bucket not in samples:
+        samples.append(bucket)
+    return {
+        "heartbeat_window_started_at": row.get("heartbeat_window_started_at") or now,
+        "heartbeat_window_samples": samples,
+    }
+
+
 def qualification_metrics(row: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
     current = now or _now()
     started = _aware(row.get("qualification_started_at"))
@@ -117,6 +142,16 @@ def qualification_metrics(row: dict[str, Any], *, now: datetime | None = None) -
     expected = (elapsed // SAMPLE_INTERVAL_SECONDS) + 1 if started else 0
     samples = int(row.get("heartbeat_sample_count") or 0)
     coverage = min(1.0, samples / expected) if expected else 0.0
+    lifetime_coverage = coverage
+    recent_started = _aware(row.get("heartbeat_window_started_at"))
+    recent_elapsed = max(0, int((current - recent_started).total_seconds())) if recent_started else 0
+    window_ready = bool(recent_started and recent_elapsed >= RECOVERY_WINDOW_SECONDS)
+    basis = "since_enrollment"
+    if window_ready:
+        basis = "recent_72h"
+        samples = len(_recent_buckets(row, current))
+        expected = RECOVERY_BUCKET_COUNT
+        coverage = samples / expected
     return {
         "elapsed_seconds": elapsed,
         "minimum_seconds": MIN_QUALIFICATION_SECONDS,
@@ -126,6 +161,11 @@ def qualification_metrics(row: dict[str, Any], *, now: datetime | None = None) -
         "minimum_sample_coverage": MIN_SAMPLE_COVERAGE,
         "time_ready": elapsed >= MIN_QUALIFICATION_SECONDS,
         "coverage_ready": coverage >= MIN_SAMPLE_COVERAGE,
+        "coverage_basis": basis,
+        "lifetime_sample_coverage": lifetime_coverage,
+        "recovery_window_seconds": RECOVERY_WINDOW_SECONDS,
+        "recovery_observed_seconds": min(recent_elapsed, RECOVERY_WINDOW_SECONDS),
+        "recovery_window_ready": window_ready,
     }
 
 
@@ -210,10 +250,14 @@ async def review_operator(
 
         metrics = qualification_metrics(state, now=current)
         qualification_started = _aware(state["qualification_started_at"])
+        activity_since = qualification_started if state["independence_status"] == "candidate" else None
+        if metrics["coverage_basis"] == "recent_72h":
+            cutoff = current - timedelta(seconds=RECOVERY_WINDOW_SECONDS)
+            activity_since = max(activity_since or cutoff, cutoff)
         activity = await qualification_activity(
             session,
             validator_id,
-            since=qualification_started if state["independence_status"] == "candidate" else None,
+            since=activity_since,
         )
         blocking_reasons: list[str] = []
         required_version, version_supported = cohort_version_status(state["software_version"])
@@ -255,9 +299,13 @@ async def review_operator(
                 "independence_review_ref": review_ref,
                 "updated": current,
             }
+            if not preserve_observation:
+                values.update(heartbeat_window_started_at=None, heartbeat_window_samples=[])
         elif action == "verify":
             if state["independence_status"] != "candidate":
                 raise OperatorReviewError("only a candidate can be verified")
+            if state["status"] != "active":
+                blocking_reasons.append("validator registration is not active")
             if not metrics["time_ready"]:
                 blocking_reasons.append("minimum qualification time has not elapsed")
             if not metrics["coverage_ready"]:
