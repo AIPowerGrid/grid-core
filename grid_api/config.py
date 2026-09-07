@@ -3,10 +3,16 @@
 
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import AwareDatetime, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ReviewedValidatorVersion = Annotated[
+    str,
+    Field(pattern=r"^v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:preview|alpha|beta|rc)\.[0-9]+)?$", max_length=64),
+]
 
 
 class GridSettings(BaseSettings):
@@ -137,6 +143,8 @@ class GridSettings(BaseSettings):
         pattern=r"^(?:v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:preview|alpha|beta|rc)\.[0-9]+)?)?$",
         max_length=64,
     )
+    # JSON array alternative for a three-release rolling transition. Not a range.
+    validator_cohort_upgrade_versions: list[ReviewedValidatorVersion] = Field(default_factory=list, max_length=2)
     # Seven-day advisory comparison. Schema and report tooling may be deployed
     # while false; no run can start and no observation can be written until the
     # three-independent-operator gate is separately frozen and this is enabled.
@@ -164,7 +172,11 @@ class GridSettings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_validator_upgrade(self):
-        if self.validator_cohort_upgrade_version and self.validator_shadow_observer_enabled:
+        if self.validator_cohort_upgrade_version and self.validator_cohort_upgrade_versions:
+            raise ValueError("Choose singular or plural validator upgrade versions, not both")
+        if len(set(self.validator_cohort_upgrade_versions)) != len(self.validator_cohort_upgrade_versions):
+            raise ValueError("Validator upgrade versions must be distinct")
+        if (self.validator_cohort_upgrade_version or self.validator_cohort_upgrade_versions) and self.validator_shadow_observer_enabled:
             raise ValueError("validator version overlap requires shadow observation disabled")
         return self
 
