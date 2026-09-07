@@ -64,6 +64,7 @@ class GridSettings(BaseSettings):
     # Optional account visibility for an already-enrolled validator. This does
     # not move the node account, issue keys, or grant economic authority.
     validator_pairing_enabled: bool = False
+    validator_compensation_send_enabled: bool = False
     # Private, time-bounded pilot; both node and human accounts must be listed.
     validator_pairing_canary_accounts: list[UUID] = Field(default_factory=list, max_length=10, repr=False)
     validator_pairing_canary_until: AwareDatetime | None = Field(default=None, repr=False)
