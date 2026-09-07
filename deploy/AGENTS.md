@@ -17,6 +17,10 @@ executes an immutable release selected through `/home/aipg/current`.
   review, public per-node status verification, 72-hour qualification,
   verification, expiry, and incident handling for independent preview
   operators.
+- `VALIDATOR_RECOVERY_2026_09_07.md` - immutable `508ca14f` / Alembic `0035`
+  production backup/restore, cutover and preserved-identity evidence. Recent
+  heartbeat collection is live; completed recovery and pilot evidence remain
+  separate gates.
 - `nginx/aipg-api.conf` - Grid routes, exact OAuth metadata routes, optional
   reviewed exact-route overlays, restricted metrics, public docs/health, and
   static `410 Gone` responses for retired API paths.
