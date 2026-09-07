@@ -150,7 +150,7 @@ validator shadow-observation records.
   conversion or worker payout row is involved. Retained verification facts plus
   the signed attestation preserve the work commitment after operational
   assignment pruning. Account beneficiaries are frozen, but their signing
-  wallets are not implicitly payment recipients. No sender is implemented.
+  wallets are not implicitly payment recipients. Sending is a separate gate.
 - `grid_validator_compensation_recipients`, added empty by `0037`, stores one
   immutable, dual-signed and maintainer-approved recipient per allocation.
   Composite beneficiary and unique allocation-hash foreign keys preserve its
@@ -158,6 +158,14 @@ validator shadow-observation records.
   and signature window; the service reconciles both commitments on every replay.
   No nonce, transaction or worker-payout row is created. Retain this financial
   consent history on rollback; downgrade refuses a nonempty table.
+- `grid_validator_compensation_payments`, added empty by `0038`, binds an
+  allocation's approved recipient to one unique signed transaction and nonce.
+  Pending/manual-review rows have SQL NULL receipts (not JSON null); sent rows
+  retain finalized Transfer proof. Unique allocation, plan, transaction and
+  sender/chain/nonce constraints defend replay. Signed bytes are private
+  execution capability, not a stored private key; never expose them in an API.
+  Downgrade refuses nonempty history. Worker nonce allocation reads this table
+  even when validator sending is disabled, so migration precedes runtime code.
 - New columns need explicit migrations, tests, and backfill/default strategy for
   existing rows.
 - Do not store plaintext API keys, private keys, or worker secrets.

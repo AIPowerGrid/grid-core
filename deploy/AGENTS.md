@@ -38,6 +38,13 @@ executes an immutable release selected through `/home/aipg/current`.
 ## Local Contracts
 
 - Env names in `env.template`, systemd, code, and docs must match exactly.
+- `VALIDATOR_COMPENSATION_SEND_ENABLED` defaults off and has no timer hook.
+  Apply `0038` before any updated worker payout process runs, because its nonce
+  lookup reads validator payment history even while disabled. Upgrade all
+  treasury-sharing senders before enabling validator transfers. After any
+  validator nonce is bound, retain the table and nonce-aware worker allocator
+  on rollback; disable the validator flag instead. Budget approval, recipient
+  consent and a supervised transfer are separate from a dark code deployment.
 - `GRID_CHARGING_ALL_MODEL_SERVICES` is a JSON array of exact capped direct
   service IDs, empty by default. Use this for sponsored auto-model demos without
   expanding the user/model charging cohort. `GRID_CHARGING_MODE=off` still wins.

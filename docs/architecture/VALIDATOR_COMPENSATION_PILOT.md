@@ -1,9 +1,9 @@
 # Validator Compensation Pilot
 
-Status: **allocation and recipient-consent backend, not deployed or payment-enabled**.
+Status: **allocation, recipient-consent and sender backends; not deployed or payment-enabled**.
 The manual PostgreSQL path exists alongside the earlier offline simulation.
 No real campaign/budget has been approved or created, funds are not reserved
-on-chain, and no payout adapter is implemented or enabled.
+on-chain, and the explicit payment adapter remains disabled.
 This is separate from worker den and from paying workers to execute blind audits.
 It cannot activate routing, reputation penalties, bonds, or slashing.
 
@@ -103,8 +103,9 @@ failed output write can follow a committed transaction: retry the same campaign
 and digest with a new private output path. Never create a replacement campaign
 to recover an uncertain result. The complete create preview/apply path and
 finalization have been exercised against synthetic PostgreSQL records, not an
-approved live compensation cohort. Operator consent UI, transfer execution,
-transaction reconciliation and compensation status UI are still required.
+approved live compensation cohort. Operator consent/status UI, deployment and
+supervised real-transfer qualification are still required. The separate sender
+and reconciliation backend below does not imply those gates have passed.
 
 ## Recipient Consent Backend
 
@@ -166,6 +167,64 @@ uncertain result retry the same signed input/digest with a new private output
 path. `sendable` remains false even after a successful bind. No nonce, payout
 attempt, wallet transaction or budget activation occurs. The sender must still
 screen recipients and prove confirmed transfers; consent alone is not payment.
+
+## Explicit Payment Backend
+
+Migration `0038` adds one private durable payment per approved allocation.
+`scripts/pay_validator_allocation.py` previews without loading a treasury key
+or calling Base RPC. Its private JSON request has exactly `campaign_id`,
+`operator_group_id`, `sender` (canonical lowercase treasury address),
+`max_fee_per_gas`, `max_priority_fee_per_gas` (positive integer wei strings,
+each at most 2 gwei, priority no greater than maximum), `approved_until`
+(timezone-aware, within the next 24 hours), and `approval_ref` (`approval:*`).
+There is no default amount, gas price, recipient, approval or campaign.
+
+The preview commits the finalized amount, signed recipient proof, Base chain
+8453, configured AIPG token, treasury sender and gas settings. Signing requires
+both the exact reviewed digest and `VALIDATOR_COMPENSATION_SEND_ENABLED=1`.
+The signing deadline is rechecked after acquiring the shared PostgreSQL lock.
+One transaction then persists allocation/hash/nonce and signed transaction
+bytes before any broadcast. Those bytes are private execution capability:
+protect database access and backups; never expose them in public status output.
+
+The sender checks actual RPC chain, configured signer/token, deployed token
+code and 18 decimals. It screens the recipient before signing and broadcast,
+checks current base fee, L2 gas balance and transfer gas estimate, and fixes
+the gas limit at 120,000. The cap bounds L2 execution gas; Base's additional L1
+data fees are not covered by that preflight balance bound. Maintain extra ETH.
+
+Only a matching transaction hash, canonical finalized Base block and exact
+token/sender/recipient/amount Transfer log can mark `sent`. A successful receipt
+without that event, a reverted transaction or an unprovable consumed nonce goes
+to `manual_review`. A pending, unavailable or not-finalized receipt is not paid.
+Concurrent observations cannot downgrade a proven payment or clear a manual
+hold without finalized transfer proof.
+
+Retries resume the SAME approved request and signed bytes, even after the
+original signing deadline. They never change nonce, amount, recipient or fee.
+An RPC may accept a transaction and lose its response; an output write may fail
+after commit. Neither permits a second manual payment. There is deliberately no
+automatic fee replacement or timer integration: a transaction stuck below the
+current fee market needs a separately reviewed same-nonce recovery mechanism,
+not a fresh payment. That recovery mechanism is not implemented.
+
+Maintainer-only command shapes, tested with synthetic PostgreSQL allocations
+and simulated Base RPC, not authorization to execute on production:
+
+```sh
+.venv/bin/python scripts/pay_validator_allocation.py \
+  --input /private/payment-request.json --output /private/payment-preview.json
+.venv/bin/python scripts/pay_validator_allocation.py \
+  --input /private/payment-request.json --output /private/payment-result.json \
+  --send --expect-digest <reviewed-payment-digest>
+```
+
+Migration order is mandatory even for a dark deployment: the worker payout
+allocator now reads all three payout tables. Apply `0038` BEFORE updated worker
+payout code runs, and upgrade every treasury-sharing worker/multiasset runner
+BEFORE enabling validator sending. After a validator nonce is bound, rolling
+back to the old two-table allocator is unsafe. Disable validator sending while
+retaining the schema and nonce-aware allocator; never erase payment history.
 
 ## Offline Tool
 
@@ -253,8 +312,8 @@ a second payable entitlement.
 3. Bind approved allocations to payment attempts without changing their frozen
    caps, amounts or evidence. Freeze the recipient before broadcast. An expired
    or changed review/recipient invalidates a draft, not a broadcast payment.
-4. Build a campaign adapter sharing the existing treasury nonce lock. Do not
-   invent worker den or feed this simulation into the ordinary worker CLI.
+4. Deploy and qualify the implemented adapter sharing the treasury nonce lock.
+   Do not invent worker den or feed the simulation into the ordinary worker CLI.
 5. Test concurrent duplication, renamed campaigns, partial batches, pending
    receipts, retries and crashes against PostgreSQL and the verified-transfer
    path. Require matching token Transfer evidence, not merely receipt success.
