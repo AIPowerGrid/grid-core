@@ -125,17 +125,21 @@ async def _row(period_id, account_id) -> dict | None:
         return {"status": r[0], "nonce": r[1], "tx_hash": r[2]} if r else None
 
 
-async def _max_assigned_nonce() -> int:
-    """Highest treasury nonce ever bound to a payout — across BOTH rails (this
-    AIPG rail's grid_payouts AND the multi-asset rail's grid_payout_legs; one
+async def _max_assigned_nonce(session=None) -> int:
+    """Highest treasury nonce ever bound across worker and validator rails; one
     treasury account = one nonce space). Fresh assignments go above this so a new
     payment can't collide with one already in flight even when the chain's
     pending-nonce view is stale (e.g. during a Base outage)."""
     from ...v2.schema import payout_legs as legs_t
-    async with await new_session() as s:
-        a = (await s.execute(sa.select(sa.func.max(payouts_t.c.nonce)))).scalar()
-        b = (await s.execute(sa.select(sa.func.max(legs_t.c.nonce)))).scalar()
-    return max(int(a) if a is not None else -1, int(b) if b is not None else -1)
+    from ...v2.schema import validator_compensation_payments as validator_payments
+    if session is None:
+        async with await new_session() as s:
+            return await _max_assigned_nonce(s)
+    values = [
+        (await session.execute(sa.select(sa.func.max(table.c.nonce)))).scalar()
+        for table in (payouts_t, legs_t, validator_payments)
+    ]
+    return max(int(value) if value is not None else -1 for value in values)
 
 
 async def _write(period_id, account_id, *, address, den, aipg, status,
@@ -438,11 +442,12 @@ async def _try_payout_lock(session) -> bool:
     """Serialize payout runners via a Postgres advisory lock (non-blocking), so two
     runs can't allocate nonces or send concurrently. Non-Postgres (sqlite tests) is
     single-process → treat as acquired."""
-    try:
-        return bool((await session.execute(
-            sa.text("SELECT pg_try_advisory_lock(:k)"), {"k": _PAYOUT_LOCK_KEY})).scalar())
-    except Exception:
+    if session.get_bind().dialect.name == "sqlite":
         return True
+    if session.get_bind().dialect.name != "postgresql":
+        raise RuntimeError("payout lock requires PostgreSQL")
+    return bool((await session.execute(
+        sa.text("SELECT pg_try_advisory_lock(:k)"), {"k": _PAYOUT_LOCK_KEY})).scalar())
 
 
 async def _amain():
