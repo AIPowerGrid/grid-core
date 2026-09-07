@@ -1185,6 +1185,22 @@ validator_compensation_work = sa.Table(
 )
 
 
+validator_compensation_recipients = sa.Table(
+    "grid_validator_compensation_recipients", metadata,
+    sa.Column("campaign_id", sa.String(64), primary_key=True),
+    sa.Column("operator_group_id", sa.String(96), primary_key=True),
+    sa.Column("allocation_hash", sa.String(64), sa.ForeignKey("grid_validator_compensation_allocations.allocation_hash", ondelete="RESTRICT"), nullable=False, unique=True),
+    sa.Column("recipient", sa.String(42), nullable=False),
+    sa.Column("proof", PortableJSON, nullable=False),
+    sa.Column("proof_hash", sa.String(64), nullable=False, unique=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(["campaign_id", "operator_group_id"],
+                            ["grid_validator_compensation_allocations.campaign_id", "grid_validator_compensation_allocations.operator_group_id"],
+                            ondelete="RESTRICT"),
+    sa.CheckConstraint("length(recipient) = 42 AND length(proof_hash) = 64", name="ck_validator_comp_recipient_shape"),
+)
+
+
 # ── Validator shadow authority (private, append-only observations) ──────
 #
 # A shadow run freezes one reviewed advisory policy.  Its observations never

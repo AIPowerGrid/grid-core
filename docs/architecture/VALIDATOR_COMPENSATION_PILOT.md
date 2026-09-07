@@ -1,6 +1,6 @@
 # Validator Compensation Pilot
 
-Status: **durable allocation implementation, not deployed or payment-enabled**.
+Status: **allocation and recipient-consent backend, not deployed or payment-enabled**.
 The manual PostgreSQL path exists alongside the earlier offline simulation.
 No real campaign/budget has been approved or created, funds are not reserved
 on-chain, and no payout adapter is implemented or enabled.
@@ -103,8 +103,69 @@ failed output write can follow a committed transaction: retry the same campaign
 and digest with a new private output path. Never create a replacement campaign
 to recover an uncertain result. The complete create preview/apply path and
 finalization have been exercised against synthetic PostgreSQL records, not an
-approved live compensation cohort. Recipient consent, transfer execution,
-transaction reconciliation and operator compensation UI are still required.
+approved live compensation cohort. Operator consent UI, transfer execution,
+transaction reconciliation and compensation status UI are still required.
+
+## Recipient Consent Backend
+
+Migration `0037` adds one private immutable consent row per finalized positive
+allocation. This administrative backend exists; a public endpoint and local-app
+wallet flow do not yet exist. Do not instruct operators to paste private keys
+or run the administrative command. Node signing must eventually use the existing
+local node key internally; the human approves in their chosen payout wallet.
+
+`scripts/manage_validator_recipient.py prepare` reads exactly `campaign_id`,
+`operator_group_id` and a canonical lowercase `recipient` from a protected JSON
+file. Its private output contains `consent` plus the exact EIP-191 `message`.
+It does not create a challenge or payment in the database. The signing window
+is at most 24 hours. The consent commits a versioned domain and Grid audience,
+campaign/contract/allocation hashes, frozen account/node/signer/control group,
+Base chain 8453, token, exact integer amount, recipient and timestamps.
+
+The node and payout recipient sign the same text. A bind input contains exactly
+`consent`, `node_signature`, `recipient_signature`, and an opaque
+`approval:<reference>`. No key is accepted. EOA signatures verify offline;
+deployed contract recipients require a Base chain check and the existing
+fail-closed EIP-1271 verifier. Wrong-chain/unavailable RPC, invalid signatures,
+expired consent and identity/commitment drift are rejected. The target cannot
+be zero, the token contract or the funds-less node signer. There is no fallback
+to the account login wallet, worker payout preference or paired human account.
+
+The reviewer must independently confirm the destination with the known operator.
+Two signatures prevent an unsigned destination substitution; they do not prove
+that a compromised node key plus an attacker-controlled destination belongs to
+the legitimate operator. A review reference records the maintainer's actual
+decision, not automatic authorization or a proof of independence.
+
+Bind defaults to a read-only preview. Apply requires the exact preview digest,
+serializes with allocation mutations under PostgreSQL, locks the current node
+and account, and rechecks expiry after signature verification. Retired accounts
+and changed node signers require manual recovery, not alias-following. Going
+offline or an independence review expiring after finalized work does not erase
+earned allocation ownership. A matching committed request can be retried after
+its signing deadline; a changed destination/proof cannot overwrite it. Recipient
+correction or identity recovery requires a separately reviewed workflow, which
+must also check that no payment is in flight; it is not implemented by this CLI.
+
+Maintainer-only sequence, using private paths and existing finalized test data:
+
+```sh
+.venv/bin/python scripts/manage_validator_recipient.py prepare \
+  --input /private/recipient-request.json --output /private/consent-to-sign.json
+# Have both clients sign the exact message outside Core; review the destination.
+.venv/bin/python scripts/manage_validator_recipient.py bind \
+  --input /private/signed-consent.json --output /private/recipient-preview.json
+.venv/bin/python scripts/manage_validator_recipient.py bind \
+  --input /private/signed-consent.json --output /private/recipient-approved.json \
+  --apply --expect-digest <reviewed-recipient-digest>
+```
+
+All paths are placeholders. New outputs are owned `0600` files, never overwritten;
+stdout omits identities, addresses, signatures and the signing message. After an
+uncertain result retry the same signed input/digest with a new private output
+path. `sendable` remains false even after a successful bind. No nonce, payout
+attempt, wallet transaction or budget activation occurs. The sender must still
+screen recipients and prove confirmed transfers; consent alone is not payment.
 
 ## Offline Tool
 
@@ -183,11 +244,11 @@ a second payable entitlement.
 ## Gates Before Sending
 
 1. Independently verify operator control, first-party exclusion, accepted work
-   and verdict review. Resolve a separately proven recipient wallet through
-   the canonical account; never assume an ephemeral validator signer is the
+   and verdict review. Resolve a separately proven recipient wallet bound to
+   the frozen beneficiary account; never assume an ephemeral validator signer is the
    desired payout destination.
 2. Deploy and qualify the implemented campaign/allocation/work ledger, then
-   add separately proven immutable recipient records. PostgreSQL allocation
+   qualify the recipient backend and ship the operator consent flow. PostgreSQL allocation
    deduplication alone does not prevent a sender paying twice.
 3. Bind approved allocations to payment attempts without changing their frozen
    caps, amounts or evidence. Freeze the recipient before broadcast. An expired
