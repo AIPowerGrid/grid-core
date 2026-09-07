@@ -565,7 +565,7 @@ content sanitization, and reward settlement.
 
 ## Work Guidance
 
-- Cohort version eligibility accepts the frozen baseline plus at most two exact
+- Cohort version eligibility accepts the frozen baseline plus at most three exact
   reviewed upgrade versions. The singular legacy setting and plural JSON array
   are mutually exclusive. Python and SQL must agree, including malformed
   prefixes. This preserves existing qualification clocks during a rolling upgrade;

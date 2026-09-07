@@ -115,12 +115,18 @@ registration would not prove continuity of the reviewed operator.
 ### Rolling Release Compatibility
 
 The default accepts only the baseline. A single reviewed release can overlap
-through `VALIDATOR_COHORT_UPGRADE_VERSION`. When a second reviewed update arrives
+through `VALIDATOR_COHORT_UPGRADE_VERSION`. When another reviewed update arrives
 before the previous transition is complete, clear that singular setting and set
-`VALIDATOR_COHORT_UPGRADE_VERSIONS` to a JSON array of at most two distinct exact
-release tags. This preserves the baseline and both reviewed upgrades without
+`VALIDATOR_COHORT_UPGRADE_VERSIONS` to a JSON array of at most three distinct exact
+release tags. This preserves the baseline and reviewed upgrades without
 accepting arbitrary newer versions, wildcards, development tags or ranges.
 Both upgrade settings together are rejected at startup.
+
+The fourth total slot allows the verified-updater release to overlap existing
+preview.13/.15/.16 nodes. This is a temporary compatibility allowance, not
+automatic admission: review and explicitly configure each exact release before
+promotion. Do not drop a still-running operator's supported version merely to
+make room. Complete the upgrade and freeze one baseline for the bounded pilot.
 
 Deploy the compatible code with the previous configuration first. Only after
 its checks pass, replace the singular setting with the reviewed list and verify
@@ -135,7 +141,9 @@ upgrade settings. If rolling back to code without the plural setting, restore
 the original singular/baseline configuration together with the code: old code
 ignores the new variable. Nodes on the new release can lose sample eligibility
 under that rollback, so report that limitation; never describe it as preserving
-all three versions. Stored history is retained, not backfilled or reset.
+all overlapping versions. Rolling back to a build limited to two plural tags
+also requires restoring its previously valid list before restarting Core.
+Stored history is retained, not backfilled or reset.
 
 ## 3. Monitor the 72-Hour Gate
 

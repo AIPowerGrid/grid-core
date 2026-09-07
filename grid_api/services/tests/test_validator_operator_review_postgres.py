@@ -35,7 +35,11 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.asyncio
-async def test_reviewed_version_transition_preserves_history_on_postgres(pg, monkeypatch):
+@pytest.mark.parametrize("upgrades", [
+    ["v0.1.0-preview.15", "v0.1.0-preview.16"],
+    ["v0.1.0-preview.15", "v0.1.0-preview.16", "v0.1.0-preview.17"],
+])
+async def test_reviewed_version_transition_preserves_history_on_postgres(pg, monkeypatch, upgrades):
     started = datetime(2026, 9, 1, 12, tzinfo=UTC)
     account_id = uuid4()
     validator_id = "val_" + uuid4().hex
@@ -59,11 +63,12 @@ async def test_reviewed_version_transition_preserves_history_on_postgres(pg, mon
         ))
         await session.commit()
 
-    settings = GridSettings(_env_file=None, validator_cohort_upgrade_versions=["v0.1.0-preview.15", "v0.1.0-preview.16"])
+    settings = GridSettings(_env_file=None, validator_cohort_upgrade_versions=upgrades)
     expected_samples = 10
     for index, (version, eligible) in enumerate([
         ("v0.1.0-preview.13", True), ("v0.1.0-preview.15", True),
-        ("v0.1.0-preview.16", True), ("v0.1.0-preview.17", False),
+        ("v0.1.0-preview.16", True), ("v0.1.0-preview.17", "v0.1.0-preview.17" in upgrades),
+        ("v0.1.0-preview.18", False),
         ("vv0.1.0-preview.16", False), ("0.1.0-preview.16", True),
     ], start=1):
         now = started + timedelta(minutes=index * 6)
