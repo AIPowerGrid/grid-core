@@ -63,6 +63,13 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - `review_validator_reference.py` - preview-first, digest-bound quality review
   and activate/pause/revoke workflow for a media reference worker. It never
   fabricates bond evidence or grants economic authority.
+- `pay_validator_allocation.py` - private, read-only-by-default preview or
+  explicit `--send --expect-digest` for one frozen validator allocation. The
+  separate default-off send flag must also be enabled. It never initializes
+  schema, creates a campaign or calls the worker payout timer. Full plans and
+  receipts stay in new owned `0600` outputs; stdout contains status/commitments
+  only, and raw signed transactions are never output. Recover uncertain results
+  with the SAME input/digest, not a new nonce or manual wallet transfer.
 - `review_worker_control.py` - preview-first, digest-bound verify/reject/revoke
   workflow for private media-worker common-control groups. It grants no
   economic authority and never publishes the group.

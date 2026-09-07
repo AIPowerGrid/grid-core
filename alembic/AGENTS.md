@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0037`
+- `versions/` - ordered migration revisions. Current source head: `0038`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -47,6 +47,8 @@ production database match the Grid-owned schema contracts without relying on
   globally unique work claims. It neither funds a campaign nor creates a payout.
   `0037` adds empty immutable, allocation-bound validator payout consent.
   It does not migrate account wallets into recipients or enable any sender.
+  `0038` adds immutable validator transaction bytes, nonce and receipt state;
+  it grants no payment approval and enables no background sender.
 
 ## Local Contracts
 
@@ -114,6 +116,11 @@ production database match the Grid-owned schema contracts without relying on
   refuses any nonempty compensation history, including an open contract.
 - Apply `0037` before using the private recipient-consent command. Application
   rollback keeps the table; explicit downgrade refuses existing consent rows.
+- Apply `0038` before updated worker payout code runs: its shared nonce lookup
+  reads the new table even with validator sending off. Before any validator
+  transfer, upgrade every treasury-sharing runner. After a validator nonce is
+  bound, do not roll back to worker code that cannot see it. Retain financial
+  history; explicit downgrade refuses any payment row.
 - Do not edit or depend on generated `__pycache__` files.
 
 ## Work Guidance
