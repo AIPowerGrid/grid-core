@@ -142,6 +142,15 @@ validator shadow-observation records.
   No scheduler exists, so these tables still cannot originate work.
 - Account IDs are UUIDs. Quota identities such as `v2:<uuid>` are not DB foreign
   keys and must not be passed to credit ledger functions.
+- `grid_validator_compensation_campaigns`, `_allocations`, and `_work` are
+  private approved pilot accounting, added empty by `0036`. Contracts and
+  finalized allocations are immutable through the service API. One transaction
+  claims each attestation/assignment and operator/probe-group at most once
+  across campaigns. Integer token amounts conserve the frozen budget; no float
+  conversion or worker payout row is involved. Retained verification facts plus
+  the signed attestation preserve the work commitment after operational
+  assignment pruning. Account beneficiaries are frozen, but their signing
+  wallets are not implicitly payment recipients. No sender is implemented.
 - New columns need explicit migrations, tests, and backfill/default strategy for
   existing rows.
 - Do not store plaintext API keys, private keys, or worker secrets.
