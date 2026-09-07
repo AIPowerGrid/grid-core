@@ -146,6 +146,16 @@ transport, accounts, stats, health/metrics.
   fresh Google/SIWE proof. Browser approval alone does not link: the current
   node must sign the exact expiring account-bound payload. No account merges,
   new credentials, wallet changes, control-group changes, or economic effects.
+- `validator_compensation.py` - eight default-off private routes under
+  `/v1/validator/compensation*` and
+  `/v1/account/validator-compensation/requests*`: node status/start/read/confirm/
+  cancel and human read/prepare/approve. Node reads/writes require
+  `validator.read`/`validator.attest`; human routes require Core user tokens,
+  `account.read`/`account.manage`, and recent step-up for writes. Bodies are
+  bounded before parsing; responses are no-store with fixed validation/storage
+  errors. Both signatures collect review evidence only, never recipient approval
+  or payment. See `docs/architecture/VALIDATOR_PAYOUT_CONSENT.md`; node-app and
+  Console screens remain separate delivery gates.
 - `styles.py` - `GET /v1/styles` for curated creative presets.
 - `health.py` - `GET /health`, including the immutable full release commit when
   the runtime can prove it from `GRID_BUILD_COMMIT` or a detached checkout.
