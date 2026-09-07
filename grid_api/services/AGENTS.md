@@ -44,6 +44,12 @@ content sanitization, and reward settlement.
   recipient consent for a positive finalized allocation: node EIP-191 proof,
   recipient EOA/Base EIP-1271 proof and exact maintainer approval digest;
   no account-wallet fallback, visibility-link authority or payment sender),
+  `validator_compensation_operator.py` (default-off private pilot/status views
+  and allocation-specific wallet/node signature collection; exact current
+  account association authorizes access, not payment. Node-row serialization,
+  post-lock identity/expiry checks and RPC outside locks protect pending proof.
+  Only the private export command feeds existing maintainer recipient review;
+  no public bind, sender, campaign creation or credit movement),
   `holdings.py` (cached on-chain AIPG balance + Chainlink ETH/USD),
   `deposits.py` (atomic Base funding receipts from verified account wallets
   plus USDC, bounded AIPG, and conversion-gated ETH claims),

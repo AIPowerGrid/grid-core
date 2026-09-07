@@ -55,6 +55,9 @@ validation, worker incentives, and trust boundaries.
   dark PostgreSQL contracts/allocations, offline simulation, recipient-consent
   and default-off transfer backends, with operator UI and live approval gates.
   Not worker-audit funding or payment approval.
+- `VALIDATOR_PAYOUT_CONSENT.md` - default-off private operator status and
+  wallet/node signature collection, Console handoff, replay/expiry policy and
+  remaining node-app/Console delivery gates. No recipient approval or sending.
 - `MEDIA_VALIDATION_V1.md` - accepted fail-closed image/video validation design:
   private challenges, cached bond eligibility, rotating references, Core object
   hashing, validator fetch defenses, dark validator-side modality scoring, and
