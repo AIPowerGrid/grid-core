@@ -82,6 +82,12 @@ validator shadow-observation records.
   review references are never public. Group/validator uniqueness on assignments
   and attestations remains the final database guard against duplicate identity
   membership or votes.
+- `grid_validators.heartbeat_window_started_at` and `heartbeat_window_samples`
+  are a bounded, server-observed rolling availability window, added by `0035`.
+  Keep at most 864 unique five-minute buckets (72 hours). The legacy enrollment
+  timestamp and lifetime counters remain untouched. No old totals are converted
+  into fictional bucket timestamps; new columns begin NULL/empty. Updating the
+  ring and lifetime counters shares the validator row lock and transaction.
 - `grid_validator_shadow_runs`, `grid_validator_shadow_observations`,
   `grid_validator_shadow_outcomes`, `grid_validator_shadow_capacity_samples`,
   and `grid_validator_shadow_errors` are the private append-only evidence for a

@@ -295,7 +295,9 @@ async def public_validator_status(validator_id: str) -> dict[str, Any]:
             )
         else:
             next_action = (
-                "Keep this validator online until its time and heartbeat coverage gates are complete."
+                "Keep this same validator online. Coverage uses the recent 72 hours once "
+                "that window is observed; existing qualification history is preserved. "
+                "Do not re-enroll or replace its identity."
             )
     elif review_current:
         summary = "verified"
@@ -337,6 +339,11 @@ async def public_validator_status(validator_id: str) -> dict[str, Any]:
                 qualification["minimum_seconds"] - qualification["elapsed_seconds"],
             ),
             "sample_coverage": qualification["sample_coverage"],
+            "coverage_basis": qualification["coverage_basis"],
+            "lifetime_sample_coverage": qualification["lifetime_sample_coverage"],
+            "recovery_window_seconds": qualification["recovery_window_seconds"],
+            "recovery_observed_seconds": qualification["recovery_observed_seconds"],
+            "recovery_window_ready": qualification["recovery_window_ready"],
             "minimum_sample_coverage": qualification["minimum_sample_coverage"],
             "time_ready": qualification["time_ready"],
             "coverage_ready": qualification["coverage_ready"],
@@ -826,24 +833,42 @@ async def heartbeat_validator(
     if not software_version or len(software_version) > 64:
         raise RegistrationError("software_version is invalid")
     normalized_capabilities = _registration_capabilities({"capabilities": capabilities})
-    now = _now()
     _, version_supported = validator_operators.cohort_version_status(software_version)
-    sample_cutoff = now - timedelta(seconds=VALIDATOR_OPERATOR_SAMPLE_INTERVAL_SECONDS)
-    start_observation = sa.and_(
-        validators_t.c.independence_status == "unreviewed",
-        validators_t.c.qualification_started_at.is_(None),
-        version_supported,
-    )
-    sample_due = sa.and_(
-        validators_t.c.independence_status.in_(("unreviewed", "candidate", "verified")),
-        validators_t.c.qualification_started_at.is_not(None),
-        version_supported,
-        sa.or_(
-            validators_t.c.last_heartbeat_sampled_at.is_(None),
-            validators_t.c.last_heartbeat_sampled_at <= sample_cutoff,
-        ),
-    )
     async with await new_session() as session:
+        # Serialize the bounded JSON window with heartbeat counters and review
+        # transitions; concurrent replicas must not overwrite each other's bins.
+        state = (
+            await session.execute(
+                sa.select(validators_t).where(
+                    validators_t.c.id == validator["id"],
+                    validators_t.c.status == "active",
+                    validators_t.c.signing_wallet == validator["signing_wallet"],
+                ).with_for_update(),
+            )
+        ).mappings().first()
+        if not state:
+            raise RegistrationError("validator registration is not active")
+        now = _now()
+        sample_cutoff = now - timedelta(seconds=VALIDATOR_OPERATOR_SAMPLE_INTERVAL_SECONDS)
+        start_observation = sa.and_(
+            validators_t.c.independence_status == "unreviewed",
+            validators_t.c.qualification_started_at.is_(None),
+            version_supported,
+        )
+        sample_due = sa.and_(
+            validators_t.c.independence_status.in_(("unreviewed", "candidate", "verified")),
+            validators_t.c.qualification_started_at.is_not(None),
+            version_supported,
+            sa.or_(
+                validators_t.c.last_heartbeat_sampled_at.is_(None),
+                validators_t.c.last_heartbeat_sampled_at <= sample_cutoff,
+            ),
+        )
+        recent = {}
+        if version_supported and state["independence_status"] in {"unreviewed", "candidate", "verified"}:
+            recent = validator_operators.record_recent_heartbeat(dict(state), now=now)
+            if all(state[key] == value for key, value in recent.items()):
+                recent = {}
         await session.execute(
             sa.update(validators_t)
             .where(validators_t.c.id == validator["id"], validators_t.c.status == "active")
@@ -851,6 +876,7 @@ async def heartbeat_validator(
                 software_version=software_version,
                 capabilities=normalized_capabilities,
                 last_heartbeat=now,
+                **recent,
                 qualification_started_at=sa.case(
                     (start_observation, now),
                     else_=validators_t.c.qualification_started_at,
