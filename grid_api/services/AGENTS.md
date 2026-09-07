@@ -619,6 +619,17 @@ content sanitization, and reward settlement.
 ## Verification
 
 - `pytest grid_api/services/` - covers `job_queue`, `den`, `quota` (+ settlement subtree).
+- `tests/test_validator_compensation_handoff.py` is an opt-in cross-repo
+  PostgreSQL/Core/Console/node check. Set disposable `VALIDATORS_TEST_DB_URL`,
+  reviewed `VALIDATOR_NODE_SOURCE`, and env-file-free built
+  `VALIDATOR_CONSOLE_SOURCE`. It performs real SIWE/Auth.js login, scoped Core
+  calls, both exact consent signatures and post-commit response-loss recovery;
+  confirmation creates no recipient binding, transfer, credit or worker payout.
+  Earning records/independence and Redis nonce transport are synthetic fixtures.
+  Each test owns one temporary PG schema and its loopback child processes.
+  This does not prove native packaging, Google/wallet-extension UI, Base RPC,
+  production rollout, independent operators, or a paid pilot. It skips explicitly
+  when the cross-repo sources or disposable DB are unavailable.
 
 ## Child DOX Index
 
