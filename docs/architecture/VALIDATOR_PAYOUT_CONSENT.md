@@ -1,7 +1,9 @@
 # Validator Payout Consent
 
-Status: **Core API implemented dark; operator-app and Console screens not yet
-implemented or released.** Migration `0039` and
+Status: **Core API and both client implementations merged; production
+compensation remains disabled and the node client is not released.** Core PR127
+is `2d16a019`; validator PR107 is `1c3b8122`; Console PR27 is `28dbf5f3`.
+Migration `0039` and
 `VALIDATOR_COMPENSATION_OPERATOR_ENABLED` are separate from the payment sender
 flag. No new API approves a recipient, creates an earning campaign, or moves
 funds. Keep the flag off until both clients and their end-to-end tests ship.
@@ -29,8 +31,9 @@ funds. Keep the flag off until both clients and their end-to-end tests ship.
    exports the proof privately and uses the existing digest-bound recipient
    approval command. The separately approved sender operates later.
 
-The Core supports this sequence; its node-app and Console UI remain delivery
-requirements. Do not send administrative commands to node operators.
+The three implementations support this sequence. Coordinated deployment,
+native release and live operator qualification remain delivery requirements.
+Do not send administrative commands to node operators.
 
 ## HTTP Contract
 
@@ -87,6 +90,30 @@ human account from the server-verified session, not a browser-provided ID.
 Display exact recipient/amount/chain before `personal_sign`. EOA verification
 is offline; deployed contract recipients require Base-pinned EIP-1271.
 Individual wallet support still requires client testing.
+The initial Console UI discovers injected EIP-6963 and legacy browser wallets.
+WalletConnect/mobile and embedded Safe-app connectors are not implemented;
+Core's EIP-1271 verifier alone does not prove those client journeys.
+
+## Integration Evidence
+
+On September 7, the local PostgreSQL 16 cross-repo test completed with real
+Core authorization, SIWE/Auth.js Console login and node/recipient signatures.
+It deliberately discarded a node confirmation response after Core committed:
+a new client recovered `review_required` without another signature submission.
+Export reverified the collected proof. Recipient bindings, validator/worker
+payments and credit-ledger rows stayed empty. Synthetic earning records and
+independence reviews were seeded in a unique disposable schema; this is not
+evidence of real operator eligibility, inference or a funded pilot.
+
+`grid_api/services/tests/test_validator_compensation_handoff.py` runs with
+`VALIDATORS_TEST_DB_URL`, `VALIDATOR_NODE_SOURCE` and a built, env-file-free
+`VALIDATOR_CONSOLE_SOURCE`. PR/main CI pins the reviewed client commits above
+and executes the test after its normal PostgreSQL suite. Its nonce store is
+single-process, not Redis; wallet-extension UI, Google, HTTPS and Base RPC are
+outside this integration test. Separate Console Playwright tests cover
+320/390/1280px layout, explicit signing and reload without signing against a
+synthetic Core. Validator PR107 passed all four native build, frozen updater
+handoff and clean-install jobs before merge. None of these activates payments.
 
 ## State And Recovery
 
