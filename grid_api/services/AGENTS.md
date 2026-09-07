@@ -162,6 +162,14 @@ content sanitization, and reward settlement.
   expiring maintainer review, at least one completed probe plus authoritative
   attestation created during that qualification window, and preview-first
   compare-and-swap transitions bound to the exact account and signing wallet.
+  After migration `0035`, supported heartbeats additionally fill a bounded ring
+  of unique server-timed five-minute buckets. Once 72 hours are actually observed,
+  qualification coverage uses that recent window rather than averaging all old
+  outages forever. Existing lifetime timestamps/counters remain unchanged and
+  provide the coverage basis during warmup. Recent-basis reviews and readiness
+  monitoring require completed work and authoritative evidence in that same
+  recent window. The review digest binds the ring, and heartbeats serialize with
+  reviews under a row lock. This never self-verifies an operator or moves money.
   A registration on the frozen cohort release automatically begins a
   non-economic observation window and rate-limited heartbeat sampling; an
   existing unreviewed registration begins on its first supported-version

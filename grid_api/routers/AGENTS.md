@@ -290,6 +290,12 @@ expired or out-of-scope pilots return 503 without revealing membership.
 
 ## Work Guidance
 
+- Validator qualification views expose additive `coverage_basis`,
+  `lifetime_sample_coverage`, `recovery_window_seconds`,
+  `recovery_observed_seconds` and `recovery_window_ready`. Never return the
+  private raw heartbeat ring. A recent-window recovery is not an operator
+  independence grant; retain the separate review/freshness/version gates.
+
 - New endpoint -> add a contract test; wire auth + rate limit; route media via `services/media.py`,
   text via `services/job_queue` + `token_stream`.
 - Worker self-canaries are setup evidence only. They must hard-target the exact
