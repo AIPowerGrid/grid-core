@@ -108,3 +108,32 @@ jobs:
         # recipes, payout-wallet validation). No Postgres/Redis/live API needed;
         # live integration tests live under tests/ and run separately.
         run: python -m pytest grid_api -q
+      - name: Checkout reviewed validator client
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: AIPowerGrid/grid-validator
+          ref: 1c3b812236a7937824217170d95df184517228b9
+          path: .integration/validator
+          persist-credentials: false
+      - name: Checkout reviewed Console client
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: AIPowerGrid/grid-frontend
+          ref: 28dbf5f348a077ed7ed163ea8e081a1eae5445a1
+          path: .integration/console
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Build pinned Console for local consent integration
+        working-directory: .integration/console
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.5 --activate
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Real PostgreSQL Core Console node compensation handoff
+        env:
+          VALIDATOR_NODE_SOURCE: ${{ github.workspace }}/.integration/validator
+          VALIDATOR_CONSOLE_SOURCE: ${{ github.workspace }}/.integration/console
+        run: python -m pytest grid_api/services/tests/test_validator_compensation_handoff.py -q
