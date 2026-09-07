@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0036`
+- `versions/` - ordered migration revisions. Current source head: `0037`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -45,6 +45,8 @@ production database match the Grid-owned schema contracts without relying on
   qualification timestamps, counters or reviews).
   `0036` adds empty private validator compensation contracts, allocations and
   globally unique work claims. It neither funds a campaign nor creates a payout.
+  `0037` adds empty immutable, allocation-bound validator payout consent.
+  It does not migrate account wallets into recipients or enable any sender.
 
 ## Local Contracts
 
@@ -110,6 +112,8 @@ production database match the Grid-owned schema contracts without relying on
 - Apply `0036` before using the manual validator allocation command. No ordinary
   API or timer reads these tables. Rollback retains them; explicit downgrade
   refuses any nonempty compensation history, including an open contract.
+- Apply `0037` before using the private recipient-consent command. Application
+  rollback keeps the table; explicit downgrade refuses existing consent rows.
 - Do not edit or depend on generated `__pycache__` files.
 
 ## Work Guidance
