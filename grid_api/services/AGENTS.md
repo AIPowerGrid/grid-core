@@ -149,7 +149,13 @@ content sanitization, and reward settlement.
   worker/model coverage, and software-version cohorts, but never validator
   identities. Scorecards label objective text votes as Core-matched or
   Core-disagreed and media/preview verdicts as validator opinion; a raw vote is
-  never silently promoted to Core-verified fact. Independent-operator counts
+  never silently promoted to Core-verified fact. Scorecard rates count votes,
+  not independent trials. Per-row sampling metadata counts retained assignment,
+  group and registered-validator bindings without exposing their identities;
+  independent sample count and confidence intervals remain unknown. Probe age
+  uses only retained, completed Core assignments, never attestation receipt or
+  validator-supplied timestamps. Missing/future probe times remain explicit.
+  Independent-operator counts
   remain zero until externally reviewed; registration count is not independence
   proof. `validator_operators.py` owns the review state: an opaque control group,
   at least 72 hours of qualification, rate-limited heartbeat coverage, an
