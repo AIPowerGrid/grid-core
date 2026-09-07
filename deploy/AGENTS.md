@@ -29,6 +29,10 @@ executes an immutable release selected through `/home/aipg/current`.
   backup/restore and dark cutover proof, preserved identities/config/timers,
   empty compensation tables and the shared-nonce rollback boundary. Native
   release, live consent, operator reviews and budget activation remain separate.
+- `VALIDATOR_RELEASE_OVERLAP_2026_09_07.md` - immutable `84fe0fd6` / `0039`
+  deployment of bounded release-overlap capacity with unchanged admission,
+  identity, environment and timer state. It does not admit preview.18 or enable
+  a validator compensation campaign.
 - `nginx/aipg-api.conf` - Grid routes, exact OAuth metadata routes, optional
   reviewed exact-route overlays, restricted metrics, public docs/health, and
   static `410 Gone` responses for retired API paths.
