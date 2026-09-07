@@ -98,6 +98,32 @@ alone never establishes independence or grants routing, reward, strike, payout,
 or slashing authority, and Core does not backfill samples from before the live
 observation path saw them.
 
+### Bounded Availability Recovery
+
+Implemented in source; apply migration `0035` before deploying this code.
+Supported heartbeats also collect at most 864 unique server-observed five-minute
+buckets. Repeated or concurrent heartbeats cannot fill missing time buckets, and
+unsupported releases do not accumulate qualified observations.
+
+During the first 72 hours of this new collection, existing qualification coverage
+and enrollment progress are preserved. Once a complete window has been observed,
+coverage uses the latest 72 hours at the same 80% threshold, rather than requiring
+an operator to compensate indefinitely for an old outage. The original start,
+lifetime sample counter, signing identity and review are not reset. Migration
+does not infer old heartbeat timestamps from cumulative totals.
+
+Registration and public-status qualification views identify `coverage_basis`
+(`since_enrollment` or `recent_72h`), retain `lifetime_sample_coverage`, and expose
+`recovery_window_seconds`, `recovery_observed_seconds` and `recovery_window_ready`.
+Raw bucket timestamps, private review references and control groups remain private.
+For the recent basis, both maintainer review and cohort readiness monitoring
+require a completed probe and authoritative attestation within that same recent
+window. Availability alone never verifies operator independence. Existing verified
+reviews still have their separate expiry, activity and release eligibility rules.
+
+This is a recovery policy, not a historical uptime reconstruction or a reason to
+reset any operator's registration. Evidence and monetary ledgers are untouched.
+
 ## Evidence Invariants
 
 Authoritative evidence must match all of:

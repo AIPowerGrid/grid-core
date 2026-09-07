@@ -3546,7 +3546,10 @@ async def test_public_candidate_next_action_tracks_gates_without_granting_review
 
     assert body["summary"] == "qualifying"
     assert ("Request maintainer review" in body["next_action"]) is expected_review
-    assert ("until its time" in body["next_action"]) is not expected_review
+    assert ("Do not re-enroll" in body["next_action"]) is not expected_review
+    assert body["qualification"]["coverage_basis"] == "since_enrollment"
+    assert body["qualification"]["recovery_window_ready"] is False
+    assert "heartbeat_window_samples" not in json.dumps(body)
     assert body["qualification"]["status"] == "candidate"
     assert body["qualification"]["review_current"] is False
     assert body["qualification"]["independent_vote_eligible"] is False
