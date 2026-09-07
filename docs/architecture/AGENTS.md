@@ -20,6 +20,9 @@ validation, worker incentives, and trust boundaries.
   invariants, scorer-capability matching, scorecard privacy rules, and future
   economic gates. Its additive scorecard metadata specifies vote/group counts,
   probe-vs-receipt freshness and explicit unknown statistical confidence.
+  It also separates the `account.read` aggregate-consumer endpoint from the
+  original active-validator work/private-health routes; no node is needed to
+  read redacted network scorecards.
 - `VALIDATOR_ANTI_GAMING.md` - executable hostile-worker baseline, public-probe
   limitations, blind-audit contract, and the quality-evidence promotion gate.
 - `VALIDATOR_RESPONSES_QUALIFICATION.md` - local native-logprob transport proof,

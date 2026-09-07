@@ -66,11 +66,19 @@ economic eligibility.
 | `POST /v1/validator/probe/{assignment_id}` | `validator.probe` | hard-target the assigned worker |
 | `POST /v1/validator/attest` | `validator.attest` | submit signed assignment evidence |
 | `GET /v1/validator/scorecards` | `validator.read` | read redacted aggregates |
+| `GET /v1/account/validator-scorecards` | `account.read` | read the same redacted network aggregates without a wallet or registered node |
 | `GET /v1/validator/assignments/health` | `validator.read` | inspect assignment workflow and aggregate network health |
 | `GET /v1/validator/workers` | `validator.read` | read inventory only |
 
 Missing registration, assignment, probe, or attestation support fails closed.
 The public inference API and worker inventory are never alternate probe paths.
+Account scorecard reads are a separate consumer surface, not validator work.
+They accept ordinary authenticated v2 read authority, including a service-refreshed
+user token, and retain bounded filters and rate limits. The original validator
+routes still require their existing scopes and active registration. No account
+IDs, node identities, group IDs, private payloads, nonces or signatures are added
+to aggregate reports. Account access does not expose private assignment health
+or grant permission to register, allocate, probe or attest.
 Self-suspension is reversible by a fresh signed registration from the same
 wallet. Maintainer revocation is not: registration, suspension, and rotation
 all reject a revoked identity. Rotation does not rewrite historical evidence,
