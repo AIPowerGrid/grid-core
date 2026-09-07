@@ -21,6 +21,10 @@ executes an immutable release selected through `/home/aipg/current`.
   production backup/restore, cutover and preserved-identity evidence. Recent
   heartbeat collection is live; completed recovery and pilot evidence remain
   separate gates.
+- `VALIDATOR_UPDATER_ROLLOUT_2026_09_07.md` - immutable `3714a927`
+  compatibility deployment, published preview.17 provenance and exact
+  four-release admission with preserved qualification. Owned-node canary,
+  public download promotion and the pilot remain separate gates.
 - `nginx/aipg-api.conf` - Grid routes, exact OAuth metadata routes, optional
   reviewed exact-route overlays, restricted metrics, public docs/health, and
   static `410 Gone` responses for retired API paths.
