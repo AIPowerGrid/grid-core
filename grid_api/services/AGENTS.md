@@ -40,6 +40,10 @@ content sanitization, and reward settlement.
   contracts and finalized allocations; independently rechecks signed completed
   text tasks, shares caps by reviewed control group and claims work globally
   once. No runtime hook, payout queue, recipient selection or sender),
+  `validator_compensation_recipients.py` (private, preview-first, immutable
+  recipient consent for a positive finalized allocation: node EIP-191 proof,
+  recipient EOA/Base EIP-1271 proof and exact maintainer approval digest;
+  no account-wallet fallback, visibility-link authority or payment sender),
   `holdings.py` (cached on-chain AIPG balance + Chainlink ETH/USD),
   `deposits.py` (atomic Base funding receipts from verified account wallets
   plus USDC, bounded AIPG, and conversion-gated ETH claims),
@@ -379,6 +383,17 @@ content sanitization, and reward settlement.
   text tasks count. Failed-worker evidence can be valid work. Reference/fidelity
   experiments remain excluded. Allocation records are not sent payments; no
   ordinary worker sender or live validator handler may consume them.
+- Recipient consent commits the exact campaign, allocation, account, node,
+  Base token, integer amount, destination and at-most-24-hour signing window.
+  Both parties sign the same domain-separated message; no private key enters
+  Core or its CLI. Apply serializes with allocation writes and locks current
+  node/account identity, rejects retired accounts and signer rotation, and
+  rechecks expiry after verification. The one immutable row per allocation
+  makes identical replay safe even after expiry; conflicting consent fails.
+  A separately authenticated recipient does not establish operator independence
+  or prevent a compromised node from proposing an attacker-owned destination.
+  The maintainer must review that destination through the known operator channel.
+  This is an administrative backend, not a shipped operator wallet UI or sender.
 - Compensated validator audits reserve integer work units against four locked
   PostgreSQL scopes: global, worker, reviewed validator, and validator/worker
   pair. The ordinary worker terminal appends its payout ledger row and settles
