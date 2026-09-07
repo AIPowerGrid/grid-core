@@ -52,7 +52,7 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   `0600` output, and prints aggregates only. It has no send mode and never
   inserts into the hourly worker payout queue. A file failure after commit is
   recovered with the same campaign/digest, not a newly named campaign.
-- `manage_validator_recipient.py` - private `prepare`/`bind` command for
+- `manage_validator_recipient.py` - private `prepare`/`bind`/`export` command for
   allocation-specific consent. Preparation reads only and returns exact text
   for the node and recipient to sign outside Core. Bind previews cryptographic
   proofs and requires the reviewed digest to persist them. EOA verification is
@@ -60,6 +60,10 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   and outputs use bounded owned `0600` files; no private key, sender, automatic
   wallet fallback or public endpoint. Replay the same signed input/digest after
   uncertain output failure, even after its original signing deadline.
+  `export` reads a fully signed, unexpired operator request and revalidates it
+  for private review without binding it; its input contains only the exact
+  request ID and maintainer approval reference. Export forbids apply/digest
+  flags and keeps signatures solely in the protected output file.
 - `review_validator_reference.py` - preview-first, digest-bound quality review
   and activate/pause/revoke workflow for a media reference worker. It never
   fabricates bond evidence or grants economic authority.

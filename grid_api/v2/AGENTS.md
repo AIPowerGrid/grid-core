@@ -166,6 +166,12 @@ validator shadow-observation records.
   execution capability, not a stored private key; never expose them in an API.
   Downgrade refuses nonempty history. Worker nonce allocation reads this table
   even when validator sending is disabled, so migration precedes runtime code.
+- `grid_validator_compensation_requests`, added empty by `0039`, holds one
+  replaceable 24-hour wallet/node consent slot per finalized allocation. It
+  binds the exact current human/node association; it is not an approved
+  recipient or a payment. SQL NULL distinguishes absent consent/signatures.
+  Expired/cancelled unbound slots may be replaced, never immutable approved
+  recipient/payment rows. Downgrade refuses nonempty pending proof.
 - New columns need explicit migrations, tests, and backfill/default strategy for
   existing rows.
 - Do not store plaintext API keys, private keys, or worker secrets.

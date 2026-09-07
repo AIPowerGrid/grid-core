@@ -29,6 +29,9 @@ for humans and agents.
   private PostgreSQL allocation contract, legacy offline simulation and the
   signed recipient-consent and default-off sender backends, with UI/live-approval gates
   before any payment.
+- `architecture/VALIDATOR_PAYOUT_CONSENT.md` - default-off operator status and
+  wallet/node signature collection; private review boundary, request recovery,
+  client verification and remaining node-app/Console release gates.
 - `architecture/NETWORK_READINESS.md` - current implementation and rollout
   status for validator, worker-growth, economics, blockchain, and operations
   requirements.
