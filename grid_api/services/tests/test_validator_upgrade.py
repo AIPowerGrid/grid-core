@@ -13,7 +13,9 @@ from grid_api.services import validator_operators as operators
 
 @pytest.mark.parametrize(
     "upgrade,upgrades",
-    [("", []), ("v0.1.0-preview.14", []), ("", ["v0.1.0-preview.15"]), ("", ["v0.1.0-preview.15", "v0.1.0-preview.16"])],
+    [("", []), ("v0.1.0-preview.14", []), ("", ["v0.1.0-preview.15"]),
+     ("", ["v0.1.0-preview.15", "v0.1.0-preview.16"]),
+     ("", ["v0.1.0-preview.15", "v0.1.0-preview.16", "v0.1.0-preview.17"])],
 )
 def test_upgrade_python_and_sql_eligibility_agree(monkeypatch, upgrade, upgrades):
     monkeypatch.setattr(
@@ -33,6 +35,8 @@ def test_upgrade_python_and_sql_eligibility_agree(monkeypatch, upgrade, upgrades
         "v0.1.0-preview.16",
         "0.1.0-preview.16",
         "v0.1.0-preview.17",
+        "0.1.0-preview.17",
+        "v0.1.0-preview.18",
         "vv0.1.0-preview.16",
         "v0.1.0-preview.9",
         "v0.1.0-dev",
@@ -86,7 +90,7 @@ def test_upgrade_overlap_cannot_run_shadow_observer():
         [""],
         [None],
         ["v0.1.0-preview.16", "v0.1.0-preview.16"],
-        ["v0.1.0-preview.14", "v0.1.0-preview.15", "v0.1.0-preview.16"],
+        ["v0.1.0-preview.14", "v0.1.0-preview.15", "v0.1.0-preview.16", "v0.1.0-preview.17"],
     ],
 )
 def test_plural_upgrade_rejects_unreviewable_or_unbounded_versions(versions):
@@ -101,18 +105,28 @@ def test_upgrade_configuration_cannot_silently_combine_lists():
         )
 
 
-def test_plural_upgrade_overlap_cannot_run_shadow_observer():
+@pytest.mark.parametrize("upgrades", [
+    ["v0.1.0-preview.15", "v0.1.0-preview.16"],
+    ["v0.1.0-preview.15", "v0.1.0-preview.16", "v0.1.0-preview.17"],
+])
+def test_plural_upgrade_overlap_cannot_run_shadow_observer(upgrades):
     with pytest.raises(ValidationError, match="overlap requires shadow observation disabled"):
         GridSettings(
             _env_file=None,
-            validator_cohort_upgrade_versions=["v0.1.0-preview.15", "v0.1.0-preview.16"],
+            validator_cohort_upgrade_versions=upgrades,
             validator_shadow_observer_enabled=True,
         )
 
 
-def test_plural_upgrade_loads_from_json_environment(monkeypatch):
+@pytest.mark.parametrize("upgrades", [
+    '["v0.1.0-preview.15","v0.1.0-preview.16"]',
+    '["v0.1.0-preview.15","v0.1.0-preview.16","v0.1.0-preview.17"]',
+])
+def test_plural_upgrade_loads_from_json_environment(monkeypatch, upgrades):
+    import json
+
     monkeypatch.setenv("VALIDATOR_COHORT_UPGRADE_VERSION", "")
-    monkeypatch.setenv("VALIDATOR_COHORT_UPGRADE_VERSIONS", '["v0.1.0-preview.15","v0.1.0-preview.16"]')
+    monkeypatch.setenv("VALIDATOR_COHORT_UPGRADE_VERSIONS", upgrades)
     settings = GridSettings(_env_file=None)
-    assert settings.validator_cohort_upgrade_versions == ["v0.1.0-preview.15", "v0.1.0-preview.16"]
+    assert settings.validator_cohort_upgrade_versions == json.loads(upgrades)
     assert settings.validator_shadow_observer_enabled is False
