@@ -88,14 +88,13 @@ def _cohort_versions() -> tuple[str, tuple[str, ...]]:
     if not baseline.removeprefix("v"):
         return baseline, ()
     upgrade = str(getattr(settings, "validator_cohort_upgrade_version", "") or "").strip()
-    versions = tuple(
-        dict.fromkeys(value.removeprefix("v") for value in (baseline, upgrade) if value)
-    )
+    upgrades = getattr(settings, "validator_cohort_upgrade_versions", ()) or ()
+    versions = tuple(dict.fromkeys(value.removeprefix("v") for value in (baseline, upgrade, *upgrades) if value))
     return baseline, versions
 
 
 def cohort_version_status(software_version: str | None) -> tuple[str, bool]:
-    """Accept the baseline and one explicitly reviewed upgrade, never newer tags by range."""
+    """Accept only the baseline and explicitly reviewed upgrades, never newer tags by range."""
     baseline, versions = _cohort_versions()
     current = str(software_version or "").strip(" ")
     normalized_current = current.removeprefix("v")
