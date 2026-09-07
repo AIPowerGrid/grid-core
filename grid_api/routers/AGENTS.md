@@ -313,6 +313,12 @@ expired or out-of-scope pilots return 503 without revealing membership.
   It synthesizes completed probe evidence and tests the storage service, not
   HTTP authentication, model fidelity, or compensation. CI supplies PostgreSQL
   16; local PostgreSQL 14 results are supplementary, not release qualification.
+- `tests/test_validator_scorecards_postgres.py` uses the same disposable PG
+  fixture and signed synthetic evidence to prove shared-group counts, bounded
+  receipt windows, actual completed-probe freshness, null/future timestamps,
+  real foreign-key pruning and read-only aggregate access. Three registrations
+  remain one probe group with unknown independence; these tests do not prove
+  inference, production HTTP authorization or a deployed scorecard.
 - Worker pairing/auth changes: include
   `grid_api/routers/tests/test_worker_enrollment_contract.py` and the service
   lifecycle tests before the full suite.
