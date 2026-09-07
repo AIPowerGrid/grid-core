@@ -145,8 +145,8 @@ class GridSettings(BaseSettings):
         pattern=r"^(?:v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:preview|alpha|beta|rc)\.[0-9]+)?)?$",
         max_length=64,
     )
-    # Preserve older operators while introducing the in-app updater. Not a range.
-    validator_cohort_upgrade_versions: list[ReviewedValidatorVersion] = Field(default_factory=list, max_length=3)
+    # Bounded release overlap preserves older operators; each tag is reviewed.
+    validator_cohort_upgrade_versions: list[ReviewedValidatorVersion] = Field(default_factory=list, max_length=7)
     # Seven-day advisory comparison. Schema and report tooling may be deployed
     # while false; no run can start and no observation can be written until the
     # three-independent-operator gate is separately frozen and this is enabled.
