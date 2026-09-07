@@ -51,9 +51,9 @@ validation, worker incentives, and trust boundaries.
 - `PAID_VALIDATOR_AUDITS.md` - accepted, partially implemented design for
   bounded scheduler-owned audits. Schema, budgets, ordinary atomic payout, and
   recovery exist dark; scheduling, scoring, and classifier gates remain absent.
-- `VALIDATOR_COMPENSATION_PILOT.md` - proposed capped operator compensation,
-  offline private allocation simulator, trust boundaries and unimplemented
-  PostgreSQL/recipient/sender gates. Not worker-audit funding or payment approval.
+- `VALIDATOR_COMPENSATION_PILOT.md` - capped operator compensation, implemented
+  dark PostgreSQL contracts/allocations, offline simulation and remaining
+  recipient/sender gates. Not worker-audit funding or payment approval.
 - `MEDIA_VALIDATION_V1.md` - accepted fail-closed image/video validation design:
   private challenges, cached bond eligibility, rotating references, Core object
   hashing, validator fetch defenses, dark validator-side modality scoring, and

@@ -45,6 +45,13 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   rejects conflicting assignment replays, shares caps across an operator's nodes,
   and exclusively creates a private non-sendable output. Stdout is aggregate only.
   It does not authenticate the input or provide durable payment idempotency.
+- `manage_validator_compensation.py` - private, preview-first PostgreSQL pilot
+  contract/finalization command. Apply requires the exact reviewed digest;
+  previews connect read-only without schema initialization. It reuses the
+  offline tool's bounded private JSON I/O, writes the full plan only to a new
+  `0600` output, and prints aggregates only. It has no send mode and never
+  inserts into the hourly worker payout queue. A file failure after commit is
+  recovered with the same campaign/digest, not a newly named campaign.
 - `review_validator_reference.py` - preview-first, digest-bound quality review
   and activate/pause/revoke workflow for a media reference worker. It never
   fabricates bond evidence or grants economic authority.

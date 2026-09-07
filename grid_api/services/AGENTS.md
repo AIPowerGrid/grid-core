@@ -36,6 +36,10 @@ content sanitization, and reward settlement.
   `validator_compensation_preview.py` (pure offline allocation simulation over
   unverified reviewer snapshots, with integer caps and assignment/operator-group
   deduplication; no economic authority, database writes, recipient or sender),
+  `validator_compensation.py` (explicitly approved, private PostgreSQL pilot
+  contracts and finalized allocations; independently rechecks signed completed
+  text tasks, shares caps by reviewed control group and claims work globally
+  once. No runtime hook, payout queue, recipient selection or sender),
   `holdings.py` (cached on-chain AIPG balance + Chainlink ETH/USD),
   `deposits.py` (atomic Base funding receipts from verified account wallets
   plus USDC, bounded AIPG, and conversion-gated ETH claims),
@@ -367,6 +371,14 @@ content sanitization, and reward settlement.
   bounces. Stale jobs are reclaimed by the loop in `main.py`.
 - Money paths must stay idempotent and tested; value-moving credit ledger writes
   require non-null refs and must not overdraft under concurrency.
+- Validator compensation is separate from worker den and audit-execution
+  budgets. The manual preview/apply command freezes a seven-day contract and
+  reviewed beneficiaries before work, then commits allocations and unique work
+  claims together after the receipt grace. It pays neither majority agreement
+  nor accusations: only independently reverified, correctly scored generated
+  text tasks count. Failed-worker evidence can be valid work. Reference/fidelity
+  experiments remain excluded. Allocation records are not sent payments; no
+  ordinary worker sender or live validator handler may consume them.
 - Compensated validator audits reserve integer work units against four locked
   PostgreSQL scopes: global, worker, reviewed validator, and validator/worker
   pair. The ordinary worker terminal appends its payout ledger row and settles

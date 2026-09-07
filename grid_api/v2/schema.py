@@ -1055,10 +1055,9 @@ validator_assignments = sa.Table(
     ),
 )
 
-# Signed validator reports about probe outcomes. V0 stores these as audit
-# evidence only: no routing, rewards, slashing, or payout logic reads this table.
-# Future validator economics can derive scorecards from this append-only evidence
-# after assignment/quorum/dispute rules exist.
+# Signed validator reports about probe outcomes. Ordinary runtime evidence has
+# no routing or penalty authority. The separate, manually approved compensation
+# pilot rechecks completed text tasks before allocating; it never sends funds.
 validator_attestations = sa.Table(
     "grid_validator_attestations",
     metadata,
@@ -1132,6 +1131,57 @@ validator_attestations = sa.Table(
         "validator_id",
         name="uq_grid_validator_attestations_group_validator",
     ),
+)
+
+
+# Approved pilot contracts and finalized validator compensation allocations.
+# These private records never enter the hourly worker payout queue. No sender
+# or automatic recipient selection is attached to them.
+validator_compensation_campaigns = sa.Table(
+    "grid_validator_compensation_campaigns", metadata,
+    sa.Column("id", sa.String(64), primary_key=True),
+    sa.Column("contract", PortableJSON, nullable=False),
+    sa.Column("contract_hash", sa.String(64), nullable=False, unique=True),
+    sa.Column("budget_atomic", sa.Numeric(78, 0), nullable=False),
+    sa.Column("allocated_atomic", sa.Numeric(78, 0), nullable=False, server_default="0"),
+    sa.Column("status", sa.String(16), nullable=False, server_default="open"),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("finalized_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("result", PortableJSON, nullable=True),
+    sa.CheckConstraint("budget_atomic > 0 AND allocated_atomic >= 0 AND allocated_atomic <= budget_atomic",
+                       name="ck_validator_comp_campaign_budget"),
+    sa.CheckConstraint("status IN ('open', 'finalized')", name="ck_validator_comp_campaign_status"),
+    sa.CheckConstraint("(status = 'open' AND finalized_at IS NULL AND result IS NULL AND allocated_atomic = 0) OR "
+                       "(status = 'finalized' AND finalized_at IS NOT NULL AND result IS NOT NULL)",
+                       name="ck_validator_comp_campaign_terminal"),
+)
+
+validator_compensation_allocations = sa.Table(
+    "grid_validator_compensation_allocations", metadata,
+    sa.Column("campaign_id", sa.String(64), sa.ForeignKey("grid_validator_compensation_campaigns.id", ondelete="RESTRICT"), primary_key=True),
+    sa.Column("operator_group_id", sa.String(96), primary_key=True),
+    sa.Column("account_id", sa.Uuid, sa.ForeignKey("grid_accounts.id", ondelete="RESTRICT"), nullable=False),
+    sa.Column("reviewed_units", sa.Integer, nullable=False),
+    sa.Column("amount_atomic", sa.Numeric(78, 0), nullable=False),
+    sa.Column("allocation_hash", sa.String(64), nullable=False, unique=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint("reviewed_units > 0 AND amount_atomic >= 0", name="ck_validator_comp_allocation_positive"),
+)
+
+validator_compensation_work = sa.Table(
+    "grid_validator_compensation_work", metadata,
+    sa.Column("attestation_id", sa.BigInteger, sa.ForeignKey("grid_validator_attestations.id", ondelete="RESTRICT"), primary_key=True),
+    sa.Column("campaign_id", sa.String(64), sa.ForeignKey("grid_validator_compensation_campaigns.id", ondelete="RESTRICT"), nullable=False),
+    sa.Column("operator_group_id", sa.String(96), nullable=False),
+    sa.Column("probe_group_id", sa.String(96), nullable=False),
+    sa.Column("assignment_id", sa.String(96), nullable=False, unique=True),
+    sa.Column("evidence_commitment", sa.String(64), nullable=False),
+    sa.Column("verification", PortableJSON, nullable=False),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.UniqueConstraint("operator_group_id", "probe_group_id", name="uq_validator_comp_operator_work"),
+    sa.ForeignKeyConstraint(["campaign_id", "operator_group_id"],
+                            ["grid_validator_compensation_allocations.campaign_id", "grid_validator_compensation_allocations.operator_group_id"],
+                            ondelete="RESTRICT"),
 )
 
 

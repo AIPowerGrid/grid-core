@@ -1,7 +1,9 @@
 # Validator Compensation Pilot
 
-Status: **proposal and offline allocation simulation only**. No campaign is
-earning, no funds are reserved, and no payout adapter is implemented or enabled.
+Status: **durable allocation implementation, not deployed or payment-enabled**.
+The manual PostgreSQL path exists alongside the earlier offline simulation.
+No real campaign/budget has been approved or created, funds are not reserved
+on-chain, and no payout adapter is implemented or enabled.
 This is separate from worker den and from paying workers to execute blind audits.
 It cannot activate routing, reputation penalties, bonds, or slashing.
 
@@ -11,15 +13,98 @@ It cannot activate routing, reputation penalties, bonds, or slashing.
 - At most 2,000 AIPG per reviewed independent operator across all their nodes.
 - At most 100 reviewed contributions per operator per UTC day.
 - One unit per operator and probe group, not per node, retry or heartbeat.
-- Exclude first-party, unreviewed, rejected, expired-review and disputed work.
+- Exclude first-party, unreviewed, rejected and expired-review operators.
+  Objectively incorrect task scores do not count. Peer-quorum disagreement
+  alone does not invalidate a correctly scored task or reward majority voting.
 - Allocate pro rata by reviewed units, floor to integer base units, then apply
   the operator cap. Leave both rounding and capped remainders in treasury;
   do not redistribute them or automatically raise any budget.
 
 These are maximum draft terms, not payment promises. The maintainer must approve
-the budget, earning window, eligibility and exact recipients before the pilot.
+the budget, earning window, eligibility and beneficiary accounts before the pilot.
+Resolve separately proven payout destinations before any transfer.
 Publish the terms before earning starts. Do not retrofit this draft onto past
 unpaid participation without a separate explicit decision.
+
+## Durable Allocation Contract
+
+Migration `0036` creates three empty private tables: campaign contracts,
+allocations and work claims. No automatic runtime handler or worker payout
+timer imports this service. The administrative command requires PostgreSQL;
+SQLite remains migration-compatible, not a qualified monetary runtime.
+
+`scripts/manage_validator_compensation.py create` reads a private object with
+exactly `terms` and `validator_ids`. Terms contain the six fields in the offline
+terms table below plus `software_version` and an opaque `approval:<reference>`.
+There are no default amounts. A reference records an actual owner decision; it
+is not authentication or proof of consent by itself. Only an authorized
+maintainer with the database role may apply it after obtaining that decision.
+
+The durable pilot is exactly seven days, frozen before its start and at most
+one day ahead. It selects three to ten active, reviewed independent operators,
+one node/beneficiary per control group for this first pilot. All must advertise
+the exact admitted release and have a fresh heartbeat at creation. Existing
+independence reviews must cover the full window plus one-hour receipt grace.
+The campaign commits their accounts, signers, control groups, review records,
+version, budget, caps, Base chain, configured AIPG token and 18-decimal unit.
+Independent control and first-party exclusion still depend on the maintainer's
+review, not a node's self-description or a hash. No qualification is reset.
+
+Finalization runs after the fixed end plus one hour. It reads at most 10,000
+authoritative receipts from the selected members, re-verifies their signatures
+and exact account/signer/assignment/nonce/evidence/target bindings, and requires
+a completed `text.generated.v8` task. Assignments must originate and complete
+inside the pilot; receipts must arrive inside the fixed grace and their own
+assignment deadline. Missing or corrupt binding data blocks finalization.
+Other experimental policies are excluded, never silently paid as text work.
+
+The signed verdict must match Core's objective task result. This accepts a
+correct `failed` verdict as well as `healthy` or `slow`; peer quorum outcome is
+not an input. It proves neither model identity nor independence from a dishonest
+coordinator. Frozen membership/review drift requires review before finalization;
+an operator simply going offline after completing work does not erase it.
+
+Eligible work is capped per UTC completion day, selected in server-receipt then
+receipt-ID order. Each control group/probe group and assignment can be allocated
+once globally, including across renamed/overlapping campaigns. Finalization
+rechecks eligibility under transaction locks, recomputes the reviewed digest,
+and atomically inserts integer allocations and work claims with the campaign
+terminal. A conflict or failure rolls everything back. Capped and rounding
+remainders stay unallocated. Re-running a finalized campaign reconciles its
+stored commitments, beneficiaries, amounts and work counts before returning it.
+Retained verification facts and signed reports support audit after assignment
+pruning. This is tamper-evident accounting, not protection against a malicious
+database administrator who can rewrite every commitment.
+
+An allocation belongs to a frozen account. It has no automatic recipient,
+nonce or transaction; the node's generated signing wallet is not a fallback
+payout destination. `sendable` remains false. Allocation finalization is not
+a passing seven-day operational pilot or authorization to turn on penalties.
+
+Administrative sequence, using private paths chosen by the maintainer:
+
+```sh
+.venv/bin/python scripts/manage_validator_compensation.py create \
+  --input /private/pilot-request.json --output /private/pilot-preview.json
+.venv/bin/python scripts/manage_validator_compensation.py create \
+  --input /private/pilot-request.json --output /private/pilot-approved.json \
+  --apply --expect-digest <reviewed-preview-digest>
+.venv/bin/python scripts/manage_validator_compensation.py finalize \
+  --campaign-id <approved-campaign-id> --output /private/allocation-preview.json
+.venv/bin/python scripts/manage_validator_compensation.py finalize \
+  --campaign-id <approved-campaign-id> --output /private/allocation-approved.json \
+  --apply --expect-digest <reviewed-allocation-digest>
+```
+
+These are placeholders, not approved production commands. Preview connections
+are read-only and never call schema initialization. Full results stay in
+exclusive `0600` outputs; stdout contains aggregates and commitments only. A
+failed output write can follow a committed transaction: retry the same campaign
+and digest with a new private output path. Never create a replacement campaign
+to recover an uncertain result. The complete create preview/apply path and
+finalization have been exercised against synthetic PostgreSQL records, not an
+approved live compensation cohort. Recipient consent, transfer execution,
+transaction reconciliation and operator compensation UI are still required.
 
 ## Offline Tool
 
@@ -52,7 +137,8 @@ timezone-aware `completed_at`, and lowercase SHA-256 `evidence_digest`. Only
 include evidence independently checked against Core's assignment, signer,
 nonce, commitment, timely acceptance and reviewed verdict. A healthy verdict
 or quorum agreement alone is not sufficient. Failed-worker evidence can be valid
-work; disputed/unreproducible evidence must remain outside the reviewed input.
+work. Unreproducible scoring is not reviewed work; peer disagreement by itself
+does not disqualify an independently verified objective score.
 
 The tool normalizes times to UTC. Exact assignment replays are idempotent;
 conflicting versions of the same assignment fail. Different assignments for the
@@ -100,12 +186,12 @@ a second payable entitlement.
    and verdict review. Resolve a separately proven recipient wallet through
    the canonical account; never assume an ephemeral validator signer is the
    desired payout destination.
-2. Implement immutable campaign, contribution and approved-recipient records
-   in PostgreSQL, including cross-campaign reuse protection. Offline
-   deduplication does not prevent concurrent senders or repeated payment runs.
-3. Enforce campaign/operator caps transactionally and freeze amounts, evidence
-   and recipient before broadcast. An expired or changed review/recipient
-   invalidates a draft, not an already broadcast payment.
+2. Deploy and qualify the implemented campaign/allocation/work ledger, then
+   add separately proven immutable recipient records. PostgreSQL allocation
+   deduplication alone does not prevent a sender paying twice.
+3. Bind approved allocations to payment attempts without changing their frozen
+   caps, amounts or evidence. Freeze the recipient before broadcast. An expired
+   or changed review/recipient invalidates a draft, not a broadcast payment.
 4. Build a campaign adapter sharing the existing treasury nonce lock. Do not
    invent worker den or feed this simulation into the ordinary worker CLI.
 5. Test concurrent duplication, renamed campaigns, partial batches, pending
