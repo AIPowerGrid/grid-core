@@ -139,12 +139,25 @@ all three versions. Stored history is retained, not backfilled or reset.
 
 ## 3. Monitor the 72-Hour Gate
 
-The node must remain online for at least 72 hours and supply at least 80 percent
-of the bounded heartbeat samples. Heartbeat freshness is checked again at
-verification time. At least one completed assignment and one Core-accepted
-authoritative attestation must also be created after the observation window starts;
-historical evidence from before observation does not count. Workload evidence
-does not replace the time and heartbeat gates.
+The observation must span at least 72 hours with at least 80 percent heartbeat
+coverage. Heartbeat freshness is checked again at verification time. Migration
+`0035` adds server-observed five-minute buckets without reconstructing old
+timestamps or resetting enrollment, identity, review or lifetime counters.
+During the first 72 hours of that collection, the original coverage calculation
+continues. Thereafter `coverage_basis=recent_72h` uses only the latest 864
+buckets, so an old outage does not require indefinite catch-up. Repeated
+heartbeats cannot fill missed buckets. Keep the same node running; do not
+restart qualification to repair coverage.
+
+At least one completed assignment and one Core-accepted authoritative
+attestation must also exist in the applicable observation window. For
+`recent_72h`, both must be from the latest 72 hours; older work does not qualify
+an idle node. Workload evidence does not replace the time, coverage, current
+release, active-registration or independent-control review gates. Public status
+exposes collection progress and lifetime coverage separately, not raw buckets.
+
+The production rollout and rollback evidence for this change is recorded in
+[Validator recovery rollout](VALIDATOR_RECOVERY_2026_09_07.md).
 
 The operator can inspect its own safe progress with:
 

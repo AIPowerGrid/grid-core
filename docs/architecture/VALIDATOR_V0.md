@@ -100,7 +100,10 @@ observation path saw them.
 
 ### Bounded Availability Recovery
 
-Implemented in source; apply migration `0035` before deploying this code.
+Production runs this path on `508ca14f` with migration `0035`, verified
+2026-09-07. Apply `0035` before deploying it to another environment. See the
+[rollout record](../../deploy/VALIDATOR_RECOVERY_2026_09_07.md) for evidence and
+the remaining observation gates.
 Supported heartbeats also collect at most 864 unique server-observed five-minute
 buckets. Repeated or concurrent heartbeats cannot fill missing time buckets, and
 unsupported releases do not accumulate qualified observations.
