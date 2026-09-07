@@ -18,9 +18,15 @@ validation, worker incentives, and trust boundaries.
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only
   invariants, scorer-capability matching, scorecard privacy rules, and future
-  economic gates.
+  economic gates. Its additive scorecard metadata specifies vote/group counts,
+  probe-vs-receipt freshness and explicit unknown statistical confidence.
 - `VALIDATOR_ANTI_GAMING.md` - executable hostile-worker baseline, public-probe
   limitations, blind-audit contract, and the quality-evidence promotion gate.
+- `VALIDATOR_RESPONSES_QUALIFICATION.md` - local native-logprob transport proof,
+  isolated Redis capture replay, honest coverage gaps and remaining live
+  assignment/runtime/calibration gates. Not a public scoring policy.
+  Includes synthetic HTTP/worker/WebSocket/Redis fault qualification and the
+  duplicate-key/UTF-8 metadata fixes it exposed; no public assignment-loop proof.
 - `VALIDATOR_SHADOW_AUTHORITY.md` - default-off seven-day advisory-routing
   observation contract after three independently qualified operators. It owns
   the no-side-effect boundary, eligible evidence, replayable decision record,

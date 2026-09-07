@@ -149,7 +149,13 @@ content sanitization, and reward settlement.
   worker/model coverage, and software-version cohorts, but never validator
   identities. Scorecards label objective text votes as Core-matched or
   Core-disagreed and media/preview verdicts as validator opinion; a raw vote is
-  never silently promoted to Core-verified fact. Independent-operator counts
+  never silently promoted to Core-verified fact. Scorecard rates count votes,
+  not independent trials. Per-row sampling metadata counts retained assignment,
+  group and registered-validator bindings without exposing their identities;
+  independent sample count and confidence intervals remain unknown. Probe age
+  uses only retained, completed Core assignments, never attestation receipt or
+  validator-supplied timestamps. Missing/future probe times remain explicit.
+  Independent-operator counts
   remain zero until externally reviewed; registration count is not independence
   proof. `validator_operators.py` owns the review state: an opaque control group,
   at least 72 hours of qualification, rate-limited heartbeat coverage, an
@@ -291,6 +297,28 @@ content sanitization, and reward settlement.
   reference disagreement are inconclusive. Worker-supplied logprobs are not
   cryptographic proof of model identity, and this lane has no routing, reward,
   strike, payout, or slashing effect.
+  `validator_responses.py` owns the bounded native Responses observation reader
+  and stream accumulator. The internal `_run_targeted_text_stage` can explicitly
+  select streaming `openai-responses` for qualification (at most 256 output
+  tokens, 300 seconds); public assignment selectors still use the existing chat
+  contract. Core dispatches these probes before ordinary raw settlement and
+  commits only bounded observations to its Redis replay buffer. Per-event and
+  whole-stream limits bound memory; missing probabilities remain explicit gaps.
+  Duplicate JSON keys at any depth are unusable, never last-value-wins.
+  Message item identifiers must be valid UTF-8 within 128 bytes, matching the
+  independent reader. Invalid metadata yields unavailable evidence, not an
+  available envelope that the validator cannot consume.
+  The envelope retains native probabilities, byte sequences, delta/sequence/item
+  indices and visible-prefix hashes, not hidden reasoning or a proven full model
+  context. It is incompatible with the chat first-distribution scorer by design.
+  No public Responses fidelity policy, runtime attestation adapter, calibrated
+  comparison, or live deployment is established by this transport work.
+  Tests cover unavailable/partial observations, terminal duplication, malformed
+  input, bounded streams, economic isolation, and a real disposable Redis
+  queue/collector/replay round trip. `test_validator_responses_redis.py` skips its
+  isolated Redis tests if `redis-server` is absent; the separate optional
+  `VALIDATOR_RESPONSES_CAPTURE` test accepts a private recorded worker capture.
+  A recorded replay is not a live end-to-end validator attestation.
   `validator_bonds.py` owns the default-off Base cache refresh. It verifies all
   WorkerRegistry selectors route through the reviewed Grid Diamond to one
   code-pinned facet release at one mutually finalized block, requires two distinct
@@ -341,6 +369,13 @@ content sanitization, and reward settlement.
   insufficient: a current independent review, fresh heartbeat, and explicit
   signing-wallet allowlist are mandatory. No scheduler or public endpoint may
   create compensated work until the separate configuration/dispatch gate lands.
+  `tests/test_paid_validator_audit_postgres.py` exercises the worker-ledger/audit
+  terminal against a disposable PostgreSQL with one private schema per test.
+  It observes blocked backend transactions before releasing a job lock, checks
+  twenty duplicate completions and release/success races, and terminates only
+  its own transaction backend before commit to prove both halves roll back.
+  These tests neither send validator compensation nor replace migration/HTTP
+  integration coverage. Their cleanup drops only the test's generated schema.
 - A successful Base funding claim atomically writes its immutable
   `grid_deposits` receipt and purchased-credit ledger movement. AIPG valuation
   must use a fresh operator epoch plus hard transaction/account/network caps;

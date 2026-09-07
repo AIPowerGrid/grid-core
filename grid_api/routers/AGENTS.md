@@ -36,6 +36,14 @@ transport, accounts, stats, health/metrics.
   Assignment-bound image/video probes branch before ordinary media settlement: they
   strip all `_validator_*` metadata, freeze the uploaded object through Core,
   acknowledge with `den: 0`, and never touch customer or worker economics.
+  Assignment-bound text probes branch before ordinary raw passthrough as well.
+  The internal Responses qualification adapter captures bounded native
+  output-text probabilities through the dedicated no-den collector; it never
+  invokes the paid passthrough handler. Missing or partial observations do not
+  become failed-worker votes. Time/size overruns cancel and close the socket so
+  late frames cannot contaminate a subsequent job. No public assignment policy
+  currently selects this adapter, and its observations cannot feed the existing
+  chat first-token score without separate context-alignment calibration.
   The separate compensated-audit hold, when present for an ordinary job UUID,
   settles through the exact text/media/passthrough paid terminal: ordinary frame,
   nonzero den acknowledgement, and no worker-visible audit marker. No scheduler
@@ -168,6 +176,10 @@ transport, accounts, stats, health/metrics.
 - Worker-reported text logprobs are untrusted evidence. Normalize and bound the
   first distribution before it reaches Redis; never retain an arbitrary nested
   backend payload or treat it as cryptographic model identity.
+  Responses qualification instead preserves bounded native per-delta records,
+  missing-probability gaps, sequence/item indices, and visible-prefix hashes.
+  These hashes are not full model-context commitments: hidden reasoning,
+  tokenizer and chat-template equivalence remain unverified.
 - Media completion must report exactly one unique canonical digest per
   presigned output slot, and every expected R2 object must pass existence,
   content-type, and size validation before payout or demand settlement.
@@ -213,6 +225,10 @@ transport, accounts, stats, health/metrics.
   result.
 - Validator scorecards must aggregate evidence only. Do not expose raw payloads,
   nonces, signatures, account IDs, or validator identities from scorecard routes.
+  Additive sampling/freshness metadata distinguishes vote counts from retained
+  probe groups and completed-probe age from receipt age. Do not turn null
+  confidence intervals or independent sample counts into zero or a green
+  confidence indicator. The route remains active-validator and scope gated.
 - Public-template validator probes are adversarially reproducible by parsers and
   probe-aware model switching. Keep the hostile-worker contract test in CI and
   never mark these generated probes as quality-eligible.
@@ -291,6 +307,18 @@ expired or out-of-scope pilots return 503 without revealing membership.
 ## Verification
 
 - `pytest grid_api/routers/`.
+- `tests/test_validator_evidence_postgres.py` requires disposable
+  `VALIDATORS_TEST_DB_URL`: signed binding/identity corruption, expired or
+  unfinished probes, concurrent duplicate/conflicting votes, and disagreement.
+  It synthesizes completed probe evidence and tests the storage service, not
+  HTTP authentication, model fidelity, or compensation. CI supplies PostgreSQL
+  16; local PostgreSQL 14 results are supplementary, not release qualification.
+- `tests/test_validator_scorecards_postgres.py` uses the same disposable PG
+  fixture and signed synthetic evidence to prove shared-group counts, bounded
+  receipt windows, actual completed-probe freshness, null/future timestamps,
+  real foreign-key pruning and read-only aggregate access. Three registrations
+  remain one probe group with unknown independence; these tests do not prove
+  inference, production HTTP authorization or a deployed scorecard.
 - Worker pairing/auth changes: include
   `grid_api/routers/tests/test_worker_enrollment_contract.py` and the service
   lifecycle tests before the full suite.
