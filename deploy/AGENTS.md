@@ -25,6 +25,10 @@ executes an immutable release selected through `/home/aipg/current`.
   compatibility deployment, published preview.17 provenance and exact
   four-release admission with preserved qualification. Owned-node canary,
   public download promotion and the pilot remain separate gates.
+- `VALIDATOR_COMPENSATION_DARK_2026_09_07.md` - immutable `874f7407` / `0039`
+  backup/restore and dark cutover proof, preserved identities/config/timers,
+  empty compensation tables and the shared-nonce rollback boundary. Native
+  release, live consent, operator reviews and budget activation remain separate.
 - `nginx/aipg-api.conf` - Grid routes, exact OAuth metadata routes, optional
   reviewed exact-route overlays, restricted metrics, public docs/health, and
   static `410 Gone` responses for retired API paths.
