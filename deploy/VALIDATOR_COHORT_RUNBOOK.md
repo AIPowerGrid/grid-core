@@ -106,10 +106,36 @@ the existing progress must be discarded.
 
 Core rejects both candidate and verify transitions unless the node's latest
 registration/heartbeat reports the exact frozen cohort baseline configured by
-`VALIDATOR_COHORT_BASELINE_VERSION`. The version is part of the review digest,
+`VALIDATOR_COHORT_BASELINE_VERSION` or an explicitly reviewed overlapping release.
+The version is part of the review digest,
 so an upgrade or downgrade between preview and apply requires a fresh preview.
 Preserve the node's existing config and `val_*` ID when upgrading; a new
 registration would not prove continuity of the reviewed operator.
+
+### Rolling Release Compatibility
+
+The default accepts only the baseline. A single reviewed release can overlap
+through `VALIDATOR_COHORT_UPGRADE_VERSION`. When a second reviewed update arrives
+before the previous transition is complete, clear that singular setting and set
+`VALIDATOR_COHORT_UPGRADE_VERSIONS` to a JSON array of at most two distinct exact
+release tags. This preserves the baseline and both reviewed upgrades without
+accepting arbitrary newer versions, wildcards, development tags or ranges.
+Both upgrade settings together are rejected at startup.
+
+Deploy the compatible code with the previous configuration first. Only after
+its checks pass, replace the singular setting with the reviewed list and verify
+each active release's eligibility. Preserve qualification timestamps, samples,
+signers and identities; do not restart qualification or fabricate missed samples.
+The list is compatibility policy, not evidence of independent operation or
+permission for rewards or penalties. Shadow observation must stay disabled
+while either upgrade setting is non-empty.
+
+After operators migrate, deliberately promote the baseline and clear both
+upgrade settings. If rolling back to code without the plural setting, restore
+the original singular/baseline configuration together with the code: old code
+ignores the new variable. Nodes on the new release can lose sample eligibility
+under that rollback, so report that limitation; never describe it as preserving
+all three versions. Stored history is retained, not backfilled or reset.
 
 ## 3. Monitor the 72-Hour Gate
 

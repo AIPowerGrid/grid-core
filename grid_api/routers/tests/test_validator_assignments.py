@@ -1390,10 +1390,20 @@ async def test_unreviewed_supported_validator_starts_observation_on_first_heartb
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("final_version", ["v0.1.0-preview.13", "v0.1.0-preview.14"])
-async def test_unreviewed_observation_samples_are_rate_limited_and_version_gated(db, monkeypatch, final_version):
+@pytest.mark.parametrize(
+    "final_version,plural",
+    [
+        ("v0.1.0-preview.13", False), ("v0.1.0-preview.14", False),
+        ("v0.1.0-preview.13", True), ("v0.1.0-preview.15", True), ("v0.1.0-preview.16", True),
+    ],
+)
+async def test_unreviewed_observation_samples_are_rate_limited_and_version_gated(db, monkeypatch, final_version, plural):
     monkeypatch.setattr(
-        validator_operators.get_settings(), "validator_cohort_upgrade_version", "v0.1.0-preview.14"
+        validator_operators.get_settings(), "validator_cohort_upgrade_version", "" if plural else "v0.1.0-preview.14",
+    )
+    monkeypatch.setattr(
+        validator_operators.get_settings(), "validator_cohort_upgrade_versions",
+        ["v0.1.0-preview.15", "v0.1.0-preview.16"] if plural else [],
     )
     account_id = uuid.uuid4()
     validator_id = await _register(account_id, software_version="v0.1.0-preview.13")
