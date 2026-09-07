@@ -23,6 +23,9 @@ validation, worker incentives, and trust boundaries.
   It also separates the `account.read` aggregate-consumer endpoint from the
   original active-validator work/private-health routes; no node is needed to
   read redacted network scorecards.
+  Its bounded availability recovery is live on `508ca14f` / Alembic `0035`;
+  collecting recent heartbeats preserves historical qualification and is not
+  itself a completed recovery window or operator-independence approval.
 - `VALIDATOR_ANTI_GAMING.md` - executable hostile-worker baseline, public-probe
   limitations, blind-audit contract, and the quality-evidence promotion gate.
 - `VALIDATOR_RESPONSES_QUALIFICATION.md` - local native-logprob transport proof,
