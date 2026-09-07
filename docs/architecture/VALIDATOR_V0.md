@@ -141,6 +141,46 @@ Core-verified fact. Media fidelity and preview-only rows remain explicitly
 `validator_opinion` because Core commits transport witnesses but does not run
 the node's local pHash/decode scorer.
 
+### Scorecard Sampling And Freshness
+
+The local September 7 addition to `GET /v1/validator/scorecards` is read-only
+and backward compatible; deployment and Console rendering are separate gates.
+Existing grouping, rates, limits, auth and economic isolation are unchanged.
+
+- `generated_at` is the Core report timestamp. `rate_basis=attestation_votes`
+  makes the denominator explicit, and `window_basis=attestation_received_at`
+  preserves the existing received-evidence window. This is not a probe-time
+  window or an estimate of all inference workloads.
+- Per-row `sampling` includes `attestation_votes`, `distinct_assignments`,
+  `distinct_probe_groups`, `distinct_registered_validators`,
+  `votes_without_group`, and `votes_without_registered_validator`.
+  These count retained bindings, not executions, independent trials, active
+  operators or externally verified control groups. A shared media execution
+  can receive several votes. Counts across grouped rows are not necessarily
+  additive. Retention/deletion can make a historical binding unknown.
+- `sampling.independent_sample_count` and `uncertainty.confidence_interval`
+  are null. Repeated/correlated votes, unresolved operator control and a
+  non-representative workload sample do not support an independent-trial
+  confidence interval. The reason codes are `correlated_votes_possible`,
+  `operator_independence_not_established`, and `non_random_workload_sample`.
+  This endpoint does not perform operator qualification; its uncertainty is
+  not a replacement for that separate review's current status.
+- `probe_freshness` contains `basis=core_completed_assignment`,
+  `votes_with_probe_time`, `latest_completed_at`, and `age_seconds`.
+  Only authoritative votes with retained assignments in `probe_status=completed`
+  contribute the Core-written `probed` timestamp. Validator payload `ts` and
+  recent attestation receipt cannot refresh old evidence. Missing or pruned
+  timestamps yield null; a future latest timestamp yields null age plus
+  `probe_time_in_future`. Partial/missing coverage adds `probe_time_missing`.
+  A latest timestamp describes only the timestamped subset, not every vote.
+
+Consumers must preserve null as unknown and distinguish existing
+`first_seen`/`last_seen` receipt times from actual probe freshness. Do not infer
+current worker availability, model authenticity, calibrated fraud detection,
+routing authority or reward eligibility from these aggregates. Historical
+clients can continue using existing fields; they must not fabricate the new
+ones when connected to older Core versions.
+
 The targeted probe is isolated from customer economics: it does not reserve or
 settle demand credits, award den, create a payout ledger completion, or apply a
 worker strike.

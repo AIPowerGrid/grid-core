@@ -4097,7 +4097,8 @@ async def scorecards(
     safe_limit = max(1, min(int(limit), 500))
     safe_since = max(1, min(int(since_hours), 24 * 90))
     mode = authority if authority in VALID_AUTHORITY else "all"
-    cutoff = _now() - timedelta(hours=safe_since)
+    generated_at = _now()
+    cutoff = generated_at - timedelta(hours=safe_since)
 
     healthy = sa.func.sum(sa.case((attestations_t.c.verdict == "healthy", 1), else_=0))
     slow = sa.func.sum(sa.case((attestations_t.c.verdict == "slow", 1), else_=0))
@@ -4127,6 +4128,15 @@ async def scorecards(
             else_=0,
         )
     )
+    # Receipt time is not probe freshness; retained, completed Core assignments
+    # are the only source of observed probe times, never validator-supplied ts.
+    completed_probe_at = sa.case(
+        (sa.and_(
+            attestations_t.c.authority == "authoritative",
+            assignments_t.c.probe_status == "completed",
+        ), assignments_t.c.probed),
+        else_=None,
+    )
 
     q = (
         sa.select(
@@ -4146,6 +4156,13 @@ async def scorecards(
             sa.func.avg(attestations_t.c.score).label("avg_score"),
             sa.func.min(attestations_t.c.created).label("first_seen"),
             sa.func.max(attestations_t.c.created).label("last_seen"),
+            sa.func.count(sa.distinct(assignments_t.c.id)).label("distinct_assignments"),
+            sa.func.count(sa.distinct(attestations_t.c.probe_group_id)).label("distinct_probe_groups"),
+            sa.func.count(sa.distinct(attestations_t.c.validator_id)).label("distinct_registered_validators"),
+            sa.func.count(attestations_t.c.probe_group_id).label("grouped_votes"),
+            sa.func.count(attestations_t.c.validator_id).label("registered_votes"),
+            sa.func.count(completed_probe_at).label("votes_with_probe_time"),
+            sa.func.max(completed_probe_at).label("latest_completed_at"),
         )
         .outerjoin(
             assignments_t,
@@ -4190,6 +4207,19 @@ async def scorecards(
             verdict_basis = "mixed"
         subject_type = "worker" if row["worker_id"] else "model"
         subject_id = row["worker_id"] or row["model"] or "unknown"
+        probe_time_count = int(row["votes_with_probe_time"] or 0)
+        latest_probe = _aware(row["latest_completed_at"]) if row["latest_completed_at"] else None
+        probe_age = (generated_at - latest_probe).total_seconds() if latest_probe else None
+        reasons = [
+            "correlated_votes_possible",
+            "operator_independence_not_established",
+            "non_random_workload_sample",
+        ]
+        if probe_time_count < total:
+            reasons.append("probe_time_missing")
+        if probe_age is not None and probe_age < 0:
+            reasons.append("probe_time_in_future")
+            probe_age = None
         items.append({
             "subject_type": subject_type,
             "subject_id": subject_id,
@@ -4200,6 +4230,25 @@ async def scorecards(
             "score_dimension": _score_dimension(row["modality"], row["capability"]),
             "quality_eligible": _quality_eligible(row["modality"], row["capability"]),
             "quality_score": None,
+            "sampling": {
+                "attestation_votes": total,
+                "distinct_assignments": int(row["distinct_assignments"] or 0),
+                "distinct_probe_groups": int(row["distinct_probe_groups"] or 0),
+                "distinct_registered_validators": int(row["distinct_registered_validators"] or 0),
+                "votes_without_group": total - int(row["grouped_votes"] or 0),
+                "votes_without_registered_validator": total - int(row["registered_votes"] or 0),
+                "independent_sample_count": None,
+            },
+            "probe_freshness": {
+                "basis": "core_completed_assignment",
+                "votes_with_probe_time": probe_time_count,
+                "latest_completed_at": latest_probe.isoformat() if latest_probe else None,
+                "age_seconds": probe_age,
+            },
+            "uncertainty": {
+                "confidence_interval": None,
+                "reasons": reasons,
+            },
             "verdict_verification": {
                 "basis": verdict_basis,
                 "core_matched": matched_count,
@@ -4225,6 +4274,9 @@ async def scorecards(
 
     return {
         "items": items,
+        "generated_at": generated_at.isoformat(),
+        "rate_basis": "attestation_votes",
+        "window_basis": "attestation_received_at",
         "count": len(items),
         "window_hours": safe_since,
         "limit": safe_limit,

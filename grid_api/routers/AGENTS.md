@@ -225,6 +225,10 @@ transport, accounts, stats, health/metrics.
   result.
 - Validator scorecards must aggregate evidence only. Do not expose raw payloads,
   nonces, signatures, account IDs, or validator identities from scorecard routes.
+  Additive sampling/freshness metadata distinguishes vote counts from retained
+  probe groups and completed-probe age from receipt age. Do not turn null
+  confidence intervals or independent sample counts into zero or a green
+  confidence indicator. The route remains active-validator and scope gated.
 - Public-template validator probes are adversarially reproducible by parsers and
   probe-aware model switching. Keep the hostile-worker contract test in CI and
   never mark these generated probes as quality-eligible.
