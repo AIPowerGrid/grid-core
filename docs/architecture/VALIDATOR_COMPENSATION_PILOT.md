@@ -110,8 +110,9 @@ and reconciliation backend below does not imply those gates have passed.
 ## Recipient Consent Backend
 
 Migration `0037` adds one private immutable consent row per finalized positive
-allocation. This administrative backend exists; a public endpoint and local-app
-wallet flow do not yet exist. Do not instruct operators to paste private keys
+allocation. The separate default-off authenticated collection API is documented
+in `VALIDATOR_PAYOUT_CONSENT.md`; its local-app and Console screens do not yet
+exist. Do not instruct operators to paste private keys
 or run the administrative command. Node signing must eventually use the existing
 local node key internally; the human approves in their chosen payout wallet.
 

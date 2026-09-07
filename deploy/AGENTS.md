@@ -38,6 +38,12 @@ executes an immutable release selected through `/home/aipg/current`.
 ## Local Contracts
 
 - Env names in `env.template`, systemd, code, and docs must match exactly.
+- `VALIDATOR_COMPENSATION_OPERATOR_ENABLED` defaults off. Apply `0039` and
+  ship/test matching node-app and Console consent screens before enabling it.
+  Current account association and fresh human proof remain mandatory; this
+  API only collects signatures for private review and cannot send payments.
+  Rollback retains pending proof and disables the flag. See
+  `docs/architecture/VALIDATOR_PAYOUT_CONSENT.md` for the complete route contract.
 - `VALIDATOR_COMPENSATION_SEND_ENABLED` defaults off and has no timer hook.
   Apply `0038` before any updated worker payout process runs, because its nonce
   lookup reads validator payment history even while disabled. Upgrade all

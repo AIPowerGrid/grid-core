@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from grid_api import database
 from grid_api.config import get_settings
+from grid_api.services.validator_compensation_operator import export_for_review
 from grid_api.services.validator_compensation_recipients import bind_recipient, prepare_recipient
 from scripts.preview_validator_compensation import read_private, write_private
 
@@ -33,6 +34,10 @@ async def run(args):
             if not isinstance(request, dict) or set(request) != {"campaign_id", "operator_group_id", "recipient"}:
                 raise ValueError("invalid recipient preparation request")
             return await prepare_recipient(**request)
+        if args.action == "export":
+            if not isinstance(request, dict) or set(request) != {"request_id", "approval_ref"}:
+                raise ValueError("invalid recipient review export")
+            return await export_for_review(**request)
         return await bind_recipient(request, apply=args.apply, expected_digest=args.expect_digest)
     finally:
         database._session_factory = previous
@@ -41,14 +46,14 @@ async def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("prepare", "bind"))
+    parser.add_argument("action", choices=("prepare", "bind", "export"))
     parser.add_argument("--input", type=Path, required=True, help="Owned private JSON file; never a private key")
     parser.add_argument("--output", type=Path, required=True, help="New private output file")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--expect-digest")
     args = parser.parse_args()
-    if args.action == "prepare" and (args.apply or args.expect_digest):
-        parser.error("prepare is read-only")
+    if args.action in {"prepare", "export"} and (args.apply or args.expect_digest):
+        parser.error("prepare and export are read-only")
     if args.apply and not args.expect_digest:
         parser.error("--apply requires the exact reviewed --expect-digest")
     try:
