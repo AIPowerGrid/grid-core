@@ -68,7 +68,7 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 
 ## Work Guidance
 
-- Validator cohort upgrades may overlap up to three explicitly configured releases
+- Validator cohort upgrades may overlap up to seven explicitly configured releases
   with the baseline. Use the legacy singular setting or the bounded JSON-array
   `VALIDATOR_COHORT_UPGRADE_VERSIONS`, never both. Configuration rejects overlap while shadow observation is enabled.
   Never implicitly accept all newer or development versions.

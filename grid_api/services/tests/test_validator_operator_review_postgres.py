@@ -14,10 +14,10 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
 from grid_api.config import GridSettings
 from grid_api.services import validator_operators, validators
 from grid_api.v2.schema import accounts as accounts_t
@@ -38,6 +38,7 @@ pytestmark = pytest.mark.skipif(
 @pytest.mark.parametrize("upgrades", [
     ["v0.1.0-preview.15", "v0.1.0-preview.16"],
     ["v0.1.0-preview.15", "v0.1.0-preview.16", "v0.1.0-preview.17"],
+    [f"v0.1.0-preview.{number}" for number in range(15, 22)],
 ])
 async def test_reviewed_version_transition_preserves_history_on_postgres(pg, monkeypatch, upgrades):
     started = datetime(2026, 9, 1, 12, tzinfo=UTC)
@@ -68,7 +69,9 @@ async def test_reviewed_version_transition_preserves_history_on_postgres(pg, mon
     for index, (version, eligible) in enumerate([
         ("v0.1.0-preview.13", True), ("v0.1.0-preview.15", True),
         ("v0.1.0-preview.16", True), ("v0.1.0-preview.17", "v0.1.0-preview.17" in upgrades),
-        ("v0.1.0-preview.18", False),
+        ("v0.1.0-preview.18", "v0.1.0-preview.18" in upgrades),
+        ("v0.1.0-preview.21", "v0.1.0-preview.21" in upgrades),
+        ("v0.1.0-preview.22", False),
         ("vv0.1.0-preview.16", False), ("0.1.0-preview.16", True),
     ], start=1):
         now = started + timedelta(minutes=index * 6)
