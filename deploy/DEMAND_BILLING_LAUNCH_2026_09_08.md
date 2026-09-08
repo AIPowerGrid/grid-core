@@ -187,6 +187,77 @@ The reviewed deployment above supersedes the initial local-only posture.
   removing the wallet does not remove denominator weight, and a prospective
   reward cutoff cannot retroactively exclude these jobs.
 
+## Combined admission and monitor deployment
+
+- PR #138 merged as `91e19739`; PR #139 then merged as
+  `adc9a21ec304fb7c61c536c4417711f284c6fc60`. The latter is now the
+  immutable production release (cutover verified 2026-09-08 at 21:50:39 UTC),
+  retaining the worker setup fixes from `d1398353`.
+- Required PR #139 CI passed on PostgreSQL 16: 1,486 Grid tests passed with
+  9 skips, backup/restore and migration parity passed, and the real
+  Core/Console/node handoff passed. CodeQL and secret/infra scans passed.
+  Local focused verification additionally passed 41 billing/alert tests,
+  including real isolated PostgreSQL 14 concurrency; that scratch server was
+  stopped after testing.
+- The monitor now reconciles each purchased-credit account in one SQL
+  statement. Equal-and-opposite account discrepancies no longer cancel out,
+  and concurrent commits cannot split its reads across snapshots. Production
+  read-only preflight found six accounts, zero mismatches, zero negative
+  balances, and zero net drift. The equivalent complete query took 0.422 ms
+  at current size; future ledger growth still needs operational monitoring.
+- Before cutover, the candidate installed the unchanged hash-locked binary
+  dependencies and passed `pip check`. A fresh 119 MB Grid-schema backup was
+  restored into a generated scratch database and checked against the candidate.
+  Live Alembic parity remained `0039`; no production migration was needed.
+  Protected evidence is under
+  `/var/lib/aipg-backup/demand-release-adc9a21e/`, including the snapshot,
+  checksum, restore/drift proof, configuration backup, and timer comparisons.
+- Public health reports the exact new SHA and Redis healthy. The supervisor
+  and child processes use the new immutable working directory; billing source,
+  admission source, and config hashes match the candidate. The API is active
+  with zero automatic restarts, and anonymous assignments still return 401.
+  Worker reconnection was checked separately from API health: all 12 workers
+  online before restart returned. The last, serving `qwen3:1.7b`, reconnected at
+  21:54:10 UTC; public health then showed the complete pre-restart model list.
+- Configuration, Nginx, unit definitions, and timer states were preserved.
+  Process environment confirms `GRID_CHARGING_MODE=allowlist`, legacy charging
+  flag 0, daily-free spending 0, promo global gate 1, and both the generation
+  admission allowlist and prospective reward cutoff unset. Promo spending
+  remains subject to its separate campaign allowlist; the global gate alone
+  does not prove a funded grant. One static, non-economic rollout test alert
+  was queued and accepted by the configured Discord transport using the deployed
+  alert module. This proves HTTP delivery, not that a human saw it or that every
+  billing fault triggers the right alert. Payout timer and sender remain inactive.
+- Rollback target is `grid-core-d1398353`, with the compatible `0039` schema
+  retained. This was a code deployment, not global billing activation: new
+  admission restrictions and the reward cutoff still require deliberate setup.
+- Chat packaging at `ced82ded459f646d1742374196599403e4510361` passed hosted
+  Linux/amd64 Dockerfile build, packaged-source hash comparison, and offline
+  imports as UID 1001 (run `34281434136`). That image is CI build evidence,
+  not a published production artifact or a Chat deployment. Its other inherited
+  infrastructure-dependent checks remain unverified.
+
+## Read-only reward-policy simulation
+
+- A standalone read-only process applied the proposed paid-only rule in memory
+  to the completed 2026-09-08 20:00-21:00 UTC window. No setting, reservation,
+  credit, payout, or historical ledger record was modified. This is a
+  counterfactual, not a revised allocation or authorization to pay that hour.
+- The unchanged policy selected 3,822.43 raw DEN across six accounts. The
+  simulated paid-only rule selected 0.32 DEN for one account, matching the
+  purchased Gallery canary. This is evidence that the eligibility filter
+  excludes the unbilled work in this sample, not a complete fraud-detection proof.
+- The current runtime hourly budget is 208.33 AIPG. The allocator still awards
+  the whole budget when one non-SmolLM job is eligible: the USD 0.003 image would
+  receive 208.33 AIPG under this simulation. No token/USD valuation is implied.
+  The SmolLM-family cap does not limit other models' low-demand windfalls.
+- Payout resumption therefore needs an explicit decision about subsidy
+  intensity, not just a billing flag: either deliberately approve a fixed
+  bootstrap pool at low demand or introduce a reviewed per-work/revenue-linked
+  emission ceiling with clipped allocation left unspent. Do not invent a
+  token valuation or silently introduce that economic policy during deployment.
+  Keep the payout timer paused until this and historical exclusions are reviewed.
+
 ## Remaining launch checklist
 
 - [x] Review and merge candidate; record exact release SHA and CI evidence.
