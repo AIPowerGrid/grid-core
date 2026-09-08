@@ -109,9 +109,11 @@ async def run_text_connectivity_canary(
     canary_id = f"self_{uuid4().hex}"
     grid_nonce = secrets.token_urlsafe(24)
     expected = f"aipg-{secrets.token_hex(10)}"
+    # Backend chat templates may append control text after the user message.
     prompt = (
         "This is a connectivity check using a public, randomly generated test label. "
-        f"Reply with the label only, without commentary: {expected}"
+        f"The label is enclosed in <label> tags: <label>{expected}</label>. "
+        "Reply with only the text inside those tags. Do not include the tags or commentary."
     )
     job_id = str(uuid4())
     payload = {

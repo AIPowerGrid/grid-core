@@ -105,3 +105,11 @@ and was correctly rejected as `output_mismatch`; there were zero completion
 ledger rows or billing reservations, and the worker key could not access
 account payouts. Do not turn a successful connection or correctly rejected
 answer into a successful model-fidelity claim.
+
+The warm retry reproduced that mismatch. Ollama's installed Qwen template
+appends `/think` to the user message, making an undelimited end-of-message label
+ambiguous. The follow-up encloses the public label in explicit tags and places
+the reply instruction after it. Three direct local Qwen 1.7B checks passed with
+fresh labels and 169-186 completion tokens each. This is backend diagnostic
+evidence, not yet proof of the follow-up's deployment or frozen Grid round trip.
+The exact comparator still rejects appended `/think`, tags, or commentary.
