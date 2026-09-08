@@ -41,6 +41,7 @@ from .. import format as fmt
 from ..models.openai import ChatCompletionRequest, ModelInfo, ModelListResponse
 from ..services import accounts as accounts_svc
 from ..services import concurrency
+from ..services import generation_admission
 from ..services import credits, den, job_queue, media, pricing, quota, recipes, token_stream
 from ..services.sanitizer import sanitize_messages
 from .worker_ws import get_available_models
@@ -374,6 +375,8 @@ async def _handle_chat_completions_for_user(
         return await _chat_media(
             request, media_kind, account_id=user.get("account_id"), user=user,
         )
+
+    generation_admission.require_path("openai-chat")
 
     # Check for available text workers serving the OpenAI chat-completions API.
     available = await get_available_models(job_type="text", api_format="openai-chat")

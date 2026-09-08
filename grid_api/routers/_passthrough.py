@@ -29,6 +29,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from ..services import credits, den, job_queue, token_stream
+from ..services import generation_admission
 from ..services.sanitizer import sanitize
 
 logger = logging.getLogger("grid_api.passthrough")
@@ -269,6 +270,7 @@ async def authorize_passthrough(user: dict, model: str, api_format: str,
     Returns the authorize_request dict augmented with `prompt_toks`. In dry-run
     (charging off) it's a no-op: ok, reserved=0. The caller shapes its own
     402 from `{ok: False, reason}` so each endpoint keeps its native error body."""
+    generation_admission.require_path(api_format)
     prompt_toks = den.count_tokens(extract_prompt_text(api_format, raw_request))
     auth = dict(await credits.authorize_request(
         user, model, prompt_toks, max_len, job_id, record_reservation=True))

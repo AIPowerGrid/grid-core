@@ -3,7 +3,7 @@
 
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Literal, get_args
 from uuid import UUID
 
 from pydantic import AwareDatetime, Field, SecretStr, model_validator
@@ -12,6 +12,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 ReviewedValidatorVersion = Annotated[
     str,
     Field(pattern=r"^v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:preview|alpha|beta|rc)\.[0-9]+)?$", max_length=64),
+]
+
+GenerationPath = Literal[
+    "openai-chat", "openai-responses", "anthropic", "image", "image-to-image",
+    "image-batch", "video", "image-to-video", "video-timeline", "audio", "3d",
 ]
 
 
@@ -31,6 +36,10 @@ class GridSettings(BaseSettings):
     # Grid API server
     grid_api_host: str = "0.0.0.0"
     grid_api_port: int = 7002
+
+    # Explicit JSON allowlist for new public inference. [] closes every path.
+    # Existing holds still finalize; omission preserves the pre-rollout surface.
+    generation_enabled_paths: frozenset[GenerationPath] = frozenset(get_args(GenerationPath))
 
     # Exact direct-service IDs only; never delegated users. Empty is dark.
     grid_charging_all_model_services: list[str] = Field(default_factory=list, max_length=20)

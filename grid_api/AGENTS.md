@@ -49,6 +49,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   local file. Never infer this authority from `GRID_DIAMOND_ADDRESS`.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
+- `generation_enabled_paths` is a typed JSON allowlist for new public inference,
+  independent of billing mode, key kind, or account cohort. Unknown values reject
+  configuration; an empty list closes all paths. Omission preserves current
+  admission for dark deployment. It never disables settlement of existing holds.
 - Startup validates the charging mode before starting dependencies or loops.
   Invalid explicit configuration must not fall back to free inference.
   Typed `grid_charging_all_model_services` selects only bounded direct-service
