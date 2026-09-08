@@ -15,7 +15,7 @@ if prior then return 1 end
 local used = tonumber(redis.call('GET', KEYS[1]) or '0')
 local amount = tonumber(ARGV[1])
 local cap = tonumber(ARGV[2])
-if cap > 0 and used + amount > cap then return 0 end
+if cap <= 0 or used + amount > cap then return 0 end
 redis.call('INCRBY', KEYS[1], amount)
 redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
 redis.call('SET', KEYS[2], ARGV[4] .. ':' .. ARGV[1], 'EX', tonumber(ARGV[3]))
@@ -52,12 +52,27 @@ def _seconds_to_tomorrow() -> int:
 
 async def authorize(user: dict, amount_micro: int, ref: str) -> tuple[bool, str | None]:
     service_id = user.get("service_id")
-    limits = user.get("service_limits") or {}
+    direct_service = user.get("key_kind") == "service"
+    limits = user.get("service_limits")
+    if direct_service and not service_id:
+        return False, "service spending policy unavailable"
     if not service_id:
         return True, None
+    if limits is None:
+        limits = {}
+    if not isinstance(limits, dict):
+        return False, "service spending policy unavailable"
     per_request = limits.get("per_request_micro")
     daily = limits.get("daily_micro")
-    if per_request is not None and amount_micro > int(per_request):
+    # Recheck stored policy at spend time: legacy/manual rows may bypass provisioning.
+    for cap in (per_request, daily):
+        if cap is None and not direct_service:
+            continue
+        if type(cap) is not int or cap <= 0:
+            return False, "service spending policy unavailable"
+    if per_request is not None and daily is not None and per_request > daily:
+        return False, "service spending policy unavailable"
+    if per_request is not None and amount_micro > per_request:
         await record_event(
             service_id,
             "request_limit_rejected",
