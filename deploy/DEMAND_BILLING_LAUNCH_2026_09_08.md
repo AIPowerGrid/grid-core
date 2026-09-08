@@ -216,10 +216,9 @@ The reviewed deployment above supersedes the initial local-only posture.
   and child processes use the new immutable working directory; billing source,
   admission source, and config hashes match the candidate. The API is active
   with zero automatic restarts, and anonymous assignments still return 401.
-  Worker reconnection is checked separately from API health: 12 were online
-  before restart; 11 had returned at the latest follow-up. All paid-canary media
-  models and the main text models were available, but full fleet recovery is
-  not yet proven.
+  Worker reconnection was checked separately from API health: all 12 workers
+  online before restart returned. The last, serving `qwen3:1.7b`, reconnected at
+  21:54:10 UTC; public health then showed the complete pre-restart model list.
 - Configuration, Nginx, unit definitions, and timer states were preserved.
   Process environment confirms `GRID_CHARGING_MODE=allowlist`, legacy charging
   flag 0, daily-free spending 0, promo global gate 1, and both the generation
@@ -237,6 +236,27 @@ The reviewed deployment above supersedes the initial local-only posture.
   imports as UID 1001 (run `34281434136`). That image is CI build evidence,
   not a published production artifact or a Chat deployment. Its other inherited
   infrastructure-dependent checks remain unverified.
+
+## Read-only reward-policy simulation
+
+- A standalone read-only process applied the proposed paid-only rule in memory
+  to the completed 2026-09-08 20:00-21:00 UTC window. No setting, reservation,
+  credit, payout, or historical ledger record was modified. This is a
+  counterfactual, not a revised allocation or authorization to pay that hour.
+- The unchanged policy selected 3,822.43 raw DEN across six accounts. The
+  simulated paid-only rule selected 0.32 DEN for one account, matching the
+  purchased Gallery canary. This is evidence that the eligibility filter
+  excludes the unbilled work in this sample, not a complete fraud-detection proof.
+- The current runtime hourly budget is 208.33 AIPG. The allocator still awards
+  the whole budget when one non-SmolLM job is eligible: the USD 0.003 image would
+  receive 208.33 AIPG under this simulation. No token/USD valuation is implied.
+  The SmolLM-family cap does not limit other models' low-demand windfalls.
+- Payout resumption therefore needs an explicit decision about subsidy
+  intensity, not just a billing flag: either deliberately approve a fixed
+  bootstrap pool at low demand or introduce a reviewed per-work/revenue-linked
+  emission ceiling with clipped allocation left unspent. Do not invent a
+  token valuation or silently introduce that economic policy during deployment.
+  Keep the payout timer paused until this and historical exclusions are reviewed.
 
 ## Remaining launch checklist
 
