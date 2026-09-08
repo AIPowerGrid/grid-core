@@ -367,6 +367,42 @@ The reviewed deployment above supersedes the initial local-only posture.
   not establish which historical payments came from these probes or attribute
   all unbilled traffic to abusive operators; reconciliation is separate.
 
+## Legacy sampler retirement deployed
+
+- PR #144 merged as `c34c7da511b640ef776e4a5c085d8a765c1cb12b`, with
+  an identical tree to tested head `dfef9e49`. Required hosted run
+  `34287466504` passed 1,539 Grid tests with 9 skips, 15 anti-gaming tests,
+  PostgreSQL 16 backup/restore and schema parity, and the real
+  Core/Console/node handoff. CodeQL and secret/infra scans passed.
+- Immutable `grid-core-c34c7da5` became current at
+  `2026-09-08T22:55:11Z`. Before cutover, the unchanged hash-locked dependency
+  installation passed `pip check`. Fresh backup
+  `grid-postgres-20260908T225308Z.dump` passed checksum and disposable restore
+  proof against this candidate. Live schema parity remains Alembic `0039`;
+  no production migration ran. Protected evidence and configuration snapshots
+  are under `/var/lib/aipg-backup/demand-release-c34c7da5/`.
+- The only parsed configuration change was `GRID_PROBE_ENABLED=0`.
+  Supervisor and child processes use the exact new release and flag value;
+  the new source does not start the sampler even if the old flag is restored.
+  Registered-validator assignments and manager setup canaries were not changed.
+  Nginx, service units, and timer states were preserved. API is active with
+  zero automatic restarts, and both payout timer and sender remain inactive.
+- All 12 pre-restart workers and 16 model identities were online again by
+  `2026-09-08T22:56:16Z`, including the delayed Qwen 4B reconnect. Public
+  validator status remained available with seven fresh heartbeats. These are
+  recovery observations, not proof of new post-restart paid jobs or independent
+  validator qualification.
+- Post-cutover read-only reconciliation found six purchased-credit accounts,
+  zero mismatches, zero negative balances, and zero net drift. No historical
+  DEN, credit, or payout row was rewritten. Treasury/reward monitoring remains
+  enabled; charging is still allowlisted, with the generation allowlist and
+  prospective reward cutoff unset. This closes the old sampler's dispatch
+  bypass, not all public billing or historical reward reconciliation.
+- Code rollback is `grid-core-4fa8bb65` with schema `0039` retained and
+  `GRID_PROBE_ENABLED=0` kept. Do not restore the pre-retirement environment:
+  that would restart the unsafe sampler on the old code. Preserve any later
+  economic configuration changes as well.
+
 ## Remaining launch checklist
 
 - [x] Review and merge candidate; record exact release SHA and CI evidence.
@@ -409,7 +445,7 @@ attribution, reserve-before-dispatch, terminal/refund, and rejection evidence.
 | Chat, Art, Music, Console | Delegated identity and shared purchased balance | Pending |
 | Bots and direct service accounts | Explicit service identity and request/day ceilings | Pending |
 | x402 | Independent external payment proof; keep dark unless verified | Pending or remain dark |
-| Validator/worker setup probes | Bound dedicated no-DEN terminals; separate legacy coordinator sampler found to use ordinary unreserved dispatch | Legacy sampler retirement candidate; live deployment and remaining bound-path proof pending |
+| Validator/worker setup probes | Bound dedicated no-DEN terminals; separate legacy coordinator sampler retired | Legacy sampler retirement deployed at `c34c7da5`; remaining live bound-path proof pending |
 
 ## Rollback boundary
 
