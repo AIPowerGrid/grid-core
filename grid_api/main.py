@@ -338,6 +338,7 @@ async def _billing_monitor():
 
     from .services import alerts
     from .services.credits import billing_health
+    from .services.treasury_health import check_and_alert as check_treasury
 
     interval = max(60, int(os.getenv("GRID_BILLING_MONITOR_SECONDS", "300") or 300))
     held_warning = int(os.getenv("GRID_BILLING_HELD_WARNING_SECONDS", "900") or 900)
@@ -366,7 +367,7 @@ async def _billing_monitor():
             await x402_payments.verify_reported_settlements()
             await x402_payments.flag_stale_settlements()
         except Exception as exc:
-            logger.error("Billing invariant monitor error: %s", exc)
+            logger.error("Billing invariant monitor error_type=%s", type(exc).__name__)
             alerts.emit(
                 "billing_monitor_failed",
                 "critical",
@@ -374,6 +375,7 @@ async def _billing_monitor():
                 fields={"error_type": type(exc).__name__},
                 dedupe_key="billing-monitor-failed",
             )
+        await check_treasury()
         await asyncio.sleep(interval)
 
 

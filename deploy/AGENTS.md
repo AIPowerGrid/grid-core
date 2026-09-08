@@ -48,6 +48,13 @@ executes an immutable release selected through `/home/aipg/current`.
 ## Local Contracts
 
 - Env names in `env.template`, systemd, code, and docs must match exactly.
+- `GRID_TREASURY_MONITOR_ENABLED` is a separate default-off balance warning.
+  Activation requires the actual payout wallet and AIPG token, `BASE_RPC_URL`,
+  and positive ETH-wei/AIPG-raw thresholds. It runs on the billing-monitor
+  cadence and never invokes a signer or sender. Verify the public addresses
+  against the deployed payout configuration; do not copy private keys into it.
+  RPC failure means balances are unknown. Threshold alerts do not authorize a
+  refill, payout, or economic-policy change.
 - Preserve the exact `WORKER_REWARDS_PAID_ONLY_SINCE` boundary once activated.
   Clearing or moving it would re-admit unbilled work or reprice history. Keep
   payout timers stopped through demand/reward reconciliation; never treat
