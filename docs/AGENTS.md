@@ -19,6 +19,9 @@ for humans and agents.
   transport-drain, rollback, and evidence procedure for the economically inert
   seven-day validator run.
 - `V2.md` - v2 API/design notes.
+- `VERIFICATION_PROBES.md` - retired unreserved coordinator sampling versus
+  supported assignment-bound validators, worker setup canaries, and separately
+  budgeted audit work. Probe verdicts and execution economics are distinct.
 - `WORKER_SETUP_DEPLOYMENT.md` - deployed worker self-status/canary evidence,
   credential revocation checks, and the reasoning-budget release follow-up.
 - `architecture/DECENTRALIZATION_ROADMAP.md` - accepted post-preview Base

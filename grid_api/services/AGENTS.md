@@ -10,6 +10,10 @@ content sanitization, and reward settlement.
 - **Dispatch:** `job_queue.py` (Redis streams - the ONE live queue), `token_stream.py`
   (worker->client token relay), `media.py` (image/video job abstraction), `storage.py`
   (presigned R2 upload), `enforcement.py` (worker strike/evict).
+- `probe.py` is a retired fail-closed compatibility shim, not a sampler.
+  Its old `GRID_PROBE_*` variables cannot dispatch work. Use the existing
+  assignment-bound validator or manager-bound setup paths for no-DEN checks;
+  paid audit work requires its separate durable budget authority.
 - `generation_admission.py` restricts new public generation by exact configured
   path before a billing reservation or dispatch. Media gates live in the shared
   submission path so chat media, SDKs, Gallery, and direct APIs cannot bypass
