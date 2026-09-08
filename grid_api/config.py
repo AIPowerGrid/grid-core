@@ -35,6 +35,10 @@ class GridSettings(BaseSettings):
     # Exact direct-service IDs only; never delegated users. Empty is dark.
     grid_charging_all_model_services: list[str] = Field(default_factory=list, max_length=20)
 
+    # Prospective emission eligibility boundary. Unset preserves legacy history;
+    # once activated, retain the exact timestamp across deploys and rollbacks.
+    worker_rewards_paid_only_since: AwareDatetime | None = None
+
     # Timeouts
     job_timeout_seconds: int = 300  # 5 min max generation time
     worker_ping_interval: int = 30  # Keepalive ping every 30s

@@ -375,6 +375,10 @@ content sanitization, and reward settlement.
 
 ## Local Contracts
 
+- An explicit invalid `GRID_CHARGING_MODE` rejects startup and authorization;
+  never interpret a typo as `off` and silently admit unbilled work. Only an
+  absent mode uses the documented legacy boolean fallback.
+
 - One queue: `job_queue.py`. Requeue is capped (Redis counter, dead-letter at
   the cap) to prevent poison-job eviction cascades. Compatible-worker generation
   failures use a tighter two-requeue budget than heterogeneous model-mismatch

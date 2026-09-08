@@ -71,8 +71,7 @@ def charging_mode() -> str:
     if _CHARGING_MODE_ENV in _CHARGING_MODES:
         return _CHARGING_MODE_ENV
     if _CHARGING_MODE_ENV:
-        logger.error("Invalid GRID_CHARGING_MODE=%r; failing closed with charging off", _CHARGING_MODE_ENV)
-        return "off"
+        raise RuntimeError("Invalid GRID_CHARGING_MODE; expected off, allowlist, or on")
     return "on" if CHARGING_ENABLED else "off"
 
 
