@@ -96,6 +96,62 @@ async def test_billing_health_detects_balance_ledger_drift(db):
 
 
 @pytest.mark.asyncio
+async def test_billing_health_detects_offsetting_account_drift(db):
+    first, second = uuid.uuid4(), uuid.uuid4()
+    await credits.credit(first, 5000, "topup", ref="health-first")
+    await credits.credit(second, 5000, "topup", ref="health-second")
+    async with await database.new_session() as session:
+        for account, balance in [(first, 4999), (second, 5001)]:
+            await session.execute(
+                credits.credits_t.update()
+                .where(credits.credits_t.c.account_id == account)
+                .values(balance_micro=balance),
+            )
+        await session.commit()
+    health = await credits.billing_health()
+    assert health["ok"] is False
+    assert health["balance_delta_micro"] == 0
+    assert health["mismatched_accounts"] == 2
+
+
+@pytest.mark.asyncio
+async def test_billing_health_empty_database_uses_one_statement(db):
+    from sqlalchemy import event
+
+    async with await database.new_session() as session:
+        engine = session.bind.sync_engine
+    statements = []
+
+    def capture(_conn, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        health = await credits.billing_health()
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert len(statements) == 1
+    assert health["ok"] is True
+    assert health["mismatched_accounts"] == 0
+    assert health["balance_total_micro"] == health["ledger_total_micro"] == 0
+
+
+@pytest.mark.asyncio
+async def test_billing_health_detects_missing_balance_cache(db):
+    account = uuid.uuid4()
+    await credits.credit(account, 5000, "topup", ref="health-missing-cache")
+    async with await database.new_session() as session:
+        await session.execute(
+            credits.credits_t.delete().where(credits.credits_t.c.account_id == account),
+        )
+        await session.commit()
+    health = await credits.billing_health()
+    assert health["ok"] is False
+    assert health["mismatched_accounts"] == 1
+    assert health["balance_delta_micro"] == -5000
+
+
+@pytest.mark.asyncio
 async def test_debit_idempotent_and_overdraft_safe(db):
     aid = uuid.uuid4()
     await credits.credit(aid, 1000, "topup", ref="seed")

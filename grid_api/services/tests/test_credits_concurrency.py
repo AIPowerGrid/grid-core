@@ -65,6 +65,44 @@ async def pg():
 
 
 @pytest.mark.asyncio
+async def test_billing_health_is_consistent_during_concurrent_spending(pg):
+    aid = await _seed_account()
+    assert await credits.credit(aid, 100_000, "seed", ref=f"health-seed:{aid}")
+
+    async def spend():
+        for index in range(30):
+            assert await credits.debit(aid, 100, "spend", ref=f"health:{aid}:{index}") == "ok"
+
+    async def observe():
+        for _ in range(30):
+            report = await credits.billing_health()
+            assert report["ok"] is True, report
+            assert report["mismatched_accounts"] == 0
+
+    await asyncio.wait_for(asyncio.gather(spend(), observe()), timeout=30)
+    assert await credits.get_balance(aid) == 97_000
+
+
+@pytest.mark.asyncio
+async def test_billing_health_offsetting_drift_on_postgres(pg):
+    first, second = await _seed_account(), await _seed_account()
+    for aid in (first, second):
+        assert await credits.credit(aid, 5000, "seed", ref=f"health-seed:{aid}")
+    async with await database.new_session() as session:
+        for aid, amount in [(first, 4999), (second, 5001)]:
+            await session.execute(
+                credits.credits_t.update()
+                .where(credits.credits_t.c.account_id == aid)
+                .values(balance_micro=amount),
+            )
+        await session.commit()
+    report = await credits.billing_health()
+    assert report["ok"] is False
+    assert report["mismatched_accounts"] == 2
+    assert report["balance_delta_micro"] == 0
+
+
+@pytest.mark.asyncio
 async def test_concurrent_debits_never_overdraft(pg):
     aid = await _seed_account()
     cost = 1_000            # micro-USD per debit
@@ -208,6 +246,7 @@ async def test_credit_racing_merge_is_not_stranded_on_retired_account(pg):
     canonical = await identities.canonical_account_id(source)
     assert canonical == await identities.canonical_account_id(destination)
     assert await credits.get_balance(canonical) == 50_000
+    assert (await credits.billing_health())["ok"] is True
 
 
 @pytest.mark.asyncio
