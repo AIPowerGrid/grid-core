@@ -516,6 +516,11 @@ content sanitization, and reward settlement.
 - Service ceilings are exposure reservations keyed by job id: reserve before
   dispatch, reduce to actual text spend on success, and release on 402/no-work
   terminals. Redis failure stays conservative until the day bucket expires.
+  Runtime authorization revalidates stored policy: direct services require
+  positive integer per-request and daily caps, with per-request no larger than
+  daily. Missing, zero, negative, or malformed caps fail closed even for legacy
+  records. Delegated user accounts may omit app-wide caps, but any configured
+  cap must be valid; their own durable credit reservation remains mandatory.
 - `GRID_CHARGING_ALL_MODEL_SERVICES` is a default-empty JSON list of exact
   direct-service IDs allowed to charge across models in allowlist mode. Both
   positive server-owned ceilings and `inference.service_submit` are required;
