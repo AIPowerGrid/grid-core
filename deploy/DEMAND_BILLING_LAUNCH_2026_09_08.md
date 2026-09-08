@@ -430,6 +430,46 @@ The reviewed deployment above supersedes the initial local-only posture.
 Source wiring is not live proof. Each row still needs exact account/service
 attribution, reserve-before-dispatch, terminal/refund, and rejection evidence.
 
+### Media and Director source trace
+
+This trace uses Core `c34c7da5` and Gallery `5836668b`, the deployed runtime
+sources, rather than the older local Gallery main checkout.
+
+- Core image, video, audio, and 3D routers authenticate with `inference.submit`
+  and pass the resolved billing user to `services/media.submit_and_wait`.
+  That shared path validates admission/batch support, calls
+  `authorize_media(record_reservation=True)`, and only then submits a queue job.
+  This is charge enforcement for selected live cohorts, not a claim that
+  allowlist-excluded traffic is already charged.
+- Gallery `handleCreateJob` checks its signed-session account against Core's
+  service identity exchange, checks the quote account, and sends the same
+  delegated token in `GenerateMedia`. Quotes do not reserve funds; Core still
+  owns the actual atomic authorization after this preflight.
+- Studio batches use one `createJob` call with `n=4`, not four independent
+  requests. Core reserves the full batch price under one job ID. The media
+  terminal requires every unique presigned output slot before atomic
+  completion/settlement. Incomplete batches release the hold instead of
+  settling the full batch; `test_media_output_contract.py` covers that boundary.
+  Native source-image/video batching is rejected before billing by
+  `test_media_contract.py`. A live paid four-output batch is still outstanding.
+- Director generates its optional Krea first frame and each video segment
+  through separate `createJob` calls. Each therefore has a separate Core
+  reservation and receipt. A recipe-unavailable fallback is another request,
+  not reuse of an existing hold. Media errors before queue submission release
+  their hold; after submission the worker terminal/reclaim/sweeper remains
+  authoritative, not the HTTP timeout.
+- Found a client retry gap: reload recovery turned untracked in-flight
+  segments into idle work, allowing Render pending to submit replacements;
+  an older output could also falsely mark a rerender done. Gallery PR #22
+  preserves identifiers and keeps uncertain work out of the automatic queue.
+  Five new regressions cover uncertainty and tracked-job continuity; all
+  98 frontend tests pass locally on Node 22.23.2. The candidate is not yet
+  deployed at this audit point. It is not durable request idempotency:
+  Gallery pending jobs are in memory, and a lost HTTP response or process
+  restart still requires outcome recovery before a safe retry. Keep paid
+  Director launch unverified until this lifecycle and a live multistage
+  canary are proven; do not treat the client safeguard as closing that gate.
+
 | Path | Core ownership / shared billing path | Live canary status |
 | --- | --- | --- |
 | Chat completions, including media shim | `routers/openai.py`, credits or media service | Pending |
@@ -439,7 +479,7 @@ attribution, reserve-before-dispatch, terminal/refund, and rejection evidence.
 | Video and image-to-video | `routers/videos.py`, `services/media.py` | Pending |
 | Audio | `routers/audio.py`, `services/media.py` | Pending |
 | 3D | `routers/threed.py`, `services/media.py` | Pending or disable |
-| Batch images | Per-item media holds; frontend fan-out must be traced | Pending |
+| Batch images | One native request and full-batch hold; validate all output slots before settlement | Source traced; paid four-output canary pending |
 | Director first frame / segments / retries | Gallery orchestration into image/video routes | Pending |
 | Direct API, SDKs, provider integrations | Same public routes; verify no alternate dispatch bypass | Pending |
 | Chat, Art, Music, Console | Delegated identity and shared purchased balance | Pending |
