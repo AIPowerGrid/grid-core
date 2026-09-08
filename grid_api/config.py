@@ -185,6 +185,7 @@ class GridSettings(BaseSettings):
     grid_alert_queue_size: int = 256
     grid_alert_dedupe_seconds: int = 300
 
+    grid_reward_monitor_enabled: bool = False
     grid_treasury_monitor_enabled: bool = False
     grid_treasury_monitor_wallet: str = Field(default="", pattern=r"^(?:0x[0-9a-fA-F]{40})?$")
     grid_treasury_monitor_token: str = Field(default="", pattern=r"^(?:0x[0-9a-fA-F]{40})?$")

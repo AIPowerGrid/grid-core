@@ -258,6 +258,28 @@ The reviewed deployment above supersedes the initial local-only posture.
   token valuation or silently introduce that economic policy during deployment.
   Keep the payout timer paused until this and historical exclusions are reviewed.
 
+## Monitoring follow-up (not production activation)
+
+- Treasury monitoring merged through PR 141 as
+  `1242ab8b118c9fe5f66b0a207477ff8f1ad76ea6`. Required hosted tests passed:
+  1,511 Grid tests with 9 skips, PostgreSQL 16 restore/schema proof, 15
+  anti-gaming tests, and the Core/Console/node handoff. CodeQL and secret gates
+  also passed. The running Core remains `adc9a21e`; this merge did not deploy
+  or configure treasury warnings.
+- The reward-backing monitor is a separate default-off candidate. It observes
+  the last complete UTC hour using the allocator's current prospective boundary
+  and shared purchased fraction. It includes walletless accrual and warns about
+  legacy unbacked eligibility, including mixed free/promotional shares, without
+  claiming a transfer occurred. Unfunded x402 and work already excluded by the
+  prospective rule do not trigger false reward-exposure alerts.
+- Candidate verification: 72 focused tests passed across SQLite and an isolated
+  local PostgreSQL 14 cluster, including unchanged historical DEN and boundary
+  behavior. The scratch cluster was stopped afterward; production was not used
+  for these tests. Full local Grid suite: 1,270 passed, 277 environment-dependent
+  skips. Hosted PostgreSQL 16 CI and production query-performance/alert proofs
+  remain required. A clean recent-hour report does not reconcile historical
+  backpay or fix the low-demand fixed-pool economics described above.
+
 ## Remaining launch checklist
 
 - [x] Review and merge candidate; record exact release SHA and CI evidence.

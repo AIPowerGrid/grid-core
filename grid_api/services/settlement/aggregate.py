@@ -43,17 +43,8 @@ def _reservation_matches_job():
     return reservations_table.c.job_id.in_((raw, canonical))
 
 
-def _reward_den():
-    """Purchased share of DEN after the explicit prospective policy boundary.
-
-    A mixed-pocket job contributes only its purchased fraction, not its whole
-    DEN for a nominal paid remainder. Free/promo and unreserved work need a
-    separate capped subsidy allocator and never enter this unrestricted pool.
-    Old rows retain their original DEN; no economic history is rewritten.
-    """
-    since = get_settings().worker_rewards_paid_only_since
-    if since is None:
-        return ledger_table.c.den
+def _purchased_den():
+    """Purchased fraction shared by payout eligibility and its read-only monitor."""
     r = reservations_table.c
     purchased = sa.case(
         (r.billing_source == "x402", r.actual_micro),
@@ -79,9 +70,23 @@ def _reward_den():
         .correlate(ledger_table)
         .scalar_subquery()
     )
+    return ledger_table.c.den * sa.func.coalesce(fraction, 0.0)
+
+
+def _reward_den():
+    """Purchased share of DEN after the explicit prospective policy boundary.
+
+    A mixed-pocket job contributes only its purchased fraction, not its whole
+    DEN for a nominal paid remainder. Free/promo and unreserved work need a
+    separate capped subsidy allocator and never enter this unrestricted pool.
+    Old rows retain their original DEN; no economic history is rewritten.
+    """
+    since = get_settings().worker_rewards_paid_only_since
+    if since is None:
+        return ledger_table.c.den
     return sa.case(
         (ledger_table.c.created < since, ledger_table.c.den),
-        else_=ledger_table.c.den * sa.func.coalesce(fraction, 0.0),
+        else_=_purchased_den(),
     )
 
 
@@ -110,6 +115,33 @@ def _funded_job():
         )
     )
     return ~sa.exists(unsettled_x402)
+
+
+async def reward_backing_health(start: datetime, end: datetime) -> dict:
+    """Observe unrestricted-pool exposure, not transfers, in one SQL snapshot.
+
+    Include walletless account accruals. Legacy wallet-only rows are included
+    for the wallet rail, but completely unattributable rows cannot be allocated.
+    This neither reprices history nor authorizes paying any reported DEN.
+    """
+    exposure = (
+        sa.select((_reward_den() - _purchased_den()).label("unbacked"))
+        .select_from(ledger_table.outerjoin(workers_table, workers_table.c.id == ledger_table.c.worker_id))
+        .where(
+            ledger_table.c.created >= start, ledger_table.c.created < end,
+            ledger_table.c.den > 0, _funded_job(),
+            sa.or_(workers_table.c.account_id.isnot(None),
+                   sa.func.trim(sa.func.coalesce(ledger_table.c.wallet, "")) != ""),
+        )
+        .subquery()
+    )
+    statement = sa.select(
+        sa.func.count().label("unbacked_jobs"),
+        sa.func.coalesce(sa.func.sum(exposure.c.unbacked), 0.0).label("unbacked_den"),
+    ).where(exposure.c.unbacked > 0)
+    async with await new_session() as session:
+        row = (await session.execute(statement)).mappings().one()
+    return {"unbacked_jobs": int(row["unbacked_jobs"]), "unbacked_den": float(row["unbacked_den"])}
 
 
 async def aggregate_den_by_account(start: datetime, end: datetime, *, min_den: float = 0.0) -> list[dict]:
