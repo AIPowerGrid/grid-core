@@ -85,6 +85,38 @@ The reviewed deployment above supersedes the initial local-only posture.
   `fix/music-billing-identity` added it with no-dispatch/no-credit-read tests and
   has now deployed. Gallery's currently deployed flow still needs live verification.
 
+## Service and Chat image follow-up
+
+- A fresh read-only production inventory found nine active service clients,
+  including four keys with direct-inference permission. Every current direct
+  service has positive per-request and daily caps. The uncapped MCP bridge has
+  no direct-inference permission; its delegated users still require their own
+  credits when charging is selected. No keys, caps, or balances were changed.
+- Core PR #134 merged as `c40232b2`: runtime service-budget validation now
+  rejects missing/malformed direct-service caps rather than relying only on
+  provisioning checks. Zero no longer means unlimited in the Redis guard.
+  Configured delegated-app caps are validated, but omitted app-wide ceilings
+  remain compatible with user-owned charging. This follow-up is not deployed
+  yet; production still selects `a754b689`.
+- Focused Core auth/billing/router checks: 377 passed, 41 skipped. Required
+  PR CI also passed with PostgreSQL 16 restore/schema and money-path checks;
+  skipped and mocked cases are not production canary evidence.
+- Chat's running image-tool, constructor, and identity-module hashes match
+  the reviewed pre-fix source. Text uses delegated identity; the image tool
+  does not. Its current database provider uses an older internal endpoint and
+  a different key from the canonical Chat service. A read-only Core credits
+  request with that image key succeeds with `charging_enabled=false` and
+  `service_budget=null`. Do not treat Chat text wiring as image billing proof.
+- Chat PR #1 (`fix/chat-image-billing`) adds a per-image lazy user-token factory
+  and requires the canonical Chat service endpoint/key for that delegation.
+  Local identity/model-sync/image-tool/provider checks: 44 passed, with Ruff
+  and targeted type checks passed. PR review/CI, provider configuration migration,
+  deployment, and a real user-attributed image canary are still required.
+  No production image-provider record or credential was changed during audit.
+- Browser access recovered, but Gallery is signed out. Its Google/wallet login
+  page is left open for a real account sign-in; no synthetic production session
+  or balance was created to substitute for the cross-site user canary.
+
 ## Remaining launch checklist
 
 - [x] Review and merge candidate; record exact release SHA and CI evidence.
@@ -101,6 +133,9 @@ The reviewed deployment above supersedes the initial local-only posture.
 - [ ] Verify billing/orphan/reward/treasury alerts and operational response.
 - [x] Deploy reviewed Core/Music code with existing configuration preserved.
 - [ ] Verify remaining frontend releases and final activation configuration.
+- [ ] Migrate Chat image provider to canonical service credentials only with
+      the delegated-image release; verify the charged account and retain a
+      protected rollback record. Inventory old-key consumers before revocation.
 - [ ] Enable only verified public paths; record disabled paths and rollback.
 - [ ] Resume payouts only after prospective policy reconciliation passes.
 
