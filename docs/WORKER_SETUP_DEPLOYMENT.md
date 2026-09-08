@@ -113,3 +113,36 @@ the reply instruction after it. Three direct local Qwen 1.7B checks passed with
 fresh labels and 169-186 completion tokens each. This is backend diagnostic
 evidence, not yet proof of the follow-up's deployment or frozen Grid round trip.
 The exact comparator still rejects appended `/think`, tags, or commentary.
+
+## Delimited-label production proof (2026-09-08)
+
+Core `d139835324fe9b05820b1ada1984fea0bb9fb538` is now selected through the
+immutable release path, superseding `0b4630c5` while preserving its billing
+changes. Required CI passed 1,437 Grid tests (nine skips), PostgreSQL
+backup/restore and schema parity, and the real Core/Console/node handoff.
+A fresh production backup was restored and checked against this exact release;
+live Alembic remained `0039`. Environment bytes, units, Nginx, and timer states
+were unchanged. Payout timer disabled/inactive; backup timer enabled/active.
+Both public health surfaces reported the exact SHA. All 14 connections recovered,
+including the temporary worker, before its deliberate shutdown.
+
+The exact v0.3.9 Linux x64 artifact, source `1e5feb38`, passed its authenticated
+dashboard-to-Core-to-Ollama Qwen 1.7B round trip in 10,971 ms with exact output.
+All three setup jobs (two earlier mismatches plus the final pass) had zero
+ledger rows and reservations. The fixture key was denied account payouts, then
+revoked and rejected by public self-status with HTTP 401.
+
+Important qualification limit: while initially connected, the fixture also
+served two ordinary jobs, totaling 4.58 den without billing reservations.
+These are not self-canaries. Their append-only rows were not changed; exact
+account, worker, and job identifiers are retained in protected operations
+evidence at `/var/lib/aipg-backup/worker-v039-staging/ordinary-work-audit.json`.
+Only the generated fixture account's wallet and payout address were cleared
+after verifying it had no payout records. This prevents transfers to the
+discarded test identity but does not remove denominator weight. Explicit
+reconciliation/exclusion remains required before resuming payouts; a future
+prospective cutoff does not erase these older rows.
+
+This proves frozen Linux connectivity and exact output, not model fidelity,
+new human Console approval, native Windows/macOS UX, or economic activation.
+The worker release notes own the full platform/artifact qualification record.
