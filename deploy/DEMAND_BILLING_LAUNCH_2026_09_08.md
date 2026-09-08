@@ -123,7 +123,9 @@ The reviewed deployment above supersedes the initial local-only posture.
   hash-verified dependency install. On commit `dab173b24d`, unit CI ran:
   4,989 passed, 30 skipped. Full type CI exposed fixture-type errors; corrections
   are pushed in `3877c22c38` with 49 focused tests and full local type checking
-  passed, awaiting fresh CI. Other inherited infrastructure-dependent workflows
+  passed. Subsequent hosted unit and full type CI passed; commit `d490442316`
+  also passed the real PostgreSQL migration suite (15 passed, 1 skipped).
+  Other inherited infrastructure-dependent workflows
   remain unverified; none of these results proves a live Chat deployment.
 
 ## Signed-in Gallery canary
@@ -157,6 +159,33 @@ The reviewed deployment above supersedes the initial local-only posture.
   parity, other modalities, refund/crash canaries, global charging, and prospective
   worker reward activation remain incomplete. Raw den is not evidence that the
   still-unset purchased-only reward cutoff has been activated.
+
+## Admission candidate and coordinated release state
+
+- Core runtime advanced to `d139835324fe9b05820b1ada1984fea0bb9fb538`
+  through the coordinated worker-setup release. The subsequent `976db957`
+  main commit is documentation-only. Do not deploy an older billing checkout
+  over those fixes.
+- PR #138 includes the billing evidence previously proposed in PR #135 and
+  adds `GENERATION_ENABLED_PATHS`, an explicit public generation allowlist.
+  Omission preserves existing paths for a compatible dark deployment; an
+  empty JSON array rejects all new public generation. This is independent of
+  charging cohorts and has not been activated in production.
+- Text, passthrough, and shared media admission reject disabled paths before
+  reservation/dispatch. Image batches, image-to-image, image-to-video, and
+  video timelines require both their base modality and extra capability.
+  The Chat media shim uses the same media admission check. Listings and quotes
+  are not admission guarantees. Existing jobs retain their terminal processing.
+- Local verification: 44 focused admission tests passed. The full Grid suite
+  before the final media-shim regression passed 1,225 with 264 skips. Required
+  PostgreSQL 16 CI on the final combined candidate remains a merge gate;
+  local tests and older-head CI are not substitutes.
+- Worker setup staging also recorded two ordinary fixture jobs (4.58 raw den,
+  no reservations). The fixture was stopped, its key revoked, and its payout
+  address cleared after confirming no payout records. Preserve those rows and
+  use the protected staging audit for explicit historical payout exclusion:
+  removing the wallet does not remove denominator weight, and a prospective
+  reward cutoff cannot retroactively exclude these jobs.
 
 ## Remaining launch checklist
 
