@@ -125,10 +125,46 @@ async def test_text_canary_hard_targets_exact_worker_and_returns_no_challenge(mo
 
 
 @pytest.mark.asyncio
+async def test_text_canary_leaves_room_for_reasoning_without_scoring_it(monkeypatch):
+    monkeypatch.setattr(worker_canaries, "get_redis", lambda: _Redis())
+
+    def reasoning_backend(captured):
+        payload = captured["payload"]
+        budget = payload["request"]["max_tokens"]
+        assert budget == payload["max_length"]
+        assert budget <= 512
+        expected = payload["prompt"].rsplit(": ", 1)[1]
+        # A healthy backend uses 80 reasoning tokens before its 24-token answer.
+        yield {"delta": {"reasoning_content": "Thinking. " * min(budget, 80)}}
+        enough_budget = budget >= 104
+        yield {
+            **_done_for(captured, output=expected if enough_budget else ""),
+            "full_reasoning": "Thinking. " * min(budget, 80),
+            "finish_reason": "stop" if enough_budget else "length",
+        }
+
+    _install_canary_transport(monkeypatch, reasoning_backend)
+    result = await worker_canaries.run_text_connectivity_canary(
+        worker_id="worker-1", worker_name="rig-a", model="reasoning-model",
+    )
+    assert result["status"] == "passed"
+    assert result["reason"] == "exact_output"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("event_factory", "reason"),
     [
         (lambda captured: [_done_for(captured, output="wrong")], "output_mismatch"),
+        (lambda captured: [_done_for(captured, output="\u201cwrong\u201d")], "output_mismatch"),
+        (
+            lambda captured: [{
+                **_done_for(captured, output=""),
+                "full_reasoning": captured["payload"]["prompt"],
+                "finish_reason": "length",
+            }],
+            "output_budget_exhausted",
+        ),
         (
             lambda captured: [
                 {"text": "x" * (worker_canaries.CANARY_MAX_OUTPUT_CHARS + 1)},
