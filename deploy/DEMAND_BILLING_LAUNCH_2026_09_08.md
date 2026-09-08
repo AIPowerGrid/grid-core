@@ -280,6 +280,69 @@ The reviewed deployment above supersedes the initial local-only posture.
   remain required. A clean recent-hour report does not reconcile historical
   backpay or fix the low-demand fixed-pool economics described above.
 
+## Monitor release deployed, activation still separate
+
+- PR 142 merged as `4fa8bb651ed6e7f04c6adcdeca97ca81c91391c7` with
+  a byte-identical tree to its tested head. Required run `34285211188` passed
+  1,538 Grid tests with 9 skips, 15 anti-gaming tests, the PostgreSQL 16
+  backup/restore/schema gates, and the real Core/Console/node handoff.
+  CodeQL and secret gates passed.
+- A standalone read-only production candidate query for 2026-09-08
+  21:00-22:00 UTC completed in 0.0808 seconds, reporting 263 jobs and
+  3,625.38 DEN without full purchased backing under the existing unset cutoff.
+  This is unrestricted-pool eligibility exposure, not evidence of transfers.
+  The process used read-only transactions and a 15-second statement timeout.
+- The treasury candidate read both balances at one Base block against the
+  configured payout signer address and token; token decimals were verified as
+  18. Gas balance was approximately 0.00723 ETH and AIPG balance approximately
+  0.00284. Hypothetical thresholds of 0.001 ETH and 5,000 AIPG correctly
+  classified only AIPG as low. No threshold was persisted and no refill occurred.
+- Immutable release `grid-core-4fa8bb65` became current at
+  2026-09-08T22:27:04Z. A fresh protected database backup was restored and
+  tested against the candidate before cutover. Evidence is under
+  `/var/lib/aipg-backup/demand-release-4fa8bb65/`. Live Alembic remains `0039`;
+  no production migration was needed. Rollback is `grid-core-adc9a21e` with
+  that compatible schema retained.
+- Public health and supervisor/child working directories report the exact
+  release. API is active with zero supervisor restarts. Config, Nginx, systemd
+  units, and timer state were preserved. Payout timer and sender are inactive.
+  Charging remains allowlisted, admission restrictions and the prospective
+  reward cutoff remain unset, and both new monitor flags remain unset/off.
+  This deployment is not global charging or monitor activation.
+- Post-deploy read-only reconciliation found six purchased-credit accounts,
+  zero mismatches, zero negative balances, and zero aggregate drift. Equivalent
+  health SQL executed in 0.302 ms at the current small dataset size; this is
+  not a future-scale performance guarantee.
+- All 12 pre-restart workers and 16 advertised models were online again by
+  2026-09-08T22:28:55Z, including the delayed Qwen 8B reconnect. This is fleet
+  recovery evidence, not a paid generation canary for each model.
+
+## Read-only monitors activated
+
+- At 2026-09-08T22:33:37Z, enabled `GRID_REWARD_MONITOR_ENABLED` and
+  `GRID_TREASURY_MONITOR_ENABLED` on the same immutable `4fa8bb65` release.
+  Treasury warnings use the verified payout signer address and token with
+  thresholds of 0.001 ETH and 5,000 AIPG (18-decimal raw units).
+- The preflight validated the candidate settings before activation. Exactly
+  six monitoring keys changed; all other parsed environment values were
+  identical. The protected snapshot and activation proof are in
+  `/var/lib/aipg-backup/monitor-activation-4fa8bb65/`. Supervisor and child
+  environments subsequently showed both flags set to `1`, with charging still
+  `allowlist` and the reward cutoff still unset.
+- A standalone invocation of the deployed checks, using read-only SQL and the
+  production RPC, exercised both expected warnings. Discord transport accepted
+  `treasury_low_aipg` and `unbacked_reward_eligibility`; the two extra events were
+  marked `delivery_canary` and used separate dedupe keys. This proves the real
+  check-to-transport path, not human receipt or a completed operator response.
+  Normal background warnings retain the existing cross-process dedupe window.
+- Core remained healthy and all 12 workers recovered. No credit, reservation,
+  historical DEN, reward policy, or payout state was changed by activation.
+  Both the payout timer and sender remain inactive.
+- To roll back only these warnings, disable their two flags. Never restore
+  the entire historical environment snapshot after subsequent billing/reward
+  configuration changes: doing so could clear a newly activated cutoff or
+  reopen generation. Preserve the economic settings and immutable release.
+
 ## Remaining launch checklist
 
 - [x] Review and merge candidate; record exact release SHA and CI evidence.
