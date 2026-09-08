@@ -514,6 +514,39 @@ sources, rather than the older local Gallery main checkout.
   global charging activation, payout restart, treasury refill, or historical
   economic-record rewrite accompanied this Gallery deployment.
 
+### Gallery uncertain-outcome release: 23:43 UTC
+
+- Gallery PR #24 merged as `9e7ff3dc2411d49d9bbd1cb0bc4b791fadd83adb`;
+  its tree matches tested head `32bcc649`. CI `34291380273` and CodeQL
+  `34291380245` passed. Local Go race tests/vet and all 98 frontend tests passed.
+- The pre-fix tests reproduced a truncated response being accepted as success
+  and a 504 body containing `404`/`unknown model` looking like a safe Director
+  fallback. The client now checks body-read errors, validates the output count
+  and presence, and classifies transport/gateway/malformed-result errors as
+  unknown outcomes. Its public warning says the original may finish and be
+  charged and retrying creates another generation. Definite 4xx rejections keep
+  their existing handling; successful responses retain Core receipt metadata.
+- This does not make pending jobs durable or recover results lost on restart.
+  The client does not retry an uncertain request automatically, and its bounded
+  public error cannot leak incidental upstream text into the recipe-fallback
+  classifier. Paid Director remains gated on durable recovery and live tests.
+- The host passed the frozen Node 22 build/reinstall, Go race tests, vet, binary
+  build, and production dependency audit. The latest audit reports five moderate
+  and one low finding, with no high/critical findings; earlier audit counts above
+  describe their own observation time. Next `16.3.4` and sharp `0.35.4` remain.
+- The candidate passed loopback Studio/Director checks, then activated at
+  `2026-09-08T23:43:54Z` after a temporary submission gate and 45-second drain.
+  The prior Go invocation showed zero generation starts/terminals across 30
+  journal entries. Both processes run from `gallery-9e7ff3dc`; backend PID
+  `565440` matches executable SHA-256
+  `4c1c718c1a74f9d1db1576dcc39f88af6c6eff6da71193d7ae2cd2f34a9221fe`.
+  Both have zero automatic restarts at verification. Patched `gallery-815c11ee`
+  is retained for rollback, which avoids restoring affected dependencies.
+- Shared environment is unchanged and Nginx was restored byte-for-byte. Public
+  Studio/Director return 200; anonymous credits/jobs return 401 after the gate
+  was removed. Host proof: `/var/lib/aipg-release-proof/gallery-9e7ff3dc/`.
+  No paid generation, reward-policy activation, or payout accompanied this change.
+
 | Path | Core ownership / shared billing path | Live canary status |
 | --- | --- | --- |
 | Chat completions, including media shim | `routers/openai.py`, credits or media service | Pending |
