@@ -204,8 +204,8 @@ def validate_challenge(challenge: Any) -> dict[str, Any]:
         or len(challenge["prompt"].encode("utf-8")) > MAX_PROMPT_BYTES
         or not isinstance(refs, list)
         or not 1 <= len(refs) <= 2
-        or len(set(refs)) != len(refs)
         or not valid_references
+        or len(set(refs)) != len(refs)
         or not isinstance(request, dict)
         or set(request) != expected_request_keys
         or isinstance(request.get("temperature"), bool)

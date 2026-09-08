@@ -40,6 +40,7 @@ from ..services import (
     signing,
     storage,
     token_stream,
+    validator_responses,
     validator_text_fidelity,
 )
 from ..services import ledger as ledger_svc
@@ -778,6 +779,16 @@ async def worker_websocket(ws: WebSocket):
                 current_job = job
                 job["worker_id"] = worker_id
 
+                # All text probe formats must be isolated BEFORE paid passthrough.
+                handled = await _maybe_handle_validator_text_probe(
+                    ws, job, selected_model, worker_id, worker_info,
+                )
+                if handled is not None:
+                    if handled:
+                        await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
+                    current_job = None
+                    continue
+
                 # ── Media path (image/video/audio/3D) ──
                 if job.get("job_type", "text") != "text":
                     async with job_queue.maintain_job_claim(job):
@@ -859,13 +870,6 @@ async def worker_websocket(ws: WebSocket):
                             job["stream_id"],
                             stream=job.get("stream"),
                         )
-                    current_job = None
-                    continue
-
-                if _is_assignment_bound_validator_job(job):
-                    ok = await _handle_validator_probe(ws, job, selected_model, worker_id, worker_info)
-                    if ok:
-                        await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
                     current_job = None
                     continue
 
@@ -1199,6 +1203,81 @@ async def worker_websocket(ws: WebSocket):
 
         if worker_info:
             logger.info(f"Worker '{worker_info['name']}' cleaned up")
+
+
+async def _maybe_handle_validator_text_probe(
+    ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict,
+) -> bool | None:
+    """None means ordinary work; malformed probe metadata never means paid work."""
+    payload = job.get("payload") or {}
+    if job.get("job_type", "text") != "text" or not any(key.startswith("_validator_") for key in payload):
+        return None
+    api_format = payload.get("api_format", "openai-chat")
+    if not _is_assignment_bound_validator_job(job) or api_format not in {"openai-chat", "openai-responses"}:
+        await token_stream.publish_error(job["job_id"], "Invalid validator probe envelope or format.", code=400)
+        return True
+    async with job_queue.maintain_job_claim(job):
+        if api_format == "openai-responses":
+            return await _handle_validator_responses_probe(ws, job, selected_model, worker_id)
+        return await _handle_validator_probe(ws, job, selected_model, worker_id, worker_info)
+
+
+async def _handle_validator_responses_probe(ws: WebSocket, job: dict, selected_model: str, worker_id: str) -> bool:
+    """Capture native probabilities without paid handling or quality inference."""
+    job_id = job["job_id"]
+    payload = job["payload"]
+    await ws.send_json({
+        "type": "job", "id": job_id, "model": selected_model,
+        "payload": {key: value for key, value in payload.items() if not key.startswith("_validator_")},
+    })
+    observation = validator_responses.ResponsesObservation()
+    closed = False
+    # One wall-clock budget, not a resettable per-frame timeout.
+    timeout = payload.get("_validator_timeout_seconds", 300)
+    if type(timeout) is not int or not 1 <= timeout <= 300:
+        timeout = 300
+    try:
+        async with asyncio.timeout(timeout):
+            for _ in range(validator_responses.MAX_STREAM_EVENTS):
+                msg = await ws.receive_json()
+                if not isinstance(msg, dict) or msg.get("id") != job_id:
+                    observation.unavailable("worker_frame_binding_failed")
+                    raise validator_responses.ObservationLimit
+                kind = msg.get("type")
+                if kind == "raw":
+                    observation.add(msg.get("data"))
+                elif kind == "done":
+                    break
+                elif kind == "error":
+                    observation.unavailable("worker_error")
+                    break
+                else:
+                    observation.unavailable("unexpected_worker_frame")
+            else:
+                raise validator_responses.ObservationLimit
+    except (TimeoutError, validator_responses.ObservationLimit) as exc:
+        observation.unavailable("timeout" if isinstance(exc, TimeoutError) else "stream_limit")
+        # Close rather than allowing late frames to contaminate the next job.
+        async with asyncio.timeout(10):
+            await ws.send_json({"type": "cancel", "id": job_id})
+            await ws.close(code=1000)
+        closed = True
+    evidence = observation.result()
+    await token_stream.publish_done(
+        job_id, observation.text,
+        finish_reason="stop" if evidence["terminal"] == "response.completed" else "error",
+        grid={
+            "worker_id": worker_id,
+            "assignment_id": payload["_validator_assignment_id"],
+            "grid_nonce": payload["_validator_grid_nonce"],
+            "economic_effect": "none",
+            "observation_status": evidence["status"],
+        },
+        logprobs=evidence,
+    )
+    if not closed:
+        await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+    return True
 
 
 async def _handle_validator_probe(ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict) -> bool:

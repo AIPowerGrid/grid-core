@@ -350,10 +350,14 @@ async def inspect_cohort_health(
         for candidate in candidate_rows:
             state = dict(candidate)
             metrics = validator_operators.qualification_metrics(state, now=current)
+            activity_since = _aware(state["qualification_started_at"])
+            if metrics["coverage_basis"] == "recent_72h":
+                cutoff = current - timedelta(seconds=validator_operators.RECOVERY_WINDOW_SECONDS)
+                activity_since = max(activity_since or cutoff, cutoff)
             activity = await validator_operators.qualification_activity(
                 session,
                 str(state["id"]),
-                since=_aware(state["qualification_started_at"]),
+                since=activity_since,
             )
             last_heartbeat = _aware(state["last_heartbeat"])
             heartbeat_fresh = bool(

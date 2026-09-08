@@ -10,6 +10,31 @@
 - Discord alerts are operational hints, not accounting authority. PostgreSQL
   remains the source of truth.
 
+Current launch evidence and incomplete gates are tracked in
+`DEMAND_BILLING_LAUNCH_2026_09_08.md`; this runbook alone is not proof of deployment.
+
+## Prospective reward cutover
+
+Keep automatic payouts paused while reconciling demand and supply. Select and
+record one future timezone-aware `WORKER_REWARDS_PAID_ONLY_SINCE` boundary after
+in-flight work is accounted for. Retain that exact value across subsequent
+deployments and rollback; never move it to rewrite historical obligations.
+
+After the boundary, unrestricted reward DEN comes only from positive settled
+purchased-credit consumption or externally settled x402 work. A mixed-pocket
+job contributes the purchased fraction of its DEN. Free/promo work and jobs
+without a valid settled reservation contribute zero, not a redistributed share.
+Any future compensation for those workloads requires a separate capped budget.
+
+Custodial allocations cap post-boundary SmolLM-family work at 0.5% of the
+period's emission budget across the entire network, not per account or wallet.
+At the existing 208.33 AIPG/hour budget this is at most 1.04165 AIPG/hour
+(24.9996/day for 24 nonoverlapping hourly periods). Below-cap work keeps its
+smaller proportional share. Excess stays unspent. Preview reports unallocated
+value explicitly. A cap is not permission to increase budgets, backfill overlapping
+periods, or pay disputed history. Paid model-substitution fraud remains a
+separate validator concern.
+
 ## Rollout modes
 
 `GRID_CHARGING_MODE=off` previews prices without moving value.
@@ -27,6 +52,8 @@ unpriced work. Do not use this mode for the first production test.
 
 The legacy `GRID_CHARGING_ENABLED` boolean is consulted only when
 `GRID_CHARGING_MODE` is absent. Keep it `0` once the mode is configured.
+An invalid explicit mode rejects startup and authorization; it must never
+silently turn charging off. Test configuration before selecting a release.
 
 ## Release gate
 

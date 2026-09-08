@@ -99,6 +99,10 @@ owning AGENTS.md and any affected parent Child DOX Index.
   idempotency, conflicting-write, single-run, and live eligibility tests execute
   on PostgreSQL 16 instead of reporting skipped coverage.
 - Service units: `pytest grid_api/services/`.
+- Required PR/main tests additionally build pinned, reviewed validator/Console
+  commits and run the real PostgreSQL/Core/Console/node compensation handoff.
+  Cross-repo source pins are an explicit compatibility baseline; update them
+  with reviewed client changes, never silently follow moving branches.
 - Router billing/settlement coverage: `pytest grid_api/routers/`.
 - Legacy smoke tests live under `tests/` and may skip without external services.
 - For docs-only changes, run at least `git diff --check` and inspect the DOX

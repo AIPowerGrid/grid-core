@@ -33,6 +33,23 @@ content sanitization, and reward settlement.
   `validator_audit_budgets.py` (default-dark compensated-audit budget,
   terminal, and ledger-aware expiry lifecycle; the ordinary worker terminal
   imports it, but no scheduler can create audit work yet),
+  `validator_compensation_preview.py` (pure offline allocation simulation over
+  unverified reviewer snapshots, with integer caps and assignment/operator-group
+  deduplication; no economic authority, database writes, recipient or sender),
+  `validator_compensation.py` (explicitly approved, private PostgreSQL pilot
+  contracts and finalized allocations; independently rechecks signed completed
+  text tasks, shares caps by reviewed control group and claims work globally
+  once. No runtime hook, payout queue, recipient selection or sender),
+  `validator_compensation_recipients.py` (private, preview-first, immutable
+  recipient consent for a positive finalized allocation: node EIP-191 proof,
+  recipient EOA/Base EIP-1271 proof and exact maintainer approval digest;
+  no account-wallet fallback, visibility-link authority or payment sender),
+  `validator_compensation_operator.py` (default-off private pilot/status views
+  and allocation-specific wallet/node signature collection; exact current
+  account association authorizes access, not payment. Node-row serialization,
+  post-lock identity/expiry checks and RPC outside locks protect pending proof.
+  Only the private export command feeds existing maintainer recipient review;
+  no public bind, sender, campaign creation or credit movement),
   `holdings.py` (cached on-chain AIPG balance + Chainlink ETH/USD),
   `deposits.py` (atomic Base funding receipts from verified account wallets
   plus USDC, bounded AIPG, and conversion-gated ETH claims),
@@ -151,13 +168,27 @@ content sanitization, and reward settlement.
   worker/model coverage, and software-version cohorts, but never validator
   identities. Scorecards label objective text votes as Core-matched or
   Core-disagreed and media/preview verdicts as validator opinion; a raw vote is
-  never silently promoted to Core-verified fact. Independent-operator counts
+  never silently promoted to Core-verified fact. Scorecard rates count votes,
+  not independent trials. Per-row sampling metadata counts retained assignment,
+  group and registered-validator bindings without exposing their identities;
+  independent sample count and confidence intervals remain unknown. Probe age
+  uses only retained, completed Core assignments, never attestation receipt or
+  validator-supplied timestamps. Missing/future probe times remain explicit.
+  Independent-operator counts
   remain zero until externally reviewed; registration count is not independence
   proof. `validator_operators.py` owns the review state: an opaque control group,
   at least 72 hours of qualification, rate-limited heartbeat coverage, an
   expiring maintainer review, at least one completed probe plus authoritative
   attestation created during that qualification window, and preview-first
   compare-and-swap transitions bound to the exact account and signing wallet.
+  After migration `0035`, supported heartbeats additionally fill a bounded ring
+  of unique server-timed five-minute buckets. Once 72 hours are actually observed,
+  qualification coverage uses that recent window rather than averaging all old
+  outages forever. Existing lifetime timestamps/counters remain unchanged and
+  provide the coverage basis during warmup. Recent-basis reviews and readiness
+  monitoring require completed work and authoritative evidence in that same
+  recent window. The review digest binds the ring, and heartbeats serialize with
+  reviews under a row lock. This never self-verifies an operator or moves money.
   A registration on the frozen cohort release automatically begins a
   non-economic observation window and rate-limited heartbeat sampling; an
   existing unreviewed registration begins on its first supported-version
@@ -182,7 +213,12 @@ content sanitization, and reward settlement.
   minute-rounded heartbeat, software version plus the frozen required cohort
   version and compatibility status, aggregate assignment/attestation counts,
   redacted qualification progress, and a bounded next action. An online stale
-  version must receive an upgrade action before cohort-review guidance. Wallets,
+  version must receive an upgrade action before cohort-review guidance. A fresh,
+  supported candidate whose time and coverage gates are complete is directed to
+  maintainer review, not told to wait indefinitely. That read-only guidance
+  preserves candidate status and does not prove accepted work, operator control,
+  or independent eligibility; the existing review transition checks those gates.
+  Wallets,
   account IDs, signatures, operator groups, review refs, raw assignments, and
   evidence remain private.
   Candidate and verify transitions require the frozen cohort version from typed
@@ -288,6 +324,28 @@ content sanitization, and reward settlement.
   reference disagreement are inconclusive. Worker-supplied logprobs are not
   cryptographic proof of model identity, and this lane has no routing, reward,
   strike, payout, or slashing effect.
+  `validator_responses.py` owns the bounded native Responses observation reader
+  and stream accumulator. The internal `_run_targeted_text_stage` can explicitly
+  select streaming `openai-responses` for qualification (at most 256 output
+  tokens, 300 seconds); public assignment selectors still use the existing chat
+  contract. Core dispatches these probes before ordinary raw settlement and
+  commits only bounded observations to its Redis replay buffer. Per-event and
+  whole-stream limits bound memory; missing probabilities remain explicit gaps.
+  Duplicate JSON keys at any depth are unusable, never last-value-wins.
+  Message item identifiers must be valid UTF-8 within 128 bytes, matching the
+  independent reader. Invalid metadata yields unavailable evidence, not an
+  available envelope that the validator cannot consume.
+  The envelope retains native probabilities, byte sequences, delta/sequence/item
+  indices and visible-prefix hashes, not hidden reasoning or a proven full model
+  context. It is incompatible with the chat first-distribution scorer by design.
+  No public Responses fidelity policy, runtime attestation adapter, calibrated
+  comparison, or live deployment is established by this transport work.
+  Tests cover unavailable/partial observations, terminal duplication, malformed
+  input, bounded streams, economic isolation, and a real disposable Redis
+  queue/collector/replay round trip. `test_validator_responses_redis.py` skips its
+  isolated Redis tests if `redis-server` is absent; the separate optional
+  `VALIDATOR_RESPONSES_CAPTURE` test accepts a private recorded worker capture.
+  A recorded replay is not a live end-to-end validator attestation.
   `validator_bonds.py` owns the default-off Base cache refresh. It verifies all
   WorkerRegistry selectors route through the reviewed Grid Diamond to one
   code-pinned facet release at one mutually finalized block, requires two distinct
@@ -322,12 +380,35 @@ content sanitization, and reward settlement.
 
 ## Local Contracts
 
+- An explicit invalid `GRID_CHARGING_MODE` rejects startup and authorization;
+  never interpret a typo as `off` and silently admit unbilled work. Only an
+  absent mode uses the documented legacy boolean fallback.
+
 - One queue: `job_queue.py`. Requeue is capped (Redis counter, dead-letter at
   the cap) to prevent poison-job eviction cascades. Compatible-worker generation
   failures use a tighter two-requeue budget than heterogeneous model-mismatch
   bounces. Stale jobs are reclaimed by the loop in `main.py`.
 - Money paths must stay idempotent and tested; value-moving credit ledger writes
   require non-null refs and must not overdraft under concurrency.
+- Validator compensation is separate from worker den and audit-execution
+  budgets. The manual preview/apply command freezes a seven-day contract and
+  reviewed beneficiaries before work, then commits allocations and unique work
+  claims together after the receipt grace. It pays neither majority agreement
+  nor accusations: only independently reverified, correctly scored generated
+  text tasks count. Failed-worker evidence can be valid work. Reference/fidelity
+  experiments remain excluded. Allocation records are not sent payments; no
+  ordinary worker sender or live validator handler may consume them.
+- Recipient consent commits the exact campaign, allocation, account, node,
+  Base token, integer amount, destination and at-most-24-hour signing window.
+  Both parties sign the same domain-separated message; no private key enters
+  Core or its CLI. Apply serializes with allocation writes and locks current
+  node/account identity, rejects retired accounts and signer rotation, and
+  rechecks expiry after verification. The one immutable row per allocation
+  makes identical replay safe even after expiry; conflicting consent fails.
+  A separately authenticated recipient does not establish operator independence
+  or prevent a compromised node from proposing an attacker-owned destination.
+  The maintainer must review that destination through the known operator channel.
+  This is an administrative backend, not a shipped operator wallet UI or sender.
 - Compensated validator audits reserve integer work units against four locked
   PostgreSQL scopes: global, worker, reviewed validator, and validator/worker
   pair. The ordinary worker terminal appends its payout ledger row and settles
@@ -338,6 +419,13 @@ content sanitization, and reward settlement.
   insufficient: a current independent review, fresh heartbeat, and explicit
   signing-wallet allowlist are mandatory. No scheduler or public endpoint may
   create compensated work until the separate configuration/dispatch gate lands.
+  `tests/test_paid_validator_audit_postgres.py` exercises the worker-ledger/audit
+  terminal against a disposable PostgreSQL with one private schema per test.
+  It observes blocked backend transactions before releasing a job lock, checks
+  twenty duplicate completions and release/success races, and terminates only
+  its own transaction backend before commit to prove both halves roll back.
+  These tests neither send validator compensation nor replace migration/HTTP
+  integration coverage. Their cleanup drops only the test's generated schema.
 - A successful Base funding claim atomically writes its immutable
   `grid_deposits` receipt and purchased-credit ledger movement. AIPG valuation
   must use a fresh operator epoch plus hard transaction/account/network caps;
@@ -433,6 +521,13 @@ content sanitization, and reward settlement.
 - Service ceilings are exposure reservations keyed by job id: reserve before
   dispatch, reduce to actual text spend on success, and release on 402/no-work
   terminals. Redis failure stays conservative until the day bucket expires.
+- `GRID_CHARGING_ALL_MODEL_SERVICES` is a default-empty JSON list of exact
+  direct-service IDs allowed to charge across models in allowlist mode. Both
+  positive server-owned ceilings and `inference.service_submit` are required;
+  delegated users and ordinary cohorts retain the model restriction. Global
+  `off` still wins. The authenticated credit summary exposes a versioned
+  `service_budget` with actual caps and `all_models_charged`; this reports
+  policy, not remaining capacity. Unpriced requests still reject before dispatch.
 - Price coverage is modality-specific. A model entry with only a video rate is
   unpriced for image/text, and positive quotes round up to one micro-USD rather
   than silently becoming free.
@@ -471,6 +566,11 @@ content sanitization, and reward settlement.
 - `router.py` must not read validator attestations into model or replica scores.
   Until blind quality evidence and a reviewed activation policy exist, `auto`
   routing may use curated tiers plus Grid-measured throughput/latency only.
+- Ordinary light chat/code and the default light tier prefer `qwen3-27b`.
+  Model scoring ranks only within the first nonempty eligible curated tier;
+  never flatten tiers or fall back to an arbitrary connected model. Operator
+  pins remain subject to the caller's eligibility list. Missing curated
+  capacity raises `NoEligibleModel`, not a fabricated model identity.
 - Random challenge values prevent answer replay, not template recognition. Do
   not describe generated canaries as blind workload validation or proof of a
   model family. Protocol-conformance evidence must remain separate from
@@ -507,6 +607,13 @@ content sanitization, and reward settlement.
 
 ## Work Guidance
 
+- Cohort version eligibility accepts the frozen baseline plus at most seven exact
+  reviewed upgrade versions. The singular legacy setting and plural JSON array
+  are mutually exclusive. Python and SQL must agree, including malformed
+  prefixes. This preserves existing qualification clocks during a rolling upgrade;
+  it neither grants independence review nor activates authority. Malformed text
+  fidelity reference IDs must produce a contract error, never a TypeError.
+
 - Adding economic logic -> add/extend tests under `tests/` or `settlement/tests/`.
 - Safety work should be a layered pre/post-dispatch content policy; do not
   overload `sanitizer.py`.
@@ -521,6 +628,17 @@ content sanitization, and reward settlement.
 ## Verification
 
 - `pytest grid_api/services/` - covers `job_queue`, `den`, `quota` (+ settlement subtree).
+- `tests/test_validator_compensation_handoff.py` is an opt-in cross-repo
+  PostgreSQL/Core/Console/node check. Set disposable `VALIDATORS_TEST_DB_URL`,
+  reviewed `VALIDATOR_NODE_SOURCE`, and env-file-free built
+  `VALIDATOR_CONSOLE_SOURCE`. It performs real SIWE/Auth.js login, scoped Core
+  calls, both exact consent signatures and post-commit response-loss recovery;
+  confirmation creates no recipient binding, transfer, credit or worker payout.
+  Earning records/independence and Redis nonce transport are synthetic fixtures.
+  Each test owns one temporary PG schema and its loopback child processes.
+  This does not prove native packaging, Google/wallet-extension UI, Base RPC,
+  production rollout, independent operators, or a paid pilot. It skips explicitly
+  when the cross-repo sources or disposable DB are unavailable.
 
 ## Child DOX Index
 

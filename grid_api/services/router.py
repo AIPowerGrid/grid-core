@@ -40,13 +40,13 @@ AUTO_MODELS = {"auto", "auto:fast", "auto:quality"}
 # aren't always online.
 _DEFAULT_CONFIG: dict[str, Any] = {
     "classes": {
-        "simple":       {"light": ["gpt-oss-20b", "deepseek-v4-flash-nvfp4"], "heavy": ["gpt-oss-120b"]},
-        "code":         {"light": ["gpt-oss-20b"],                            "heavy": ["qwen3-27b", "gpt-oss-120b"]},
+        "simple":       {"light": ["qwen3-27b"],                            "heavy": ["gpt-oss-120b", "deepseek-v4-flash-nvfp4"]},
+        "code":         {"light": ["qwen3-27b"],                            "heavy": ["qwen3-27b", "gpt-oss-120b"]},
         "reasoning":    {"light": ["qwen3-27b"],                              "heavy": ["gpt-oss-120b", "qwen3-27b"]},
         "long_context": {"light": ["qwen3-27b"],                              "heavy": ["qwen3-27b", "gpt-oss-120b"]},
         "creative":     {"light": ["Gemma4-26B_A4B-uncensored"],             "heavy": ["Gemma4-26B_A4B-uncensored", "gpt-oss-120b"]},
     },
-    "default": {"light": ["gpt-oss-20b", "deepseek-v4-flash-nvfp4"], "heavy": ["gpt-oss-120b", "qwen3-27b"]},
+    "default": {"light": ["qwen3-27b"], "heavy": ["gpt-oss-120b", "deepseek-v4-flash-nvfp4"]},
     # Step-2 scoring weights (model-level). Tunable via routing.json.
     "weights": {"quality": 1.0, "throughput": 0.4, "latency": 0.5, "failure": 1.0},
 }
@@ -302,9 +302,8 @@ async def resolve_auto_async(model_field: str, prompt: str, available: list[str]
 def resolve_auto(model_field: str, prompt: str, available: list[str], scores: dict | None = None) -> tuple[str, dict[str, Any]]:
     """Resolve `auto*` to a concrete ONLINE model + routing metadata.
 
-    Never fails when any text worker is online: candidates that aren't online are
-    skipped; if none of a class's candidates are online we fall back through the
-    other effort tier, the default tier, then any available model.
+    Callers supply eligible online models. Fall back only through curated tiers;
+    throughput may rank peers within a tier, never override tier preference.
     """
     t0 = time.time()
     cfg = _load_config()
@@ -329,22 +328,20 @@ def resolve_auto(model_field: str, prompt: str, available: list[str], scores: di
 
     class_map = cfg["classes"].get(task_class, cfg["default"])
     other = "light" if eff == "heavy" else "heavy"
-    # Preference order: chosen tier → other tier → default(chosen) → default(other).
-    ordered: list[str] = (
-        class_map.get(eff, [])
-        + class_map.get(other, [])
-        + cfg["default"].get(eff, [])
-        + cfg["default"].get(other, [])
-    )
-    # Online candidates in curated order (deduped). Curation is the prior.
-    seen: set[str] = set()
-    online = [m for m in ordered if m in avail and not (m in seen or seen.add(m))]
-    fallback = not online
+    tiers = [class_map.get(eff, []), class_map.get(other, []),
+             cfg["default"].get(eff, []), cfg["default"].get(other, [])]
+    online: list[str] = []
+    fallback = False
+    for index, tier in enumerate(tiers):
+        online = list(dict.fromkeys(m for m in tier if m in avail))
+        if online:
+            fallback = index > 0
+            break
     if not online:
-        chosen = available[0] if available else model_field  # last resort
-    elif scores:
+        raise NoEligibleModel("No eligible curated model is online")
+    if scores:
         # Best-scoring online candidate. max() is stable on first-seen for ties, so
-        # curated order breaks ties; live quality/speed can override the prior.
+        # curated order breaks ties; measured speed ranks only these peers.
         chosen = max(online, key=lambda m: scores.get(m, {}).get("score", 0.0))
     else:
         chosen = online[0]  # Step-1 behavior: curated order, no scores
@@ -366,3 +363,7 @@ def resolve_auto(model_field: str, prompt: str, available: list[str], scores: di
         f"fallback={fallback} {meta['gate_ms']}ms)",
     )
     return chosen, meta
+
+
+class NoEligibleModel(ValueError):
+    """No curated candidate can serve the current auto request."""

@@ -18,9 +18,21 @@ validation, worker incentives, and trust boundaries.
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only
   invariants, scorer-capability matching, scorecard privacy rules, and future
-  economic gates.
+  economic gates. Its additive scorecard metadata specifies vote/group counts,
+  probe-vs-receipt freshness and explicit unknown statistical confidence.
+  It also separates the `account.read` aggregate-consumer endpoint from the
+  original active-validator work/private-health routes; no node is needed to
+  read redacted network scorecards.
+  Its bounded availability recovery is live on `508ca14f` / Alembic `0035`;
+  collecting recent heartbeats preserves historical qualification and is not
+  itself a completed recovery window or operator-independence approval.
 - `VALIDATOR_ANTI_GAMING.md` - executable hostile-worker baseline, public-probe
   limitations, blind-audit contract, and the quality-evidence promotion gate.
+- `VALIDATOR_RESPONSES_QUALIFICATION.md` - local native-logprob transport proof,
+  isolated Redis capture replay, honest coverage gaps and remaining live
+  assignment/runtime/calibration gates. Not a public scoring policy.
+  Includes synthetic HTTP/worker/WebSocket/Redis fault qualification and the
+  duplicate-key/UTF-8 metadata fixes it exposed; no public assignment-loop proof.
 - `VALIDATOR_SHADOW_AUTHORITY.md` - default-off seven-day advisory-routing
   observation contract after three independently qualified operators. It owns
   the no-side-effect boundary, eligible evidence, replayable decision record,
@@ -39,6 +51,13 @@ validation, worker incentives, and trust boundaries.
 - `PAID_VALIDATOR_AUDITS.md` - accepted, partially implemented design for
   bounded scheduler-owned audits. Schema, budgets, ordinary atomic payout, and
   recovery exist dark; scheduling, scoring, and classifier gates remain absent.
+- `VALIDATOR_COMPENSATION_PILOT.md` - capped operator compensation, implemented
+  dark PostgreSQL contracts/allocations, offline simulation, recipient-consent
+  and default-off transfer backends, with operator UI and live approval gates.
+  Not worker-audit funding or payment approval.
+- `VALIDATOR_PAYOUT_CONSENT.md` - default-off private operator status and
+  wallet/node signature collection, Console handoff, replay/expiry policy and
+  remaining node-app/Console delivery gates. No recipient approval or sending.
 - `MEDIA_VALIDATION_V1.md` - accepted fail-closed image/video validation design:
   private challenges, cached bond eligibility, rotating references, Core object
   hashing, validator fetch defenses, dark validator-side modality scoring, and

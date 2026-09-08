@@ -1145,6 +1145,178 @@ async def test_preview_attestation_does_not_affect_authoritative_scorecards(db):
         "core_disagreed": 0,
         "validator_opinion": 1,
     }
+    item = preview["items"][0]
+    assert item["sampling"]["attestation_votes"] == 1
+    assert item["sampling"]["distinct_probe_groups"] == 0
+    assert item["sampling"]["votes_without_group"] == 1
+    assert item["sampling"]["independent_sample_count"] is None
+    assert item["probe_freshness"]["latest_completed_at"] is None
+    assert item["probe_freshness"]["age_seconds"] is None
+    assert item["uncertainty"]["confidence_interval"] is None
+    assert "probe_time_missing" in item["uncertainty"]["reasons"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "offset", "age", "reason"),
+    [
+        ("completed", -10800, 10800, None),
+        ("completed", None, None, "probe_time_missing"),
+        ("completed", 600, None, "probe_time_in_future"),
+        ("running", -10, None, "probe_time_missing"),
+    ],
+)
+async def test_scorecard_probe_age_is_not_attestation_receipt_age(
+    db, monkeypatch, status, offset, age, reason,
+):
+    account_id = uuid.uuid4()
+    validator_id, assignment, payload = await _assignment(account_id)
+    await validators_svc.record_attestation(
+        account_id=account_id, validator_id=validator_id,
+        payload=payload, signature=_sign(payload),
+    )
+    now = validators_svc._now().replace(microsecond=0)
+    monkeypatch.setattr(validators_svc, "_now", lambda: now)
+    async with await database.new_session() as session:
+        await session.execute(sa.update(assignments_t).where(
+            assignments_t.c.id == assignment["assignment_id"],
+        ).values(
+            probe_status=status,
+            probed=now + timedelta(seconds=offset) if offset is not None else None,
+        ))
+        await session.commit()
+    report = await validators_svc.scorecards(authority="authoritative")
+    item = report["items"][0]
+    assert report["generated_at"] == now.isoformat()
+    assert report["rate_basis"] == "attestation_votes"
+    assert report["window_basis"] == "attestation_received_at"
+    assert item["probe_freshness"]["age_seconds"] == age
+    assert item["sampling"]["distinct_assignments"] == 1
+    assert item["sampling"]["distinct_registered_validators"] == 1
+    assert item["sampling"]["independent_sample_count"] is None
+    assert item["uncertainty"]["confidence_interval"] is None
+    if reason:
+        assert reason in item["uncertainty"]["reasons"]
+    else:
+        assert item["probe_freshness"]["votes_with_probe_time"] == 1
+        assert item["probe_freshness"]["latest_completed_at"] == (
+            now - timedelta(hours=3)
+        ).isoformat()
+    assert item["quality_score"] is None
+    assert report["economic_effect"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_scorecard_shared_votes_are_not_independent_samples(db):
+    active = [{"worker_id": str(uuid.uuid4()), "name": "rig-shared-count",
+               "models": ["qwen3-27b"], "job_types": ["text"]}]
+    group_ids = set()
+    for key_int in (20, 21):
+        private_key = "0x" + f"{key_int:064x}"
+        wallet = Account.from_key(private_key).address.lower()
+        account_id = uuid.uuid4()
+        validator_id = await _register(account_id, private_key)
+        issued = await validators_svc.issue_assignments(
+            account_id=account_id, validator_id=validator_id,
+            validator_wallet=wallet, active_workers=active, limit=1,
+        )
+        assignment = issued["assignments"][0]
+        group_ids.add(assignment["probe_group_id"])
+        async with await database.new_session() as session:
+            await session.execute(sa.insert(attestations_t).values(
+                attestation_hash=hashlib.sha256(validator_id.encode()).hexdigest(),
+                account_id=account_id, validator_id=validator_id,
+                assignment_id=assignment["assignment_id"],
+                probe_group_id=assignment["probe_group_id"],
+                worker_id=active[0]["worker_id"], model="qwen3-27b",
+                modality="text", capability=assignment["capability"],
+                authority="authoritative", quorum_status="pending", verdict="healthy",
+                payload={}, created=validators_svc._now(),
+            ))
+            await session.commit()
+    assert len(group_ids) == 1
+    item = (await validators_svc.scorecards())["items"][0]
+    assert item["sampling"] == {
+        "attestation_votes": 2, "distinct_assignments": 2,
+        "distinct_probe_groups": 1, "distinct_registered_validators": 2,
+        "votes_without_group": 0, "votes_without_registered_validator": 0,
+        "independent_sample_count": None,
+    }
+    assert "correlated_votes_possible" in item["uncertainty"]["reasons"]
+    assert "operator_independence_not_established" in item["uncertainty"]["reasons"]
+    assert item["healthy_rate"] == 1.0
+    serialized = json.dumps(item)
+    for private_id in group_ids:
+        assert private_id not in serialized
+
+
+@pytest.mark.asyncio
+async def test_scorecards_empty_window_has_no_invented_samples(db):
+    report = await validators_svc.scorecards()
+    assert report["items"] == []
+    assert report["generated_at"]
+    assert report["rate_basis"] == "attestation_votes"
+
+
+@pytest.mark.asyncio
+async def test_scorecard_pruned_assignment_does_not_refresh_old_evidence(db):
+    account_id = uuid.uuid4()
+    validator_id, assignment, payload = await _assignment(account_id)
+    await validators_svc.record_attestation(
+        account_id=account_id, validator_id=validator_id,
+        payload=payload, signature=_sign(payload),
+    )
+    async with await database.new_session() as session:
+        # Reproduce ON DELETE SET NULL explicitly on the SQLite fixture.
+        await session.execute(sa.update(attestations_t).where(
+            attestations_t.c.assignment_id == assignment["assignment_id"],
+        ).values(assignment_id=None, probe_group_id=None))
+        await session.execute(sa.delete(assignments_t).where(
+            assignments_t.c.id == assignment["assignment_id"],
+        ))
+        await session.commit()
+    item = (await validators_svc.scorecards())["items"][0]
+    assert item["total"] == 1
+    assert item["sampling"]["distinct_assignments"] == 0
+    assert item["sampling"]["votes_without_group"] == 1
+    assert item["probe_freshness"]["age_seconds"] is None
+    assert "probe_time_missing" in item["uncertainty"]["reasons"]
+
+
+def test_scorecards_route_retains_scoped_auth_and_additive_metadata(monkeypatch):
+    account_id = uuid.uuid4()
+    active_checks = []
+    report = {
+        "items": [], "generated_at": "2026-09-07T00:00:00+00:00",
+        "rate_basis": "attestation_votes", "window_basis": "attestation_received_at",
+        "economic_effect": "none",
+    }
+
+    async def fake_auth(_key, *, required_scope):
+        assert required_scope == "validator.read"
+        return {"source": "v2", "account_id": account_id, "wallet": TEST_WALLET}
+
+    async def fake_active(**kwargs):
+        active_checks.append(kwargs)
+        return {"validator_id": "val_test"}
+
+    async def fake_scorecards(**kwargs):
+        assert kwargs["authority"] == "authoritative"
+        return report
+
+    monkeypatch.setattr(validator_router.accounts_svc, "authenticate", fake_auth)
+    monkeypatch.setattr(validators_svc, "active_validator", fake_active)
+    monkeypatch.setattr(validators_svc, "scorecards", fake_scorecards)
+    app = FastAPI()
+    app.state.limiter = limiter
+    app.include_router(validator_router.router)
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/validator/scorecards?authority=authoritative", headers={"apikey": "test"},
+        )
+    assert response.status_code == 200
+    assert response.json() == report
+    assert active_checks == [{"account_id": account_id, "signing_wallet": TEST_WALLET}]
 
 
 @pytest.mark.asyncio
@@ -1218,7 +1390,21 @@ async def test_unreviewed_supported_validator_starts_observation_on_first_heartb
 
 
 @pytest.mark.asyncio
-async def test_unreviewed_observation_samples_are_rate_limited_and_version_gated(db, monkeypatch):
+@pytest.mark.parametrize(
+    "final_version,plural",
+    [
+        ("v0.1.0-preview.13", False), ("v0.1.0-preview.14", False),
+        ("v0.1.0-preview.13", True), ("v0.1.0-preview.15", True), ("v0.1.0-preview.16", True),
+    ],
+)
+async def test_unreviewed_observation_samples_are_rate_limited_and_version_gated(db, monkeypatch, final_version, plural):
+    monkeypatch.setattr(
+        validator_operators.get_settings(), "validator_cohort_upgrade_version", "" if plural else "v0.1.0-preview.14",
+    )
+    monkeypatch.setattr(
+        validator_operators.get_settings(), "validator_cohort_upgrade_versions",
+        ["v0.1.0-preview.15", "v0.1.0-preview.16"] if plural else [],
+    )
     account_id = uuid.uuid4()
     validator_id = await _register(account_id, software_version="v0.1.0-preview.13")
     async with await database.new_session() as session:
@@ -1248,7 +1434,7 @@ async def test_unreviewed_observation_samples_are_rate_limited_and_version_gated
     await validators_svc.heartbeat_validator(
         account_id=account_id,
         signing_wallet=TEST_WALLET,
-        software_version="v0.1.0-preview.13",
+        software_version=final_version,
         capabilities=["text.basic.v1"],
     )
 
@@ -3322,6 +3508,95 @@ async def test_public_validator_status_is_redacted_and_reports_qualification(db)
     assert str(account_id) not in encoded
     assert "opg_never_public_01" not in encoded
     assert "private:cohort-review" not in encoded
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "hours,samples,expected_review",
+    [(72, 692, True), (72, 691, False), (71, 1000, False), (72, 0, False)],
+)
+async def test_public_candidate_next_action_tracks_gates_without_granting_review(
+    db, monkeypatch, hours, samples, expected_review
+):
+    validator_id = await _register(uuid.uuid4())
+    now = datetime(2026, 9, 5, 19, tzinfo=UTC)
+    monkeypatch.setattr(validators_svc, "_now", lambda: now)
+    monkeypatch.setattr(validator_operators, "MIN_QUALIFICATION_SECONDS", 72 * 3600)
+    monkeypatch.setattr(validator_operators, "SAMPLE_INTERVAL_SECONDS", 300)
+    monkeypatch.setattr(validator_operators, "MIN_SAMPLE_COVERAGE", 0.8)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t).where(validators_t.c.id == validator_id).values(
+                independence_status="candidate",
+                operator_group_id="opg_private_review_01",
+                independence_review_ref="private:review-next-step",
+                qualification_started_at=now - timedelta(hours=hours),
+                heartbeat_sample_count=samples,
+                last_heartbeat_sampled_at=now,
+                last_heartbeat=now,
+                software_version="v0.1.0-preview.13",
+            )
+        )
+        await session.commit()
+        before = dict((await session.execute(
+            sa.select(validators_t).where(validators_t.c.id == validator_id)
+        )).mappings().one())
+
+    body = await validators_svc.public_validator_status(validator_id)
+
+    assert body["summary"] == "qualifying"
+    assert ("Request maintainer review" in body["next_action"]) is expected_review
+    assert ("Do not re-enroll" in body["next_action"]) is not expected_review
+    assert body["qualification"]["coverage_basis"] == "since_enrollment"
+    assert body["qualification"]["recovery_window_ready"] is False
+    assert "heartbeat_window_samples" not in json.dumps(body)
+    assert body["qualification"]["status"] == "candidate"
+    assert body["qualification"]["review_current"] is False
+    assert body["qualification"]["independent_vote_eligible"] is False
+    assert body["economic_effect"] == "none"
+    assert body["activity"] == {"assigned": 0, "completed": 0, "attested": 0}
+    assert "opg_private_review_01" not in json.dumps(body)
+    assert "private:review-next-step" not in json.dumps(body)
+    async with await database.new_session() as session:
+        after = dict((await session.execute(
+            sa.select(validators_t).where(validators_t.c.id == validator_id)
+        )).mappings().one())
+    assert after == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,heartbeat_age,version,summary",
+    [
+        ("suspended", 0, "v0.1.0-preview.13", "inactive"),
+        ("active", 3600, "v0.1.0-preview.13", "offline"),
+        ("active", 0, "v0.1.0-preview.9", "upgrade_required"),
+    ],
+)
+async def test_mature_candidate_still_prioritizes_operational_repairs(
+    db, monkeypatch, status, heartbeat_age, version, summary
+):
+    validator_id = await _register(uuid.uuid4())
+    now = datetime(2026, 9, 5, 19, tzinfo=UTC)
+    monkeypatch.setattr(validators_svc, "_now", lambda: now)
+    async with await database.new_session() as session:
+        await session.execute(
+            sa.update(validators_t).where(validators_t.c.id == validator_id).values(
+                status=status,
+                independence_status="candidate",
+                qualification_started_at=now - timedelta(days=4),
+                heartbeat_sample_count=2000,
+                last_heartbeat=now - timedelta(seconds=heartbeat_age),
+                software_version=version,
+            )
+        )
+        await session.commit()
+    body = await validators_svc.public_validator_status(validator_id)
+    assert body["qualification"]["time_ready"] is True
+    assert body["qualification"]["coverage_ready"] is True
+    assert body["summary"] == summary
+    assert "Request maintainer review" not in body["next_action"]
+    assert body["qualification"]["independent_vote_eligible"] is False
 
 
 @pytest.mark.asyncio

@@ -288,9 +288,17 @@ async def public_validator_status(validator_id: str) -> dict[str, Any]:
         )
     elif qualification_status == "candidate":
         summary = "qualifying"
-        next_action = (
-            "Keep this validator online until its time and heartbeat coverage gates are complete."
-        )
+        if qualification["time_ready"] and qualification["coverage_ready"]:
+            next_action = (
+                "Time and heartbeat coverage are complete. Request maintainer review "
+                "using only this public validator ID; keep the node online."
+            )
+        else:
+            next_action = (
+                "Keep this same validator online. Coverage uses the recent 72 hours once "
+                "that window is observed; existing qualification history is preserved. "
+                "Do not re-enroll or replace its identity."
+            )
     elif review_current:
         summary = "verified"
         next_action = "No operator action is currently required."
@@ -331,6 +339,11 @@ async def public_validator_status(validator_id: str) -> dict[str, Any]:
                 qualification["minimum_seconds"] - qualification["elapsed_seconds"],
             ),
             "sample_coverage": qualification["sample_coverage"],
+            "coverage_basis": qualification["coverage_basis"],
+            "lifetime_sample_coverage": qualification["lifetime_sample_coverage"],
+            "recovery_window_seconds": qualification["recovery_window_seconds"],
+            "recovery_observed_seconds": qualification["recovery_observed_seconds"],
+            "recovery_window_ready": qualification["recovery_window_ready"],
             "minimum_sample_coverage": qualification["minimum_sample_coverage"],
             "time_ready": qualification["time_ready"],
             "coverage_ready": qualification["coverage_ready"],
@@ -820,24 +833,42 @@ async def heartbeat_validator(
     if not software_version or len(software_version) > 64:
         raise RegistrationError("software_version is invalid")
     normalized_capabilities = _registration_capabilities({"capabilities": capabilities})
-    now = _now()
     _, version_supported = validator_operators.cohort_version_status(software_version)
-    sample_cutoff = now - timedelta(seconds=VALIDATOR_OPERATOR_SAMPLE_INTERVAL_SECONDS)
-    start_observation = sa.and_(
-        validators_t.c.independence_status == "unreviewed",
-        validators_t.c.qualification_started_at.is_(None),
-        version_supported,
-    )
-    sample_due = sa.and_(
-        validators_t.c.independence_status.in_(("unreviewed", "candidate", "verified")),
-        validators_t.c.qualification_started_at.is_not(None),
-        version_supported,
-        sa.or_(
-            validators_t.c.last_heartbeat_sampled_at.is_(None),
-            validators_t.c.last_heartbeat_sampled_at <= sample_cutoff,
-        ),
-    )
     async with await new_session() as session:
+        # Serialize the bounded JSON window with heartbeat counters and review
+        # transitions; concurrent replicas must not overwrite each other's bins.
+        state = (
+            await session.execute(
+                sa.select(validators_t).where(
+                    validators_t.c.id == validator["id"],
+                    validators_t.c.status == "active",
+                    validators_t.c.signing_wallet == validator["signing_wallet"],
+                ).with_for_update(),
+            )
+        ).mappings().first()
+        if not state:
+            raise RegistrationError("validator registration is not active")
+        now = _now()
+        sample_cutoff = now - timedelta(seconds=VALIDATOR_OPERATOR_SAMPLE_INTERVAL_SECONDS)
+        start_observation = sa.and_(
+            validators_t.c.independence_status == "unreviewed",
+            validators_t.c.qualification_started_at.is_(None),
+            version_supported,
+        )
+        sample_due = sa.and_(
+            validators_t.c.independence_status.in_(("unreviewed", "candidate", "verified")),
+            validators_t.c.qualification_started_at.is_not(None),
+            version_supported,
+            sa.or_(
+                validators_t.c.last_heartbeat_sampled_at.is_(None),
+                validators_t.c.last_heartbeat_sampled_at <= sample_cutoff,
+            ),
+        )
+        recent = {}
+        if version_supported and state["independence_status"] in {"unreviewed", "candidate", "verified"}:
+            recent = validator_operators.record_recent_heartbeat(dict(state), now=now)
+            if all(state[key] == value for key, value in recent.items()):
+                recent = {}
         await session.execute(
             sa.update(validators_t)
             .where(validators_t.c.id == validator["id"], validators_t.c.status == "active")
@@ -845,6 +876,7 @@ async def heartbeat_validator(
                 software_version=software_version,
                 capabilities=normalized_capabilities,
                 last_heartbeat=now,
+                **recent,
                 qualification_started_at=sa.case(
                     (start_observation, now),
                     else_=validators_t.c.qualification_started_at,
@@ -4091,7 +4123,8 @@ async def scorecards(
     safe_limit = max(1, min(int(limit), 500))
     safe_since = max(1, min(int(since_hours), 24 * 90))
     mode = authority if authority in VALID_AUTHORITY else "all"
-    cutoff = _now() - timedelta(hours=safe_since)
+    generated_at = _now()
+    cutoff = generated_at - timedelta(hours=safe_since)
 
     healthy = sa.func.sum(sa.case((attestations_t.c.verdict == "healthy", 1), else_=0))
     slow = sa.func.sum(sa.case((attestations_t.c.verdict == "slow", 1), else_=0))
@@ -4121,6 +4154,15 @@ async def scorecards(
             else_=0,
         )
     )
+    # Receipt time is not probe freshness; retained, completed Core assignments
+    # are the only source of observed probe times, never validator-supplied ts.
+    completed_probe_at = sa.case(
+        (sa.and_(
+            attestations_t.c.authority == "authoritative",
+            assignments_t.c.probe_status == "completed",
+        ), assignments_t.c.probed),
+        else_=None,
+    )
 
     q = (
         sa.select(
@@ -4140,6 +4182,13 @@ async def scorecards(
             sa.func.avg(attestations_t.c.score).label("avg_score"),
             sa.func.min(attestations_t.c.created).label("first_seen"),
             sa.func.max(attestations_t.c.created).label("last_seen"),
+            sa.func.count(sa.distinct(assignments_t.c.id)).label("distinct_assignments"),
+            sa.func.count(sa.distinct(attestations_t.c.probe_group_id)).label("distinct_probe_groups"),
+            sa.func.count(sa.distinct(attestations_t.c.validator_id)).label("distinct_registered_validators"),
+            sa.func.count(attestations_t.c.probe_group_id).label("grouped_votes"),
+            sa.func.count(attestations_t.c.validator_id).label("registered_votes"),
+            sa.func.count(completed_probe_at).label("votes_with_probe_time"),
+            sa.func.max(completed_probe_at).label("latest_completed_at"),
         )
         .outerjoin(
             assignments_t,
@@ -4184,6 +4233,19 @@ async def scorecards(
             verdict_basis = "mixed"
         subject_type = "worker" if row["worker_id"] else "model"
         subject_id = row["worker_id"] or row["model"] or "unknown"
+        probe_time_count = int(row["votes_with_probe_time"] or 0)
+        latest_probe = _aware(row["latest_completed_at"]) if row["latest_completed_at"] else None
+        probe_age = (generated_at - latest_probe).total_seconds() if latest_probe else None
+        reasons = [
+            "correlated_votes_possible",
+            "operator_independence_not_established",
+            "non_random_workload_sample",
+        ]
+        if probe_time_count < total:
+            reasons.append("probe_time_missing")
+        if probe_age is not None and probe_age < 0:
+            reasons.append("probe_time_in_future")
+            probe_age = None
         items.append({
             "subject_type": subject_type,
             "subject_id": subject_id,
@@ -4194,6 +4256,25 @@ async def scorecards(
             "score_dimension": _score_dimension(row["modality"], row["capability"]),
             "quality_eligible": _quality_eligible(row["modality"], row["capability"]),
             "quality_score": None,
+            "sampling": {
+                "attestation_votes": total,
+                "distinct_assignments": int(row["distinct_assignments"] or 0),
+                "distinct_probe_groups": int(row["distinct_probe_groups"] or 0),
+                "distinct_registered_validators": int(row["distinct_registered_validators"] or 0),
+                "votes_without_group": total - int(row["grouped_votes"] or 0),
+                "votes_without_registered_validator": total - int(row["registered_votes"] or 0),
+                "independent_sample_count": None,
+            },
+            "probe_freshness": {
+                "basis": "core_completed_assignment",
+                "votes_with_probe_time": probe_time_count,
+                "latest_completed_at": latest_probe.isoformat() if latest_probe else None,
+                "age_seconds": probe_age,
+            },
+            "uncertainty": {
+                "confidence_interval": None,
+                "reasons": reasons,
+            },
             "verdict_verification": {
                 "basis": verdict_basis,
                 "core_matched": matched_count,
@@ -4219,6 +4300,9 @@ async def scorecards(
 
     return {
         "items": items,
+        "generated_at": generated_at.isoformat(),
+        "rate_basis": "attestation_votes",
+        "window_basis": "attestation_received_at",
         "count": len(items),
         "window_hours": safe_since,
         "limit": safe_limit,
@@ -5642,21 +5726,34 @@ async def _run_targeted_text_stage(
     prompt: str,
     request: dict[str, Any],
     timeout_seconds: int = PROBE_TIMEOUT_SECONDS,
+    api_format: str = "openai-chat",
 ) -> dict[str, Any]:
     """Dispatch and witness one economically inert stage on the assigned worker."""
     from . import job_queue, token_stream
 
+    if api_format not in {"openai-chat", "openai-responses"}:
+        raise ValueError("unsupported validator text probe format")
+    if api_format == "openai-responses" and (
+        request.get("stream") is not True
+        or type(request.get("max_output_tokens")) is not int
+        or not 1 <= request["max_output_tokens"] <= 256
+        or type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 300
+        or not row.get("target_worker_id")
+    ):
+        raise ValueError("Responses qualification requires a bounded streaming request")
     payload = {
         "request": request,
-        "api_format": "openai-chat",
+        "api_format": api_format,
         "prompt": prompt,
-        "max_length": int(request.get("max_tokens") or 32),
+        "max_length": int(request.get("max_output_tokens" if api_format == "openai-responses" else "max_tokens") or 32),
         "temperature": float(request.get("temperature") or 0),
         "_validator_probe": True,
         "_validator_assignment_id": assignment_id,
         "_validator_probe_group_id": row["probe_group_id"],
         "_validator_grid_nonce": row["grid_nonce"],
     }
+    if api_format == "openai-responses":
+        payload["_validator_timeout_seconds"] = timeout_seconds
     try:
         await job_queue.submit_job(
             job_id,
@@ -5691,6 +5788,16 @@ async def _run_targeted_text_stage(
                     "code": event.get("code", 502),
                 }
             if event.get("text") == token_stream.DONE_SENTINEL:
+                if api_format == "openai-responses":
+                    binding = event.get("grid")
+                    expected = {
+                        "worker_id": str(row["target_worker_id"]),
+                        "assignment_id": assignment_id,
+                        "grid_nonce": row["grid_nonce"],
+                        "economic_effect": "none",
+                    }
+                    if not isinstance(binding, dict) or any(binding.get(key) != value for key, value in expected.items()):
+                        return {"status": "error", "code": 502, "message": "worker witness binding failed"}
                 return {
                     "status": "completed",
                     "full_text": event.get("full_text") or "".join(chunks),

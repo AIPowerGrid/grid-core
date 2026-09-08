@@ -49,6 +49,13 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   local file. Never infer this authority from `GRID_DIAMOND_ADDRESS`.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
+- Startup validates the charging mode before starting dependencies or loops.
+  Invalid explicit configuration must not fall back to free inference.
+  Typed `grid_charging_all_model_services` selects only bounded direct-service
+  principals for model-independent charging; default empty, global off wins.
+- `worker_rewards_paid_only_since` is a typed, timezone-aware prospective
+  reward boundary. Its activation is separate from demand charging and must
+  retain historical ledger rows; see settlement contracts before changing it.
 - **OAuth storage:** public client registration and authorization requests are
   operational state, not permanent identity or economic records. The lifecycle
   sweeper removes day-old authorization rows and never-used orphan clients even
@@ -65,6 +72,11 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   follows only `VALIDATOR_PAIRING_ENABLED`. Settings errors must not print inputs.
 
 ## Work Guidance
+
+- Validator cohort upgrades may overlap up to seven explicitly configured releases
+  with the baseline. Use the legacy singular setting or the bounded JSON-array
+  `VALIDATOR_COHORT_UPGRADE_VERSIONS`, never both. Configuration rejects overlap while shadow observation is enabled.
+  Never implicitly accept all newer or development versions.
 
 - Config: a typed `config.py` is the target; feature-specific env reads remain
   scattered across the tree. Keep `deploy/env.template` current and consolidate

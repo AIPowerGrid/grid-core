@@ -66,11 +66,19 @@ economic eligibility.
 | `POST /v1/validator/probe/{assignment_id}` | `validator.probe` | hard-target the assigned worker |
 | `POST /v1/validator/attest` | `validator.attest` | submit signed assignment evidence |
 | `GET /v1/validator/scorecards` | `validator.read` | read redacted aggregates |
+| `GET /v1/account/validator-scorecards` | `account.read` | read the same redacted network aggregates without a wallet or registered node |
 | `GET /v1/validator/assignments/health` | `validator.read` | inspect assignment workflow and aggregate network health |
 | `GET /v1/validator/workers` | `validator.read` | read inventory only |
 
 Missing registration, assignment, probe, or attestation support fails closed.
 The public inference API and worker inventory are never alternate probe paths.
+Account scorecard reads are a separate consumer surface, not validator work.
+They accept ordinary authenticated v2 read authority, including a service-refreshed
+user token, and retain bounded filters and rate limits. The original validator
+routes still require their existing scopes and active registration. No account
+IDs, node identities, group IDs, private payloads, nonces or signatures are added
+to aggregate reports. Account access does not expose private assignment health
+or grant permission to register, allocate, probe or attest.
 Self-suspension is reversible by a fresh signed registration from the same
 wallet. Maintainer revocation is not: registration, suspension, and rotation
 all reject a revoked identity. Rotation does not rewrite historical evidence,
@@ -89,6 +97,35 @@ observed window while attaching the private common-control group. Observation
 alone never establishes independence or grants routing, reward, strike, payout,
 or slashing authority, and Core does not backfill samples from before the live
 observation path saw them.
+
+### Bounded Availability Recovery
+
+Production runs this path on `508ca14f` with migration `0035`, verified
+2026-09-07. Apply `0035` before deploying it to another environment. See the
+[rollout record](../../deploy/VALIDATOR_RECOVERY_2026_09_07.md) for evidence and
+the remaining observation gates.
+Supported heartbeats also collect at most 864 unique server-observed five-minute
+buckets. Repeated or concurrent heartbeats cannot fill missing time buckets, and
+unsupported releases do not accumulate qualified observations.
+
+During the first 72 hours of this new collection, existing qualification coverage
+and enrollment progress are preserved. Once a complete window has been observed,
+coverage uses the latest 72 hours at the same 80% threshold, rather than requiring
+an operator to compensate indefinitely for an old outage. The original start,
+lifetime sample counter, signing identity and review are not reset. Migration
+does not infer old heartbeat timestamps from cumulative totals.
+
+Registration and public-status qualification views identify `coverage_basis`
+(`since_enrollment` or `recent_72h`), retain `lifetime_sample_coverage`, and expose
+`recovery_window_seconds`, `recovery_observed_seconds` and `recovery_window_ready`.
+Raw bucket timestamps, private review references and control groups remain private.
+For the recent basis, both maintainer review and cohort readiness monitoring
+require a completed probe and authoritative attestation within that same recent
+window. Availability alone never verifies operator independence. Existing verified
+reviews still have their separate expiry, activity and release eligibility rules.
+
+This is a recovery policy, not a historical uptime reconstruction or a reason to
+reset any operator's registration. Evidence and monetary ledgers are untouched.
 
 ## Evidence Invariants
 
@@ -140,6 +177,46 @@ Disagreement remains visible signed evidence; it is not silently relabeled as a
 Core-verified fact. Media fidelity and preview-only rows remain explicitly
 `validator_opinion` because Core commits transport witnesses but does not run
 the node's local pHash/decode scorer.
+
+### Scorecard Sampling And Freshness
+
+The local September 7 addition to `GET /v1/validator/scorecards` is read-only
+and backward compatible; deployment and Console rendering are separate gates.
+Existing grouping, rates, limits, auth and economic isolation are unchanged.
+
+- `generated_at` is the Core report timestamp. `rate_basis=attestation_votes`
+  makes the denominator explicit, and `window_basis=attestation_received_at`
+  preserves the existing received-evidence window. This is not a probe-time
+  window or an estimate of all inference workloads.
+- Per-row `sampling` includes `attestation_votes`, `distinct_assignments`,
+  `distinct_probe_groups`, `distinct_registered_validators`,
+  `votes_without_group`, and `votes_without_registered_validator`.
+  These count retained bindings, not executions, independent trials, active
+  operators or externally verified control groups. A shared media execution
+  can receive several votes. Counts across grouped rows are not necessarily
+  additive. Retention/deletion can make a historical binding unknown.
+- `sampling.independent_sample_count` and `uncertainty.confidence_interval`
+  are null. Repeated/correlated votes, unresolved operator control and a
+  non-representative workload sample do not support an independent-trial
+  confidence interval. The reason codes are `correlated_votes_possible`,
+  `operator_independence_not_established`, and `non_random_workload_sample`.
+  This endpoint does not perform operator qualification; its uncertainty is
+  not a replacement for that separate review's current status.
+- `probe_freshness` contains `basis=core_completed_assignment`,
+  `votes_with_probe_time`, `latest_completed_at`, and `age_seconds`.
+  Only authoritative votes with retained assignments in `probe_status=completed`
+  contribute the Core-written `probed` timestamp. Validator payload `ts` and
+  recent attestation receipt cannot refresh old evidence. Missing or pruned
+  timestamps yield null; a future latest timestamp yields null age plus
+  `probe_time_in_future`. Partial/missing coverage adds `probe_time_missing`.
+  A latest timestamp describes only the timestamped subset, not every vote.
+
+Consumers must preserve null as unknown and distinguish existing
+`first_seen`/`last_seen` receipt times from actual probe freshness. Do not infer
+current worker availability, model authenticity, calibrated fraud detection,
+routing authority or reward eligibility from these aggregates. Historical
+clients can continue using existing fields; they must not fabricate the new
+ones when connected to older Core versions.
 
 The targeted probe is isolated from customer economics: it does not reserve or
 settle demand credits, award den, create a payout ledger completion, or apply a
