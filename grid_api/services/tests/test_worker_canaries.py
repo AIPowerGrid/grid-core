@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 import json
+import re
 
 import pytest
 
@@ -47,9 +48,15 @@ def _install_canary_transport(monkeypatch, event_factory):
     return submitted
 
 
+def _expected_label(submitted):
+    labels = re.findall(r"<label>(aipg-[0-9a-f]{20})</label>", submitted["payload"]["prompt"])
+    assert len(labels) == 1
+    return labels[0]
+
+
 def _done_for(submitted, *, output=None, worker_id="worker-1", economic_effect="none"):
     payload = submitted["payload"]
-    expected = payload["prompt"].rsplit(": ", 1)[1]
+    expected = _expected_label(submitted)
     return {
         "text": token_stream.DONE_SENTINEL,
         "full_text": expected if output is None else output,
@@ -118,6 +125,8 @@ async def test_text_canary_hard_targets_exact_worker_and_returns_no_challenge(mo
     }
     assert submitted["payload"]["_worker_self_canary"] is True
     assert submitted["payload"]["api_format"] == "openai-chat"
+    assert submitted["payload"]["request"]["messages"][0]["content"] == submitted["payload"]["prompt"]
+    assert submitted["payload"]["prompt"].endswith("Do not include the tags or commentary.")
     assert redis.calls[0][1] == {
         "ex": worker_canaries.CANARY_COOLDOWN_SECONDS,
         "nx": True,
@@ -133,7 +142,7 @@ async def test_text_canary_leaves_room_for_reasoning_without_scoring_it(monkeypa
         budget = payload["request"]["max_tokens"]
         assert budget == payload["max_length"]
         assert budget <= 512
-        expected = payload["prompt"].rsplit(": ", 1)[1]
+        expected = _expected_label(captured)
         # A healthy backend uses 80 reasoning tokens before its 24-token answer.
         yield {"delta": {"reasoning_content": "Thinking. " * min(budget, 80)}}
         enough_budget = budget >= 104
@@ -156,6 +165,14 @@ async def test_text_canary_leaves_room_for_reasoning_without_scoring_it(monkeypa
     ("event_factory", "reason"),
     [
         (lambda captured: [_done_for(captured, output="wrong")], "output_mismatch"),
+        (
+            lambda captured: [_done_for(captured, output=_expected_label(captured) + " /think")],
+            "output_mismatch",
+        ),
+        (
+            lambda captured: [_done_for(captured, output=f"<label>{_expected_label(captured)}</label>")],
+            "output_mismatch",
+        ),
         (lambda captured: [_done_for(captured, output="\u201cwrong\u201d")], "output_mismatch"),
         (
             lambda captured: [{
