@@ -409,15 +409,21 @@ async def test_blocked_approval_rechecks_state_after_actual_pg_lock(db, monkeypa
         async with db() as holder:
             await holder.execute(sa.select(tables.validators.c.id).where(tables.validators.c.id == node[0]).with_for_update())
             holder_pid = await holder.scalar(sa.text("SELECT pg_backend_pid()"))
-            task = asyncio.create_task(approve_wallet(human, recipient, view))
             async with asyncio.timeout(10):
                 async with db() as observer:
-                    while not await observer.scalar(
-                        sa.text(
-                            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE :pid = ANY(pg_blocking_pids(pid)))",
-                        ),
-                        {"pid": holder_pid},
-                    ):
+                    # Force the observer's activity snapshot to precede the contender.
+                    await observer.scalar(sa.text("SELECT count(*) FROM pg_stat_activity"))
+                    task = asyncio.create_task(approve_wallet(human, recipient, view))
+                    while True:
+                        # Activity snapshots persist for the observer transaction.
+                        await observer.execute(sa.text("SELECT pg_stat_clear_snapshot()"))
+                        if await observer.scalar(
+                            sa.text(
+                                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE :pid = ANY(pg_blocking_pids(pid)))",
+                            ),
+                            {"pid": holder_pid},
+                        ):
+                            break
                         if task.done():
                             await task
                             pytest.fail("approval did not wait on the held node lock")
