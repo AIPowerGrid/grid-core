@@ -496,7 +496,7 @@ sources, rather than the older local Gallery main checkout.
   and original configuration backup were verified.
 - Activated `/opt/aipg-gallery-releases/gallery-815c11ee` through the release
   symlink and restarted both services at `2026-09-08T23:24:42Z`. Both are active
-  with zero service restarts at verification. Backend PID `563942` resolves
+  with zero automatic restarts at verification. Backend PID `563942` resolves
   to the new release directory and its executable matches SHA-256
   `672a978fbdadb4a8c1c9b3f0c63d4bfd57ea20e625c0e9e9cd747d3e2a195c1e`.
   The shared environment hash is unchanged. Nginx was restored byte-for-byte
