@@ -36,6 +36,9 @@ content sanitization, and reward settlement.
   (splits, payout-asset + conversion-fee knobs, `worker_share_bps`),
   `canary_audit.py` (read-only account/job reconciliation for supervised
   demand-billing rollout),
+  `treasury_health.py` (default-off Base ETH/AIPG balance warnings through the
+  billing monitor; explicit public wallet/token and raw-unit thresholds, no
+  signer or payment calls),
   `validator_audit_budgets.py` (default-dark compensated-audit budget,
   terminal, and ledger-aware expiry lifecycle; the ordinary worker terminal
   imports it, but no scheduler can create audit work yet),
@@ -558,6 +561,11 @@ content sanitization, and reward settlement.
   per account in one SQL statement, preserving a single PostgreSQL snapshot.
   Opposite account discrepancies must not cancel out; missing cache rows are
   included. Only aggregate totals and mismatch counts leave the monitor.
+- Treasury monitoring verifies Base chain ID and reads ETH/AIPG at one block.
+  RPC failures report unknown balances, never zero or cached healthy values.
+  It runs even with payout scheduling stopped and never refills or pays. Its
+  configured token must match the reviewed AIPG payout token before activation;
+  this warning is not an independently verified on-chain settlement proof.
 - Text reservations snapshot input/output rates and holder discount at reserve
   time. Never reprice an in-flight job from the current price book.
 - `ledger.py` writes one completion event per job. Settlement and stats depend on
