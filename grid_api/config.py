@@ -185,6 +185,22 @@ class GridSettings(BaseSettings):
     grid_alert_queue_size: int = 256
     grid_alert_dedupe_seconds: int = 300
 
+    grid_treasury_monitor_enabled: bool = False
+    grid_treasury_monitor_wallet: str = Field(default="", pattern=r"^(?:0x[0-9a-fA-F]{40})?$")
+    grid_treasury_monitor_token: str = Field(default="", pattern=r"^(?:0x[0-9a-fA-F]{40})?$")
+    grid_treasury_min_eth_wei: int = Field(default=0, ge=0, le=2**256 - 1)
+    grid_treasury_min_token_raw: int = Field(default=0, ge=0, le=2**256 - 1)
+
+    @model_validator(mode="after")
+    def validate_treasury_monitor(self):
+        if self.grid_treasury_monitor_enabled:
+            addresses = (self.grid_treasury_monitor_wallet, self.grid_treasury_monitor_token)
+            if (not self.base_rpc_url or not self.base_rpc_url.get_secret_value().strip()
+                    or any(not address or int(address[2:], 16) == 0 for address in addresses)
+                    or not self.grid_treasury_min_eth_wei or not self.grid_treasury_min_token_raw):
+                raise ValueError("Treasury monitor requires RPC, nonzero wallet/token, and positive thresholds")
+        return self
+
     @model_validator(mode="after")
     def validate_validator_upgrade(self):
         if self.validator_cohort_upgrade_version and self.validator_cohort_upgrade_versions:
