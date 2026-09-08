@@ -463,12 +463,89 @@ sources, rather than the older local Gallery main checkout.
   an older output could also falsely mark a rerender done. Gallery PR #22
   preserves identifiers and keeps uncertain work out of the automatic queue.
   Five new regressions cover uncertainty and tracked-job continuity; all
-  98 frontend tests pass locally on Node 22.23.2. The candidate is not yet
-  deployed at this audit point. It is not durable request idempotency:
+  98 frontend tests pass locally on Node 22.23.2. This safeguard was deployed
+  in Gallery `815c11ee` at 23:24:42 UTC (release evidence below).
+  It is not durable request idempotency:
   Gallery pending jobs are in memory, and a lost HTTP response or process
   restart still requires outcome recovery before a safe retry. Keep paid
   Director launch unverified until this lifecycle and a live multistage
   canary are proven; do not treat the client safeguard as closing that gate.
+
+### Gallery patched release: 23:24 UTC
+
+- Gallery PR #22 merged as `815c11eef601486d83a9c216f63f620bb56d359e`.
+  Its tree matches tested head `1ef05d2e`. All CI checks passed in run
+  `34289126286`; both CodeQL language jobs passed in `34289126269`.
+- Alongside the Director recovery safeguard, this release pins Next.js and
+  its ESLint config to `16.3.4` and sharp to `0.35.4`. The production dependency
+  audit passes the high/critical gate with two moderate and one low finding
+  remaining. This is not a claim of a vulnerability-free dependency tree.
+- The LXC candidate passed the Node 22 production build and production-only
+  frozen reinstall, Go race tests, vet, and binary build. The first helper
+  stopped after a successful web build because sharp does not export
+  `package.json`; verification was corrected to `require("sharp").versions.sharp`
+  and resumed against the existing candidate, not an assumed successful build.
+- The candidate web process returned 200 for `/create` and `/create/director`
+  on a loopback-only alternate port before activation. That process was stopped.
+- New job and prompt-enhancement submissions were temporarily gated at Nginx.
+  Status polling and browsing remained available. After a 45-second drain,
+  the current Go invocation's journal showed zero generation starts and zero
+  terminals across 31 entries. This is journal-derived evidence, not a durable
+  pending-job registry. The first gate check raced Nginx reload; the helper
+  stopped before switching releases, then resumed only after the live 503 gate
+  and original configuration backup were verified.
+- Activated `/opt/aipg-gallery-releases/gallery-815c11ee` through the release
+  symlink and restarted both services at `2026-09-08T23:24:42Z`. Both are active
+  with zero automatic restarts at verification. Backend PID `563942` resolves
+  to the new release directory and its executable matches SHA-256
+  `672a978fbdadb4a8c1c9b3f0c63d4bfd57ea20e625c0e9e9cd747d3e2a195c1e`.
+  The shared environment hash is unchanged. Nginx was restored byte-for-byte
+  to its pre-gate configuration; anonymous jobs and credits return 401 again.
+- Public Studio and Director return 200. A fresh browser page restores the
+  signed-in session after hydration, retains the earlier paid image, and shows
+  purchased balance rounded to `$0.0007`. Krea correctly remains preview for
+  this cohort. No additional paid generation was submitted during this release.
+- Protected host evidence lives under
+  `/var/lib/aipg-release-proof/gallery-815c11ee/`. The previous release is
+  retained, but its image-processing dependencies are affected: do not blindly
+  roll them back to undo a UI issue. Preserve the patches in any rollback build
+  or explicitly contain the affected surface while repairing the candidate.
+- Core remains on `c34c7da5` with charging allowlisted. No reward cutoff,
+  global charging activation, payout restart, treasury refill, or historical
+  economic-record rewrite accompanied this Gallery deployment.
+
+### Gallery uncertain-outcome release: 23:43 UTC
+
+- Gallery PR #24 merged as `9e7ff3dc2411d49d9bbd1cb0bc4b791fadd83adb`;
+  its tree matches tested head `32bcc649`. CI `34291380273` and CodeQL
+  `34291380245` passed. Local Go race tests/vet and all 98 frontend tests passed.
+- The pre-fix tests reproduced a truncated response being accepted as success
+  and a 504 body containing `404`/`unknown model` looking like a safe Director
+  fallback. The client now checks body-read errors, validates the output count
+  and presence, and classifies transport/gateway/malformed-result errors as
+  unknown outcomes. Its public warning says the original may finish and be
+  charged and retrying creates another generation. Definite 4xx rejections keep
+  their existing handling; successful responses retain Core receipt metadata.
+- This does not make pending jobs durable or recover results lost on restart.
+  The client does not retry an uncertain request automatically, and its bounded
+  public error cannot leak incidental upstream text into the recipe-fallback
+  classifier. Paid Director remains gated on durable recovery and live tests.
+- The host passed the frozen Node 22 build/reinstall, Go race tests, vet, binary
+  build, and production dependency audit. The latest audit reports five moderate
+  and one low finding, with no high/critical findings; earlier audit counts above
+  describe their own observation time. Next `16.3.4` and sharp `0.35.4` remain.
+- The candidate passed loopback Studio/Director checks, then activated at
+  `2026-09-08T23:43:54Z` after a temporary submission gate and 45-second drain.
+  The prior Go invocation showed zero generation starts/terminals across 30
+  journal entries. Both processes run from `gallery-9e7ff3dc`; backend PID
+  `565440` matches executable SHA-256
+  `4c1c718c1a74f9d1db1576dcc39f88af6c6eff6da71193d7ae2cd2f34a9221fe`.
+  Both have zero automatic restarts at verification. Patched `gallery-815c11ee`
+  is retained for rollback, which avoids restoring affected dependencies.
+- Shared environment is unchanged and Nginx was restored byte-for-byte. Public
+  Studio/Director return 200; anonymous credits/jobs return 401 after the gate
+  was removed. Host proof: `/var/lib/aipg-release-proof/gallery-9e7ff3dc/`.
+  No paid generation, reward-policy activation, or payout accompanied this change.
 
 | Path | Core ownership / shared billing path | Live canary status |
 | --- | --- | --- |
