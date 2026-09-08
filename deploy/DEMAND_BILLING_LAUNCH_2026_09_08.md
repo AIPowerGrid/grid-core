@@ -343,6 +343,30 @@ The reviewed deployment above supersedes the initial local-only posture.
   configuration changes: doing so could clear a newly activated cutoff or
   reopen generation. Preserve the economic settings and immutable release.
 
+## Additional dispatch gap: legacy coordinator sampler
+
+- Runtime inspection of `4fa8bb65` found `GRID_PROBE_ENABLED=1`, interval
+  300 seconds, and a 256-token cap in the actual supervisor/child environment.
+  The old `services/probe.py` submitted ordinary text jobs without reservation
+  or an assignment-bound no-DEN terminal. Its evidence-only verdict framing
+  did not prevent successful jobs from producing ordinary worker DEN.
+- The retirement candidate removes the startup task, replaces old callable
+  entry points with a fail-closed compatibility shim, and removes enabling
+  instructions from the environment template. It leaves registered-validator
+  assignments, manager setup canaries, and the separately budgeted audit rail
+  unchanged. The updated probe document separates verdict authority from
+  execution economics.
+- A regression test first reproduced ordinary queue submission and now proves
+  no submission even with the legacy flag set. Full local Grid suite: 1,271
+  passed, 277 environment-dependent skips. Required hosted CI and deployment
+  remain pending for this candidate; do not describe the production gap as
+  closed merely because the source fix exists.
+- At deployment, set the legacy enable flag to `0` while preserving all other
+  settings, so rollback to the previous code cannot restart that sampler.
+  Keep payouts paused and preserve historical ledger rows. This finding does
+  not establish which historical payments came from these probes or attribute
+  all unbilled traffic to abusive operators; reconciliation is separate.
+
 ## Remaining launch checklist
 
 - [x] Review and merge candidate; record exact release SHA and CI evidence.
@@ -385,7 +409,7 @@ attribution, reserve-before-dispatch, terminal/refund, and rejection evidence.
 | Chat, Art, Music, Console | Delegated identity and shared purchased balance | Pending |
 | Bots and direct service accounts | Explicit service identity and request/day ceilings | Pending |
 | x402 | Independent external payment proof; keep dark unless verified | Pending or remain dark |
-| Validator/worker setup probes | Bounded internal work; prove no ordinary emission entry | Pending |
+| Validator/worker setup probes | Bound dedicated no-DEN terminals; separate legacy coordinator sampler found to use ordinary unreserved dispatch | Legacy sampler retirement candidate; live deployment and remaining bound-path proof pending |
 
 ## Rollback boundary
 
