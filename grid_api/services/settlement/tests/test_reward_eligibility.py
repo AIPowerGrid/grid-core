@@ -143,3 +143,69 @@ async def test_unset_policy_keeps_legacy_preview(db, monkeypatch):
 def test_policy_boundary_requires_timezone():
     with pytest.raises(ValidationError):
         GridSettings(_env_file=None, worker_rewards_paid_only_since="2026-09-09T00:00:00")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("reservation", "unbacked"), [
+    (None, 100), ({"status": "held"}, 100),
+    ({"status": "released"}, 100), ({"free_micro": 100}, 100),
+    ({"promo_micro": 100}, 100),
+    ({"free_micro": 60, "promo_micro": 30}, 90), ({}, 0),
+])
+async def test_reward_monitor_detects_legacy_unbacked_share(db, monkeypatch, reservation, unbacked):
+    monkeypatch.setattr(aggregate, "get_settings", lambda: SimpleNamespace(worker_rewards_paid_only_since=None))
+    await seed(reservation=reservation)
+    report = await aggregate.reward_backing_health(CUTOVER, CUTOVER + timedelta(hours=1))
+    assert report == {"unbacked_jobs": int(unbacked > 0), "unbacked_den": unbacked}
+    async with await database.new_session() as session:
+        assert (await session.execute(sa.select(sa.func.sum(ledger.c.den)))).scalar_one() == 100
+
+
+@pytest.mark.asyncio
+async def test_reward_monitor_does_not_flag_excluded_or_fully_funded_work(db):
+    await seed()
+    await seed(reservation={"promo_micro": 80})
+    await seed(reservation={}, compact_job_id=True)
+    await seed(reservation={"billing_source": "x402", "account_id": None},
+               payment={"status": "reported", "settled_micro": 100})
+    await seed(reservation={"billing_source": "x402", "account_id": None},
+               payment={"status": "settled", "settled_micro": 100})
+    assert await aggregate.reward_backing_health(CUTOVER, CUTOVER + timedelta(hours=1)) == {
+        "unbacked_jobs": 0, "unbacked_den": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_reward_monitor_window_and_historical_boundary(db):
+    await seed(created=CUTOVER - timedelta(hours=2))
+    await seed(created=CUTOVER - timedelta(microseconds=1))
+    await seed(created=CUTOVER)
+    await seed(created=CUTOVER + timedelta(hours=1))
+    assert await aggregate.reward_backing_health(CUTOVER - timedelta(hours=1), CUTOVER) == {
+        "unbacked_jobs": 1, "unbacked_den": 100,
+    }
+    assert await aggregate.reward_backing_health(CUTOVER, CUTOVER + timedelta(hours=1)) == {
+        "unbacked_jobs": 0, "unbacked_den": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_reward_monitor_includes_walletless_accrual_not_unattributable(db, monkeypatch):
+    monkeypatch.setattr(aggregate, "get_settings", lambda: SimpleNamespace(worker_rewards_paid_only_since=None))
+    await seed(wallet="")
+    orphan = await seed(wallet="")
+    async with await database.new_session() as session:
+        await session.execute(sa.update(workers).where(workers.c.account_id == orphan).values(account_id=None))
+        await session.commit()
+    assert await aggregate.reward_backing_health(CUTOVER, CUTOVER + timedelta(hours=1)) == {
+        "unbacked_jobs": 1, "unbacked_den": 100,
+    }
+
+
+@pytest.mark.asyncio
+async def test_reward_monitor_obeys_x402_funding_gate_even_before_cutoff(db, monkeypatch):
+    monkeypatch.setattr(aggregate, "get_settings", lambda: SimpleNamespace(worker_rewards_paid_only_since=None))
+    await seed(reservation={"billing_source": "x402", "account_id": None}, payment={"status": "reported"})
+    assert await aggregate.reward_backing_health(CUTOVER, CUTOVER + timedelta(hours=1)) == {
+        "unbacked_jobs": 0, "unbacked_den": 0,
+    }

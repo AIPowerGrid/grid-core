@@ -52,6 +52,12 @@ Merkle claims on Base.
 - `bot.py` - the settlement bot (orchestrates a settlement run).
 - `merkle.py` - cumulative Merkle tree + proof generation.
 - `aggregate.py` - roll up per-worker/per-den earnings for a period (input to ALL rails).
+  Its read-only `reward_backing_health` compares the same eligible DEN with
+  purchased backing in one SQL snapshot. It includes walletless account accrual
+  and legacy wallet-only eligibility, excludes unfunded x402, and reports only
+  aggregate exposure, never a claim that a payment occurred. `_purchased_den`
+  is shared with the existing prospective eligibility rule; monitoring must not
+  change its boundary or historical allocations.
 - `ipfs.py` - publish the proof set off-chain.
 - `tests/` - `test_merkle.py`, `test_ipfs.py`.
 
