@@ -317,6 +317,32 @@ The reviewed deployment above supersedes the initial local-only posture.
   2026-09-08T22:28:55Z, including the delayed Qwen 8B reconnect. This is fleet
   recovery evidence, not a paid generation canary for each model.
 
+## Read-only monitors activated
+
+- At 2026-09-08T22:33:37Z, enabled `GRID_REWARD_MONITOR_ENABLED` and
+  `GRID_TREASURY_MONITOR_ENABLED` on the same immutable `4fa8bb65` release.
+  Treasury warnings use the verified payout signer address and token with
+  thresholds of 0.001 ETH and 5,000 AIPG (18-decimal raw units).
+- The preflight validated the candidate settings before activation. Exactly
+  six monitoring keys changed; all other parsed environment values were
+  identical. The protected snapshot and activation proof are in
+  `/var/lib/aipg-backup/monitor-activation-4fa8bb65/`. Supervisor and child
+  environments subsequently showed both flags set to `1`, with charging still
+  `allowlist` and the reward cutoff still unset.
+- A standalone invocation of the deployed checks, using read-only SQL and the
+  production RPC, exercised both expected warnings. Discord transport accepted
+  `treasury_low_aipg` and `unbacked_reward_eligibility`; the two extra events were
+  marked `delivery_canary` and used separate dedupe keys. This proves the real
+  check-to-transport path, not human receipt or a completed operator response.
+  Normal background warnings retain the existing cross-process dedupe window.
+- Core remained healthy and all 12 workers recovered. No credit, reservation,
+  historical DEN, reward policy, or payout state was changed by activation.
+  Both the payout timer and sender remain inactive.
+- To roll back only these warnings, disable their two flags. Never restore
+  the entire historical environment snapshot after subsequent billing/reward
+  configuration changes: doing so could clear a newly activated cutoff or
+  reopen generation. Preserve the economic settings and immutable release.
+
 ## Remaining launch checklist
 
 - [x] Review and merge candidate; record exact release SHA and CI evidence.
