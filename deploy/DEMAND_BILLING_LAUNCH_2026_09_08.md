@@ -7,6 +7,34 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Reviewed deployment
+
+- Core PR #132 merged as `a754b6898b4a6111758b104ee633de18ef0fe252`.
+  Production now selects `/home/aipg/releases/grid-core-a754b689`.
+  The prior `grid-core-84fe0fd6` release remains available for rollback.
+- Required CI passed with 1,399 tests passed and 9 skipped, PostgreSQL 16
+  backup/restore proof, migration/schema parity, and secret/infrastructure scans.
+  CodeQL also passed. Skipped cases and live canaries remain separate evidence.
+- Candidate installed only the reviewed hash-locked binary wheels and passed
+  `pip check`. No dependency lock, Alembic, systemd, or Nginx changes between
+  the prior live release and this candidate; existing service/proxy assets stayed
+  unchanged.
+- Production backup restored into a disposable database using the exact new
+  candidate: Alembic `0039`, no new upgrade operations, proof passed. This did
+  not restore over or alter the live economic database.
+- Configuration preflight and the restarted process confirmed charging still
+  `allowlist`, one account, zero service cohort entries, `z-image-turbo` model
+  cohort, and no `WORKER_REWARDS_PAID_ONLY_SINCE` value. The production environment
+  file was byte-for-byte unchanged across cutover. The new economic policy is
+  deployed but NOT activated.
+- Verified the running process directory and both local/public health commit.
+  Redis healthy; all 13 previously connected workers recovered after restart.
+  Worker payout timer and service remain inactive; no payment or backpay ran.
+- Music PR #3 merged and deployed as `b9713d996eeba87dee9ea1cbebb7948cebdc7141`.
+  Container build/auth smoke and post-restart HTTP checks passed, with the
+  signed-session delegation comparison active. Music PR #4 records that release.
+  No billing flags or balances changed and no real audio generation ran.
+
 ## Verified containment
 
 - Production `aipg-payout.timer` stopped and disabled; the payout one-shot was
@@ -28,8 +56,8 @@ Historical accrual and disputed payments are outside this rollout.
 
 ## Local implementation and evidence
 
-Candidate branch: `fix/demand-billing-launch`, based on `61a9ffb9`.
-Changes in this document are not yet a claim of merge or deployment.
+Implementation branch: `fix/demand-billing-launch`, based on `61a9ffb9`.
+The reviewed deployment above supersedes the initial local-only posture.
 
 - Invalid explicit charging modes now reject startup before dependencies/loops
   and reject authorization, instead of silently falling back to free inference.
@@ -54,12 +82,12 @@ Changes in this document are not yet a claim of merge or deployment.
 - Source review: Music and Gallery send delegated user tokens for generation
   and preflight quotes. Gallery checks the refreshed identity against its signed
   session. Music lacked that session comparison; a separate candidate branch
-  `fix/music-billing-identity` adds it with no-dispatch/no-credit-read tests.
-  Neither source observation proves the currently deployed frontend behavior.
+  `fix/music-billing-identity` added it with no-dispatch/no-credit-read tests and
+  has now deployed. Gallery's currently deployed flow still needs live verification.
 
 ## Remaining launch checklist
 
-- [ ] Review and merge candidate; record exact release SHA and CI evidence.
+- [x] Review and merge candidate; record exact release SHA and CI evidence.
 - [ ] Review query performance and immutable prospective cutoff selection.
 - [ ] Reconcile requested emission budget, no overlapping payout periods, and
       every payout entrypoint before restarting any sender. No treasury refill.
@@ -71,7 +99,8 @@ Changes in this document are not yet a claim of merge or deployment.
       reconcile reservation/debit/refund/reward eligibility for each job.
 - [ ] Verify funding retry persists receipt without another transfer.
 - [ ] Verify billing/orphan/reward/treasury alerts and operational response.
-- [ ] Deploy reviewed immutable releases and verify process configuration.
+- [x] Deploy reviewed Core/Music code with existing configuration preserved.
+- [ ] Verify remaining frontend releases and final activation configuration.
 - [ ] Enable only verified public paths; record disabled paths and rollback.
 - [ ] Resume payouts only after prospective policy reconciliation passes.
 
