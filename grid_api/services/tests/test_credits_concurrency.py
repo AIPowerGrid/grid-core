@@ -27,6 +27,8 @@ from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import deposits as deposits_t
 from grid_api.v2.schema import metadata as v2_metadata
 from grid_api.v2.schema import x402_payments as x402_payments_t
+from grid_api.v2.schema import ledger as ledger_t
+from grid_api.v2.schema import reservations as reservations_t
 
 
 async def _seed_account() -> uuid.UUID:
@@ -98,6 +100,88 @@ async def test_duplicate_ref_debit_charges_once_under_race(pg):
     assert sum(1 for r in results if r == "ok") == 1, results
     assert sum(1 for r in results if r == "already") == 11, results
     assert await credits.get_balance(aid) == cost * 9
+
+
+async def _funded_completion(monkeypatch, kind):
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "on")
+    aid = await _seed_account()
+    job = str(uuid.uuid4())
+    balance = 1_000_000
+    assert await credits.credit(aid, balance, "seed", ref=f"terminal-seed:{job}")
+    model = "gpt-oss-120b" if kind == "text" else "z-image-turbo"
+    if kind == "text":
+        auth = await credits.authorize_request(
+            {"account_id": aid}, model, 1000, 1000, job, record_reservation=True,
+        )
+        actual = pricing.quote_text(model, 1000, 100)
+    else:
+        auth = await credits.authorize_media(
+            aid, model, kind, 1, None, job, record_reservation=True,
+        )
+        actual = pricing.quote_image(model, 1)
+    assert auth["ok"] and auth["reserved"] > 0
+    values = dict(job_id=job, worker_id=str(uuid.uuid4()), wallet="", model=model,
+                  job_type=kind, den=1.0, output_units=100 if kind == "text" else 1,
+                  prompt_hash="a" * 64, result_hash="b" * 64)
+    return aid, job, balance, actual, values
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["text", "image"])
+async def test_concurrent_terminals_charge_and_reward_exactly_once(pg, monkeypatch, kind):
+    aid, job, initial, actual, values = await _funded_completion(monkeypatch, kind)
+    start = asyncio.Event()
+
+    async def complete():
+        await start.wait()
+        return await credits.record_and_settle(
+            ledger_values=values, completion_tokens=100, exact=kind != "text",
+        )
+
+    racers = [asyncio.create_task(complete()) for _ in range(20)]
+    start.set()
+    results = await asyncio.wait_for(asyncio.gather(*racers), timeout=20)
+    assert results.count("settled") == 1, results
+    assert results.count("duplicate") == 19, results
+    assert await credits.get_balance(aid) == initial - actual
+    async with await database.new_session() as s:
+        assert (await s.execute(sa.select(sa.func.count()).select_from(ledger_t).where(
+            ledger_t.c.job_id == uuid.UUID(job)))).scalar() == 1
+        assert (await s.execute(sa.select(reservations_t.c.status).where(
+            reservations_t.c.job_id == job))).scalar() == "settled"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["text", "image"])
+async def test_completion_racing_refund_cannot_pay_worker_for_refunded_job(pg, monkeypatch, kind):
+    aid, job, initial, actual, values = await _funded_completion(monkeypatch, kind)
+    start = asyncio.Event()
+
+    async def complete():
+        await start.wait()
+        return await credits.record_and_settle(
+            ledger_values=values, completion_tokens=100, exact=kind != "text",
+        )
+
+    async def refund():
+        await start.wait()
+        await credits.release_job(job)
+
+    racers = [asyncio.create_task(complete()), asyncio.create_task(refund())]
+    start.set()
+    result, _ = await asyncio.wait_for(asyncio.gather(*racers), timeout=20)
+    async with await database.new_session() as s:
+        status = (await s.execute(sa.select(reservations_t.c.status).where(
+            reservations_t.c.job_id == job))).scalar()
+        rewarded = (await s.execute(sa.select(sa.func.count()).select_from(ledger_t).where(
+            ledger_t.c.job_id == uuid.UUID(job)))).scalar()
+    if result == "settled":
+        assert status == "settled" and rewarded == 1
+        assert await credits.get_balance(aid) == initial - actual
+    else:
+        assert result == "stale_no_payout"
+        assert status == "released" and rewarded == 0
+        assert await credits.get_balance(aid) == initial
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,9 @@
 """Pure-math tests for account-based custodial payout splitting (no DB/web3)."""
 
 import uuid
+from decimal import Decimal
+
+import pytest
 
 from grid_api.services.settlement.payouts import compute_account_payouts, _as_uuid
 
@@ -51,3 +54,37 @@ def test_as_uuid_coerces_str_account_id():
     assert _as_uuid(None) is None                 # None passes through
     assert isinstance(_as_uuid(str(u)), uuid.UUID)
     assert _as_uuid("not-a-uuid") == "not-a-uuid" # garbage passes through (no crash)
+
+
+@pytest.mark.parametrize("accounts", [1, 10, 1000])
+def test_smollm_cap_is_network_wide_not_per_wallet(accounts):
+    rows = [{"account_id": str(i), "den": 100.0 / accounts, "smollm_den": 100.0 / accounts,
+             "payout_address": None if i % 2 else "0xA"} for i in range(accounts)]
+    out = compute_account_payouts(rows, 208.33, min_aipg=0)
+    paid = sum(Decimal(str(p["aipg"])) for p in out)
+    assert paid <= Decimal("1.04165")
+    assert paid >= Decimal("1.04164")
+
+
+def test_clipped_share_is_not_redistributed_even_with_mixed_account():
+    rows = [
+        {"account_id": "mixed", "den": 90, "smollm_den": 80, "payout_address": "0xA"},
+        {"account_id": "other", "den": 10, "smollm_den": 0, "payout_address": None},
+    ]
+    out = {r["account_id"]: r for r in compute_account_payouts(rows, 100, min_aipg=0)}
+    assert out["mixed"]["aipg"] == 10.5
+    assert out["other"]["aipg"] == 10
+    assert sum(r["aipg"] for r in out.values()) == 20.5
+
+
+def test_small_leg_below_cap_keeps_its_smaller_original_share():
+    rows = [{"account_id": "small", "den": 0.1, "smollm_den": 0.1},
+            {"account_id": "other", "den": 99.9, "smollm_den": 0}]
+    out = {r["account_id"]: r for r in compute_account_payouts(rows, 100, min_aipg=0)}
+    assert out["small"]["aipg"] == 0.1
+
+
+@pytest.mark.parametrize("small", [-1, 101, float("nan"), float("inf")])
+def test_malformed_capped_weights_reject(small):
+    with pytest.raises(ValueError):
+        compute_account_payouts([{"account_id": "bad", "den": 100, "smollm_den": small}], 100)

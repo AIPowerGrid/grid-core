@@ -128,11 +128,45 @@ def test_legacy_boolean_remains_emergency_compatible(monkeypatch):
     assert credits.charging_mode() == "on"
 
 
-def test_invalid_charging_mode_fails_closed(monkeypatch):
+@pytest.mark.parametrize("legacy_enabled", [False, True])
+def test_invalid_charging_mode_fails_closed(monkeypatch, legacy_enabled):
     monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "surprise")
-    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
-    assert credits.charging_mode() == "off"
-    assert credits.charging_enabled_for({"account_id": "a-1"}, PRICED_MODEL) is False
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", legacy_enabled)
+    with pytest.raises(RuntimeError, match="Invalid GRID_CHARGING_MODE") as error:
+        credits.charging_mode()
+    assert "surprise" not in str(error.value)
+    with pytest.raises(RuntimeError, match="Invalid GRID_CHARGING_MODE"):
+        credits.charging_enabled_for({"account_id": "a-1"}, PRICED_MODEL)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("modality", ["text", "image", "video", "audio", "3d"])
+async def test_invalid_mode_never_authorizes_work(monkeypatch, modality):
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "invalid")
+    user = {"account_id": "a-1"}
+    with pytest.raises(RuntimeError, match="Invalid GRID_CHARGING_MODE"):
+        if modality == "text":
+            await credits.authorize_request(user, PRICED_MODEL, 10, 10, "invalid-mode")
+        else:
+            await credits.authorize_media("a-1", "model", modality, 1, 1, "invalid-mode", user=user)
+
+
+@pytest.mark.asyncio
+async def test_invalid_mode_stops_startup_before_dependencies(monkeypatch):
+    from unittest.mock import AsyncMock
+    from grid_api import main
+    from grid_api.services import alerts
+
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "invalid")
+    database_start = AsyncMock()
+    alerts_start = AsyncMock()
+    monkeypatch.setattr(main, "init_database", database_start)
+    monkeypatch.setattr(alerts, "start", alerts_start)
+    with pytest.raises(RuntimeError, match="Invalid GRID_CHARGING_MODE"):
+        async with main.lifespan(main.app):
+            pytest.fail("invalid billing configuration accepted startup")
+    database_start.assert_not_awaited()
+    alerts_start.assert_not_awaited()
 
 
 @pytest.mark.asyncio
