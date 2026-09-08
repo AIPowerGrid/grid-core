@@ -187,6 +187,57 @@ The reviewed deployment above supersedes the initial local-only posture.
   removing the wallet does not remove denominator weight, and a prospective
   reward cutoff cannot retroactively exclude these jobs.
 
+## Combined admission and monitor deployment
+
+- PR #138 merged as `91e19739`; PR #139 then merged as
+  `adc9a21ec304fb7c61c536c4417711f284c6fc60`. The latter is now the
+  immutable production release (cutover verified 2026-09-08 at 21:50:39 UTC),
+  retaining the worker setup fixes from `d1398353`.
+- Required PR #139 CI passed on PostgreSQL 16: 1,486 Grid tests passed with
+  9 skips, backup/restore and migration parity passed, and the real
+  Core/Console/node handoff passed. CodeQL and secret/infra scans passed.
+  Local focused verification additionally passed 41 billing/alert tests,
+  including real isolated PostgreSQL 14 concurrency; that scratch server was
+  stopped after testing.
+- The monitor now reconciles each purchased-credit account in one SQL
+  statement. Equal-and-opposite account discrepancies no longer cancel out,
+  and concurrent commits cannot split its reads across snapshots. Production
+  read-only preflight found six accounts, zero mismatches, zero negative
+  balances, and zero net drift. The equivalent complete query took 0.422 ms
+  at current size; future ledger growth still needs operational monitoring.
+- Before cutover, the candidate installed the unchanged hash-locked binary
+  dependencies and passed `pip check`. A fresh 119 MB Grid-schema backup was
+  restored into a generated scratch database and checked against the candidate.
+  Live Alembic parity remained `0039`; no production migration was needed.
+  Protected evidence is under
+  `/var/lib/aipg-backup/demand-release-adc9a21e/`, including the snapshot,
+  checksum, restore/drift proof, configuration backup, and timer comparisons.
+- Public health reports the exact new SHA and Redis healthy. The supervisor
+  and child processes use the new immutable working directory; billing source,
+  admission source, and config hashes match the candidate. The API is active
+  with zero automatic restarts, and anonymous assignments still return 401.
+  Worker reconnection is checked separately from API health: 12 were online
+  before restart; 11 had returned at the latest follow-up. All paid-canary media
+  models and the main text models were available, but full fleet recovery is
+  not yet proven.
+- Configuration, Nginx, unit definitions, and timer states were preserved.
+  Process environment confirms `GRID_CHARGING_MODE=allowlist`, legacy charging
+  flag 0, daily-free spending 0, promo global gate 1, and both the generation
+  admission allowlist and prospective reward cutoff unset. Promo spending
+  remains subject to its separate campaign allowlist; the global gate alone
+  does not prove a funded grant. One static, non-economic rollout test alert
+  was queued and accepted by the configured Discord transport using the deployed
+  alert module. This proves HTTP delivery, not that a human saw it or that every
+  billing fault triggers the right alert. Payout timer and sender remain inactive.
+- Rollback target is `grid-core-d1398353`, with the compatible `0039` schema
+  retained. This was a code deployment, not global billing activation: new
+  admission restrictions and the reward cutoff still require deliberate setup.
+- Chat packaging at `ced82ded459f646d1742374196599403e4510361` passed hosted
+  Linux/amd64 Dockerfile build, packaged-source hash comparison, and offline
+  imports as UID 1001 (run `34281434136`). That image is CI build evidence,
+  not a published production artifact or a Chat deployment. Its other inherited
+  infrastructure-dependent checks remain unverified.
+
 ## Remaining launch checklist
 
 - [x] Review and merge candidate; record exact release SHA and CI evidence.
