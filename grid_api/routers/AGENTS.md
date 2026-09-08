@@ -277,6 +277,13 @@ transport, accounts, stats, health/metrics.
   service key. Legacy `X-Grid-User-Assertion` is app-local only and cannot claim
   Google or wallet identity. Account management needs a recent Core-verified
   Google/SIWE proof.
+- Public generation admission is independent of identity and charging mode.
+  Chat text checks `openai-chat`; passthrough reserves check their fixed
+  `openai-responses` / `anthropic` format. All media, including chat's media
+  abstraction and Director timeline payloads, passes the shared service gate.
+  Disabled paths return 503 before a new hold/dispatch; terminal handlers keep
+  draining already admitted work. Availability/price listings alone do not
+  establish that an operationally gated path is enabled.
 - OAuth access tokens have no `service_id`; while the OAuth gate is live Core
   accepts them only for the configured exact resource audience. The remote MCP
   backend key may carry only `oauth.introspect`; never reuse a frontend bridge

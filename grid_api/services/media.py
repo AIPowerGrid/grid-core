@@ -26,6 +26,7 @@ from fastapi import HTTPException
 from PIL import Image
 
 from . import job_queue, token_stream, recipes, storage, credits
+from . import generation_admission
 
 logger = logging.getLogger("grid_api.media")
 
@@ -332,6 +333,7 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
     `preferred_worker` (a worker NAME the caller has verified the account owns)
     expresses soft affinity — the grid prefers that worker but won't stall if it's
     offline or busy."""
+    generation_admission.require_media(job_type, payload)
     n = int(payload.get("n", 1) or 1)
     validate_batch_request(
         job_type,
