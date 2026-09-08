@@ -51,6 +51,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   local file. Never infer this authority from `GRID_DIAMOND_ADDRESS`.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
+- The old `GRID_PROBE_*` coordinator sampler is retired and is not scheduled by
+  startup. It submitted ordinary unreserved jobs despite evidence-only claims.
+  Never restore it as a billing exception; bound validator/setup paths remain
+  separate and existing historical ledger rows require reconciliation.
 - `generation_enabled_paths` is a typed JSON allowlist for new public inference,
   independent of billing mode, key kind, or account cohort. Unknown values reject
   configuration; an empty list closes all paths. Omission preserves current

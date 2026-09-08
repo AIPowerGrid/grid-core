@@ -429,10 +429,6 @@ async def lifespan(app: FastAPI):
     oauth_state_sweeper = asyncio.create_task(_oauth_state_sweeper())
     validator_bond_sync = asyncio.create_task(_validator_bond_sync_loop())
     billing_monitor = asyncio.create_task(_billing_monitor())
-    # Verification probes ("validator zero") — dormant unless GRID_PROBE_ENABLED;
-    # even ON it only records evidence (no reward/slash). See VERIFICATION_PROBES.md.
-    from .services import probe as _probe
-    prober = asyncio.create_task(_probe.probe_loop())
     alerts.emit(
         "core_started",
         "success",
@@ -457,7 +453,6 @@ async def lifespan(app: FastAPI):
     oauth_state_sweeper.cancel()
     validator_bond_sync.cancel()
     billing_monitor.cancel()
-    prober.cancel()
     await asyncio.gather(validator_shadow_collector, return_exceptions=True)
     from .services import route_events as _route_events
     await _route_events.drain()
