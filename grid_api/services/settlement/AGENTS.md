@@ -88,6 +88,21 @@ Merkle claims on Base.
   Fiat/USDC off-chain legs are the Stripe rail (design: PAYOUT_EXECUTOR.md).
 - Settlement input is `grid_ledger` via `aggregate.py`; do not read orphan or
   legacy den tables for v2 worker payouts.
+- `WORKER_REWARDS_PAID_ONLY_SINCE` is an optional timezone-aware, prospective
+  boundary shared by account, wallet, and diagnostic aggregation. Retain its
+  exact value after activation. Before it, legacy DEN is unchanged; at/after
+  it, only settled positive purchased-credit work or settled x402 payments
+  contributes. Mixed free/promo/paid jobs contribute only the purchased fraction.
+  Missing, held, released, unknown-source, and malformed reservations contribute
+  zero. Free/promotional usage does not earn unrestricted emissions; compensated
+  audit and any future free-work subsidy require separate explicit budgets.
+- Custodial emission allocation caps post-boundary SmolLM-family work at 50
+  basis points of the requested period budget across ALL accounts (including
+  walletless accrual). It preserves a smaller natural share and never
+  redistributes clipped allocation. This is an emission cap, not a model
+  fidelity claim or a cap on the dark earned-revenue pass-through rail.
+  Keep payouts paused until the boundary, budget, hourly scheduling, and live
+  reconciliation are reviewed. These functions do not authorize backpay.
 - Merkle leaf and proof formats are wire contracts with on-chain claim logic.
   Any format change must update tests and known vectors.
 - A settlement run must be idempotent: repeated runs must not double-report,
