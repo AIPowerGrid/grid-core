@@ -13,6 +13,8 @@ executes an immutable release selected through `/home/aipg/current`.
 - `README.md` - deploy/cutover/runbook notes.
 - `DEMAND_BILLING_RUNBOOK.md` - dark deploy, allowlisted canary, alert,
   rollback, and staged demand-charging procedure.
+- `DEMAND_BILLING_LAUNCH_2026_09_08.md` - active launch evidence and outstanding
+  gates; local tests and implementation are not production activation proof.
 - `VALIDATOR_COHORT_RUNBOOK.md` - privacy-safe intake, opaque common-control
   review, public per-node status verification, 72-hour qualification,
   verification, expiry, and incident handling for independent preview
@@ -46,6 +48,10 @@ executes an immutable release selected through `/home/aipg/current`.
 ## Local Contracts
 
 - Env names in `env.template`, systemd, code, and docs must match exactly.
+- Preserve the exact `WORKER_REWARDS_PAID_ONLY_SINCE` boundary once activated.
+  Clearing or moving it would re-admit unbilled work or reprice history. Keep
+  payout timers stopped through demand/reward reconciliation; never treat
+  switching charging off as permission to resume unbounded free emissions.
 - `VALIDATOR_COMPENSATION_OPERATOR_ENABLED` defaults off. Apply `0039` and
   ship/test matching node-app and Console consent screens before enabling it.
   Current account association and fresh human proof remain mandatory; this
@@ -199,6 +205,10 @@ executes an immutable release selected through `/home/aipg/current`.
   removes DAC bypass, while immutable releases live below `0750 aipg:aipg`
   directories; changing the group back to `root` makes the unit unable to
   execute its own versioned script.
+- Verify group read/traverse on the selected release root and `scripts/`, and
+  group read/execute on `scripts/backup_postgres.sh` (normally `0750 aipg:aipg`).
+  UID 0 with empty capabilities cannot bypass a `0700` release owned by `aipg`.
+  Check exact paths; never broaden secret-file permissions recursively.
 - If you rename Base/contract env vars, update `docs/`, `grid_api/services/*`,
   and any SDK examples in the same change.
 
