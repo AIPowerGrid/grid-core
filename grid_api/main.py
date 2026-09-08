@@ -41,6 +41,7 @@ from .routers import (
     styles,
     threed,
     validator,
+    validator_compensation,
     validator_pairing,
     videos,
     worker_enrollment,
@@ -380,6 +381,10 @@ async def _billing_monitor():
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     from .services import alerts
+    from .services import credits as _credits
+
+    # Validate before starting dependencies or accepting any unbilled work.
+    _credits.charging_mode()
 
     logger.info("Starting Grid Streaming API...")
     await alerts.start()
@@ -424,7 +429,6 @@ async def lifespan(app: FastAPI):
     # even ON it only records evidence (no reward/slash). See VERIFICATION_PROBES.md.
     from .services import probe as _probe
     prober = asyncio.create_task(_probe.probe_loop())
-    from .services import credits as _credits
     alerts.emit(
         "core_started",
         "success",
@@ -537,6 +541,7 @@ app.include_router(stats.router)
 app.include_router(styles.router)
 app.include_router(validator.router)
 app.include_router(validator_pairing.router)
+app.include_router(validator_compensation.router)
 app.include_router(accounts.router)
 app.include_router(health.router)
 app.include_router(metrics.router)

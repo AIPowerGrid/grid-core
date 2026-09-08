@@ -106,19 +106,68 @@ the existing progress must be discarded.
 
 Core rejects both candidate and verify transitions unless the node's latest
 registration/heartbeat reports the exact frozen cohort baseline configured by
-`VALIDATOR_COHORT_BASELINE_VERSION`. The version is part of the review digest,
+`VALIDATOR_COHORT_BASELINE_VERSION` or an explicitly reviewed overlapping release.
+The version is part of the review digest,
 so an upgrade or downgrade between preview and apply requires a fresh preview.
 Preserve the node's existing config and `val_*` ID when upgrading; a new
 registration would not prove continuity of the reviewed operator.
 
+### Rolling Release Compatibility
+
+The default accepts only the baseline. A single reviewed release can overlap
+through `VALIDATOR_COHORT_UPGRADE_VERSION`. When another reviewed update arrives
+before the previous transition is complete, clear that singular setting and set
+`VALIDATOR_COHORT_UPGRADE_VERSIONS` to a JSON array of at most seven distinct exact
+release tags. This preserves the baseline and reviewed upgrades without
+accepting arbitrary newer versions, wildcards, development tags or ranges.
+Both upgrade settings together are rejected at startup.
+
+The eight total slots allow reviewed releases to overlap existing operators
+without a Core code change for every client release. This is bounded transition
+capacity, not a requirement to fill every slot or retain obsolete releases
+indefinitely. It is a temporary compatibility allowance, not
+automatic admission: review and explicitly configure each exact release before
+promotion. Do not drop a still-running operator's supported version merely to
+make room. Complete the upgrade and freeze one baseline for the bounded pilot.
+
+Deploy the compatible code with the previous configuration first. Only after
+its checks pass, replace the singular setting with the reviewed list and verify
+each active release's eligibility. Preserve qualification timestamps, samples,
+signers and identities; do not restart qualification or fabricate missed samples.
+The list is compatibility policy, not evidence of independent operation or
+permission for rewards or penalties. Shadow observation must stay disabled
+while either upgrade setting is non-empty.
+
+After operators migrate, deliberately promote the baseline and clear both
+upgrade settings. If rolling back to code without the plural setting, restore
+the original singular/baseline configuration together with the code: old code
+ignores the new variable. Nodes on the new release can lose sample eligibility
+under that rollback, so report that limitation; never describe it as preserving
+all overlapping versions. Rolling back to a build limited to two or three plural tags
+also requires restoring its previously valid list before restarting Core.
+Stored history is retained, not backfilled or reset.
+
 ## 3. Monitor the 72-Hour Gate
 
-The node must remain online for at least 72 hours and supply at least 80 percent
-of the bounded heartbeat samples. Heartbeat freshness is checked again at
-verification time. At least one completed assignment and one Core-accepted
-authoritative attestation must also be created after the observation window starts;
-historical evidence from before observation does not count. Workload evidence
-does not replace the time and heartbeat gates.
+The observation must span at least 72 hours with at least 80 percent heartbeat
+coverage. Heartbeat freshness is checked again at verification time. Migration
+`0035` adds server-observed five-minute buckets without reconstructing old
+timestamps or resetting enrollment, identity, review or lifetime counters.
+During the first 72 hours of that collection, the original coverage calculation
+continues. Thereafter `coverage_basis=recent_72h` uses only the latest 864
+buckets, so an old outage does not require indefinite catch-up. Repeated
+heartbeats cannot fill missed buckets. Keep the same node running; do not
+restart qualification to repair coverage.
+
+At least one completed assignment and one Core-accepted authoritative
+attestation must also exist in the applicable observation window. For
+`recent_72h`, both must be from the latest 72 hours; older work does not qualify
+an idle node. Workload evidence does not replace the time, coverage, current
+release, active-registration or independent-control review gates. Public status
+exposes collection progress and lifetime coverage separately, not raw buckets.
+
+The production rollout and rollback evidence for this change is recorded in
+[Validator recovery rollout](VALIDATOR_RECOVERY_2026_09_07.md).
 
 The operator can inspect its own safe progress with:
 

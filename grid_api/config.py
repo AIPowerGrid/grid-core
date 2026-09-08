@@ -3,10 +3,16 @@
 
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import AwareDatetime, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ReviewedValidatorVersion = Annotated[
+    str,
+    Field(pattern=r"^v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:preview|alpha|beta|rc)\.[0-9]+)?$", max_length=64),
+]
 
 
 class GridSettings(BaseSettings):
@@ -25,6 +31,13 @@ class GridSettings(BaseSettings):
     # Grid API server
     grid_api_host: str = "0.0.0.0"
     grid_api_port: int = 7002
+
+    # Exact direct-service IDs only; never delegated users. Empty is dark.
+    grid_charging_all_model_services: list[str] = Field(default_factory=list, max_length=20)
+
+    # Prospective emission eligibility boundary. Unset preserves legacy history;
+    # once activated, retain the exact timestamp across deploys and rollbacks.
+    worker_rewards_paid_only_since: AwareDatetime | None = None
 
     # Timeouts
     job_timeout_seconds: int = 300  # 5 min max generation time
@@ -55,6 +68,8 @@ class GridSettings(BaseSettings):
     # Optional account visibility for an already-enrolled validator. This does
     # not move the node account, issue keys, or grant economic authority.
     validator_pairing_enabled: bool = False
+    validator_compensation_send_enabled: bool = False
+    validator_compensation_operator_enabled: bool = False
     # Private, time-bounded pilot; both node and human accounts must be listed.
     validator_pairing_canary_accounts: list[UUID] = Field(default_factory=list, max_length=10, repr=False)
     validator_pairing_canary_until: AwareDatetime | None = Field(default=None, repr=False)
@@ -128,6 +143,14 @@ class GridSettings(BaseSettings):
     validator_cohort_monitor_seconds: int = Field(default=300, ge=60, le=3600)
     validator_cohort_monitor_window_hours: int = Field(default=24, ge=1, le=720)
     validator_cohort_baseline_version: str = "v0.1.0-preview.13"
+    # One exact reviewed release may overlap the baseline during an upgrade.
+    validator_cohort_upgrade_version: str = Field(
+        default="",
+        pattern=r"^(?:v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:preview|alpha|beta|rc)\.[0-9]+)?)?$",
+        max_length=64,
+    )
+    # Bounded release overlap preserves older operators; each tag is reviewed.
+    validator_cohort_upgrade_versions: list[ReviewedValidatorVersion] = Field(default_factory=list, max_length=7)
     # Seven-day advisory comparison. Schema and report tooling may be deployed
     # while false; no run can start and no observation can be written until the
     # three-independent-operator gate is separately frozen and this is enabled.
@@ -152,6 +175,16 @@ class GridSettings(BaseSettings):
     grid_alert_discord_webhook: SecretStr | None = None
     grid_alert_queue_size: int = 256
     grid_alert_dedupe_seconds: int = 300
+
+    @model_validator(mode="after")
+    def validate_validator_upgrade(self):
+        if self.validator_cohort_upgrade_version and self.validator_cohort_upgrade_versions:
+            raise ValueError("Choose singular or plural validator upgrade versions, not both")
+        if len(set(self.validator_cohort_upgrade_versions)) != len(self.validator_cohort_upgrade_versions):
+            raise ValueError("Validator upgrade versions must be distinct")
+        if (self.validator_cohort_upgrade_version or self.validator_cohort_upgrade_versions) and self.validator_shadow_observer_enabled:
+            raise ValueError("validator version overlap requires shadow observation disabled")
+        return self
 
     @model_validator(mode="after")
     def validate_pairing_canary(self):

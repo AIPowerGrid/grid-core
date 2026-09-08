@@ -21,6 +21,7 @@ import datetime as _dt
 import logging
 import os
 import uuid as _uuid
+from decimal import Decimal, ROUND_DOWN
 
 import sqlalchemy as sa
 
@@ -36,6 +37,9 @@ AIPG_TOKEN_ADDRESS = os.getenv("AIPG_TOKEN_ADDRESS", "0xa1c0deCaFE3E9Bf06A5F29B7
 BASE_RPC_URL = os.getenv("BASE_RPC_URL", "")
 TREASURY_PK = os.getenv("SETTLEMENT_TREASURY_PK", "")  # funded AIPG sender; never logged
 MIN_AIPG = float(os.getenv("PAYOUT_MIN_AIPG", "0.01"))
+# Versioned prospective policy: at most 0.5% of a period's emission budget
+# across the whole SmolLM family and all accounts; clipped value stays unspent.
+SMOLLM_EMISSION_CAP_BPS = 50
 
 _ERC20_ABI = [
     {"name": "transfer", "type": "function", "stateMutability": "nonpayable",
@@ -57,14 +61,34 @@ def compute_account_payouts(rows: list[dict], budget_aipg: float, *, min_aipg: f
     [{account_id, payout_address, den, share, aipg, payable}] sorted high→low,
     dropping sub-dust rows. `payable` = the account has a wallet (else it accrues).
     Emissions-funded bootstrap → the whole budget goes to supply (the 85/3/12
-    revenue split is a revenue concept, not applicable to emissions)."""
+    revenue split is a revenue concept, not applicable to emissions).
+
+    Prospective aggregation adds `smollm_den`. That family shares one network
+    cap, including walletless accounts; excess is NOT redistributed. Historical
+    aggregates without that field retain their original allocation arithmetic.
+    """
     total_den = sum(float(r["den"]) for r in rows)
     if total_den <= 0 or budget_aipg <= 0:
         return []
+    capped = any("smollm_den" in row for row in rows)
+    if capped:
+        budget = Decimal(str(budget_aipg))
+        total = sum(Decimal(str(r["den"])) for r in rows)
+        small_total = sum(Decimal(str(r.get("smollm_den", 0))) for r in rows)
+        if not budget.is_finite() or not total.is_finite() or not small_total.is_finite():
+            raise ValueError("Non-finite payout inputs")
+        small_scale = min(Decimal(1), Decimal(SMOLLM_EMISSION_CAP_BPS) * total / (10000 * small_total)) if small_total > 0 else Decimal(1)
     out = []
     for r in rows:
         share = float(r["den"]) / total_den
         aipg = budget_aipg * share
+        if capped:
+            den, small = Decimal(str(r["den"])), Decimal(str(r.get("smollm_den", 0)))
+            if not den.is_finite() or not small.is_finite() or not 0 <= small <= den:
+                raise ValueError("Invalid capped payout weight")
+            eligible = den - small + small * small_scale
+            amount = (budget * eligible / total).quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
+            aipg, share = float(amount), float(eligible / total)
         if aipg < min_aipg:
             continue
         addr = r.get("payout_address")
@@ -96,6 +120,7 @@ async def preview_period(start, end, budget_aipg: float) -> dict:
         "accounts": len(rows),
         "total_den": attributed,
         "budget_aipg": budget_aipg,
+        "unallocated_aipg": round(max(0.0, budget_aipg - sum(p["aipg"] for p in pay)), 8),
         "payouts": pay,
         "payable_now_aipg": round(sum(p["aipg"] for p in payable), 4), "n_payable": len(payable),
         "accrued_aipg": round(sum(p["aipg"] for p in accrued), 4), "n_accrued": len(accrued),
@@ -125,17 +150,21 @@ async def _row(period_id, account_id) -> dict | None:
         return {"status": r[0], "nonce": r[1], "tx_hash": r[2]} if r else None
 
 
-async def _max_assigned_nonce() -> int:
-    """Highest treasury nonce ever bound to a payout — across BOTH rails (this
-    AIPG rail's grid_payouts AND the multi-asset rail's grid_payout_legs; one
+async def _max_assigned_nonce(session=None) -> int:
+    """Highest treasury nonce ever bound across worker and validator rails; one
     treasury account = one nonce space). Fresh assignments go above this so a new
     payment can't collide with one already in flight even when the chain's
     pending-nonce view is stale (e.g. during a Base outage)."""
     from ...v2.schema import payout_legs as legs_t
-    async with await new_session() as s:
-        a = (await s.execute(sa.select(sa.func.max(payouts_t.c.nonce)))).scalar()
-        b = (await s.execute(sa.select(sa.func.max(legs_t.c.nonce)))).scalar()
-    return max(int(a) if a is not None else -1, int(b) if b is not None else -1)
+    from ...v2.schema import validator_compensation_payments as validator_payments
+    if session is None:
+        async with await new_session() as s:
+            return await _max_assigned_nonce(s)
+    values = [
+        (await session.execute(sa.select(sa.func.max(table.c.nonce)))).scalar()
+        for table in (payouts_t, legs_t, validator_payments)
+    ]
+    return max(int(value) if value is not None else -1 for value in values)
 
 
 async def _write(period_id, account_id, *, address, den, aipg, status,
@@ -438,11 +467,12 @@ async def _try_payout_lock(session) -> bool:
     """Serialize payout runners via a Postgres advisory lock (non-blocking), so two
     runs can't allocate nonces or send concurrently. Non-Postgres (sqlite tests) is
     single-process → treat as acquired."""
-    try:
-        return bool((await session.execute(
-            sa.text("SELECT pg_try_advisory_lock(:k)"), {"k": _PAYOUT_LOCK_KEY})).scalar())
-    except Exception:
+    if session.get_bind().dialect.name == "sqlite":
         return True
+    if session.get_bind().dialect.name != "postgresql":
+        raise RuntimeError("payout lock requires PostgreSQL")
+    return bool((await session.execute(
+        sa.text("SELECT pg_try_advisory_lock(:k)"), {"k": _PAYOUT_LOCK_KEY})).scalar())
 
 
 async def _amain():

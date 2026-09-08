@@ -899,6 +899,8 @@ validators = sa.Table(
     sa.Column("qualification_started_at", sa.DateTime(timezone=True), nullable=True),
     sa.Column("heartbeat_sample_count", sa.Integer, nullable=False, default=0),
     sa.Column("last_heartbeat_sampled_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("heartbeat_window_started_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("heartbeat_window_samples", PortableJSON, nullable=False, default=list, server_default="[]"),
     sa.Column("independence_reviewed_at", sa.DateTime(timezone=True), nullable=True),
     sa.Column("independence_expires_at", sa.DateTime(timezone=True), nullable=True, index=True),
     sa.Column("independence_review_ref", sa.String(128), nullable=True),
@@ -1053,10 +1055,9 @@ validator_assignments = sa.Table(
     ),
 )
 
-# Signed validator reports about probe outcomes. V0 stores these as audit
-# evidence only: no routing, rewards, slashing, or payout logic reads this table.
-# Future validator economics can derive scorecards from this append-only evidence
-# after assignment/quorum/dispute rules exist.
+# Signed validator reports about probe outcomes. Ordinary runtime evidence has
+# no routing or penalty authority. The separate, manually approved compensation
+# pilot rechecks completed text tasks before allocating; it never sends funds.
 validator_attestations = sa.Table(
     "grid_validator_attestations",
     metadata,
@@ -1130,6 +1131,116 @@ validator_attestations = sa.Table(
         "validator_id",
         name="uq_grid_validator_attestations_group_validator",
     ),
+)
+
+
+# Approved pilot contracts and finalized validator compensation allocations.
+# These private records never enter the hourly worker payout queue. No sender
+# or automatic recipient selection is attached to them.
+validator_compensation_campaigns = sa.Table(
+    "grid_validator_compensation_campaigns", metadata,
+    sa.Column("id", sa.String(64), primary_key=True),
+    sa.Column("contract", PortableJSON, nullable=False),
+    sa.Column("contract_hash", sa.String(64), nullable=False, unique=True),
+    sa.Column("budget_atomic", sa.Numeric(78, 0), nullable=False),
+    sa.Column("allocated_atomic", sa.Numeric(78, 0), nullable=False, server_default="0"),
+    sa.Column("status", sa.String(16), nullable=False, server_default="open"),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("finalized_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("result", PortableJSON, nullable=True),
+    sa.CheckConstraint("budget_atomic > 0 AND allocated_atomic >= 0 AND allocated_atomic <= budget_atomic",
+                       name="ck_validator_comp_campaign_budget"),
+    sa.CheckConstraint("status IN ('open', 'finalized')", name="ck_validator_comp_campaign_status"),
+    sa.CheckConstraint("(status = 'open' AND finalized_at IS NULL AND result IS NULL AND allocated_atomic = 0) OR "
+                       "(status = 'finalized' AND finalized_at IS NOT NULL AND result IS NOT NULL)",
+                       name="ck_validator_comp_campaign_terminal"),
+)
+
+validator_compensation_allocations = sa.Table(
+    "grid_validator_compensation_allocations", metadata,
+    sa.Column("campaign_id", sa.String(64), sa.ForeignKey("grid_validator_compensation_campaigns.id", ondelete="RESTRICT"), primary_key=True),
+    sa.Column("operator_group_id", sa.String(96), primary_key=True),
+    sa.Column("account_id", sa.Uuid, sa.ForeignKey("grid_accounts.id", ondelete="RESTRICT"), nullable=False),
+    sa.Column("reviewed_units", sa.Integer, nullable=False),
+    sa.Column("amount_atomic", sa.Numeric(78, 0), nullable=False),
+    sa.Column("allocation_hash", sa.String(64), nullable=False, unique=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint("reviewed_units > 0 AND amount_atomic >= 0", name="ck_validator_comp_allocation_positive"),
+)
+
+validator_compensation_work = sa.Table(
+    "grid_validator_compensation_work", metadata,
+    sa.Column("attestation_id", sa.BigInteger, sa.ForeignKey("grid_validator_attestations.id", ondelete="RESTRICT"), primary_key=True),
+    sa.Column("campaign_id", sa.String(64), sa.ForeignKey("grid_validator_compensation_campaigns.id", ondelete="RESTRICT"), nullable=False),
+    sa.Column("operator_group_id", sa.String(96), nullable=False),
+    sa.Column("probe_group_id", sa.String(96), nullable=False),
+    sa.Column("assignment_id", sa.String(96), nullable=False, unique=True),
+    sa.Column("evidence_commitment", sa.String(64), nullable=False),
+    sa.Column("verification", PortableJSON, nullable=False),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.UniqueConstraint("operator_group_id", "probe_group_id", name="uq_validator_comp_operator_work"),
+    sa.ForeignKeyConstraint(["campaign_id", "operator_group_id"],
+                            ["grid_validator_compensation_allocations.campaign_id", "grid_validator_compensation_allocations.operator_group_id"],
+                            ondelete="RESTRICT"),
+)
+
+
+validator_compensation_recipients = sa.Table(
+    "grid_validator_compensation_recipients", metadata,
+    sa.Column("campaign_id", sa.String(64), primary_key=True),
+    sa.Column("operator_group_id", sa.String(96), primary_key=True),
+    sa.Column("allocation_hash", sa.String(64), sa.ForeignKey("grid_validator_compensation_allocations.allocation_hash", ondelete="RESTRICT"), nullable=False, unique=True),
+    sa.Column("recipient", sa.String(42), nullable=False),
+    sa.Column("proof", PortableJSON, nullable=False),
+    sa.Column("proof_hash", sa.String(64), nullable=False, unique=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(["campaign_id", "operator_group_id"],
+                            ["grid_validator_compensation_allocations.campaign_id", "grid_validator_compensation_allocations.operator_group_id"],
+                            ondelete="RESTRICT"),
+    sa.CheckConstraint("length(recipient) = 42 AND length(proof_hash) = 64", name="ck_validator_comp_recipient_shape"),
+)
+
+
+validator_compensation_payments = sa.Table(
+    "grid_validator_compensation_payments", metadata,
+    sa.Column("allocation_hash", sa.String(64), sa.ForeignKey("grid_validator_compensation_recipients.allocation_hash", ondelete="RESTRICT"), primary_key=True),
+    sa.Column("plan", PortableJSON, nullable=False),
+    sa.Column("plan_hash", sa.String(64), nullable=False, unique=True),
+    sa.Column("chain_id", sa.Integer, nullable=False),
+    sa.Column("sender", sa.String(42), nullable=False),
+    sa.Column("nonce", sa.BigInteger, nullable=False),
+    sa.Column("tx_hash", sa.String(66), nullable=False, unique=True),
+    sa.Column("raw_transaction", sa.LargeBinary, nullable=False),
+    sa.Column("status", sa.String(24), nullable=False),
+    sa.Column("reason", sa.String(64), nullable=True),
+    sa.Column("receipt", sa.JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"), nullable=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint("chain_id = 8453 AND nonce >= 0", name="ck_validator_comp_payment_chain"),
+    sa.CheckConstraint("status IN ('pending', 'sent', 'manual_review')", name="ck_validator_comp_payment_status"),
+    sa.CheckConstraint("(status = 'sent') = (receipt IS NOT NULL)", name="ck_validator_comp_payment_receipt"),
+    sa.CheckConstraint("length(raw_transaction) > 0 AND length(raw_transaction) <= 2048", name="ck_validator_comp_payment_raw"),
+    sa.UniqueConstraint("chain_id", "sender", "nonce", name="uq_validator_comp_payment_nonce"),
+)
+
+
+validator_compensation_requests = sa.Table(
+    "grid_validator_compensation_requests", metadata,
+    sa.Column("allocation_hash", sa.String(64), sa.ForeignKey("grid_validator_compensation_allocations.allocation_hash", ondelete="RESTRICT"), primary_key=True),
+    sa.Column("id", sa.String(68), nullable=False, unique=True),
+    sa.Column("operator_account_id", sa.Uuid, sa.ForeignKey("grid_accounts.id", ondelete="RESTRICT"), nullable=False),
+    sa.Column("pairing_id", sa.String(68), nullable=False),
+    sa.Column("status", sa.String(24), nullable=False),
+    sa.Column("consent", sa.JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"), nullable=True),
+    sa.Column("recipient_signature", sa.Text, nullable=True),
+    sa.Column("node_signature", sa.String(132), nullable=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint("status IN ('awaiting_wallet', 'awaiting_node', 'review_required', 'cancelled')", name="ck_validator_comp_request_status"),
+    sa.CheckConstraint("expires_at > created", name="ck_validator_comp_request_expiry"),
+    sa.CheckConstraint("status IN ('awaiting_wallet', 'cancelled') OR (consent IS NOT NULL AND recipient_signature IS NOT NULL)", name="ck_validator_comp_request_wallet"),
+    sa.CheckConstraint("(status = 'review_required') = (node_signature IS NOT NULL)", name="ck_validator_comp_request_node"),
+    sa.CheckConstraint("recipient_signature IS NULL OR length(recipient_signature) <= 16386", name="ck_validator_comp_request_signature"),
 )
 
 

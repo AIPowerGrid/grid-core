@@ -40,9 +40,40 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - `review_validator_operator.py` - preview-first, digest-bound candidate,
   verify, or reject transition for an opaque validator control group. It never
   publishes operator identity or grants economic authority.
+- `preview_validator_compensation.py` - POSIX-only offline allocation simulation
+  over a bounded private reviewer snapshot. It has no network/database/sender,
+  rejects conflicting assignment replays, shares caps across an operator's nodes,
+  and exclusively creates a private non-sendable output. Stdout is aggregate only.
+  It does not authenticate the input or provide durable payment idempotency.
+- `manage_validator_compensation.py` - private, preview-first PostgreSQL pilot
+  contract/finalization command. Apply requires the exact reviewed digest;
+  previews connect read-only without schema initialization. It reuses the
+  offline tool's bounded private JSON I/O, writes the full plan only to a new
+  `0600` output, and prints aggregates only. It has no send mode and never
+  inserts into the hourly worker payout queue. A file failure after commit is
+  recovered with the same campaign/digest, not a newly named campaign.
+- `manage_validator_recipient.py` - private `prepare`/`bind`/`export` command for
+  allocation-specific consent. Preparation reads only and returns exact text
+  for the node and recipient to sign outside Core. Bind previews cryptographic
+  proofs and requires the reviewed digest to persist them. EOA verification is
+  offline; contract recipients additionally require Base RPC/EIP-1271. Inputs
+  and outputs use bounded owned `0600` files; no private key, sender, automatic
+  wallet fallback or public endpoint. Replay the same signed input/digest after
+  uncertain output failure, even after its original signing deadline.
+  `export` reads a fully signed, unexpired operator request and revalidates it
+  for private review without binding it; its input contains only the exact
+  request ID and maintainer approval reference. Export forbids apply/digest
+  flags and keeps signatures solely in the protected output file.
 - `review_validator_reference.py` - preview-first, digest-bound quality review
   and activate/pause/revoke workflow for a media reference worker. It never
   fabricates bond evidence or grants economic authority.
+- `pay_validator_allocation.py` - private, read-only-by-default preview or
+  explicit `--send --expect-digest` for one frozen validator allocation. The
+  separate default-off send flag must also be enabled. It never initializes
+  schema, creates a campaign or calls the worker payout timer. Full plans and
+  receipts stay in new owned `0600` outputs; stdout contains status/commitments
+  only, and raw signed transactions are never output. Recover uncertain results
+  with the SAME input/digest, not a new nonce or manual wallet transfer.
 - `review_worker_control.py` - preview-first, digest-bound verify/reject/revoke
   workflow for private media-worker common-control groups. It grants no
   economic authority and never publishes the group.

@@ -82,6 +82,12 @@ validator shadow-observation records.
   review references are never public. Group/validator uniqueness on assignments
   and attestations remains the final database guard against duplicate identity
   membership or votes.
+- `grid_validators.heartbeat_window_started_at` and `heartbeat_window_samples`
+  are a bounded, server-observed rolling availability window, added by `0035`.
+  Keep at most 864 unique five-minute buckets (72 hours). The legacy enrollment
+  timestamp and lifetime counters remain untouched. No old totals are converted
+  into fictional bucket timestamps; new columns begin NULL/empty. Updating the
+  ring and lifetime counters shares the validator row lock and transaction.
 - `grid_validator_shadow_runs`, `grid_validator_shadow_observations`,
   `grid_validator_shadow_outcomes`, `grid_validator_shadow_capacity_samples`,
   and `grid_validator_shadow_errors` are the private append-only evidence for a
@@ -136,6 +142,36 @@ validator shadow-observation records.
   No scheduler exists, so these tables still cannot originate work.
 - Account IDs are UUIDs. Quota identities such as `v2:<uuid>` are not DB foreign
   keys and must not be passed to credit ledger functions.
+- `grid_validator_compensation_campaigns`, `_allocations`, and `_work` are
+  private approved pilot accounting, added empty by `0036`. Contracts and
+  finalized allocations are immutable through the service API. One transaction
+  claims each attestation/assignment and operator/probe-group at most once
+  across campaigns. Integer token amounts conserve the frozen budget; no float
+  conversion or worker payout row is involved. Retained verification facts plus
+  the signed attestation preserve the work commitment after operational
+  assignment pruning. Account beneficiaries are frozen, but their signing
+  wallets are not implicitly payment recipients. Sending is a separate gate.
+- `grid_validator_compensation_recipients`, added empty by `0037`, stores one
+  immutable, dual-signed and maintainer-approved recipient per allocation.
+  Composite beneficiary and unique allocation-hash foreign keys preserve its
+  accounting references. The proof commits exact Base token/amount, destination
+  and signature window; the service reconciles both commitments on every replay.
+  No nonce, transaction or worker-payout row is created. Retain this financial
+  consent history on rollback; downgrade refuses a nonempty table.
+- `grid_validator_compensation_payments`, added empty by `0038`, binds an
+  allocation's approved recipient to one unique signed transaction and nonce.
+  Pending/manual-review rows have SQL NULL receipts (not JSON null); sent rows
+  retain finalized Transfer proof. Unique allocation, plan, transaction and
+  sender/chain/nonce constraints defend replay. Signed bytes are private
+  execution capability, not a stored private key; never expose them in an API.
+  Downgrade refuses nonempty history. Worker nonce allocation reads this table
+  even when validator sending is disabled, so migration precedes runtime code.
+- `grid_validator_compensation_requests`, added empty by `0039`, holds one
+  replaceable 24-hour wallet/node consent slot per finalized allocation. It
+  binds the exact current human/node association; it is not an approved
+  recipient or a payment. SQL NULL distinguishes absent consent/signatures.
+  Expired/cancelled unbound slots may be replaced, never immutable approved
+  recipient/payment rows. Downgrade refuses nonempty pending proof.
 - New columns need explicit migrations, tests, and backfill/default strategy for
   existing rows.
 - Do not store plaintext API keys, private keys, or worker secrets.

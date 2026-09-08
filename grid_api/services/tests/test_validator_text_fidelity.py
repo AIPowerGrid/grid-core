@@ -7,6 +7,14 @@ from grid_api.services import validator_text_fidelity as fidelity
 from grid_api.services import validators
 
 
+@pytest.mark.parametrize("refs", [[{}], [[]], ["ref-1", {}]])
+def test_unhashable_reference_ids_are_contract_errors(refs):
+    challenge = fidelity.make_challenge(["ref-1"], top_logprobs=5, max_tokens=4)
+    challenge["reference_worker_ids"] = refs
+    with pytest.raises(fidelity.FidelityContractError):
+        fidelity.validate_challenge(challenge)
+
+
 def test_challenge_is_dynamic_and_bounded():
     first = fidelity.make_challenge(["ref-1", "ref-2"], top_logprobs=10, max_tokens=8)
     second = fidelity.make_challenge(["ref-1", "ref-2"], top_logprobs=10, max_tokens=8)

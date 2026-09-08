@@ -23,6 +23,7 @@ from datetime import datetime
 import sqlalchemy as sa
 
 from ...database import new_session
+from ...config import get_settings
 from ...v2.schema import accounts as accounts_table
 from ...v2.schema import ledger as ledger_table
 from ...v2.schema import reservations as reservations_table
@@ -30,10 +31,65 @@ from ...v2.schema import workers as workers_table
 from ...v2.schema import x402_payments as x402_payments_table
 
 
+def _reservation_matches_job():
+    # Both persisted UUID spellings are supported without applying a function
+    # to the reservation primary key (which would force a scan for every job).
+    raw = sa.func.replace(sa.cast(ledger_table.c.job_id, sa.String()), "-", "")
+    canonical = (sa.func.substr(raw, 1, 8).concat("-")
+                 .concat(sa.func.substr(raw, 9, 4)).concat("-")
+                 .concat(sa.func.substr(raw, 13, 4)).concat("-")
+                 .concat(sa.func.substr(raw, 17, 4)).concat("-")
+                 .concat(sa.func.substr(raw, 21, 12)))
+    return reservations_table.c.job_id.in_((raw, canonical))
+
+
+def _reward_den():
+    """Purchased share of DEN after the explicit prospective policy boundary.
+
+    A mixed-pocket job contributes only its purchased fraction, not its whole
+    DEN for a nominal paid remainder. Free/promo and unreserved work need a
+    separate capped subsidy allocator and never enter this unrestricted pool.
+    Old rows retain their original DEN; no economic history is rewritten.
+    """
+    since = get_settings().worker_rewards_paid_only_since
+    if since is None:
+        return ledger_table.c.den
+    r = reservations_table.c
+    purchased = sa.case(
+        (r.billing_source == "x402", r.actual_micro),
+        else_=sa.case(
+            (r.actual_micro > r.free_micro + r.promo_micro,
+             r.actual_micro - r.free_micro - r.promo_micro),
+            else_=0,
+        ),
+    )
+    fraction = (
+        sa.select(sa.cast(purchased, sa.Float) / sa.func.nullif(r.actual_micro, 0))
+        .where(
+            _reservation_matches_job(),
+            r.status == "settled",
+            r.billing_source.in_(("credits", "x402")),
+            sa.or_(r.billing_source == "x402", r.account_id.isnot(None)),
+            r.actual_micro > 0,
+            r.reserved_micro > 0,
+            r.free_micro >= 0,
+            r.promo_micro >= 0,
+            r.free_micro + r.promo_micro <= r.reserved_micro,
+        )
+        .correlate(ledger_table)
+        .scalar_subquery()
+    )
+    return sa.case(
+        (ledger_table.c.created < since, ledger_table.c.den),
+        else_=ledger_table.c.den * sa.func.coalesce(fraction, 0.0),
+    )
+
+
 def _funded_job():
     """Exclude x402 work until its on-chain USDC settlement is durable.
 
-    Credit-funded and legacy jobs have no x402 reservation and pass directly.
+    This proof gate applies before and after the paid-only policy boundary.
+    `_reward_den` additionally removes unbilled/free DEN after that boundary.
     """
     unsettled_x402 = (
         sa.select(sa.literal(1))
@@ -45,7 +101,7 @@ def _funded_job():
             ),
         )
         .where(
-            sa.func.replace(reservations_table.c.job_id, "-", "") == sa.func.replace(sa.cast(ledger_table.c.job_id, sa.String()), "-", ""),
+            _reservation_matches_job(),
             reservations_table.c.billing_source == "x402",
             sa.or_(
                 x402_payments_table.c.job_id.is_(None),
@@ -71,13 +127,22 @@ async def aggregate_den_by_account(start: datetime, end: datetime, *, min_den: f
     j = ledger_table.join(workers_table, workers_table.c.id == ledger_table.c.worker_id, isouter=True).join(
         accounts_table, accounts_table.c.id == workers_table.c.account_id, isouter=True,
     )
+    since = get_settings().worker_rewards_paid_only_since
+    capped_den = sa.literal(0.0)
+    if since is not None:
+        capped_den = sa.case(
+            (sa.and_(ledger_table.c.created >= since,
+                     sa.func.lower(ledger_table.c.model).contains("smollm")), _reward_den()),
+            else_=0.0,
+        )
     async with await new_session() as session:
         result = await session.execute(
             sa.select(
                 workers_table.c.account_id.label("account_id"),
                 accounts_table.c.payout_wallet.label("payout_wallet"),
                 accounts_table.c.wallet.label("login_wallet"),
-                sa.func.sum(ledger_table.c.den).label("den"),
+                sa.func.sum(_reward_den()).label("den"),
+                sa.func.sum(capped_den).label("smollm_den"),
             )
             .select_from(j)
             .where(
@@ -87,12 +152,15 @@ async def aggregate_den_by_account(start: datetime, end: datetime, *, min_den: f
                 _funded_job(),
             )
             .group_by(workers_table.c.account_id, accounts_table.c.payout_wallet, accounts_table.c.wallet)
-            .having(sa.func.sum(ledger_table.c.den) > min_den),
+            .having(sa.func.sum(_reward_den()) > min_den),
         )
         out = []
         for row in result:
             addr = (row.payout_wallet or "").strip() or (row.login_wallet or "").strip() or None
-            out.append({"account_id": str(row.account_id), "den": float(row.den), "payout_address": addr})
+            item = {"account_id": str(row.account_id), "den": float(row.den), "payout_address": addr}
+            if since is not None and row.smollm_den > 0:
+                item["smollm_den"] = float(row.smollm_den)
+            out.append(item)
         return out
 
 
@@ -103,7 +171,7 @@ async def total_den_in_window(start: datetime, end: datetime) -> float:
     async with await new_session() as session:
         row = (
             await session.execute(
-                sa.select(sa.func.coalesce(sa.func.sum(ledger_table.c.den), 0.0)).where(
+                sa.select(sa.func.coalesce(sa.func.sum(_reward_den()), 0.0)).where(
                     ledger_table.c.created >= start,
                     ledger_table.c.created < end,
                     _funded_job(),
@@ -131,7 +199,7 @@ async def aggregate_den_for_period(
         result = await session.execute(
             sa.select(
                 ledger_table.c.wallet,
-                sa.func.sum(ledger_table.c.den).label("den"),
+                sa.func.sum(_reward_den()).label("den"),
             )
             .where(
                 ledger_table.c.created >= start,
@@ -141,7 +209,7 @@ async def aggregate_den_for_period(
                 _funded_job(),
             )
             .group_by(ledger_table.c.wallet)
-            .having(sa.func.sum(ledger_table.c.den) > min_den),
+            .having(sa.func.sum(_reward_den()) > min_den),
         )
         return [{"address": row.wallet, "den": float(row.den)} for row in result]
 
@@ -156,7 +224,7 @@ async def count_unattributed_den(start: datetime, end: datetime) -> dict:
         result = await session.execute(
             sa.select(
                 sa.func.count().label("jobs"),
-                sa.func.coalesce(sa.func.sum(ledger_table.c.den), 0).label("den"),
+                sa.func.coalesce(sa.func.sum(_reward_den()), 0).label("den"),
             ).where(
                 ledger_table.c.created >= start,
                 ledger_table.c.created < end,
@@ -165,6 +233,7 @@ async def count_unattributed_den(start: datetime, end: datetime) -> dict:
                     ledger_table.c.wallet.is_(None),
                 ),
                 _funded_job(),
+                _reward_den() > 0,
             ),
         )
         row = result.first()

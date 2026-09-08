@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current head: `0034`
+- `versions/` - ordered migration revisions. Current source head: `0039`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -40,7 +40,17 @@ production database match the Grid-owned schema contracts without relying on
   validator shadow-run, observation, outcome, capacity-sample, and bounded-error
   tables without enabling collection, routing, or economics; `0033` adds the
   database-enforced single-running-shadow invariant; `0034` adds the stable,
-  private per-job commitment required for exact ledger coverage).
+  private per-job commitment required for exact ledger coverage; `0035` adds
+  an initially empty bounded recent-heartbeat window without rewriting existing
+  qualification timestamps, counters or reviews).
+  `0036` adds empty private validator compensation contracts, allocations and
+  globally unique work claims. It neither funds a campaign nor creates a payout.
+  `0037` adds empty immutable, allocation-bound validator payout consent.
+  It does not migrate account wallets into recipients or enable any sender.
+  `0038` adds immutable validator transaction bytes, nonce and receipt state;
+  it grants no payment approval and enables no background sender.
+  `0039` adds empty bounded operator wallet/node consent requests; no recipient
+  is approved and no account wallet is adopted automatically.
 
 ## Local Contracts
 
@@ -96,8 +106,26 @@ production database match the Grid-owned schema contracts without relying on
   linked to raw ledger job ids without fabricating evidence.
 - Migrations must be idempotent only where Alembic expects them to be; do not
   hide failed DDL with broad exception swallowing.
+- Apply `0035` before deploying recovery-window code: validator reads select
+  these columns. It backfills no heartbeat evidence or independence. During
+  the first 72 hours of real collection the existing coverage basis is preserved.
+  Rollback the application while retaining the additive columns; explicit
+  downgrade discards recent observations, never the legacy qualification fields.
 - Economic constraints matter: unique `grid_ledger.job_id`, non-null credit refs
   for value-moving rows, and FK consistency are money-safety properties.
+- Apply `0036` before using the manual validator allocation command. No ordinary
+  API or timer reads these tables. Rollback retains them; explicit downgrade
+  refuses any nonempty compensation history, including an open contract.
+- Apply `0037` before using the private recipient-consent command. Application
+  rollback keeps the table; explicit downgrade refuses existing consent rows.
+- Apply `0038` before updated worker payout code runs: its shared nonce lookup
+  reads the new table even with validator sending off. Before any validator
+  transfer, upgrade every treasury-sharing runner. After a validator nonce is
+  bound, do not roll back to worker code that cannot see it. Retain financial
+  history; explicit downgrade refuses any payment row.
+- Apply `0039` before enabling `VALIDATOR_COMPENSATION_OPERATOR_ENABLED`.
+  Rollback disables the flag and retains pending proof; downgrade refuses
+  nonempty request state. This flag never enables payment sending.
 - Do not edit or depend on generated `__pycache__` files.
 
 ## Work Guidance

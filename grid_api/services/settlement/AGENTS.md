@@ -24,7 +24,8 @@ Merkle claims on Base.
 - `payouts.py` - custodial CLI/timer: fixed AIPG budget pro-rata by den,
   nonce-bound, Transfer-proven, idempotent per (period, account). **Every send
   is OFAC-gated** (`sanctions.screen` before funds move). Its fresh-nonce
-  allocator spans BOTH rails (`grid_payouts` AND `grid_payout_legs` — one
+  allocator spans worker and validator tables (`grid_payouts`,
+  `grid_payout_legs`, `grid_validator_compensation_payments` - one
   treasury account = one nonce space).
 - `sanctions.py` - OFAC screening: local denylist (`GRID_SANCTIONS_DENYLIST`,
   authoritative, zero-I/O) + optional Chainalysis oracle
@@ -54,6 +55,16 @@ Merkle claims on Base.
 - `ipfs.py` - publish the proof set off-chain.
 - `tests/` - `test_merkle.py`, `test_ipfs.py`.
 
+**Validator operator compensation (default-off, separate from worker den):**
+- `validator_payments.py` binds one reviewed, finalized allocation and signed
+  recipient consent to one immutable Base AIPG transaction. A PostgreSQL
+  transaction shares the worker payout advisory lock, assigns the nonce and
+  commits signed bytes before broadcast. Retries use identical bytes, including
+  after uncertain broadcast or output failure; no automatic fee replacement.
+  Exact sender/token/recipient/amount Transfer evidence at a finalized canonical
+  Base block is required for `sent`. Missing consumed-nonce proof and malformed
+  receipts require manual review. The private CLI is not called by a timer.
+
 ## Local Contracts
 
 - **Money moves only after OFAC screening.** A screen hit or an unverifiable
@@ -62,13 +73,36 @@ Merkle claims on Base.
   Transfer log, or tx to+value for native). status==1 alone is NOT proof. A
   consumed nonce that can't be proven becomes `manual_review` — never re-sent,
   never auto-`sent`.
-- **One nonce space:** fresh nonces exceed the max bound in `grid_payouts` AND
-  `grid_payout_legs`; both rails share the treasury account.
+- **One nonce space:** fresh nonces exceed the max bound in all three payout
+  tables. Apply migration `0038` before updated worker payout code runs, even
+  with validator sending disabled. All treasury-sharing runners must use the
+  updated allocator before validator sending is enabled. Lock acquisition
+  failures must propagate, never be interpreted as success.
+- Validator sending requires explicit `VALIDATOR_COMPENSATION_SEND_ENABLED=1`
+  and a separately reviewed exact payment digest. Neither source availability
+  nor allocation/recipient consent authorizes funds movement. Never delete
+  stored transaction bytes or roll back nonce-aware worker code after a
+  validator payment is bound. Protect database backups like signing capability.
 - **No conversion in any rail.** The pass-through model distributes the basket
   as received; swaps/fees were deliberately rejected (exchange/MSB exposure).
   Fiat/USDC off-chain legs are the Stripe rail (design: PAYOUT_EXECUTOR.md).
 - Settlement input is `grid_ledger` via `aggregate.py`; do not read orphan or
   legacy den tables for v2 worker payouts.
+- `WORKER_REWARDS_PAID_ONLY_SINCE` is an optional timezone-aware, prospective
+  boundary shared by account, wallet, and diagnostic aggregation. Retain its
+  exact value after activation. Before it, legacy DEN is unchanged; at/after
+  it, only settled positive purchased-credit work or settled x402 payments
+  contributes. Mixed free/promo/paid jobs contribute only the purchased fraction.
+  Missing, held, released, unknown-source, and malformed reservations contribute
+  zero. Free/promotional usage does not earn unrestricted emissions; compensated
+  audit and any future free-work subsidy require separate explicit budgets.
+- Custodial emission allocation caps post-boundary SmolLM-family work at 50
+  basis points of the requested period budget across ALL accounts (including
+  walletless accrual). It preserves a smaller natural share and never
+  redistributes clipped allocation. This is an emission cap, not a model
+  fidelity claim or a cap on the dark earned-revenue pass-through rail.
+  Keep payouts paused until the boundary, budget, hourly scheduling, and live
+  reconciliation are reviewed. These functions do not authorize backpay.
 - Merkle leaf and proof formats are wire contracts with on-chain claim logic.
   Any format change must update tests and known vectors.
 - A settlement run must be idempotent: repeated runs must not double-report,
