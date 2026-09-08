@@ -660,6 +660,11 @@ content sanitization, and reward settlement.
 ## Verification
 
 - `pytest grid_api/services/` - covers `job_queue`, `den`, `quota` (+ settlement subtree).
+- PostgreSQL lock-observation tests must refresh `pg_stat_activity` snapshots
+  inside a long-lived observer transaction. Prime the snapshot before starting
+  the contender and call `pg_stat_clear_snapshot()` before each poll; otherwise
+  a new blocked connection can remain invisible and produce a false timeout.
+  Still require actual `pg_blocking_pids` evidence before changing tested state.
 - `tests/test_validator_compensation_handoff.py` is an opt-in cross-repo
   PostgreSQL/Core/Console/node check. Set disposable `VALIDATORS_TEST_DB_URL`,
   reviewed `VALIDATOR_NODE_SOURCE`, and env-file-free built
