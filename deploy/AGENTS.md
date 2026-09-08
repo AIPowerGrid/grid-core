@@ -48,9 +48,9 @@ executes an immutable release selected through `/home/aipg/current`.
 ## Local Contracts
 
 - Env names in `env.template`, systemd, code, and docs must match exactly.
-- Old `GRID_PROBE_*` coordinator sampling variables are retired. Remove them
-  from operator configuration when deploying the retirement; they cannot
-  re-enable ordinary unreserved canary work in the new release. Keep current
+- Old `GRID_PROBE_*` coordinator sampling variables are retired. Disable the
+  old enable flag when deploying so rollback cannot restart the sampler; the
+  new release ignores it and cannot dispatch ordinary unreserved canary work. Keep current
   validator and manager setup flags unchanged, and preserve historical ledger
   records for separate reconciliation.
 - `GRID_REWARD_MONITOR_ENABLED` defaults off. It checks the last completed UTC
