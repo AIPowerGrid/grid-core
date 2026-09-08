@@ -48,6 +48,14 @@ executes an immutable release selected through `/home/aipg/current`.
 ## Local Contracts
 
 - Env names in `env.template`, systemd, code, and docs must match exactly.
+- `GRID_REWARD_MONITOR_ENABLED` defaults off. It checks the last completed UTC
+  hour on the billing-monitor cadence, using the current reward boundary and
+  purchased fraction. It warns about unrestricted-pool exposure, not transfers;
+  walletless account accrual is included. It does not certify historical
+  backpay, policy economics, or a stopped/running payout timer. Query failures
+  report unknown status, and monitoring never changes allocations or resumes
+  payouts. A legacy or unset boundary can deliberately produce warnings while
+  payouts are paused for reconciliation.
 - `GRID_TREASURY_MONITOR_ENABLED` is a separate default-off balance warning.
   Activation requires the actual payout wallet and AIPG token, `BASE_RPC_URL`,
   and positive ETH-wei/AIPG-raw thresholds. It runs on the billing-monitor

@@ -339,6 +339,7 @@ async def _billing_monitor():
     from .services import alerts
     from .services.credits import billing_health
     from .services.treasury_health import check_and_alert as check_treasury
+    from .services.reward_health import check_and_alert as check_rewards
 
     interval = max(60, int(os.getenv("GRID_BILLING_MONITOR_SECONDS", "300") or 300))
     held_warning = int(os.getenv("GRID_BILLING_HELD_WARNING_SECONDS", "900") or 900)
@@ -376,6 +377,7 @@ async def _billing_monitor():
                 dedupe_key="billing-monitor-failed",
             )
         await check_treasury()
+        await check_rewards()
         await asyncio.sleep(interval)
 
 
