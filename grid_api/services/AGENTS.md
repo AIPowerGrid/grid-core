@@ -39,6 +39,8 @@ content sanitization, and reward settlement.
   `treasury_health.py` (default-off Base ETH/AIPG balance warnings through the
   billing monitor; explicit public wallet/token and raw-unit thresholds, no
   signer or payment calls),
+  `reward_health.py` (default-off last-complete-UTC-hour warning for reward
+  eligibility without full purchased backing; no economic writes),
   `validator_audit_budgets.py` (default-dark compensated-audit budget,
   terminal, and ledger-aware expiry lifecycle; the ordinary worker terminal
   imports it, but no scheduler can create audit work yet),
