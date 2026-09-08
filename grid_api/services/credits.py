@@ -1736,58 +1736,54 @@ async def sweep_stale_reservations(older_than_seconds: int = 3600, limit: int = 
 async def billing_health(held_warning_seconds: int = 900) -> dict[str, int | bool]:
     """Read-only economic invariants for the operator monitor.
 
-    The purchased-balance cache must equal the append-only purchased ledger in
-    aggregate. Promotional and daily-free pockets intentionally live elsewhere
-    and are excluded from both sides of this invariant.
+    Reconcile each account, including rows present on only one side. One SQL
+    statement gives PostgreSQL one MVCC snapshot during concurrent spending.
+    Promotional and daily-free pockets intentionally live elsewhere and are
+    excluded from both sides of this invariant. Return aggregates, not identities.
     """
     held_cutoff = _now() - _dt.timedelta(seconds=max(0, held_warning_seconds))
-    async with await new_session() as s:
-        balance_total = int(
-            await s.scalar(sa.select(sa.func.coalesce(sa.func.sum(credits_t.c.balance_micro), 0)))
-            or 0
-        )
-        ledger_total = int(
-            await s.scalar(sa.select(sa.func.coalesce(sa.func.sum(ledger_t.c.delta_micro), 0)))
-            or 0
-        )
-        negative_balances = int(
-            await s.scalar(
-                sa.select(sa.func.count()).select_from(credits_t).where(credits_t.c.balance_micro < 0),
-            )
-            or 0
-        )
-        stale_held = int(
-            await s.scalar(
-                sa.select(sa.func.count())
-                .select_from(reservations_t)
-                .where(
-                    reservations_t.c.status == "held",
-                    reservations_t.c.created < held_cutoff,
-                ),
-            )
-            or 0
-        )
-        invalid_splits = int(
-            await s.scalar(
-                sa.select(sa.func.count())
-                .select_from(reservations_t)
-                .where(
-                    reservations_t.c.free_micro + reservations_t.c.promo_micro
-                    > reservations_t.c.reserved_micro,
-                ),
-            )
-            or 0
-        )
-    return {
-        "ok": (
-            balance_total == ledger_total
-            and negative_balances == 0
-            and invalid_splits == 0
+    movements = sa.union_all(
+        sa.select(
+            credits_t.c.account_id,
+            credits_t.c.balance_micro.label("balance"),
+            sa.literal(0).label("ledger"),
         ),
-        "balance_total_micro": balance_total,
-        "ledger_total_micro": ledger_total,
-        "balance_delta_micro": balance_total - ledger_total,
-        "negative_balances": negative_balances,
-        "stale_held": stale_held,
-        "invalid_reservation_splits": invalid_splits,
+        sa.select(ledger_t.c.account_id, sa.literal(0), ledger_t.c.delta_micro),
+    ).subquery()
+    accounts = (
+        sa.select(
+            sa.func.sum(movements.c.balance).label("balance"),
+            sa.func.sum(movements.c.ledger).label("ledger"),
+        )
+        .group_by(movements.c.account_id)
+        .subquery()
+    )
+    statement = sa.select(
+        sa.func.coalesce(sa.func.sum(accounts.c.balance), 0).label("balance_total_micro"),
+        sa.func.coalesce(sa.func.sum(accounts.c.ledger), 0).label("ledger_total_micro"),
+        sa.func.count().filter(accounts.c.balance < 0).label("negative_balances"),
+        sa.func.count().filter(accounts.c.balance != accounts.c.ledger).label("mismatched_accounts"),
+        sa.select(sa.func.count())
+        .select_from(reservations_t)
+        .where(reservations_t.c.status == "held", reservations_t.c.created < held_cutoff)
+        .scalar_subquery().label("stale_held"),
+        sa.select(sa.func.count())
+        .select_from(reservations_t)
+        .where(
+            reservations_t.c.free_micro + reservations_t.c.promo_micro
+            > reservations_t.c.reserved_micro,
+        )
+        .scalar_subquery().label("invalid_reservation_splits"),
+    )
+    async with await new_session() as s:
+        row = (await s.execute(statement)).mappings().one()
+    health = {key: int(value) for key, value in row.items()}
+    return {
+        **health,
+        "ok": (
+            health["mismatched_accounts"] == 0
+            and health["negative_balances"] == 0
+            and health["invalid_reservation_splits"] == 0
+        ),
+        "balance_delta_micro": health["balance_total_micro"] - health["ledger_total_micro"],
     }
