@@ -280,6 +280,43 @@ The reviewed deployment above supersedes the initial local-only posture.
   remain required. A clean recent-hour report does not reconcile historical
   backpay or fix the low-demand fixed-pool economics described above.
 
+## Monitor release deployed, activation still separate
+
+- PR 142 merged as `4fa8bb651ed6e7f04c6adcdeca97ca81c91391c7` with
+  a byte-identical tree to its tested head. Required run `34285211188` passed
+  1,538 Grid tests with 9 skips, 15 anti-gaming tests, the PostgreSQL 16
+  backup/restore/schema gates, and the real Core/Console/node handoff.
+  CodeQL and secret gates passed.
+- A standalone read-only production candidate query for 2026-09-08
+  21:00-22:00 UTC completed in 0.0808 seconds, reporting 263 jobs and
+  3,625.38 DEN without full purchased backing under the existing unset cutoff.
+  This is unrestricted-pool eligibility exposure, not evidence of transfers.
+  The process used read-only transactions and a 15-second statement timeout.
+- The treasury candidate read both balances at one Base block against the
+  configured payout signer address and token; token decimals were verified as
+  18. Gas balance was approximately 0.00723 ETH and AIPG balance approximately
+  0.00284. Hypothetical thresholds of 0.001 ETH and 5,000 AIPG correctly
+  classified only AIPG as low. No threshold was persisted and no refill occurred.
+- Immutable release `grid-core-4fa8bb65` became current at
+  2026-09-08T22:27:04Z. A fresh protected database backup was restored and
+  tested against the candidate before cutover. Evidence is under
+  `/var/lib/aipg-backup/demand-release-4fa8bb65/`. Live Alembic remains `0039`;
+  no production migration was needed. Rollback is `grid-core-adc9a21e` with
+  that compatible schema retained.
+- Public health and supervisor/child working directories report the exact
+  release. API is active with zero supervisor restarts. Config, Nginx, systemd
+  units, and timer state were preserved. Payout timer and sender are inactive.
+  Charging remains allowlisted, admission restrictions and the prospective
+  reward cutoff remain unset, and both new monitor flags remain unset/off.
+  This deployment is not global charging or monitor activation.
+- Post-deploy read-only reconciliation found six purchased-credit accounts,
+  zero mismatches, zero negative balances, and zero aggregate drift. Equivalent
+  health SQL executed in 0.302 ms at the current small dataset size; this is
+  not a future-scale performance guarantee.
+- All 12 pre-restart workers and 16 advertised models were online again by
+  2026-09-08T22:28:55Z, including the delayed Qwen 8B reconnect. This is fleet
+  recovery evidence, not a paid generation canary for each model.
+
 ## Remaining launch checklist
 
 - [x] Review and merge candidate; record exact release SHA and CI evidence.
