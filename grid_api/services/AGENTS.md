@@ -554,6 +554,10 @@ content sanitization, and reward settlement.
 - Operator alerts are best-effort and data-minimized. Never include prompts,
   outputs, email addresses, credentials, signatures, raw exceptions, or
   unredacted identity values in alert fields.
+- `credits.billing_health` reconciles purchased balances against ledger totals
+  per account in one SQL statement, preserving a single PostgreSQL snapshot.
+  Opposite account discrepancies must not cancel out; missing cache rows are
+  included. Only aggregate totals and mismatch counts leave the monitor.
 - Text reservations snapshot input/output rates and holder discount at reserve
   time. Never reprice an in-flight job from the current price book.
 - `ledger.py` writes one completion event per job. Settlement and stats depend on
