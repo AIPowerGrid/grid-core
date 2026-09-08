@@ -147,7 +147,12 @@ The reviewed deployment above supersedes the initial local-only posture.
 - Gallery PR #20 merged as `5836668b91a25cb2a1491af1fca6d8b1fa6d1cb6`
   after all backend/frontend/browser/security/CodeQL checks passed. It also
   verifies that Core credit/quote response IDs match the delegated account
-  before generation. Production candidate is being built, not yet activated.
+  before generation. That release is now active after the production Next build,
+  production-only lockfile reinstall, Go race tests/vet/build, and health checks.
+  Both services are active; the running backend binary hash matches the candidate.
+  Environment, Nginx, and service definitions stayed unchanged, with `2bc9c7e6`
+  retained for rollback. A fresh signed-in Google page load retained the session,
+  loaded the stored canary image, and showed the same paid balance and Z-Image quote.
 - This proves one purchased-credit Gallery image path only. Cross-site balance
   parity, other modalities, refund/crash canaries, global charging, and prospective
   worker reward activation remain incomplete. Raw den is not evidence that the
