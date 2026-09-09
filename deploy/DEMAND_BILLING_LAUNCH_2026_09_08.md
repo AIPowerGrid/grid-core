@@ -7,6 +7,85 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Funded owner canary and Chat output fix (2026-09-09)
+
+Funding and a bounded test-spend approval have now been supplied. The prior
+funding block below is historical, not the current blocker. Only the existing
+owner account's charging-model cohort was expanded to `z-image-turbo`,
+`gpt-oss-120b`, `krea 2 turbo`, `ltx-2.3`, `ltx director 2.0`, and
+`ace-step-v1.5-xl-turbo`. This selects canary billing, not public launch readiness.
+No other account or direct-service cohort was added; the existing homepage
+all-model service policy was preserved.
+
+- Chat PR #1 merged as `085e7394b50b2e72ee8a9181a073412490324918` and is live
+  on the corrected `grid-085e7394b5-r2` images. Its first packaging attempt
+  failed and was rolled back; Chat's production release guide records the
+  asset-permission and additive-migration rollback fixes. The maintainer's
+  exception covered unavailable inherited private-runner checks only, not
+  AIPG tests or paid-canary gates. Chat PR #2 records deployment evidence.
+- Real Chat text, Chat-generated Krea image and Music audio completed with
+  account attribution and exact reserve/settle/refund reconciliation. Music's
+  completed output reopened after reload without another generation. Chat's
+  image and signed-in session also survived reload. This is not a process-crash
+  proof or a cross-account authorization test.
+- The initial Chat image workflow exposed a missing result hash on its
+  tool-only text turn. The unchanged read-only canary audit returned failure.
+  Historical ledger rows and charges were retained, not rewritten.
+- Core PR #156 fixes the output commitment and tool-function metering and
+  merged as `7cb79de8f6e2dd174b2ff345503e6ba69fd74a2b`. Required PR CI passed
+  with PostgreSQL 16: 1,627 tests passed, 10 explicit skips, plus the separate
+  Core/Console/node integration test. Dependency audit, restore/schema parity,
+  full-history secrets/infrastructure scans and CodeQL passed. The merged tree
+  exactly matched the tested PR tree, and merged-main CI also passed.
+- Production selected immutable `grid-core-7cb79de8` only after a fresh backup
+  restored/migrated on disposable scratch at `0040`. Locked dependencies,
+  schema, migrations, systemd, Nginx and environment were unchanged. Exact
+  generation routes were briefly gated while the queues drained; normal
+  admission resumed after matching-commit health/Redis checks. `0d4545cd` is
+  the compatible rollback; retained evidence is in
+  `/var/lib/aipg-backup/demand-release-7cb79de8/`.
+- The supervisor and five child processes were checked directly: exact new
+  release, `allowlist`, one owner account, zero direct-service cohort entries,
+  and the six approved models. Global charging, daily-free spending and the
+  prospective reward cutoff were not enabled. Payout service/timer remain
+  inactive; monitor and existing promotional settings were preserved.
+- Repeating the Chat image workflow produced a distinct image and three
+  successful jobs with result commitments. The read-only audit passed with
+  exact debits/refunds, zero account/global balance discrepancies, no negative
+  balances, invalid splits or stale holds. Keep both private
+  `pre-fix-audit.json` (failed) and `post-fix-chat-audit.json` (passed) in the
+  funded-canary evidence directory. The old failed job remains a known
+  historical evidence gap; the passing report covers the new tested jobs.
+- Gallery's single-image canary completed once and survived reload. Batch
+  remains deliberately unavailable in the Gallery UI until the production
+  workflow/cardinality proof exists.
+- The funded LTX video completed with one 80,000-micro-USD debit and a valid
+  result commitment, but reload exposed a Gallery read bug: three PostgreSQL
+  readers discarded the stored video type and returned image. The object was
+  a valid four-second H.264/AAC MP4; the original database row and durable
+  receipt were correct. New paid generations were paused. Gallery PR #29 fixes
+  single-item, private-history and favorite readers without data or schema
+  changes. Its PostgreSQL regression failed in all three readers before the
+  fix; local race tests and required PostgreSQL 16/browser/security CI passed.
+  PR #29 merged as `02446c68`; its identical tested head `af7593fd` is live
+  after backup/restore/race proof with existing rows and schema unchanged.
+  Reloading the original canary restored video playback with visibly moving
+  frames and the same receipt, without another generation or debit. This is
+  not a video-quality, actual-dimension, in-flight crash or Director proof.
+- At the post-Video audit, cumulative approved canary spend was USD 0.097610,
+  within the USD 1 approval. All five post-Core-fix Chat/Gallery jobs reconciled
+  with zero account/global discrepancies, invalid splits, negative balances
+  or stale holds. Director and remaining failure, identity and service-path
+  canaries are not signed off by these results.
+
+Public activation remains HOLD. In particular, direct-service metadata ceilings
+are not proof that preview traffic actually consumed exposure budget; the
+remaining service cohorts need an enforced funding/disable policy. An unset
+prospective reward cutoff must not be described as paid-only reward activation,
+and the unrestricted pro-rata pool still needs its reviewed emission policy
+before payouts resume. Do not remove those gates because the funded happy-path
+canaries now work.
+
 ## Media recovery deployment (2026-09-09, 01:39 UTC)
 
 - Core `4891565001ba18ca2bc4b4cfcdb818aeb7da5aeb` is selected at
