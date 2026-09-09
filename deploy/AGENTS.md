@@ -55,6 +55,9 @@ executes an immutable release selected through `/home/aipg/current`.
   passed without changing the cohort or payout timers. Preserve the existing
   admission list and reward cutoff; see the launch evidence for exact limits
   and rollback. This does not authorize global billing or payout resumption.
+  The launch record separately documents 27 local Uvicorn/PG/Redis crash tests
+  and alert transport delivery; these do not count as elapsed observation or
+  authorize a new runtime deployment.
 
 - Media-result recovery requires Alembic `0040` before the candidate starts.
   Verify backup/restore and schema parity with the exact release. Ordinary
