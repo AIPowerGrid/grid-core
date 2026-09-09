@@ -7,11 +7,123 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
-The follow-up frozen-period sender is now implemented and locally tested;
-see [the candidate record](WORKER_PAYOUT_FREEZE_2026_09_09.md). It requires
-`0041` and separate reviewed deployment/reconciliation. Earlier notes below
-about broad retry selection and reaggregation describe the deployed/previous
-sender, not the candidate. Payout resumption remains unchecked.
+## Prospective payout and shutdown review (2026-09-09, 22:58 UTC)
+
+Read-only production preview on `3ab6d933` covered the five complete UTC hours
+17 through 21 after the immutable cutoff. Each passed the sender's exact
+hour/ID/cutoff/budget contract at 208.33 AIPG/hour. Hours 17 and 20 each allocate
+208.33 to the owner's configured wallet; hours 18, 19 and 21 allocate zero and
+leave their budgets unspent. Total preview is 416.66 AIPG, not a transfer or a
+new persisted obligation. The plan table remains empty. Full private results
+are in `prospective-preview-20260909T225552Z.json` in the release evidence folder.
+
+This confirms an important policy property, not a new arithmetic defect: a
+small amount of eligible non-SmolLM work can receive the entire fixed hourly
+budget when no other account contributes. The preview is an emissions split,
+not a cost-proportional reimbursement. No budget or allocation was changed.
+
+At Base block 51102666, the configured sender matched the treasury monitor;
+the verified chain ID was 8453. Mined and RPC-pending nonce were both 1807;
+the maximum recorded nonce was 1806, with no recorded unconsumed nonce rows.
+This is one RPC snapshot, not proof that historical transfers were all correct.
+The 1,719 `sent`, 87 `manual_review` and 1,895 `accrued` historical rows remain
+untouched and excluded from automatic prospective retries.
+
+The payout wallet held 0.007227499493259457 ETH but only
+0.002843159999506788 AIPG. Gas is available; AIPG funding is insufficient for
+the preview. Do not refill or send as a side effect of this review. This wallet
+is distinct from the deposit Safe and purchased-credit ledger. A reviewed
+funding action and supervised send/replay remain prerequisites to resumption.
+
+The runbook now closes generation with explicit empty admission during a
+billing incident, preserving terminal settlement. Turning charging `off`
+alone would leave public uncharged generation open and is not an inference
+kill switch. The new global-activation procedure preserves the seven admitted
+paths, caps, cutoff and paused payouts and requires process and negative-canary
+readback. It does not waive the 24-hour observation or other open gates.
+
+## Frozen payout release deployed (2026-09-09, 22:44 UTC)
+
+- PR171 merged as `3ab6d9330b07aebc1cef795bd1dc826ab896f654` after required
+  Python 3.12 CI: 1,847 passed, nine explicit skips, plus the separate real
+  PostgreSQL Core/Console/node handoff. Dependency audit, restored migration,
+  schema parity, CodeQL and secret checks passed.
+- Production selected immutable `grid-core-3ab6d933` at
+  `2026-09-09T22:44:38Z`. A fresh checksum-verified production backup restored
+  and migrated to `0041` in an isolated database before live migration.
+  Exact generation routes were briefly gated; two empty queue observations
+  preceded migration and restart. The maintenance gate was removed afterward.
+- `grid_payout_periods` is empty. Full historical payout row fingerprints
+  match before backup, after restore, after live migration and after final
+  reconciliation. No plan, obligation, transfer, grant or backpay was created.
+- Public health reports the exact commit, healthy Redis and nine workers.
+  All six inspected processes use the new release; the environment checksum,
+  seven admitted paths, exact reward cutoff, allowlisted charging and stopped
+  payout timer/service remain unchanged. No new billing cohort was introduced.
+- Read-only reconciliation of recorded canaries and global balances passed:
+  no findings, balance drift, negative balances, stale holds or invalid splits.
+  Owner balance remains USD 9.772654; no additional canary funds were spent.
+  Private evidence is under
+  `/var/lib/aipg-backup/demand-release-3ab6d933/`.
+- API rollback is `94be0cc1` with the additive schema retained and all payout
+  senders paused. Older senders do not honor frozen plans. Global activation,
+  same-cohort observation, and reviewed payout resumption remain open.
+
+See [the frozen-period contract](WORKER_PAYOUT_FREEZE_2026_09_09.md).
+Earlier candidate-only and old-sender defect sections are historical snapshots.
+
+## Legacy consumer activation review (2026-09-09, 22:36 UTC)
+
+Follow-up: the PostgreSQL consumer matrix now has 43 cases, adding 16
+Google-only/wallet-linked, funded/empty-user cases across text/image/video/audio.
+Each exercises all four first-party service identities with real Grid token
+signatures and persisted accounts. Native-token and service-key-plus-user-token
+transport must resolve the same account. A funded frontend service does not
+subsidize an empty user by accident; successful holds charge only the user.
+Upstream Google/SIWE proof is a fixture here, not a browser login observation.
+The combined consumer, native identity, service-policy, free/promo, mode and
+admission suite passed 243 tests locally; all 43 consumer cases ran on PG16.
+The separate setup/validator transport and anti-gaming suite passed 50 tests,
+including forbidden-call assertions on credit/reward paths for no-DEN probes.
+
+A read-only production transaction, with a five-second statement timeout,
+inventoried active, unexpired stored keys without selecting credentials,
+hashes, account IDs, wallet addresses or labels. Counts describe keys, not
+people or independent operators:
+
+| Kind | Scope source | Inference policy | Keys |
+| --- | --- | --- | ---: |
+| Ordinary | Explicit | Canonical account | 73 |
+| Ordinary | Explicit | No inference scope | 22 |
+| Ordinary | Legacy defaults | Canonical account | 35 |
+| Session | Legacy defaults | Canonical account | 30 |
+| Service | Explicit | Delegation required | 4 |
+| Service | Explicit | Bounded direct service | 4 |
+| Service | Explicit | No inference scope | 1 |
+
+Total: 169 keys; 73 used in the preceding seven days. No malformed scope rows
+or active keys belonging to inactive service clients were found. One ordinary
+inference credential resolves to an account with a request-quota exemption.
+That exemption is not a purchased-credit exemption.
+
+The new `test_consumer_activation.py` adds 27 PostgreSQL cases. Persisted
+legacy-empty-scope, session and explicit inference keys pass real key lookup,
+then durable text/image/video/audio authorization. With global mode selected,
+an unmatched account/service/model allowlist and legacy `CHARGING_ENABLED=0`
+cannot produce dry-run behavior. Funded quota-exempt accounts get a durable
+debit/hold; empty accounts reject without a hold or reward. A repeated terminal
+release creates exactly one full refund. Non-inference scoped keys return 403.
+The combined consumer/native identity/service-policy/free/promo/mode suite
+passed 176 tests locally, including these 27 on PostgreSQL 16.15. Free/promo
+availability and holder discounts in the new matrix are zero fixtures; HTTP
+dispatch, provider proofs, GPU output and concurrency are not exercised here.
+
+Legacy key ownership and revocation review remains separate housekeeping.
+Do not revoke unknown credentials en masse or treat them as an exception to
+global charging. This inventory does not prove which third-party app owns a
+key, and does not prove live global enforcement while production is allowlisted.
+No production keys, flags, balances, payouts or runtime were changed by this
+review. The required same-cohort observation and global activation remain open.
 
 ## Consumer and payout review (2026-09-09, 21:56 UTC)
 
@@ -1212,7 +1324,8 @@ The reviewed deployment above supersedes the initial local-only posture.
       every payout entrypoint before restarting any sender. No treasury refill.
 - [x] Verify credits and free/promo ceilings in actual production processes;
       retain the exact builder campaign, not a blanket promotion enablement.
-- [ ] Complete request-to-terminal inventory below, including negative tests.
+- [x] Complete request-to-terminal inventory below, including negative tests;
+      global runtime activation remains separate from route coverage.
 - [ ] Prove Google-only, wallet-linked, zero-balance, free-exhausted, and capped
       direct-service cases; same canonical balance across first-party apps.
 - [x] Run funded success canaries on the seven enabled paths, including
@@ -1240,8 +1353,32 @@ The reviewed deployment above supersedes the initial local-only posture.
 
 ## Entry-point inventory
 
-Source wiring is not live proof. Each row still needs exact account/service
-attribution, reserve-before-dispatch, terminal/refund, and rejection evidence.
+The following inventory reconciles the current Core `3ab6d933` source with the
+dated evidence above. It is not a claim that global charging is already live:
+production remains allowlisted. The live jobs and failure experiments are
+recorded in earlier sections, not replaced by source inspection.
+
+| Path / consumer | Billing identity and hold | Terminal and rejection evidence | Launch posture |
+| --- | --- | --- | --- |
+| Chat completions, including SDK/API callers | `accounts.authenticate(inference.submit)`; canonical user or capped direct service; `openai.py` calls durable `authorize_request` before queueing | Worker WS atomic `record_and_settle`; PostgreSQL handler and real Core crash tests; funded stream/nonstream/disconnect and empty-service live canaries | Admitted |
+| Responses and Anthropic messages | Same scoped identity; shared `_passthrough.authorize_passthrough` creates durable text hold before dispatch | Raw worker terminal owns atomic settlement/release; same PG/crash and live rejection/success evidence | Admitted |
+| Single image, video, image-to-video, audio | Scoped media routers pass the resolved user into `media.submit_and_wait`; exact cost held before queue submission | Media worker terminal verifies complete output contract before atomic settlement; failures/reclaim release, HTTP timeout does not; funded modality and negative canaries recorded above | Admitted |
+| Gallery Director | Canonical delegated Gallery user; optional first image and each video segment are separate media jobs/holds | Multistage paid live canary, durable request/result recovery and per-job reconciliation recorded above | Admitted through image/video paths |
+| Chat image tool | Canonical Chat delegated token, not its service balance; shared Core media path | Live paid image job plus running-source/provider check recorded above | Admitted through image path |
+| Image batches / image-to-image | Same media billing authority, but admission runs first | Real batch failure fully refunded; incomplete outputs cannot settle; admission tests forbid reserve/dispatch | Disabled |
+| Video timeline / 3D | Same scoped media router and first admission gate | Admission tests forbid reserve/dispatch; no successful live qualification claimed | Disabled |
+| Discord bots / other old API consumers | Stored ordinary keys resolve a canonical account; no independent billing rail | Legacy/default/session/scoped PG matrix rejects empty accounts, including quota-exempt ones; global mode ignores old cohort lists | Covered by public route gates; individual key ownership still unknown |
+| First-party bridges | User token carries account and service binding; bridge alone lacks direct-submit authority | New PG matrix covers four service identities; separate native proof/exchange tests; signed-in live owner balance checks recorded above | Delegation required |
+| Direct service apps | Explicit direct-submit scope, positive request/day ceilings and their own funded account | Runtime policy tests; four-client production policy inventory; paid service and empty-service canaries recorded above | Explicit bounded identities only |
+| Validator / manager setup probes | Server-issued assignment or exact manager-bound worker envelope, separate bounded dispatch | Transport tests forbid credit/settlement/metrics calls and require zero DEN acknowledgments; anti-gaming and setup suite passed 50 tests | No reward authority; not a public free inference API |
+| x402 | Separate default-off payment authority | Not part of these public live canaries | Disabled |
+
+Unpriced models reject under global charging regardless of which public API,
+SDK, bot or app submitted the request. The shared terminal records only the
+purchased fraction as unrestricted reward-eligible DEN after the immutable
+cutoff; promotional/free and unreserved work cannot claim that pool. Historical
+accrual and pending payout reconciliation remain separate. The table closes
+the route/consumer mapping, not outstanding activation or observation gates.
 
 ### Media and Director source trace
 

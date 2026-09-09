@@ -1,11 +1,13 @@
-# Frozen worker payout periods - candidate
+# Frozen worker payout periods - deployed, senders paused
 
 ## Posture
 
-Source/tests only. Production remains Core `94be0cc1`, Alembic `0040`,
-charging allowlisted and worker payout service/timer paused. This document
-does not approve a runtime deployment, historical backpay, treasury refill,
-or sender restart.
+Production selected Core `3ab6d933` / Alembic `0041` at
+`2026-09-09T22:44:38Z` after required CI and a restored-production migration
+proof. Charging remains allowlisted and worker payout service/timer paused.
+The new plan table is empty; historical payout fingerprints are unchanged.
+See the launch evidence for backup, process and balance reconciliation.
+No historical backpay, treasury refill or sender restart is authorized here.
 
 ## Contract
 
