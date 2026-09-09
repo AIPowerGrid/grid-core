@@ -7,6 +7,8 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Ownership
 
+- `WORKER_PAYOUT_FREEZE_2026_09_09.md` - prospective hourly allocation candidate,
+  PostgreSQL proof, migration and rollback gates. Not payout activation evidence.
 - `bootstrap.sh` - fresh-host bootstrap pinned to an operator-supplied full
   commit SHA. Installs only the Grid API, PostgreSQL, Redis, and Nginx.
 - `env.template` - `/etc/aipg/grid.env` source of production env names.
@@ -48,6 +50,12 @@ executes an immutable release selected through `/home/aipg/current`.
   proof.
 
 ## Local Contracts
+
+- The frozen worker-payout candidate requires Alembic `0041` before any sender.
+  It adds empty hourly plans, never adopts historical obligations, and does not
+  authorize a timer restart. If this code is rolled back, keep payouts paused:
+  an older sender can recompute amounts or retry excluded historical rows.
+  API rollback may retain the additive table. Never downgrade nonempty plans.
 
 - Production selected immutable `94be0cc1` / Alembic `0040` for atomic queue
   retry recovery at `2026-09-09T20:03:49Z`. Fresh restore, drained restart,
