@@ -36,7 +36,10 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   faucet or claim endpoint.
 - `verify_demand_canary.py` - read-only reconciliation of one canonical
   account's balance, reservations, purchased-credit refs, and worker ledger
-  terminals.
+  terminals. Loads local reviewed recipe content from its own checkout to
+  check retained recipe roots against public-model/checkpoint routing. Unknown
+  or missing roots remain findings; it does not query chain RPC, fetch new
+  workflows, infer equivalence from pricing, or repair historical rows.
 - `review_validator_operator.py` - preview-first, digest-bound candidate,
   verify, or reject transition for an opaque validator control group. It never
   publishes operator identity or grants economic authority.

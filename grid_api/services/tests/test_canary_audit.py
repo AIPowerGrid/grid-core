@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from grid_api import database
-from grid_api.services import credits
+from grid_api.services import credits, recipes
 from grid_api.services.canary_audit import JobExpectation, audit_demand_canary
-from grid_api.v2.schema import accounts, metadata
+from grid_api.v2.schema import accounts, metadata, reservations
 from grid_api.v2.schema import credits as credits_t
 
 IMAGE_MODEL = "z-image-turbo"
@@ -121,3 +121,54 @@ async def test_canary_audit_fails_on_balance_cache_drift(db):
         "account_ledger_drift",
         "global_ledger_drift",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", [None, "missing_root", "unknown_root", "display_name_root",
+                                    "wrong_model", "wrong_type", "wrong_result_model", "wrong_recipe"])
+async def test_recipe_alias_requires_exact_recorded_route(db, monkeypatch, fault):
+    from types import SimpleNamespace
+
+    root = "0x" + "a" * 64
+    recipe = SimpleNamespace(recipe_root=root, model_name=IMAGE_MODEL,
+                             job_type="image", required_models=["checkpoint"])
+    monkeypatch.setattr(recipes, "get_recipe", lambda ref: recipe if ref == root else None)
+    if fault == "wrong_recipe":
+        recipe.model_name = "unrelated"
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    account_id, job_id = uuid.uuid4(), uuid.uuid4()
+    async with await database.new_session() as session:
+        await session.execute(sa.insert(accounts).values(id=account_id, flags={}))
+        await session.commit()
+    await credits.credit(account_id, 1_000_000, "test_topup", ref="recipe-funding")
+    await credits.authorize_media(account_id, IMAGE_MODEL, "image", 1, None, job_id,
+                                  record_reservation=True)
+    values = {**_ledger_values(job_id), "model": "checkpoint"}
+    if fault == "wrong_model":
+        values["model"] = "different-checkpoint"
+    if fault == "wrong_type":
+        values["job_type"] = "video"
+    result = {"media": [{"url": "https://example.invalid/result.webp", "key": "image/result",
+                         "sha256": "b" * 64}], "model": values["model"], "worker": "test",
+              "gen_time": 1.0, "recipe_root": root}
+    if fault == "missing_root":
+        result["recipe_root"] = None
+    elif fault == "unknown_root":
+        result["recipe_root"] = "0x" + "c" * 64
+    elif fault == "display_name_root":
+        result["recipe_root"] = IMAGE_MODEL
+    assert await credits.record_and_settle(ledger_values=values, exact=True,
+                                           media_result=result) == "settled"
+    if fault == "wrong_result_model":
+        # Corrupted recovery metadata must not hide a mismatched ledger.
+        result["model"] = "unrelated"
+        async with await database.new_session() as session:
+            await session.execute(sa.update(reservations).where(
+                reservations.c.job_id == str(job_id)).values(media_result=result))
+            await session.commit()
+    async with await database.new_session() as session:
+        report = await audit_demand_canary(session, account_id,
+            [JobExpectation(job_id, "success")], stale_seconds=3600)
+    assert report["ok"] is (fault is None)
+    assert {item["code"] for item in report["findings"]} == (
+        set() if fault is None else {"model_mismatch"})
