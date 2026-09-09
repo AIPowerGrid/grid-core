@@ -19,17 +19,18 @@ import argparse
 import asyncio
 import datetime as _dt
 import logging
+import math
 import os
 import uuid as _uuid
-from decimal import Decimal, ROUND_DOWN
+from decimal import ROUND_DOWN, Decimal
 
 import sqlalchemy as sa
 
 from ...database import close_database, init_database, new_session
 from ...v2.schema import accounts as accounts_t
 from ...v2.schema import payouts as payouts_t
-from .aggregate import aggregate_den_by_account, total_den_in_window
 from . import sanctions
+from .aggregate import aggregate_den_by_account, total_den_in_window
 
 logger = logging.getLogger("grid_api.payouts")
 
@@ -67,7 +68,19 @@ def compute_account_payouts(rows: list[dict], budget_aipg: float, *, min_aipg: f
     cap, including walletless accounts; excess is NOT redistributed. Historical
     aggregates without that field retain their original allocation arithmetic.
     """
+    # Reject the whole input before returning any payable or accrued allocation.
+    # In particular, a negative weight must not inflate another account's share.
+    if not math.isfinite(budget_aipg) or budget_aipg < 0:
+        raise ValueError("Invalid payout budget")
+    if not math.isfinite(min_aipg) or min_aipg < 0:
+        raise ValueError("Invalid payout minimum")
+    for r in rows:
+        den, small = float(r["den"]), float(r.get("smollm_den", 0))
+        if not math.isfinite(den) or not math.isfinite(small) or not 0 <= small <= den:
+            raise ValueError("Invalid payout weight")
     total_den = sum(float(r["den"]) for r in rows)
+    if not math.isfinite(total_den):
+        raise ValueError("Non-finite total payout weight")
     if total_den <= 0 or budget_aipg <= 0:
         return []
     capped = any("smollm_den" in row for row in rows)
