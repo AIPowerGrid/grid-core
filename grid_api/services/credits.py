@@ -435,7 +435,8 @@ async def _insert_reservation_in_session(s, job_id, account_id, model: str, rese
                                           output_rate: int | None = None, discount_bps: int = 0,
                                           service_id: str | None = None,
                                           billing_source: str = "credits",
-                                          external_payer: str | None = None) -> None:
+                                          external_payer: str | None = None,
+                                          media_client_ref: str | None = None) -> None:
     # A UUID authorizes either customer-funded work or protocol-funded audit
     # work, never both. The shared Postgres advisory lock closes the cross-table
     # race that separate UNIQUE constraints cannot express.
@@ -451,6 +452,7 @@ async def _insert_reservation_in_session(s, job_id, account_id, model: str, rese
         service_id=service_id,
         billing_source=billing_source,
         external_payer=external_payer,
+        media_client_ref=media_client_ref,
         status="held", created=_now(),
     ))
 
@@ -1033,7 +1035,8 @@ async def reconcile(user: dict, model: str, prompt_tokens: int, completion_token
 
 
 async def authorize_media(account_id, model: str, job_type: str, n: int, seconds, job_id,
-                          *, record_reservation: bool = False, user: dict | None = None) -> dict:
+                          *, record_reservation: bool = False, user: dict | None = None,
+                          client_ref: str | None = None) -> dict:
     """Pre-dispatch billing gate for media (image/video). Unlike text, media cost
     is deterministic from the request (n images / video seconds), so we reserve
     the EXACT cost up front; on success it stands (settle_exact), on failure it's
@@ -1144,7 +1147,8 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
             try:
                 await _insert_reservation_in_session(s, job_id, account_id, model, cost, 0,
                                                      free_micro=from_free, promo_micro=from_promo,
-                                                     service_id=(user or {}).get("service_id"))
+                                                     service_id=(user or {}).get("service_id"),
+                                                     media_client_ref=client_ref)
             except IntegrityError:
                 await s.rollback()
                 reserved = await _reservation_reserved_micro(job_id)
@@ -1485,7 +1489,7 @@ async def release_job(job_id) -> None:
 
 
 async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
-                            exact: bool = False) -> str:
+                            exact: bool = False, media_result: dict | None = None) -> str:
     """ATOMIC terminal for a SUCCESSFUL job: write the worker-payout ledger row
     AND settle the exclusive demand or compensated-audit reservation in ONE
     transaction — both commit or neither.
@@ -1496,7 +1500,9 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
 
     `ledger_values` are the record_completion_in_session kwargs. `exact=True`
     (media) lets the exact reserve stand; otherwise reconcile against
-    `completion_tokens` (text/passthrough). Returns:
+    `completion_tokens` (text/passthrough). A bounded `media_result`, when
+    supplied by the verified worker terminal, commits with the demand hold;
+    it is never reconstructed for historical or unreserved jobs. Returns:
       'duplicate'       — job already in grid_ledger (double dispatch) → nothing done
       'settled'         — ledger written + reservation reconciled (paid success)
       'audit_settled'   — ledger written + audit budget consumed (paid success)
@@ -1510,6 +1516,12 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
     from . import ledger as ledger_svc
     job_id = str(ledger_values["job_id"])
     try:
+        if media_result is not None:
+            from .media_results import validate_result
+            media_result = validate_result(media_result)
+            if (not exact or ledger_values["job_type"] not in {"image", "video", "audio", "3d"}
+                    or media_result["model"] != ledger_values["model"]):
+                raise ValueError("media recovery result does not match terminal")
         async with await new_session() as s:
             await validator_audit_budgets.lock_job_in_session(s, job_id)
             row = (await s.execute(
@@ -1597,7 +1609,8 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
                 sa.update(reservations_t)
                 .where(sa.and_(reservations_t.c.job_id == job_id,
                                reservations_t.c.status == "held"))
-                .values(status="settled", settled=_now(), actual_micro=actual)
+                .values(status="settled", settled=_now(), actual_micro=actual,
+                        media_result=media_result)
             )
             if res.rowcount == 0:
                 # A reservation EXISTS but is no longer held — it was already

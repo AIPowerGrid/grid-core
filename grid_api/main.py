@@ -32,6 +32,7 @@ from .routers import (
     audio,
     health,
     images,
+    media_results,
     metrics,
     oauth,
     openai,
@@ -531,6 +532,7 @@ app.include_router(oauth.router)
 app.include_router(anthropic.router)
 app.include_router(responses.router)
 app.include_router(images.router)
+app.include_router(media_results.router)
 app.include_router(videos.router)
 app.include_router(audio.router)
 app.include_router(threed.router)
