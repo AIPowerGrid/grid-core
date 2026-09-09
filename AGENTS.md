@@ -94,6 +94,9 @@ owning AGENTS.md and any affected parent Child DOX Index.
 - Deployment candidates must pass the PostgreSQL 16 backup/restore proof in
   pull-request CI; this is part of the required `tests` context, not a
   post-merge-only check.
+- PR/main operations checks exclude the unused Google Chrome apt source on
+  their disposable runners before installing PostgreSQL client and ShellCheck.
+  Keep package integrity checks enabled; this must not alter production hosts.
 - Pull-request and `main` CI must inject a disposable
   `VALIDATOR_SHADOW_TEST_DB_URL` into the full Grid suite so the shadow-run
   idempotency, conflicting-write, single-run, and live eligibility tests execute
