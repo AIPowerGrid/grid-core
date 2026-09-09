@@ -5,10 +5,12 @@
 
 import uuid
 from decimal import Decimal
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from grid_api.services.settlement.payouts import compute_account_payouts, _as_uuid
+from grid_api.services.settlement import payouts
+from grid_api.services.settlement.payouts import _as_uuid, compute_account_payouts
 
 
 def test_prorata_split_by_den_sums_to_budget():
@@ -88,3 +90,57 @@ def test_small_leg_below_cap_keeps_its_smaller_original_share():
 def test_malformed_capped_weights_reject(small):
     with pytest.raises(ValueError):
         compute_account_payouts([{"account_id": "bad", "den": 100, "smollm_den": small}], 100)
+
+
+@pytest.mark.parametrize("bad", [-1, float("nan"), float("inf"), -float("inf")])
+@pytest.mark.parametrize("field", ["den", "budget", "min_aipg"])
+@pytest.mark.parametrize("capped", [False, True])
+def test_all_payout_inputs_must_be_finite_and_nonnegative(bad, field, capped):
+    rows = [{"account_id": "A", "den": 2, "payout_address": None}]
+    if capped:
+        rows[0]["smollm_den"] = 0
+    if field == "den":
+        rows.append({"account_id": "B", "den": bad, "payout_address": "0xB"})
+    with pytest.raises(ValueError):
+        compute_account_payouts(
+            rows, bad if field == "budget" else 100,
+            min_aipg=bad if field == "min_aipg" else 0,
+        )
+
+
+def test_overflowing_total_den_rejects_instead_of_zero_allocations():
+    rows = [{"account_id": str(i), "den": 1e308} for i in range(2)]
+    with pytest.raises(ValueError):
+        compute_account_payouts(rows, 100, min_aipg=0)
+
+
+@pytest.mark.parametrize("rows,budget", [([], float("nan")), ([{"den": -1}], 0),
+                                         ([{"den": 0, "smollm_den": 1}], 100)])
+def test_empty_or_zero_budget_does_not_hide_invalid_inputs(rows, budget):
+    with pytest.raises(ValueError):
+        compute_account_payouts(rows, budget)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_budget,bad_weight", [(float("inf"), 1), (100, -1),
+                                                  (100, float("nan"))])
+async def test_invalid_allocation_never_enters_sender_or_writes_accrual(
+    monkeypatch, bad_budget, bad_weight,
+):
+    rows = [{"account_id": "walletless", "den": 2, "payout_address": None},
+            {"account_id": "payable", "den": bad_weight, "payout_address": "0xA"}]
+    monkeypatch.setattr(payouts, "aggregate_den_by_account", AsyncMock(return_value=rows))
+    monkeypatch.setattr(payouts, "BASE_RPC_URL", "https://never.invalid")
+    monkeypatch.setattr(payouts, "TREASURY_PK", "test-only-invalid-key")
+    sender = Mock(side_effect=AssertionError("Must not initialize the sender"))
+    writes = AsyncMock(side_effect=AssertionError("Must not write an allocation"))
+    lookups = AsyncMock(side_effect=AssertionError("Must reject before payout lookup"))
+    monkeypatch.setattr(payouts, "_ctx", sender)
+    monkeypatch.setattr(payouts, "_write", writes)
+    monkeypatch.setattr(payouts, "_row", lookups)
+
+    with pytest.raises(ValueError):
+        await payouts.send_period(None, None, bad_budget, "test-period")
+    sender.assert_not_called()
+    writes.assert_not_called()
+    lookups.assert_not_called()

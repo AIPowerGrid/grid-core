@@ -109,6 +109,12 @@ Merkle claims on Base.
   fidelity claim or a cap on the dark earned-revenue pass-through rail.
   Keep payouts paused until the boundary, budget, hourly scheduling, and live
   reconciliation are reviewed. These functions do not authorize backpay.
+- Both custodial allocation branches validate finite nonnegative budgets,
+  minimums and account weights before returning payable or accrued rows. Total
+  floating-point weight overflow and invalid SmolLM subsets reject the whole
+  preview/send, including empty or zero-budget inputs. Valid historical
+  arithmetic and the prospective cap are unchanged; this is input validation,
+  not a new emission rate or authorization to resume payouts.
 - Merkle leaf and proof formats are wire contracts with on-chain claim logic.
   Any format change must update tests and known vectors.
 - A settlement run must be idempotent: repeated runs must not double-report,
