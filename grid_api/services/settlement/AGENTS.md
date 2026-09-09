@@ -27,6 +27,14 @@ Merkle claims on Base.
   allocator spans worker and validator tables (`grid_payouts`,
   `grid_payout_legs`, `grid_validator_compensation_payments` - one
   treasury account = one nonce space).
+  Screening is enforced inside the common `_settle_one` before signing or
+  rebroadcast, including accrued and retry entrypoints. Recording proof of an
+  already-mined transfer does not require another screen and never sends funds.
+  A held attempt uses `manual_review` (fits the existing 16-character status
+  column) and retains its existing nonce/hash; screening
+  cannot cancel a transaction already in the mempool. Unexpected broadcast
+  failures retain the signed transaction hash, never replace it with RPC error
+  text. Tests use simulated chain outcomes and actual PostgreSQL persistence.
 - `sanctions.py` - OFAC screening: local denylist (`GRID_SANCTIONS_DENYLIST`,
   authoritative, zero-I/O) + optional Chainalysis oracle
   (`GRID_SANCTIONS_ORACLE`). FAIL-CLOSED: hit → `blocked_sanctions`;
@@ -115,6 +123,13 @@ Merkle claims on Base.
   preview/send, including empty or zero-budget inputs. Valid historical
   arithmetic and the prospective cap are unchanged; this is input validation,
   not a new emission rate or authorization to resume payouts.
+- Payout resumption still requires immutable period allocations and overlap
+  review. `send_period` currently recomputes allocations on rerun; a partially
+  sent period plus late ledger arrivals can exceed its original budget across
+  recipients. Existing pending intent can also differ from recomputed amount
+  or current wallet. Do not use reruns to reprice or redirect bound payments.
+  Historical accrued/retry selection remains broad and is not authorization
+  to settle excluded historical obligations.
 - Merkle leaf and proof formats are wire contracts with on-chain claim logic.
   Any format change must update tests and known vectors.
 - A settlement run must be idempotent: repeated runs must not double-report,

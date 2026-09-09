@@ -282,7 +282,8 @@ async def _settle_one(ctx, *, period_id, account_id, address, den, aipg,
     payout is BOUND to a nonce; once that nonce is consumed we never re-send at a
     new one (only replace at the bound nonce). We mark 'sent' ONLY after PROVING
     the on-chain Transfer — a consumed nonce we can't prove becomes 'manual_review'
-    (never auto-'sent', never re-sent). Returns 'sent'|'pending'|'failed'|'manual_review'."""
+    (never auto-'sent', never re-sent). Screening holds also return 'manual_review'
+    without signing or broadcasting; that state fits the existing status column."""
     Web3, w3, acct, token, decimals = ctx
     mined = w3.eth.get_transaction_count(acct.address)  # 'latest' = mined count
 
@@ -299,6 +300,15 @@ async def _settle_one(ctx, *, period_id, account_id, address, den, aipg,
                      status="manual_review", nonce=stored_nonce, set_tx=False)
         logger.error("payout %s/%s: nonce %s consumed but transfer UNPROVEN (tx=%s) — manual_review",
                      period_id, account_id, stored_nonce, stored_tx)
+        return "manual_review"
+
+    # Every sender, including accrued/retry paths, reaches this gate. Already
+    # mined proof above records history; screening here governs NEW broadcasts.
+    blocked = sanctions.payable_status(await sanctions.screen(address))
+    if blocked:
+        await _write(period_id, account_id, address=address, den=den, aipg=aipg,
+                     status="manual_review", nonce=stored_nonce, set_tx=False)
+        logger.warning("payout held before broadcast: %s", blocked)
         return "manual_review"
 
     # (2) Nonce to use: reuse the bound one (replacement) or assign a fresh,
@@ -328,7 +338,7 @@ async def _settle_one(ctx, *, period_id, account_id, address, den, aipg,
         if not any(k in msg for k in ("already known", "nonce too low",
                                       "replacement transaction underpriced")):
             await _write(period_id, account_id, address=address, den=den, aipg=aipg,
-                         status="failed", tx_hash=str(e)[:80], nonce=nonce)
+                         status="failed", nonce=nonce, set_tx=False)
             return "failed"
 
     # (5) Confirm (short) — and PROVE the Transfer, never trust status==1 alone.
@@ -372,18 +382,6 @@ async def send_period(start, end, budget_aipg: float, period_id: str) -> dict:
                          aipg=p["aipg"], status="accrued")
             counts["accrued"] += 1
             continue
-        # OFAC screen before ANY funds move. A sanctioned hit (blocked_sanctions)
-        # or an address we couldn't verify with a configured oracle (review_sanctions)
-        # is recorded terminally and never sent.
-        screen = await sanctions.screen(p["payout_address"])
-        blocked = sanctions.payable_status(screen)
-        if blocked:
-            await _write(period_id, p["account_id"], address=p["payout_address"], den=p["den"],
-                         aipg=p["aipg"], status=blocked)
-            counts[blocked] = counts.get(blocked, 0) + 1
-            logger.warning("payout %s account=%s addr=%s (source=%s)",
-                           blocked, p["account_id"], p["payout_address"], screen.get("source"))
-            continue
         if ctx is None:
             counts["failed"] += 1  # has a wallet but no treasury configured → can't send
             continue
@@ -405,7 +403,7 @@ async def pay_accrued() -> dict:
     async with await new_session() as s:
         rows = (await s.execute(
             sa.select(payouts_t.c.period_id, payouts_t.c.account_id, payouts_t.c.den,
-                      payouts_t.c.aipg_amount, payouts_t.c.nonce,
+                      payouts_t.c.aipg_amount, payouts_t.c.nonce, payouts_t.c.tx_hash,
                       sa.func.coalesce(sa.func.nullif(accounts_t.c.payout_wallet, ""),
                                        sa.func.nullif(accounts_t.c.wallet, "")).label("addr"))
             .select_from(payouts_t.join(accounts_t, accounts_t.c.id == payouts_t.c.account_id))
@@ -420,7 +418,8 @@ async def pay_accrued() -> dict:
         try:
             st = await _settle_one(ctx, period_id=r.period_id, account_id=r.account_id,
                                    address=r.addr, den=float(r.den or 0),
-                                   aipg=float(r.aipg_amount), stored_nonce=r.nonce)
+                                   aipg=float(r.aipg_amount), stored_nonce=r.nonce,
+                                   stored_tx=r.tx_hash)
             if st == "sent":
                 paid += 1
         except Exception as e:
