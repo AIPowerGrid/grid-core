@@ -151,6 +151,34 @@ async def test_insufficient_paid_releases_the_free_it_took(db, live):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("funded", [False, True])
+async def test_exhausted_free_uses_only_purchased_balance(db, live, funded):
+    cost = pricing.quote_text(PRICED, 100, 200)
+    fake = live(cap=cost)
+    aid, job = _aid(), str(uuid.uuid4())
+    assert await fake.consume(aid, None, cost, "earlier-job") == cost
+    if funded:
+        await credits.credit(aid, cost, "test:seed", ref="exhausted-seed")
+
+    out = await credits.authorize_request(
+        {"account_id": aid}, PRICED, 100, 200, job, record_reservation=True,
+    )
+    assert out["ok"] is funded
+    if funded:
+        assert out["from_free"] == 0
+        assert await _reservation(job) == {"reserved": cost, "free": 0, "status": "held"}
+        await credits.release_job(job)
+        await credits.release_job(job)
+        assert await credits.get_balance(aid) == cost
+    else:
+        assert out["status"] == "insufficient"
+        assert await _reservation(job) is None
+        assert await credits.get_balance(aid) == 0
+    assert fake.spent == cost
+    assert fake.refs["earlier-job"] == cost
+
+
+@pytest.mark.asyncio
 async def test_settle_underrun_restores_free_first_then_paid(db, live):
     """actual < free_held: only `actual` stays consumed from free; the ENTIRE
     paid hold refunds. Free never converts to paid or vice versa."""

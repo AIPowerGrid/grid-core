@@ -210,7 +210,32 @@ Important warning/critical events:
 - unhandled Core HTTP failure and route rate limiting
 
 Repeated alerts are deduplicated for `GRID_ALERT_DEDUPE_SECONDS`; delivery uses a
-bounded queue and never blocks account, inference, deposit, or settlement work.
+bounded in-process queue with Redis cross-process deduplication and never blocks
+account, inference, deposit, or settlement work. This is not a durable outbox:
+process loss, queue overflow, or delivery failure can lose a notification. Use
+read-only reconciliation and service logs as well; silence is not health proof.
+
+### Operator response
+
+The sole maintainer owns these responses; no second maintainer or committee is
+required. Record UTC time, exact release, aggregate finding, action and recovery
+evidence in the private incident record. Never paste credentials or user content
+into Discord. Alert delivery acceptance is not proof somebody reviewed it.
+
+| Signal | Immediate action | Required before reopening or retrying |
+| --- | --- | --- |
+| Purchased-ledger mismatch, invalid split, or unbacked reward eligibility | Close new generation using the kill switch below; keep payouts stopped and preserve rows | Read-only reconciliation explains the discrepancy and proves repaired invariants; review any corrective money movement separately |
+| Aging hold or recovery failure | Inspect the original job, queue delivery, reservation, completion and retained result; keep terminal recovery running | Prove the terminal state before a refund; never assume an HTTP timeout or missing client means no completed work. Close generation if recovery is failing or the unexplained backlog grows |
+| Billing monitor failure | Treat accounting health as unknown; check database availability, service logs and read-only reconciliation | A successful authoritative check, not just a healthy HTTP endpoint; if health cannot be established, close new generation |
+| Normal insufficient-credit, unpriced-model or service-cap rejection | Keep the request rejected; direct the user to funding or the app owner to its reviewed budget | No automatic grants, cap expansion, free fallback or switch to charging off |
+| Low treasury ETH or AIPG | Keep payout senders stopped; distinguish the payout wallet from the deposit Safe and user credit balances | Reconcile prospective obligations, obtain reviewed funding, verify balances/nonce, then perform the supervised send/replay separately |
+| Base RPC or deposit verification failure | Do not mark a deposit credited or a payout sent without proof; retain the receipt/hash for retry | Verify the exact transaction through the existing idempotent claim/reconciliation path; never ask for another transfer solely because credit confirmation failed |
+| Alert delivery failure | Inspect bounded service logs and run direct reconciliation; restore the existing secret-managed transport | A labeled transport test plus direct health check; do not infer accounting success from a quiet channel |
+
+These actions do not authorize historical ledger edits, automatic treasury
+refills, new subsidies, or payout activation. A recovery test may use synthetic
+data in an isolated database; do not manufacture a balance mismatch in production
+to test an alert.
 
 ## Kill switch and rollback
 

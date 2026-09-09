@@ -51,8 +51,10 @@ owning AGENTS.md and any affected parent Child DOX Index.
   at `/v1/workers/ws`. Do not restore legacy key lookup, table writes, Flask
   processes, or polling routes.
 - Money paths must be fail-closed in live mode, idempotent by durable refs, and
-  covered by tests. `GRID_CHARGING_ENABLED=0` is dry-run; do not assume money is
-  live just because billing helpers exist.
+  covered by tests. Explicit `GRID_CHARGING_MODE` takes precedence over the
+  legacy `GRID_CHARGING_ENABLED` fallback. The legacy flag being `0` does not
+  prove dry-run when a mode is configured; verify the selected request cohort
+  and actual running configuration.
 - Production Python dependencies resolve from `requirements-grid.txt` into the
   reviewed, hash-locked Python 3.12/Linux `requirements-grid.lock`. Docker and
   host deploys consume only matching binary wheels from the lock and do not
