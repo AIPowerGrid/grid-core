@@ -362,6 +362,19 @@ expired or out-of-scope pilots return 503 without revealing membership.
 ## Verification
 
 - `pytest grid_api/routers/`.
+- `tests/test_core_process_crash.py` starts the real Uvicorn application with
+  scoped API keys, HTTP clients and worker WebSockets, a dedicated PostgreSQL
+  database per case and a private Redis process. SIGKILL after reservation,
+  dispatch or committed settlement is followed by restart against the same
+  stores. Chat, Responses and Anthropic cover streaming and non-streaming;
+  image, video and audio cover exact-charge recovery. Tests assert refund-once,
+  original-job redelivery, no duplicate charge/reward and authenticated media
+  recovery by job ID and client reference. Audio uses ephemeral signed wallet
+  delegation/receipts. Worker output and R2 presence are simulated; clocks are
+  shortened. This is not GPU qualification, a database/Redis-server crash,
+  object-storage durability or elapsed production observation. Requires a
+  disposable `CREDITS_TEST_DB_URL` with CREATE DATABASE permission and local
+  `redis-server`; required PR/main CI provides both. No production DB is used.
 - `tests/test_worker_billing_failures_postgres.py` uses disposable
   `CREDITS_TEST_DB_URL` and a unique schema per test. It runs the actual worker
   registration/dispatch loop and credit transactions for chat, both native
