@@ -713,6 +713,17 @@ content sanitization, and reward settlement.
 
 ## Verification
 
+- `tests/test_consumer_activation.py` uses isolated PostgreSQL schemas to pin
+  global charging through actual stored legacy-empty-scope/session/scoped key
+  authentication and durable text/image/video/audio authorization. Quota-exempt
+  flags and unmatched allowlists cannot bypass a paid hold or insufficient-credit
+  rejection. Zero free/promo availability and discounts are fixtures; this is not
+  a live OAuth, frontend, dispatch, or GPU qualification test.
+  Its delegated-user matrix also proves that Google-only and wallet-linked
+  account fixtures use their own credit through all four first-party service
+  identities, never the funded application's balance. Both service-key-plus-
+  token and native user-token transport verify real Grid signatures; upstream
+  Google/SIWE proof is outside this test.
 - `pytest grid_api/services/` - covers `job_queue`, `den`, `quota` (+ settlement subtree).
 - PostgreSQL lock-observation tests must refresh `pg_stat_activity` snapshots
   inside a long-lived observer transaction. Prime the snapshot before starting
