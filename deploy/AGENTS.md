@@ -84,6 +84,11 @@ executes an immutable release selected through `/home/aipg/current`.
   Core recovery alone does not close Gallery/Director's restart/retry gate.
 
 - Env names in `env.template`, systemd, code, and docs must match exactly.
+- A billing incident must close new public generation, not merely disable
+  charging. Gate exact generation routes, select explicit empty admission,
+  and preserve settlement/recovery and stopped payouts. `GRID_CHARGING_MODE=off`
+  alone leaves free generation open. Follow the runbook's closed-generation
+  rollback and separate global-activation sequence.
 - Old `GRID_PROBE_*` coordinator sampling variables are retired. Disable the
   old enable flag when deploying so rollback cannot restart the sampler; the
   new release ignores it and cannot dispatch ordinary unreserved canary work. Keep current
