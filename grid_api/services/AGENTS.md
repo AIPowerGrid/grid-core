@@ -44,6 +44,12 @@ content sanitization, and reward settlement.
   (splits, payout-asset + conversion-fee knobs, `worker_share_bps`),
   `canary_audit.py` (read-only account/job reconciliation for supervised
   demand-billing rollout),
+  Recipe-name/checkpoint-name differences pass that audit only with a retained
+  Core-dispatched recipe root matching the exact reviewed recipe, requested
+  model, job type, and routed checkpoint. Pricing aliases are not evidence.
+  Missing historical roots remain findings; never backfill economic records
+  merely to make a canary pass. This verifies routing intent, not execution
+  fidelity or worker-reported output integrity.
   `treasury_health.py` (default-off Base ETH/AIPG balance warnings through the
   billing monitor; explicit public wallet/token and raw-unit thresholds, no
   signer or payment calls),

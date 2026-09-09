@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from grid_api.config import get_settings
 from grid_api.services.canary_audit import JobExpectation, audit_demand_canary
+from grid_api.services import recipes
 
 
 def _expectations(args) -> list[JobExpectation]:
@@ -32,6 +33,9 @@ def _expectations(args) -> list[JobExpectation]:
 
 async def _run(args) -> bool:
     settings = get_settings()
+    # Exact content roots from this reviewed checkout only. Missing/retired
+    # roots remain findings; never infer a route from a pricing alias.
+    recipes.load_local_recipes(str(Path(__file__).resolve().parents[1] / "recipes"))
     engine = create_async_engine(
         settings.async_database_url,
         pool_pre_ping=True,
