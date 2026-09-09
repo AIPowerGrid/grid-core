@@ -39,6 +39,18 @@ Earlier candidate-only and old-sender defect sections are historical snapshots.
 
 ## Legacy consumer activation review (2026-09-09, 22:36 UTC)
 
+Follow-up: the PostgreSQL consumer matrix now has 43 cases, adding 16
+Google-only/wallet-linked, funded/empty-user cases across text/image/video/audio.
+Each exercises all four first-party service identities with real Grid token
+signatures and persisted accounts. Native-token and service-key-plus-user-token
+transport must resolve the same account. A funded frontend service does not
+subsidize an empty user by accident; successful holds charge only the user.
+Upstream Google/SIWE proof is a fixture here, not a browser login observation.
+The combined consumer, native identity, service-policy, free/promo, mode and
+admission suite passed 243 tests locally; all 43 consumer cases ran on PG16.
+The separate setup/validator transport and anti-gaming suite passed 50 tests,
+including forbidden-call assertions on credit/reward paths for no-DEN probes.
+
 A read-only production transaction, with a five-second statement timeout,
 inventoried active, unexpired stored keys without selecting credentials,
 hashes, account IDs, wallet addresses or labels. Counts describe keys, not
@@ -1277,7 +1289,8 @@ The reviewed deployment above supersedes the initial local-only posture.
       every payout entrypoint before restarting any sender. No treasury refill.
 - [x] Verify credits and free/promo ceilings in actual production processes;
       retain the exact builder campaign, not a blanket promotion enablement.
-- [ ] Complete request-to-terminal inventory below, including negative tests.
+- [x] Complete request-to-terminal inventory below, including negative tests;
+      global runtime activation remains separate from route coverage.
 - [ ] Prove Google-only, wallet-linked, zero-balance, free-exhausted, and capped
       direct-service cases; same canonical balance across first-party apps.
 - [x] Run funded success canaries on the seven enabled paths, including
@@ -1305,8 +1318,32 @@ The reviewed deployment above supersedes the initial local-only posture.
 
 ## Entry-point inventory
 
-Source wiring is not live proof. Each row still needs exact account/service
-attribution, reserve-before-dispatch, terminal/refund, and rejection evidence.
+The following inventory reconciles the current Core `3ab6d933` source with the
+dated evidence above. It is not a claim that global charging is already live:
+production remains allowlisted. The live jobs and failure experiments are
+recorded in earlier sections, not replaced by source inspection.
+
+| Path / consumer | Billing identity and hold | Terminal and rejection evidence | Launch posture |
+| --- | --- | --- | --- |
+| Chat completions, including SDK/API callers | `accounts.authenticate(inference.submit)`; canonical user or capped direct service; `openai.py` calls durable `authorize_request` before queueing | Worker WS atomic `record_and_settle`; PostgreSQL handler and real Core crash tests; funded stream/nonstream/disconnect and empty-service live canaries | Admitted |
+| Responses and Anthropic messages | Same scoped identity; shared `_passthrough.authorize_passthrough` creates durable text hold before dispatch | Raw worker terminal owns atomic settlement/release; same PG/crash and live rejection/success evidence | Admitted |
+| Single image, video, image-to-video, audio | Scoped media routers pass the resolved user into `media.submit_and_wait`; exact cost held before queue submission | Media worker terminal verifies complete output contract before atomic settlement; failures/reclaim release, HTTP timeout does not; funded modality and negative canaries recorded above | Admitted |
+| Gallery Director | Canonical delegated Gallery user; optional first image and each video segment are separate media jobs/holds | Multistage paid live canary, durable request/result recovery and per-job reconciliation recorded above | Admitted through image/video paths |
+| Chat image tool | Canonical Chat delegated token, not its service balance; shared Core media path | Live paid image job plus running-source/provider check recorded above | Admitted through image path |
+| Image batches / image-to-image | Same media billing authority, but admission runs first | Real batch failure fully refunded; incomplete outputs cannot settle; admission tests forbid reserve/dispatch | Disabled |
+| Video timeline / 3D | Same scoped media router and first admission gate | Admission tests forbid reserve/dispatch; no successful live qualification claimed | Disabled |
+| Discord bots / other old API consumers | Stored ordinary keys resolve a canonical account; no independent billing rail | Legacy/default/session/scoped PG matrix rejects empty accounts, including quota-exempt ones; global mode ignores old cohort lists | Covered by public route gates; individual key ownership still unknown |
+| First-party bridges | User token carries account and service binding; bridge alone lacks direct-submit authority | New PG matrix covers four service identities; separate native proof/exchange tests; signed-in live owner balance checks recorded above | Delegation required |
+| Direct service apps | Explicit direct-submit scope, positive request/day ceilings and their own funded account | Runtime policy tests; four-client production policy inventory; paid service and empty-service canaries recorded above | Explicit bounded identities only |
+| Validator / manager setup probes | Server-issued assignment or exact manager-bound worker envelope, separate bounded dispatch | Transport tests forbid credit/settlement/metrics calls and require zero DEN acknowledgments; anti-gaming and setup suite passed 50 tests | No reward authority; not a public free inference API |
+| x402 | Separate default-off payment authority | Not part of these public live canaries | Disabled |
+
+Unpriced models reject under global charging regardless of which public API,
+SDK, bot or app submitted the request. The shared terminal records only the
+purchased fraction as unrestricted reward-eligible DEN after the immutable
+cutoff; promotional/free and unreserved work cannot claim that pool. Historical
+accrual and pending payout reconciliation remain separate. The table closes
+the route/consumer mapping, not outstanding activation or observation gates.
 
 ### Media and Director source trace
 

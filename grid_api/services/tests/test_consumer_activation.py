@@ -10,7 +10,7 @@ Free/promo availability and holder discounts are explicitly zero fixtures.
 
 import os
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
@@ -19,7 +19,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from grid_api import database
-from grid_api.services import accounts, credits
+from grid_api.services import accounts, credits, user_tokens
 from grid_api.v2 import schema as tables
 
 PG = os.environ.get("CREDITS_TEST_DB_URL", "")
@@ -48,6 +48,7 @@ async def pg(monkeypatch):
         monkeypatch.setattr(credits, "_free_first", AsyncMock(return_value=0))
         monkeypatch.setattr(credits, "holder_discount_bps", AsyncMock(return_value=0))
         monkeypatch.setattr(credits, "_economic_alert", lambda *args, **kwargs: None)
+        monkeypatch.setenv("GRID_USER_TOKEN_SIGNING_KEY", "consumer-activation-fixture-" * 3)
         yield
     finally:
         await engine.dispose()
@@ -175,3 +176,82 @@ async def test_non_inference_credentials_cannot_enter_billing(pg, scope):
     async with await database.new_session() as session:
         assert await session.scalar(sa.select(sa.func.count()).select_from(tables.reservations)) == 0
         assert await session.scalar(sa.select(sa.func.count()).select_from(tables.ledger)) == 0
+
+
+@pytest.mark.parametrize("auth_method", ["google", "siwe"])
+@pytest.mark.parametrize("funded", [False, True])
+@pytest.mark.parametrize(
+    "modality,model",
+    [
+        ("text", "gpt-oss-120b"),
+        ("image", "z-image-turbo"),
+        ("video", "ltx-2.3"),
+        ("audio", "ace-step-v1.5-xl-turbo"),
+    ],
+)
+async def test_frontend_delegation_never_spends_the_service_balance(pg, auth_method, funded, modality, model):
+    # Upstream identity proof is a fixture; Grid token signatures and account
+    # resolution are real. Never confuse this with a live Google/wallet login.
+    account, _ = await accounts.create_account(
+        issue_initial_key=False,
+        oauth_sub=f"google-fixture-{uuid4()}" if auth_method == "google" else None,
+        wallet="0x" + "ab" * 20 if auth_method == "siwe" else None,
+    )
+    aid = UUID(account["id"])
+    initial = 1_000_000 if funded else 0
+    if funded:
+        assert await credits.credit(aid, initial, "test_funding", f"user:{aid}")
+    for index, service_id in enumerate(("grid-console", "aipg-chat", "aipg-art", "aipg-music")):
+        service, key = await accounts.create_service_client(service_id, service_id)
+        service_account = UUID(str(service["account_id"]))
+        assert await credits.credit(service_account, 2_000_000, "test_funding", f"service:{service_id}")
+        token = user_tokens.issue(
+            aid,
+            audience=service_id,
+            service_id=service_id,
+            scopes=["account.read", "inference.submit"],
+            auth_method=auth_method,
+        )
+        # Both supported transport forms must resolve to the same user, not app.
+        delegated = await accounts.authenticate(key, user_token=token, required_scope="inference.submit")
+        native = await accounts.authenticate(token, required_scope="inference.submit")
+        assert delegated["account_id"] == native["account_id"] == aid
+        assert delegated["auth_method"] == native["auth_method"] == auth_method
+        assert bool(delegated["wallet"]) is (auth_method == "siwe")
+        user = native if index % 2 else delegated
+        job = str(uuid4())
+        if modality == "text":
+            result = await credits.authorize_request(user, model, 100, 128, job, record_reservation=True)
+        else:
+            result = await credits.authorize_media(
+                aid,
+                model,
+                modality,
+                1,
+                2,
+                job,
+                user=user,
+                record_reservation=True,
+            )
+        assert await credits.get_balance(service_account) == 2_000_000
+        async with await database.new_session() as session:
+            hold = (
+                (
+                    await session.execute(
+                        sa.select(tables.reservations).where(
+                            tables.reservations.c.job_id == job,
+                        ),
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+        if funded:
+            assert result["ok"] and result["reserved"] > 0
+            assert hold["account_id"] == aid and hold["service_id"] == service_id
+            assert await credits.get_balance(aid) == initial - result["reserved"]
+            await credits.release_job(job)
+            assert await credits.get_balance(aid) == initial
+        else:
+            assert not result["ok"] and result["status"] == "insufficient"
+            assert hold is None and await credits.get_balance(aid) == 0
