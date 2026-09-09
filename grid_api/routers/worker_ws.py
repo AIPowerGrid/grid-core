@@ -1836,7 +1836,10 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 "model": selected_model,
                 "worker": worker_info.get("name", ""),
                 "gen_time": round(gen_time, 2),
-                "recipe_root": expected_recipe_root,
+                # Core's resolved dispatch commitment, not the worker's claim.
+                # Audio additionally checks the worker's echo above. For other
+                # media this records routing intent, not proof of execution.
+                "recipe_root": payload.get("recipe_root"),
             }
             settle_result = await credits.record_and_settle(
                 ledger_values=dict(

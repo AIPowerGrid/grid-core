@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -18,6 +19,7 @@ from ..v2.schema import credit_ledger as credit_ledger_t
 from ..v2.schema import credits as credits_t
 from ..v2.schema import ledger as worker_ledger_t
 from ..v2.schema import reservations as reservations_t
+from . import recipes
 from .identities import account_family_ids, canonical_account_id
 
 CanaryOutcome = Literal["success", "failure", "absent"]
@@ -35,6 +37,28 @@ def _finding(findings: list[dict], code: str, scope: str, detail: str) -> None:
 
 def _iso(value) -> str | None:
     return value.isoformat() if value else None
+
+
+def _recipe_route_matches(reservation, completion) -> bool:
+    """Check recorded Core routing against the exact reviewed recipe, not prices.
+
+    This accounts for public recipe names vs checkpoint names; it does not
+    attest that a worker actually executed the model or workflow.
+    """
+    result = reservation.get("media_result")
+    if not isinstance(result, dict) or result.get("model") != completion["model"]:
+        return False
+    root = result.get("recipe_root")
+    if not isinstance(root, str) or not re.fullmatch(r"0x[0-9a-f]{64}", root):
+        return False
+    recipe = recipes.get_recipe(root)
+    return bool(
+        recipe
+        and recipe.recipe_root == root
+        and recipe.model_name.casefold() == reservation["model"].casefold()
+        and recipe.job_type == completion["job_type"]
+        and completion["model"] in recipe.required_models
+    )
 
 
 async def _global_invariants(session, stale_seconds: int) -> dict:
@@ -188,7 +212,7 @@ async def _audit_job(
         if not completion:
             _finding(findings, "missing_worker_completion", scope, "successful work has no worker ledger row")
         else:
-            if completion["model"] != reservation["model"]:
+            if completion["model"] != reservation["model"] and not _recipe_route_matches(reservation, completion):
                 _finding(findings, "model_mismatch", scope, "reservation and worker ledger name different models")
             if not completion["prompt_hash"]:
                 _finding(findings, "missing_prompt_hash", scope, "successful work has no prompt commitment")
@@ -230,6 +254,7 @@ async def _audit_job(
             "settled": _iso(reservation["settled"]),
         },
         "worker_completion": bool(completion),
+        "worker_model": completion["model"] if completion else None,
         "worker_job_type": completion["job_type"] if completion else None,
         "worker_output_units": int(completion["output_units"] or 0) if completion else None,
         "purchased_delta_micro": movement_total,
