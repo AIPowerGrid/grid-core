@@ -713,6 +713,12 @@ content sanitization, and reward settlement.
 
 ## Verification
 
+- `tests/test_consumer_activation.py` uses isolated PostgreSQL schemas to pin
+  global charging through actual stored legacy-empty-scope/session/scoped key
+  authentication and durable text/image/video/audio authorization. Quota-exempt
+  flags and unmatched allowlists cannot bypass a paid hold or insufficient-credit
+  rejection. Zero free/promo availability and discounts are fixtures; this is not
+  a live OAuth, frontend, dispatch, or GPU qualification test.
 - `pytest grid_api/services/` - covers `job_queue`, `den`, `quota` (+ settlement subtree).
 - PostgreSQL lock-observation tests must refresh `pg_stat_activity` snapshots
   inside a long-lived observer transaction. Prime the snapshot before starting
