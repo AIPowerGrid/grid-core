@@ -14,7 +14,9 @@ executes an immutable release selected through `/home/aipg/current`.
 - `DEMAND_BILLING_RUNBOOK.md` - dark deploy, allowlisted canary, alert,
   rollback, and staged demand-charging procedure.
 - `DEMAND_BILLING_LAUNCH_2026_09_08.md` - active launch evidence and outstanding
-  gates; local tests and implementation are not production activation proof.
+  gates; includes deployed Music journal recovery and the staged, unselected
+  Core payout-input candidate. Local tests and implementation are not
+  production activation proof.
 - `VALIDATOR_COHORT_RUNBOOK.md` - privacy-safe intake, opaque common-control
   review, public per-node status verification, 72-hour qualification,
   verification, expiry, and incident handling for independent preview
