@@ -7,6 +7,44 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Streaming disconnect proof (2026-09-09, 17:13 UTC)
+
+Each request emitted streaming output before the HTTP client deliberately
+closed its connection without receiving a terminal. The reservation was still
+`held` immediately after disconnect, then settled once at the worker terminal.
+This proves disconnect reconciliation, not cancellation of backend generation
+or recovery after killing the Core process. Work continued and was charged for
+its full measured generation, not merely the fragment the client read.
+
+| Format | Grid job | Reserved micro-USD | Actual micro-USD | Refunded micro-USD |
+| --- | --- | ---: | ---: | ---: |
+| Chat | `aab200ba-933a-45e6-a124-4f7c62860c1a` | 156 | 154 | 2 |
+| Responses | `099e98a0-0316-40c4-960b-6f6acc75b88f` | 156 | 153 | 3 |
+| Anthropic | `bdec7055-44de-4aed-a8e8-aef06b456126` | 79 | 69 | 10 |
+
+- Every job has a nonempty output hash, one debit and its unused refund,
+  purchased-only settlement, and fully purchased-backed reward eligibility.
+  The unchanged read-only canary auditor reconciled all three with no findings,
+  no account/global balance drift, negative balances or stale holds.
+- The first helper run passed Chat and Responses, then its Anthropic request
+  returned 401 because the helper omitted that format's `x-api-key` header.
+  Preserve the incomplete run at `/var/lib/aipg-backup/stream-disconnect-20260909/`.
+  A corrected helper reran only Anthropic with a fresh temporary key; its proof
+  and the three-job final audit live in the `-r2` directory. This was a canary
+  client mistake, not evidence of a production auth regression. Both temporary
+  keys were revoked and subsequent credit reads returned 401.
+- Focused local admission, free-credit and promotion tests: 79 passed, with
+  one existing websockets deprecation warning. SQLite/fake-store tests are not
+  a claim of a live free-credit campaign or additional PostgreSQL race proof.
+- The final process/config inspection corrects an earlier summary: daily-free
+  spending is off, but the already-existing promotion gate is on for exact
+  campaign `builder-2026-q3`. Welcome grants are not in that spendable list.
+  Neither configuration changed in this pass; no new promotion was activated.
+- Purchased balance: USD 9.772660. Cumulative test spend: USD 0.228015 of the
+  approved USD 1. Global charging remains allowlisted; payout service/timer
+  remain inactive. This does not close remaining frontend/identity, crash,
+  canary-observation or payout-economics gates.
+
 ## Explicit admission and auth proof (2026-09-09, 17:07 UTC)
 
 **Current state:** Core `ad5a1257`, Alembic `0040`, charging still allowlisted,
@@ -69,7 +107,8 @@ verified-path containment step, not global charging activation.
   No new grant, treasury transfer, historical ledger rewrite or payout occurred.
 
 Next gates: finish identity/failure and frontend QA, reconcile the configured
-free/promo policy with tests (both spend gates remain dark), satisfy the
+free/promo policy with tests (daily-free spending is off; the existing promo
+gate is on for exact campaign `builder-2026-q3`, not welcome grants), satisfy the
 runbook's canary observation/reconciliation requirement, and then explicitly
 activate global charging on the verified list. Payout economics and historical
 obligations are a separate review; paid-only eligibility is not payout approval.
