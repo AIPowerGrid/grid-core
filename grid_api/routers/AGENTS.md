@@ -200,6 +200,12 @@ transport, accounts, stats, health/metrics.
   them draw daily free, promotional, or purchased account credit.
 - `worker_ws.py` must not trust worker-reported counts for rewards or customer
   billing without a server-side cap or verification path.
+- Chat settlement commits all witnessed output channels through
+  `services/chat_output.py`, including tool-only and reasoning-only replies.
+  Grid token counts include assembled function names/arguments, not call IDs
+  or chunk counts; the requested maximum remains the billing cap. Terminal
+  self-reports cannot replace an observed stream. HTTP collectors share the counter for dry-run/display
+  fallback but never settle money. Historical result hashes are not rewritten.
 - Worker-reported text logprobs are untrusted evidence. Normalize and bound the
   first distribution before it reaches Redis; never retain an arbitrary nested
   backend payload or treat it as cryptographic model identity.

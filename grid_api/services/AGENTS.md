@@ -599,6 +599,15 @@ content sanitization, and reward settlement.
   time. Never reprice an in-flight job from the current price book.
 - `ledger.py` writes one completion event per job. Settlement and stats depend on
   `grid_ledger`; do not revive orphan den tables for new v2 payouts.
+- `chat_output.py` owns assembled chat output counts and commitments. Plain
+  text-only receipts retain SHA-256(text), or NULL for no output. Reasoning or
+  tool output uses canonical JSON with `schema=aipg.chat-output.v2`, `content`,
+  `reasoning_content`, and the ordered `tool_calls` list. Counts include text,
+  reasoning, function names and argument strings separately using the existing
+  Grid tokenizer proxy; call IDs/indexes are not billable. Old visible-only
+  worker signatures cannot authenticate this richer receipt and remain unsigned
+  until workers adopt its exact commitment. No routing/reward authority is added,
+  and historical commitments/charges remain unchanged.
 - On-chain reads only via sync loops, cached; never per-request.
 - Never copy a payout private key to a worker. Core resolves the payout wallet
   from the API-key account, then verifies its signed delegation to the worker's

@@ -20,7 +20,7 @@ import uuid
 import pytest
 
 from grid_api.routers import openai as o
-from grid_api.services import credits, den, token_stream
+from grid_api.services import chat_output, credits, den, token_stream
 
 MODEL = "gpt-oss-120b"
 
@@ -119,3 +119,27 @@ async def test_stream_observes_once_on_disconnect(monkeypatch, spy):
     await agen.aclose()     # disconnect
     assert len(spy["charge"]) == 1  # observed once in finally
     assert spy["charge"][0]["c"] == den.count_tokens("first part ")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_tool_only_collector_observes_assembled_functions(monkeypatch, spy, stream):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", False)
+    call = {"index": 0, "id": "call-1", "type": "function",
+            "function": {"name": "image", "arguments": '{"prompt":"blue triangle"}'}}
+    events = [
+        {"delta": {"tool_calls": [{**call, "function": {"name": "image", "arguments": '{"prompt":'}}]}},
+        {"delta": {"tool_calls": [{"index": 0, "function": {"arguments": '"blue triangle"}'}}]}},
+        {"text": token_stream.DONE_SENTINEL, "finish_reason": "tool_calls"},
+    ]
+    monkeypatch.setattr(o.token_stream, "subscribe_tokens", _fake_subscribe(events))
+    user = {"account_id": uuid.uuid4()}
+    if stream:
+        async for _ in o._stream_openai("tool-job", MODEL, "cid", user):
+            pass
+    else:
+        response = await o._collect_response("tool-job", MODEL, user)
+        assert response["choices"][0]["message"]["tool_calls"] == [call]
+        assert response["usage"]["completion_tokens"] == chat_output.completion_tokens("", "", [call])
+    assert spy["charge"] == [{"p": 0, "c": chat_output.completion_tokens("", "", [call])}]
+    assert not spy["reconcile"]

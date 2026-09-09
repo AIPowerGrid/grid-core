@@ -42,7 +42,7 @@ from ..models.openai import ChatCompletionRequest, ModelInfo, ModelListResponse
 from ..services import accounts as accounts_svc
 from ..services import concurrency
 from ..services import generation_admission
-from ..services import credits, den, job_queue, media, pricing, quota, recipes, token_stream
+from ..services import chat_output, credits, den, job_queue, media, pricing, quota, recipes, token_stream
 from ..services.sanitizer import sanitize_messages
 from .worker_ws import get_available_models
 from ..services import router as router_svc
@@ -594,8 +594,16 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
     yield f"data: {json.dumps(chunk)}\n\n"
 
     # Grid-side completion accumulator for dry-run observability — count what the
-    # grid ACTUALLY relayed (content + reasoning), never worker `usage`.
+    # grid ACTUALLY relayed (content, reasoning and tools), never worker `usage`.
     relayed = []
+    reasoning_parts = []
+    tool_acc = {}
+
+    def observed_tokens():
+        return chat_output.completion_tokens(
+            "".join(relayed), "".join(reasoning_parts), [tool_acc[i] for i in sorted(tool_acc)],
+        )
+
     observed = False  # log the dry-run would-charge exactly once
     terminal = False  # did we reach a natural end (done/error) vs. client disconnect?
 
@@ -627,7 +635,7 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
                     if grid_meta:
                         usage_chunk["grid"] = grid_meta
                     yield f"data: {json.dumps(usage_chunk)}\n\n"
-                await _observe_dry(user, model, prompt_toks, den.count_tokens("".join(relayed)), job_id)
+                await _observe_dry(user, model, prompt_toks, observed_tokens(), job_id)
                 observed = True
                 break
 
@@ -637,11 +645,13 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
                 if delta.get("content"):
                     relayed.append(delta["content"])
                 if delta.get("reasoning_content"):
-                    relayed.append(delta["reasoning_content"])
+                    reasoning_parts.append(delta["reasoning_content"])
+                if delta.get("tool_calls"):
+                    chat_output.merge_tool_call_deltas(tool_acc, delta["tool_calls"])
                 chunk = fmt.openai_chunk_raw(delta, model, completion_id, finish_reason=data.get("finish_reason"))
             elif data.get("reasoning"):
                 # Legacy worker path — reasoning channel.
-                relayed.append(data.get("text", ""))
+                reasoning_parts.append(data.get("text", ""))
                 chunk = fmt.openai_chunk("", model, completion_id, reasoning=data.get("text", ""))
             else:
                 # Legacy worker path — plain content.
@@ -660,7 +670,7 @@ async def _stream_openai(job_id: str, model: str, completion_id: str, user: dict
         # Dry-run only: observe the would-charge once even on disconnect/cancel.
         # (LIVE money is settled in worker_ws regardless of this generator.)
         if not observed:
-            await _observe_dry(user, model, prompt_toks, den.count_tokens("".join(relayed)), job_id)
+            await _observe_dry(user, model, prompt_toks, observed_tokens(), job_id)
         # Release the in-flight slot the handler transferred to us — on natural
         # finish AND on client disconnect (this finally runs in both).
         if inflight_account:
@@ -678,6 +688,7 @@ async def _collect_response(job_id: str, model: str, user: dict | None = None, s
     content = ""
     reasoning = ""
     tool_calls = None
+    tool_acc = {}
     usage = None
     finish_reason = "stop"
     grid_meta = None
@@ -707,6 +718,8 @@ async def _collect_response(job_id: str, model: str, user: dict | None = None, s
                     content += delta["content"]
                 if delta.get("reasoning_content"):
                     reasoning += delta["reasoning_content"]
+                if delta.get("tool_calls"):
+                    chat_output.merge_tool_call_deltas(tool_acc, delta["tool_calls"])
             elif data.get("reasoning"):
                 reasoning += data.get("text", "")
             else:
@@ -720,7 +733,8 @@ async def _collect_response(job_id: str, model: str, user: dict | None = None, s
     # Grid-counted completion (tiktoken of the content+reasoning the grid actually
     # assembled) — used for dry-run observability and as the display fallback.
     # LIVE money is settled durably in worker_ws (credits.settle_job), never here.
-    bill_completion = den.count_tokens(content + reasoning)
+    tool_calls = tool_calls or ([tool_acc[i] for i in sorted(tool_acc)] if tool_acc else None)
+    bill_completion = chat_output.completion_tokens(content, reasoning, tool_calls)
     await _observe_dry(user, model, prompt_toks, bill_completion, job_id)
 
     # Client-facing usage: prefer the worker's report (faithful), fall back to the
