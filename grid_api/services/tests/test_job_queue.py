@@ -1,172 +1,57 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Tests for job dispatch requeue logic.
+"""Queue API adapter tests. Retry correctness is proved on real Redis next door."""
 
-The core correctness property: a job that lands on a worker which doesn't
-serve its model must be requeued for another worker, NOT discarded — and a
-job that no worker serves must eventually fault (not bounce forever).
-
-Uses a fake Redis that records xadd / xack calls so we can assert the
-requeue + bounce-limit behavior without a live Redis.
-"""
-
-from __future__ import annotations
+from unittest.mock import AsyncMock
 
 import pytest
 
 from grid_api.services import job_queue
 
 
-class FakeRedis:
-    def __init__(self):
-        self.xadds: list[dict] = []
-        self.xacks: list[str] = []
-        self.xclaims: list[dict] = []
-        self.counters: dict[str, int] = {}
-
-    async def xadd(self, stream, data, **kwargs):
-        # Accept maxlen/approximate (real redis trims the stream); the fake just
-        # records the payload, so the trim kwargs are irrelevant here.
-        self.xadds.append(data)
-        return f"fake-{len(self.xadds)}"
-
-    async def xack(self, stream, group, msg_id):
-        self.xacks.append(msg_id)
-        return 1
-
-    async def incr(self, key):
-        self.counters[key] = self.counters.get(key, 0) + 1
-        return self.counters[key]
-
-    async def expire(self, key, seconds):
-        return True
-
-    async def xclaim(
-        self,
-        stream,
-        group,
-        consumer,
-        *,
-        min_idle_time,
-        message_ids,
-        justid,
-    ):
-        self.xclaims.append(
-            {
-                "stream": stream,
-                "group": group,
-                "consumer": consumer,
-                "min_idle_time": min_idle_time,
-                "message_ids": message_ids,
-                "justid": justid,
-            }
-        )
-        return message_ids
-
-
 @pytest.fixture
 def fake_redis(monkeypatch):
-    r = FakeRedis()
-    monkeypatch.setattr(job_queue, "get_redis", lambda: r)
-    return r
-
-
-def _job(requeue_count=0, stream_id="s-1"):
-    return {
-        "stream_id": stream_id,
-        "job_id": "job-1",
-        "payload": {"prompt": "hi"},
-        "models": ["llama-70b"],
-        "requeue_count": requeue_count,
-    }
+    client = AsyncMock()
+    monkeypatch.setattr(job_queue, "get_redis", lambda: client)
+    return client
 
 
 @pytest.mark.asyncio
-async def test_mismatch_requeues_and_acks(fake_redis):
-    """A fresh mismatched job is acked (leaves this worker) and re-added."""
-    requeued = await job_queue.requeue_for_mismatch(_job(requeue_count=0))
-
-    assert requeued is True
-    assert fake_redis.xacks == ["s-1"], "must ack the current delivery"
-    assert len(fake_redis.xadds) == 1, "must re-add the job"
-    assert fake_redis.xadds[0]["job_id"] == "job-1"
-    assert fake_redis.xadds[0]["requeue_count"] == "1", "bounce counter increments"
-
-
-@pytest.mark.asyncio
-async def test_requeue_count_increments_each_bounce(fake_redis):
-    await job_queue.requeue_for_mismatch(_job(requeue_count=5))
-    assert fake_redis.xadds[0]["requeue_count"] == "6"
-
-
-@pytest.mark.asyncio
-async def test_bounce_limit_faults_instead_of_requeue(fake_redis):
-    """At the limit, the job is acked but NOT re-added — caller faults it."""
-    requeued = await job_queue.requeue_for_mismatch(_job(requeue_count=job_queue.MAX_REQUEUE))
-
-    assert requeued is False, "signals caller to fault + notify client"
-    assert fake_redis.xacks == ["s-1"], "still acked so it leaves the PEL"
-    assert fake_redis.xadds == [], "must NOT re-add past the limit"
-
-
-@pytest.mark.asyncio
-async def test_bounce_limit_is_inclusive(fake_redis):
-    """One below the limit still requeues; at the limit it stops."""
-    below = await job_queue.requeue_for_mismatch(_job(requeue_count=job_queue.MAX_REQUEUE - 1))
-    assert below is True
-    assert len(fake_redis.xadds) == 1
-
-    at = await job_queue.requeue_for_mismatch(_job(requeue_count=job_queue.MAX_REQUEUE))
-    assert at is False
-    assert len(fake_redis.xadds) == 1, "no new add at the limit"
-
-
-@pytest.mark.asyncio
-async def test_submit_job_carries_requeue_count(fake_redis):
-    await job_queue.submit_job("job-2", {"p": 1}, ["m"], requeue_count=3)
-    assert fake_redis.xadds[0]["requeue_count"] == "3"
-
-
-@pytest.mark.asyncio
-async def test_submit_job_defaults_requeue_count_zero(fake_redis):
-    await job_queue.submit_job("job-3", {"p": 1}, ["m"])
-    assert fake_redis.xadds[0]["requeue_count"] == "0"
+@pytest.mark.parametrize("count", [0, 3])
+async def test_submit_job_carries_requeue_count(fake_redis, count):
+    await job_queue.submit_job("job", {"p": 1}, ["m"], requeue_count=count)
+    assert fake_redis.xadd.call_args.args[1]["requeue_count"] == str(count)
 
 
 @pytest.mark.asyncio
 async def test_touch_job_claim_preserves_worker_ownership(fake_redis):
-    job = _job()
-    job.update({"worker_id": "worker-1", "job_type": "audio", "stream": "grid:jobs:media"})
-
-    await job_queue.touch_job_claim(job)
-
-    assert fake_redis.xclaims == [
-        {
-            "stream": "grid:jobs:media",
-            "group": job_queue.CONSUMER_GROUP,
-            "consumer": "worker-1",
-            "min_idle_time": 0,
-            "message_ids": ["s-1"],
-            "justid": True,
-        }
-    ]
+    await job_queue.touch_job_claim({"stream_id": "1-0", "worker_id": "worker-1", "job_type": "audio", "stream": "grid:jobs:media"})
+    fake_redis.xclaim.assert_awaited_once_with(
+        "grid:jobs:media",
+        job_queue.CONSUMER_GROUP,
+        "worker-1",
+        min_idle_time=0,
+        message_ids=["1-0"],
+        justid=True,
+    )
 
 
 @pytest.mark.asyncio
-async def test_generation_retry_budget_dead_letters_after_two_requeues(fake_redis):
-    results = []
-    for index in range(3):
-        results.append(
-            await job_queue.requeue_job(
-                "poison-job",
-                {"prompt": "hi"},
-                ["gpt-oss-20b"],
-                stream_id=f"s-{index}",
-                max_attempts=job_queue.MAX_GENERATION_REQUEUE,
-            )
-        )
+async def test_requeue_requires_source_delivery(fake_redis):
+    with pytest.raises(ValueError, match="pending stream delivery"):
+        await job_queue.requeue_job("job", {}, [])
+    fake_redis.eval.assert_not_called()
 
-    assert results[:2] == ["fake-1", "fake-2"]
-    assert results[2] is None
-    assert fake_redis.xacks == ["s-0", "s-1", "s-2"]
-    assert len(fake_redis.xadds) == 2
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,delivery,expected",
+    [
+        ("closed", "", None),
+        ("requeued", "2-0", "2-0"),
+        ("superseded", "1-0", "1-0"),
+    ],
+)
+async def test_failure_status_only_dead_letter_returns_none(fake_redis, status, delivery, expected):
+    fake_redis.eval.return_value = [status, delivery]
+    assert await job_queue.requeue_job("job", {}, [], "1-0") == expected

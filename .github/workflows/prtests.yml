@@ -82,7 +82,7 @@ jobs:
             fi
           done
           sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client shellcheck
+          sudo apt-get install -y -qq postgresql-client shellcheck redis-server
           shellcheck -x scripts/backup_postgres.sh scripts/prove_postgres_restore.sh deploy/bootstrap.sh
       - name: Backup and restored migration proof
         env:
