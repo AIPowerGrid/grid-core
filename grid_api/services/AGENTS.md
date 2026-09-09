@@ -417,10 +417,23 @@ content sanitization, and reward settlement.
   never interpret a typo as `off` and silently admit unbilled work. Only an
   absent mode uses the documented legacy boolean fallback.
 
-- One queue: `job_queue.py`. Requeue is capped (Redis counter, dead-letter at
-  the cap) to prevent poison-job eviction cascades. Compatible-worker generation
-  failures use a tighter two-requeue budget than heterogeneous model-mismatch
-  bounces. Stale jobs are reclaimed by the loop in `main.py`.
+- One queue: `job_queue.py`. Retry handoffs check the original pending delivery
+  and append its replacement before acknowledging it in one Redis Lua script.
+  A failed append leaves the original pending; repeat handoffs are nonterminal
+  no-ops, never a reason to refund a job already handed to another consumer.
+  Original stream fields preserve progress, targeting and retry counters.
+  Affinity exhaustion keeps the claim for local execution. Generation retries
+  use a separate message-carried counter (including any legacy Redis counter
+  during upgrade), capped at two for compatible-worker failures. Mismatch
+  bounces retain their separate cap. Stale recovery preserves both counters;
+  it is not itself a backend failure or a new generation attempt.
+  `tests/test_job_queue_redis.py` uses isolated Unix-socket Redis to prove append
+  errors, duplicate races, metadata retention, caps and child-process death
+  immediately before/after handoff. Lua errors do not roll back writes; retain
+  the append-before-ack ordering and validate before writing. These tests do
+  not prove Redis persistence loss, exactly-once GPU execution, stream trimming
+  under overload, full Uvicorn restart, or SQL/queue distributed transactions.
+  Paid settlement remains guarded separately by its durable reservation.
 - Money paths must stay idempotent and tested; value-moving credit ledger writes
   require non-null refs and must not overdraft under concurrency.
 - Validator compensation is separate from worker den and audit-execution

@@ -12,11 +12,13 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 
 import redis.exceptions
 
 from ..redis_client import CONSUMER_GROUP, MEDIA_STREAM_KEY, STREAM_KEY, get_redis
+from ..safe_logging import error_type
 
 logger = logging.getLogger("grid_api.job_queue")
 
@@ -26,12 +28,13 @@ logger = logging.getLogger("grid_api.job_queue")
 # MUST exceed the job's own allowed runtime, else the reclaimer yanks a job that
 # is still rendering, re-dispatches it, and the client times out on doubled work.
 # Text jobs stream tokens and complete fast, so they keep the tight window.
-STALE_JOB_MS = 300_000        # text: 5 minutes
+STALE_JOB_MS = 300_000  # text: 5 minutes
 STALE_JOB_MS_MEDIA = 900_000  # media: 15 minutes (> VIDEO_TIMEOUT incl. cold start)
 
 
 def _stale_ms_for(stream: str) -> int:
     return STALE_JOB_MS_MEDIA if stream == MEDIA_STREAM_KEY else STALE_JOB_MS
+
 
 # A job can be requeued (bounced between workers that don't serve its model)
 # at most this many times before we give up and fault it. With instant
@@ -52,7 +55,6 @@ MAX_GENERATION_REQUEUE = 2
 # forever — a slow memory leak + data-retention issue. Approximate trimming (~)
 # is cheap and keeps well above the cap, so in-flight/recent jobs (a handful,
 # near the head) are never trimmed. Generous default; override via env.
-import os
 MAX_STREAM_LEN = int(os.getenv("GRID_JOB_STREAM_MAXLEN", "10000") or 10000)
 
 # Soft worker-affinity: a job may name a preferred_worker (ownership-gated at
@@ -68,6 +70,100 @@ MAX_AFFINITY_BOUNCE = 10
 
 def _stream_for(job_type: str) -> str:
     return STREAM_KEY if job_type == "text" else MEDIA_STREAM_KEY
+
+
+# Lua is indivisible with respect to a Core crash, but does not roll back on
+# command errors. Validate/read first and XADD before XACK: a failed append must
+# leave the original delivery pending. Copy Redis fields, not a caller's stale
+# reconstruction, so progress/targeting and all retry counters survive recovery.
+_HANDOFF = """
+local pending = redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[2], ARGV[2], 1)
+if #pending == 0 then return {'superseded', ARGV[2]} end
+if ARGV[6] ~= '' and pending[1][2] ~= ARGV[6] then
+    return {'superseded', ARGV[2]}
+end
+local source = redis.call('XRANGE', KEYS[1], ARGV[2], ARGV[2])
+if #source == 0 then return redis.error_reply('pending source missing') end
+local fields = source[1][2]
+local offsets = {}
+for i = 1, #fields, 2 do offsets[fields[i]] = i + 1 end
+local function read(name, default)
+    if offsets[name] then return fields[offsets[name]] end
+    return default
+end
+local function write(name, value)
+    if offsets[name] then fields[offsets[name]] = tostring(value)
+    else
+        table.insert(fields, name)
+        table.insert(fields, tostring(value))
+        offsets[name] = #fields
+    end
+end
+if read('job_id', '') ~= ARGV[3] then
+    return redis.error_reply('pending job mismatch')
+end
+local count = tonumber(read('requeue_count', '0'))
+local passes = tonumber(read('affinity_passes', '0'))
+local failures = tonumber(read('generation_requeues', '0'))
+local limit = tonumber(ARGV[5])
+local maxlen = tonumber(ARGV[7])
+if not count or not passes or not failures or not limit or not maxlen then
+    return redis.error_reply('invalid retry counters')
+end
+local mode = ARGV[4]
+if mode == 'affinity' then
+    if passes >= limit then return {'run', ''} end
+    write('affinity_passes', passes + 1)
+elseif mode == 'mismatch' then
+    if count >= limit then
+        redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+        return {'closed', ''}
+    end
+    write('requeue_count', count + 1)
+elseif mode == 'failure' then
+    -- Carry forward an old release's counter during a rolling upgrade. New
+    -- retries live on the message, so a long job cannot reset the cap by TTL.
+    local legacy = tonumber(redis.call('GET', KEYS[2]) or '0')
+    if not legacy then return redis.error_reply('invalid legacy retry counter') end
+    failures = math.max(failures, legacy)
+    if failures >= limit then
+        redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+        return {'closed', ''}
+    end
+    write('generation_requeues', failures + 1)
+    write('requeue_count', count + 1)
+elseif mode ~= 'stale' then
+    return redis.error_reply('invalid retry mode')
+end
+local replacement = redis.call('XADD', KEYS[1], 'MAXLEN', '~', maxlen, '*', unpack(fields))
+redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+return {'requeued', replacement}
+"""
+
+
+async def _handoff(job: dict, mode: str, limit: int = MAX_REQUEUE) -> tuple[str, str]:
+    """Transfer one pending delivery, or report that it already left this caller.
+
+    Superseded is intentionally nonterminal: it must never trigger a refund or
+    another dispatch. The returned old ID is an opaque truthy handle, not a
+    promise that this invocation created a replacement.
+    """
+    if not job.get("stream_id"):
+        raise ValueError("requeue requires a pending stream delivery")
+    result = await get_redis().eval(
+        _HANDOFF,
+        2,
+        job.get("stream") or _stream_for(job.get("job_type", "text")),
+        f"grid:requeue:{job['job_id']}",
+        CONSUMER_GROUP,
+        job["stream_id"],
+        job["job_id"],
+        mode,
+        limit,
+        job.get("worker_id", ""),
+        MAX_STREAM_LEN,
+    )
+    return result[0], result[1]
 
 
 async def submit_job(
@@ -159,31 +255,8 @@ async def requeue_for_mismatch(job: dict) -> bool:
     Returns True if requeued, False if the bounce limit was hit (caller
     should fault the job and notify the client).
     """
-    r = get_redis()
-    count = job.get("requeue_count", 0)
-    job_type = job.get("job_type", "text")
-
-    # Ack the current delivery either way so it leaves this worker's PEL.
-    await r.xack(job.get("stream", _stream_for(job_type)), CONSUMER_GROUP, job["stream_id"])
-
-    if count >= MAX_REQUEUE:
-        logger.warning(
-            f"Job {job['job_id']} hit requeue limit ({MAX_REQUEUE}) for "
-            f"models {job['models']} — no worker serves it; faulting."
-        )
-        return False
-
-    await submit_job(
-        job["job_id"], job["payload"], job["models"],
-        requeue_count=count + 1, job_type=job_type,
-        # Preserve affinity across a model-mismatch bounce, else a preferred
-        # worker loses its claim the moment a mismatched worker touches the job.
-        preferred_worker=job.get("preferred_worker", ""),
-        hard_target_worker=job.get("hard_target_worker", ""),
-        affinity_passes=job.get("affinity_passes", 0),
-        progress_token=job.get("progress_token", ""),
-    )
-    return True
+    status, _ = await _handoff(job, "mismatch")
+    return status != "closed"
 
 
 async def bounce_for_affinity(job: dict) -> bool:
@@ -194,29 +267,8 @@ async def bounce_for_affinity(job: dict) -> bool:
     Returns True if bounced, False if the bounce limit was hit (caller should
     run the job locally rather than stall it — affinity is a preference).
     """
-    r = get_redis()
-    job_type = job.get("job_type", "text")
-    passes = job.get("affinity_passes", 0)
-
-    # Ack the current delivery either way so it leaves this worker's PEL.
-    await r.xack(job.get("stream", _stream_for(job_type)), CONSUMER_GROUP, job["stream_id"])
-
-    if passes >= MAX_AFFINITY_BOUNCE:
-        logger.info(
-            f"Job {job['job_id']} hit affinity bounce limit ({MAX_AFFINITY_BOUNCE}) "
-            f"for preferred '{job.get('preferred_worker')}' — running on available worker."
-        )
-        return False
-
-    await submit_job(
-        job["job_id"], job["payload"], job["models"],
-        requeue_count=job.get("requeue_count", 0), job_type=job_type,
-        preferred_worker=job.get("preferred_worker", ""),
-        hard_target_worker=job.get("hard_target_worker", ""),
-        affinity_passes=passes + 1,
-        progress_token=job.get("progress_token", ""),
-    )
-    return True
+    status, _ = await _handoff(job, "affinity", MAX_AFFINITY_BOUNCE)
+    return status != "run"
 
 
 async def ack_job(message_id: str, stream: str = STREAM_KEY):
@@ -273,8 +325,10 @@ async def requeue_job(
     max_attempts: int = MAX_REQUEUE,
 ):
     """Requeue a failed job back into the stream, carrying + capping the retry
-    count. Returns the new stream id, or None if the job has hit `max_attempts`
-    and must be dead-lettered.
+    count. Returns a truthy delivery handle (new, or already superseded), or
+    None if this invocation closed the job at `max_attempts`. Original Redis
+    fields are authoritative; payload/metadata arguments remain for caller
+    compatibility but cannot replace the original admitted job on retry.
 
     Without a cap a "poison" job (one that fails on every attempt — e.g. a
     request the backend can't serve, or a transient that recurs) loops forever:
@@ -282,29 +336,12 @@ async def requeue_job(
     touches it (the 2026-06-16 gpt-oss "0 tokens" eviction cascade). Capping it
     turns an infinite loop into a clean per-client failure. Callers that have
     stronger evidence of a poison job use a tighter limit than MAX_REQUEUE."""
-    r = get_redis()
-    if stream_id:
-        await r.xack(stream or _stream_for(job_type), CONSUMER_GROUP, stream_id)
-    # Self-contained retry counter keyed by job_id — works regardless of whether
-    # the caller threads requeue_count, so a poison job is capped even on the
-    # failure path. Cleared by TTL (and the job_id is unique per request).
-    attempts = await r.incr(f"grid:requeue:{job_id}")
-    await r.expire(f"grid:requeue:{job_id}", 600)
-    if attempts > max_attempts:
-        logger.error(
-            f"Job {job_id} hit its requeue limit ({max_attempts}) after repeated failures "
-            f"— dead-lettering instead of requeuing"
-        )
-        return None
-    new_id = await submit_job(
-        job_id, payload, models,
-        requeue_count=requeue_count + 1, job_type=job_type,
-        preferred_worker=preferred_worker,
-        hard_target_worker=hard_target_worker,
-        affinity_passes=affinity_passes,
+    status, delivery = await _handoff(
+        {"job_id": job_id, "stream_id": stream_id, "stream": stream, "job_type": job_type},
+        "failure",
+        max_attempts,
     )
-    logger.info(f"Requeued job {job_id} as {new_id} (attempt {attempts}/{max_attempts})")
-    return new_id
+    return None if status == "closed" else delivery
 
 
 async def claim_stale_jobs() -> int:
@@ -320,28 +357,23 @@ async def claim_stale_jobs() -> int:
         # XAUTOCLAIM: grab pending messages older than STALE_JOB_MS
         try:
             result = await r.xautoclaim(
-                stream, CONSUMER_GROUP, "reclaimer", min_idle_time=_stale_ms_for(stream), start_id="0-0", count=10,
+                stream,
+                CONSUMER_GROUP,
+                "reclaimer",
+                min_idle_time=_stale_ms_for(stream),
+                start_id="0-0",
+                count=10,
             )
             # result = (next_start_id, [(msg_id, fields), ...], [deleted_ids])
             if not result or not result[1]:
                 continue
 
             for msg_id, fields in result[1]:
-                job_id = fields.get("job_id", "unknown")
-                logger.warning(f"Reclaiming stale job {job_id} (msg {msg_id}) from {stream}")
-                # Ack the old message and requeue
-                await r.xack(stream, CONSUMER_GROUP, msg_id)
-                await submit_job(
-                    job_id,
-                    json.loads(fields.get("payload", "{}")),
-                    json.loads(fields.get("models", "[]")),
-                    job_type=fields.get("job_type", "text"),
-                    preferred_worker=fields.get("preferred_worker", ""),
-                    hard_target_worker=fields.get("hard_target_worker", ""),
-                    affinity_passes=int(fields.get("affinity_passes", 0)),
-                    progress_token=fields.get("progress_token", ""),
+                status, _ = await _handoff(
+                    {"job_id": fields["job_id"], "stream_id": msg_id, "stream": stream, "worker_id": "reclaimer"},
+                    "stale",
                 )
-                reclaimed += 1
+                reclaimed += status == "requeued"
         except Exception as e:
-            logger.error(f"Error claiming stale jobs from {stream}: {e}")
+            logger.error("Error claiming stale jobs (%s)", error_type(e))
     return reclaimed

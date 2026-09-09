@@ -7,6 +7,32 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Atomic queue recovery candidate (2026-09-09)
+
+- Found and reproduced an acknowledgement-before-append gap in mismatch,
+  affinity, generation-failure and stale-recovery paths. Real Redis append
+  errors removed the original pending claim in all four paths. Concurrent
+  retry callers also duplicated work, and duplicate generation retries could
+  incorrectly tell a caller to refund an already-requeued job.
+- The candidate moves each handoff into a pending-checked Lua operation with
+  append before acknowledgement. Repeat handoffs are nonterminal no-ops.
+  Affinity exhaustion retains the running claim; original progress/targeting
+  fields and message-carried retry budgets survive retries and stale recovery.
+  Existing legacy generation counters are honored during upgrade.
+- Local focused result: 45 passed, including 38 real disposable-Redis cases.
+  Sixteen cases kill a real child running Core queue code immediately before
+  handoff or after Redis completes it but before the caller gets its result.
+  Recovery exposes one executable job on both text and media streams. Initial
+  red run reproduced 15 failures against the unmodified implementation.
+- This is not a full Uvicorn/worker/PostgreSQL restart or Redis-server crash
+  proof. It does not make GPU execution exactly once or close stream retention
+  under overload. Production deployment and end-to-end rollout remain separate
+  gates; no production flags, holds, balances, payments or timers changed here.
+- PR/main CI explicitly installs Redis so these proofs cannot silently skip
+  because the executable is absent. Do not deploy a mixed-version fleet and
+  assume old retry code honors the new handoff; confirm all Core processes
+  run the reviewed candidate before relying on it.
+
 ## Worker failure and Console recovery evidence (2026-09-09)
 
 - New PostgreSQL-backed worker tests exercise the actual registration/dispatch
