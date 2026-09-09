@@ -7,6 +7,8 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Ownership
 
+- `WORKER_PAYOUT_FREEZE_2026_09_09.md` - prospective hourly allocation candidate,
+  PostgreSQL proof, migration and rollback gates. Not payout activation evidence.
 - `bootstrap.sh` - fresh-host bootstrap pinned to an operator-supplied full
   commit SHA. Installs only the Grid API, PostgreSQL, Redis, and Nginx.
 - `env.template` - `/etc/aipg/grid.env` source of production env names.
@@ -49,7 +51,20 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
-- Production selected immutable `94be0cc1` / Alembic `0040` for atomic queue
+- Production selected immutable `3ab6d933` / Alembic `0041` at
+  `2026-09-09T22:44:38Z`, including the frozen payout and screening fixes.
+  Restored-production migration, drained restart, six-process configuration
+  and existing canary/global balance reconciliation passed. The plan table is
+  empty and historical payout fingerprints are unchanged. Keep charging
+  allowlisted, payout service/timer stopped, exact admission/cutoff/settings
+  preserved. This is not global activation or a supervised payout proof.
+- The frozen worker-payout code requires Alembic `0041` before any sender.
+  It adds empty hourly plans, never adopts historical obligations, and does not
+  authorize a timer restart. If this code is rolled back, keep payouts paused:
+  an older sender can recompute amounts or retry excluded historical rows.
+  API rollback may retain the additive table. Never downgrade nonempty plans.
+
+- The previous release selected immutable `94be0cc1` / Alembic `0040` for atomic queue
   retry recovery at `2026-09-09T20:03:49Z`. Fresh restore, drained restart,
   six-process configuration, funded text and six-route empty-service canaries
   passed without changing the cohort or payout timers. Preserve the existing
@@ -59,9 +74,8 @@ executes an immutable release selected through `/home/aipg/current`.
   and alert transport delivery; these do not count as elapsed observation or
   authorize a new runtime deployment.
   The subsequent consumer review verifies Chat's canonical image provider and
-  current-load payout query timings. Sender screening/hash-retention fixes
-  remain separate from unresolved period-allocation/overlap and historical
-  retry gates; no payout restart follows from that review.
+  current-load payout query timings. Those older observations do not replace
+  the frozen-period deployment evidence above or authorize a payout restart.
 
 - Media-result recovery requires Alembic `0040` before the candidate starts.
   Verify backup/restore and schema parity with the exact release. Ordinary
