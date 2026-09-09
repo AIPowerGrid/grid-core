@@ -38,7 +38,7 @@ class GridSettings(BaseSettings):
     grid_api_port: int = 7002
 
     # Explicit JSON allowlist for new public inference. [] closes every path.
-    # Existing holds still finalize; omission preserves the pre-rollout surface.
+    # Existing holds still finalize; omission is permitted only before global charging.
     generation_enabled_paths: frozenset[GenerationPath] = frozenset(get_args(GenerationPath))
 
     # Exact direct-service IDs only; never delegated users. Empty is dark.
