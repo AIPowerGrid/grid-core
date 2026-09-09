@@ -8,6 +8,12 @@ from fastapi import HTTPException
 from ..config import get_settings
 
 
+def validate_rollout(charging_mode: str) -> None:
+    """Global paid activation must deliberately select its verified surface."""
+    if charging_mode == "on" and "generation_enabled_paths" not in get_settings().model_fields_set:
+        raise RuntimeError("Global charging requires explicit GENERATION_ENABLED_PATHS; [] closes all paths")
+
+
 def require_path(path: str) -> None:
     if path not in get_settings().generation_enabled_paths:
         raise HTTPException(status_code=503, detail="This generation path is temporarily unavailable.")

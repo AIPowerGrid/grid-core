@@ -20,6 +20,10 @@ content sanitization, and reward settlement.
   them. Source-image, image-batch, and video-timeline capabilities additionally
   require their base image/video path. This is not a pricing or reward exemption;
   internal validator/setup probes retain their separate non-economic contracts.
+  `validate_rollout` rejects global charging with an omitted admission list
+  before startup touches dependencies. Dark/allowlisted deployment can retain
+  defaults; an explicit empty list is a valid closed rollout. This guard forces
+  selection, not a claim that the selected paths have been verified.
 - **Economy:** `credits.py` (reserve/settle lifecycle; draws promotional, then
   daily free, then purchased value), `promotions.py` (durable budgeted grants,
   gated on `GRID_PROMO_SPENDABLE_LIVE` plus exact campaign IDs in

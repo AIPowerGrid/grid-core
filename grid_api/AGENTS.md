@@ -58,7 +58,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - `generation_enabled_paths` is a typed JSON allowlist for new public inference,
   independent of billing mode, key kind, or account cohort. Unknown values reject
   configuration; an empty list closes all paths. Omission preserves current
-  admission for dark deployment. It never disables settlement of existing holds.
+  admission for dark/allowlisted deployment only. Global charging (including
+  the legacy boolean fallback) requires an explicitly supplied list at startup,
+  before dependencies or background tasks start. It never disables settlement
+  of existing holds. Explicit selection is not evidence that canaries passed.
 - Startup validates the charging mode before starting dependencies or loops.
   Invalid explicit configuration must not fall back to free inference.
   Typed `grid_charging_all_model_services` selects only bounded direct-service
