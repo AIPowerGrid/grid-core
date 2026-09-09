@@ -4,6 +4,7 @@
 """Runtime policy validation must not rely on service provisioning history."""
 
 from uuid import uuid4
+from types import SimpleNamespace
 
 import pytest
 
@@ -110,6 +111,12 @@ async def test_valid_direct_service_reserves_daily_budget(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("charging_mode", ["on", "allowlist"])
+@pytest.mark.parametrize("limits", [
+    None, {}, [], "invalid", {"per_request_micro": 1, "daily_micro": 0},
+    {"per_request_micro": True, "daily_micro": 100},
+    {"per_request_micro": 101, "daily_micro": 100},
+])
 @pytest.mark.parametrize(
     "modality,model",
     [
@@ -121,9 +128,15 @@ async def test_valid_direct_service_reserves_daily_budget(monkeypatch):
     ],
 )
 async def test_global_charging_rejects_unbounded_service_before_credit_movement(
-    monkeypatch, modality, model,
+    monkeypatch, modality, model, charging_mode, limits,
 ):
-    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "on")
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", charging_mode)
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_ACCOUNTS", frozenset())
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_SERVICES", frozenset())
+    monkeypatch.setattr(credits, "CHARGING_ALLOW_MODELS", frozenset({"other-model"}))
+    monkeypatch.setattr(credits, "get_settings", lambda: SimpleNamespace(
+        grid_charging_all_model_services=["legacy-unbounded"],
+    ))
 
     async def no_discount(*args, **kwargs):
         return 0
@@ -144,7 +157,7 @@ async def test_global_charging_rejects_unbounded_service_before_credit_movement(
         "account_id": uuid4(),
         "key_kind": "service",
         "service_id": "legacy-unbounded",
-        "service_limits": {},
+        "service_limits": limits,
         "scopes": ["inference.submit", "inference.service_submit"],
     }
     if modality == "text":
