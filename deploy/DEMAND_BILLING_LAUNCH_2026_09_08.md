@@ -7,6 +7,43 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Core process crash proof (2026-09-09, local)
+
+`grid_api/routers/tests/test_core_process_crash.py` adds 27 real Core-process
+crash/restart cases. The combined process, worker-failure and Redis-handoff
+suite passed **115 tests** against isolated PostgreSQL 16.15 and Redis 8.10.0
+on the maintainer machine. Required PR/main CI supplies PostgreSQL 16 and Redis
+with the production Python 3.12 dependency lock; local Python 3.13 results do
+not replace that gate.
+
+- Each case starts the actual Uvicorn app, authenticates scoped user and worker
+  keys, submits HTTP work and drives the worker WebSocket. It SIGKILLs Core
+  after the durable reserve, after worker dispatch, or after the atomic terminal
+  commit but before success delivery/queue acknowledgment.
+- Restart retains the same disposable PostgreSQL database and Redis instance.
+  Core's actual startup reclaimer/sweeper must recover the job or refund the
+  orphan. Independent connections assert ledger/balance parity, original job
+  identity, exactly one charge/reward, and zero reward on duplicate completion.
+- Chat, Responses and Anthropic each cover streaming and non-streaming. Image,
+  video and audio cover exact-cost settlement and authenticated result recovery
+  by job ID and the frontend's original request reference. Audio registration
+  and completion use ephemeral real signatures, not an identity bypass.
+- A second restart and completed sweep must leave all monetary rows unchanged.
+  Storage presigns/presence and generated media/text are fixtures; no GPU or R2
+  is contacted. Recovery clocks are shortened. This does not establish Redis
+  or PostgreSQL server-crash durability, multi-host failover, output quality,
+  external OAuth behavior, or elapsed production observation.
+
+This is tests/documentation only. Production remains `94be0cc1`, charging
+allowlisted and payouts paused. It requires no production restart. Earlier
+sections describing component-only crash evidence are historical snapshots.
+
+An independently labeled operational alert canary was also delivered through
+production's real Redis-backed alert queue and accepted by Discord (HTTP
+200/204). The private `alert-delivery.json` beside the release evidence records
+the check. This proves transport delivery, not human acknowledgment or an
+injected monetary fault; operational response remains open.
+
 ## Atomic queue recovery deployed (2026-09-09, 20:03 UTC)
 
 - Core PR167 merged as `94be0cc128d7b2f5a62981549a70cece7eeab8d6`.
@@ -1130,8 +1167,10 @@ The reviewed deployment above supersedes the initial local-only posture.
 - [x] Prove actual worker-handler failures/timeouts on PostgreSQL for all six
       formats, and Redis retry/duplicate/process-kill boundaries; PR166/167.
       These are controlled component tests, not a live GPU outage experiment.
-- [ ] Complete end-to-end Core crash recovery and the runbook's 24-hour
-      allowlist observation before global expansion.
+- [x] Prove Core SIGKILL/restart against actual PostgreSQL/Redis with HTTP and
+      worker WebSockets; 27 cases with synthetic worker output/storage.
+- [ ] Complete the runbook's 24-hour allowlist observation before global
+      expansion. Local accelerated-clock tests do not satisfy this window.
 - [x] Retry the real funding receipt twice without another transfer or credit.
 - [x] Verify funding retry persists receipt without another transfer (required
       Console browser fixtures, deployed UI and separate live duplicate claim).
