@@ -7,6 +7,47 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Legacy consumer activation review (2026-09-09, 22:36 UTC)
+
+A read-only production transaction, with a five-second statement timeout,
+inventoried active, unexpired stored keys without selecting credentials,
+hashes, account IDs, wallet addresses or labels. Counts describe keys, not
+people or independent operators:
+
+| Kind | Scope source | Inference policy | Keys |
+| --- | --- | --- | ---: |
+| Ordinary | Explicit | Canonical account | 73 |
+| Ordinary | Explicit | No inference scope | 22 |
+| Ordinary | Legacy defaults | Canonical account | 35 |
+| Session | Legacy defaults | Canonical account | 30 |
+| Service | Explicit | Delegation required | 4 |
+| Service | Explicit | Bounded direct service | 4 |
+| Service | Explicit | No inference scope | 1 |
+
+Total: 169 keys; 73 used in the preceding seven days. No malformed scope rows
+or active keys belonging to inactive service clients were found. One ordinary
+inference credential resolves to an account with a request-quota exemption.
+That exemption is not a purchased-credit exemption.
+
+The new `test_consumer_activation.py` adds 27 PostgreSQL cases. Persisted
+legacy-empty-scope, session and explicit inference keys pass real key lookup,
+then durable text/image/video/audio authorization. With global mode selected,
+an unmatched account/service/model allowlist and legacy `CHARGING_ENABLED=0`
+cannot produce dry-run behavior. Funded quota-exempt accounts get a durable
+debit/hold; empty accounts reject without a hold or reward. A repeated terminal
+release creates exactly one full refund. Non-inference scoped keys return 403.
+The combined consumer/native identity/service-policy/free/promo/mode suite
+passed 176 tests locally, including these 27 on PostgreSQL 16.15. Free/promo
+availability and holder discounts in the new matrix are zero fixtures; HTTP
+dispatch, provider proofs, GPU output and concurrency are not exercised here.
+
+Legacy key ownership and revocation review remains separate housekeeping.
+Do not revoke unknown credentials en masse or treat them as an exception to
+global charging. This inventory does not prove which third-party app owns a
+key, and does not prove live global enforcement while production is allowlisted.
+No production keys, flags, balances, payouts or runtime were changed by this
+review. The required same-cohort observation and global activation remain open.
+
 ## Consumer and payout review (2026-09-09, 21:56 UTC)
 
 - Fresh Chat container inspection confirms API/background/web release
