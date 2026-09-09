@@ -96,6 +96,12 @@ executes an immutable release selected through `/home/aipg/current`.
 - `GRID_CHARGING_ALL_MODEL_SERVICES` is a JSON array of exact capped direct
   service IDs, empty by default. Use this for sponsored auto-model demos without
   expanding the user/model charging cohort. `GRID_CHARGING_MODE=off` still wins.
+  Revalidate every current direct key's active service, canonical account, caps
+  and spendable balance before a cohort expansion. Zero balance must reject;
+  do not synthesize purchased credit. After restart, wait for each tested
+  modality's workers, not merely healthy Redis, before a live rejection canary.
+  Verify the authenticated credit summary says all models are charged before
+  attempting an unfunded generation, and revoke any temporary test key.
 - Promotional spending requires both the global emergency gate and a non-empty
   exact `GRID_PROMO_SPENDABLE_CAMPAIGNS` allowlist. Never use or emulate a
   wildcard; enable reviewed builder cohorts independently of welcome grants.
