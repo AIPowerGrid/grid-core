@@ -34,6 +34,7 @@ from ..redis_client import get_redis
 from ..services import accounts as accounts_svc
 from ..services import (
     audio,
+    chat_output,
     credits,
     job_queue,
     route_events,
@@ -989,12 +990,14 @@ async def worker_websocket(ws: WebSocket):
                 requested_max = int(job["payload"].get("max_length", 512) or 512)
                 # Real tokenizer (tiktoken) server-side — worker-independent and
                 # far more accurate than word-splitting (which undercounts ~25%).
-                # Count BOTH content and reasoning_content: reasoning tokens are
+                # Count content, reasoning_content, and assembled tool functions:
+                # tool-only answers are real output, not free inference.
+                # Reasoning tokens are
                 # real generated work (the model spends most of its decode time on
                 # them), so excluding them collapsed t/s for reasoning models to
                 # ~2-3 and under-rewarded their den. Matches OpenAI (reasoning =
                 # output tokens).
-                server_token_count = count_tokens(full_text) + count_tokens(gen.get("full_reasoning") or "")
+                server_token_count = chat_output.completion_tokens(full_text, gen.get("full_reasoning") or "", gen.get("tool_calls"))
                 effective_tokens = min(server_token_count, token_count or server_token_count, requested_max)
 
                 # 2) Context: the prompt is user-controlled and the context
@@ -1029,7 +1032,7 @@ async def worker_websocket(ws: WebSocket):
                 # on the reservation's held→settled flip; no-op for jobs with no
                 # reservation (dry-run / legacy).
                 bill_completion = min(server_token_count, requested_max)
-                result_hash = ledger_svc.content_hash(full_text)
+                result_hash = chat_output.result_hash(full_text, gen.get("full_reasoning") or "", gen.get("tool_calls"))
                 payout_wallet = worker_info.get("wallet_address", "")
                 # OPTIONAL "signed" tier: store the worker's signature ONLY if it
                 # verifies to the payout wallet over this exact output commitment.
@@ -2062,18 +2065,7 @@ def _merge_tool_call_deltas(acc: dict, deltas: list):
     has complete, parseable tool calls (the stream itself still relays each raw
     fragment to the client — this is only for the collected/DONE view + hashing).
     """
-    for tc in deltas or []:
-        idx = tc.get("index", 0)
-        slot = acc.setdefault(idx, {"index": idx, "id": None, "type": "function", "function": {"name": "", "arguments": ""}})
-        if tc.get("id"):
-            slot["id"] = tc["id"]
-        if tc.get("type"):
-            slot["type"] = tc["type"]
-        fn = tc.get("function") or {}
-        if fn.get("name"):
-            slot["function"]["name"] += fn["name"]
-        if fn.get("arguments"):
-            slot["function"]["arguments"] += fn["arguments"]
+    chat_output.merge_tool_call_deltas(acc, deltas)
 
 
 # record_and_settle outcomes that mean a PAID success (publish DONE, pay den).
@@ -2231,14 +2223,11 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
             # legitimate terminal — settle it as a partial success, never a worker
             # failure (no strike, no requeue).
             was_cancelled = bool(msg.get("cancelled"))
-            # Use the worker's final full_text ONLY when it's non-empty. A worker
-            # that streamed deltas but sends an empty full_text in `done` must not
-            # wipe the grid-witnessed stream we accumulated (that's what produced
-            # the misleading sha256("") result hashes). Non-streaming workers send
-            # the whole output here (truthy → used); partial/cancelled output stays
-            # whatever we actually relayed.
-            full_text = msg.get("full_text") or full_text
-            full_reasoning = msg.get("full_reasoning") or full_reasoning
+            # Once output was streamed, the terminal self-report cannot replace
+            # the bytes witnessed by Core (including an empty visible channel).
+            if token_count == 0:
+                full_text = msg.get("full_text") or full_text
+                full_reasoning = msg.get("full_reasoning") or full_reasoning
             usage = msg.get("usage") or usage
             # OPTIONAL worker signature over the output commitment (Part B). Just
             # carried here; verified against the payout wallet at settle time.
