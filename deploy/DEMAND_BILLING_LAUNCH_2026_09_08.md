@@ -7,6 +7,49 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Direct services now charged (2026-09-09, 16:09 UTC)
+
+- The current four direct-service principals are now selected in
+  `GRID_CHARGING_ALL_MODEL_SERVICES`: `aigarth`, `aipg-music-local`,
+  `codebase-design`, and `website-homepage-demo`. All retain their existing
+  positive request/day caps. Missing funds reject; this is not a credit grant,
+  a price change, or permission for unlimited sponsored inference.
+- The configuration preview revalidated active direct keys, matching canonical
+  service accounts and valid caps against read-only PostgreSQL. Exactly one
+  environment setting changed under the deployment locks, with a pre-change
+  digest check and preserved permissions/ownership. The owner/delegated-user
+  cohort, model list, promotional settings, daily-free gate, and reward cutoff
+  were not expanded. The core release remains `ad5a1257` / Alembic `0040`.
+- The first attempt proved image/video 402 rejection, but audio returned 503
+  during worker reconnection after restart. The guard rolled configuration back
+  and retained the ingress gate for inspection. After confirming rollback and
+  healthy workers, normal ingress was restored. The temporary test key was
+  revoked. Preserve the failed attempt under
+  `/var/lib/aipg-backup/direct-services-20260909/`; it is not passing proof.
+- The second attempt added an explicit required-model readiness wait before
+  issuing its short-lived canary key. It passed a fresh backup/restore proof
+  and queue drain, then activated at `16:09:57Z`. All six inspected supervisor
+  and child processes use the exact four-service cohort and allowlisted mode.
+  Private evidence and operator scripts are retained under
+  `/var/lib/aipg-backup/direct-services-20260909-r2/`.
+- An additional two-minute, inference/account-read-only service key tested the
+  existing zero-balance service through the live Core HTTP API on loopback
+  while public generation ingress was gated. Text, image, video, and audio each
+  returned 402. Neither Redis job stream's last-generated ID advanced; the
+  service's reservation and credit-ledger counts and purchased balance remained
+  unchanged. The key was revoked and a subsequent authenticated read returned
+  401. Existing service keys were neither rotated nor revoked. Test spend: zero.
+- Public ingress is restored and health reports healthy Redis and the exact
+  unchanged Core release. Worker payout service and timer remain inactive.
+  This check does not establish positive funding for the empty service, a
+  paid service-generation canary, passthrough rejection coverage, or public
+  all-account charging. New direct services must not be assumed charged merely
+  because these four are in the cohort.
+
+The prior direct-service exposure gate is closed for the current inventory.
+Global user charging, the prospective paid-only reward boundary, remaining
+identity/failure and modality canaries, and payout reconciliation remain open.
+
 ## Service-cohort hardening and Director evidence (2026-09-09)
 
 - Core PR #158 merged as `275cda22275cc12e9983a033710abc875c72473d` after
