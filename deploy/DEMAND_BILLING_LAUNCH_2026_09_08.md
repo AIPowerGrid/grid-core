@@ -7,6 +7,12 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+The follow-up frozen-period sender is now implemented and locally tested;
+see [the candidate record](WORKER_PAYOUT_FREEZE_2026_09_09.md). It requires
+`0041` and separate reviewed deployment/reconciliation. Earlier notes below
+about broad retry selection and reaggregation describe the deployed/previous
+sender, not the candidate. Payout resumption remains unchecked.
+
 ## Consumer and payout review (2026-09-09, 21:56 UTC)
 
 - Fresh Chat container inspection confirms API/background/web release

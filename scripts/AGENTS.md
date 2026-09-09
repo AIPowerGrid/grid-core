@@ -107,6 +107,10 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   run, edit, or repoint it casually. Preserve UTC period boundaries, the
   caller-injected environment, payout idempotency, receipt verification, and
   the retry step.
+  The wrapper captures the clock once, deriving start/end/id from that same
+  UTC hour. Updated Core caps and freezes that period before any broadcast;
+  retries consume only verified prospective plans, never unreviewed legacy
+  rows. The wrapper must stay paired with `0041` and the frozen-period sender.
 - Systemd owns `/etc/aipg/grid.env`; do not source that file from the shell
   wrapper or print its values.
 - The payout wrapper resolves Python from its own immutable release directory;

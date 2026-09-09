@@ -21,6 +21,11 @@ Merkle claims on Base.
 ## Ownership
 
 **Live custodial rail:**
+- `payout_periods.py` freezes each closed, post-cutoff UTC hour once, together
+  with every allocation, before any signing/broadcast. The reviewed hourly cap
+  bounds `--budget`; the canonical hour ID and unique hour slot reject aliases
+  and overlapping/custom windows. Replays verify the commitment and stored rows,
+  never recompute weights or adopt late arrivals. An empty hour is frozen too.
 - `payouts.py` - custodial CLI/timer: fixed AIPG budget pro-rata by den,
   nonce-bound, Transfer-proven, idempotent per (period, account). **Every send
   is OFAC-gated** (`sanctions.screen` before funds move). Its fresh-nonce
@@ -35,6 +40,12 @@ Merkle claims on Base.
   cannot cancel a transaction already in the mempool. Unexpected broadcast
   failures retain the signed transaction hash, never replace it with RPC error
   text. Tests use simulated chain outcomes and actual PostgreSQL persistence.
+  Sender entrypoints themselves hold the shared treasury transaction advisory
+  lock, not just the CLI. Amount, DEN, non-null recipient and nonce cannot be
+  rewritten after recording. Walletless prospective accrual can bind its first
+  current account wallet once; pending rows with no nonce survive failure
+  before signing/broadcasting. No new public payout status is introduced.
+  Transfer units use Decimal arithmetic, and the RPC must identify Base.
 - `sanctions.py` - OFAC screening: local denylist (`GRID_SANCTIONS_DENYLIST`,
   authoritative, zero-I/O) + optional Chainalysis oracle
   (`GRID_SANCTIONS_ORACLE`). FAIL-CLOSED: hit → `blocked_sanctions`;
@@ -123,13 +134,14 @@ Merkle claims on Base.
   preview/send, including empty or zero-budget inputs. Valid historical
   arithmetic and the prospective cap are unchanged; this is input validation,
   not a new emission rate or authorization to resume payouts.
-- Payout resumption still requires immutable period allocations and overlap
-  review. `send_period` currently recomputes allocations on rerun; a partially
-  sent period plus late ledger arrivals can exceed its original budget across
-  recipients. Existing pending intent can also differ from recomputed amount
-  or current wallet. Do not use reruns to reprice or redirect bound payments.
-  Historical accrued/retry selection remains broad and is not authorization
-  to settle excluded historical obligations.
+- Migration `0041` and reviewed frozen-period code must precede sender
+  resumption. New plans require an unchanged paid-only cutoff and a closed
+  whole UTC hour after it, capped by `PAYOUT_HOURLY_BUDGET` (208.33 default).
+  A changed budget, minimum, cap policy, token or cutoff cannot reprice a plan;
+  conflicts fail closed. Automatic accrued/retry selectors only consume rows
+  with a verified plan. Historical rows remain owed/reviewable but untouched,
+  and need a separate reconciled backpay procedure. Do not restart an old
+  sender after plans exist: its recomputation bypasses these contracts.
 - Merkle leaf and proof formats are wire contracts with on-chain claim logic.
   Any format change must update tests and known vectors.
 - A settlement run must be idempotent: repeated runs must not double-report,
@@ -151,6 +163,13 @@ Merkle claims on Base.
 
 ## Verification
 
+- PostgreSQL: set disposable `PAYOUTS_TEST_DB_URL` and `CREDITS_TEST_DB_URL`,
+  then run settlement tests plus multiasset/revenue/sanctions service tests.
+  Frozen-period coverage includes late-arrival overpayment, recipient changes,
+  atomic rollback, concurrent plan creation and all imported sender locks,
+  legacy exclusion, wallet-later accrual and nonempty downgrade refusal.
+  The hourly wrapper test copies it and substitutes a recorder for Python;
+  no test executes the actual timer against a treasury.
 - `pytest grid_api/services/settlement/tests/` (Merkle/IPFS).
 - `pytest grid_api/services/tests/test_revenue.py test_multiasset.py test_sanctions.py`
   (pass-through engine, sender routing + proofs, OFAC gate).
