@@ -106,7 +106,7 @@ async def canonical_account_id(account_id, *, session=None) -> UUID:
             await session.close()
 
 
-async def account_family_ids(account_id, *, session=None) -> set[UUID]:
+async def account_family_ids(account_id, *, session=None, max_members: int | None = None) -> set[UUID]:
     """Return the canonical account and every retired alias beneath it."""
     owns_session = session is None
     if owns_session:
@@ -116,20 +116,40 @@ async def account_family_ids(account_id, *, session=None) -> set[UUID]:
         family = {canonical}
         frontier = {canonical}
         for _ in range(16):
-            rows = (await session.execute(
-                sa.select(account_aliases.c.source_account_id).where(
-                    account_aliases.c.canonical_account_id.in_(frontier)
-                )
-            )).scalars().all()
+            query = sa.select(account_aliases.c.source_account_id).where(
+                account_aliases.c.canonical_account_id.in_(frontier)
+            )
+            if max_members is not None:
+                query = query.limit(max_members + 1)
+            rows = (await session.execute(query)).scalars().all()
             discovered = {_uuid(row) for row in rows} - family
             if not discovered:
                 return family
             family.update(discovered)
+            if max_members is not None and len(family) > max_members:
+                raise RuntimeError("account alias family exceeds member limit")
             frontier = discovered
         raise RuntimeError("account alias family exceeds safety limit")
     finally:
         if owns_session:
             await session.close()
+
+
+async def account_ownership(account_id) -> dict:
+    """Read proved historical owners; never infer ownership from login hints."""
+    async with await new_session() as session:
+        canonical = await canonical_account_id(account_id, session=session)
+        if await session.scalar(sa.select(accounts.c.id).where(accounts.c.id == canonical)) is None:
+            raise RuntimeError("canonical account is missing")
+        family = await account_family_ids(canonical, session=session, max_members=128)
+        # A concurrent merge may change the root during this read. Retry through
+        # authentication instead of returning an internally inconsistent handoff.
+        if await canonical_account_id(canonical, session=session) != canonical:
+            raise RuntimeError("account ownership changed during read")
+        return {
+            "account_id": str(canonical),
+            "account_aliases": sorted(str(aid) for aid in family if aid != canonical),
+        }
 
 
 async def _canonical_owners(session, account_ids) -> set[UUID]:

@@ -145,6 +145,34 @@ remain the proof paths for account linking and promotional grants.
 Core additionally binds every `app` subject to the authenticated bridge account,
 preventing subject collisions across partners even when local IDs match.
 
+## Recovery after an account merge
+
+`GET /v1/account/ownership` provides a private, read-only handoff: the
+authenticated canonical `account_id` and sorted `account_aliases` containing
+only IDs retired by Core's recorded merges. It accepts no target account.
+It requires `account.read`; service callers must supply a service-bound
+`X-Grid-User-Token`. Responses are `no-store`, limited to 60 requests/minute,
+and bounded to 128 total family members. Missing authentication returns 401,
+missing scope returns 403, and storage errors, corrupt graphs, oversized
+families or a root changing during the read return a bounded 503, not a partial
+ownership list.
+
+This endpoint does not merge accounts, mint a session, change credits or
+rewrite historical ledger IDs. It is a trusted server response over the
+configured Core connection, not a standalone signed proof. A broker may use
+it to authorize recovery of its own records under a retired owner. It must
+verify the canonical response against its delegated identity and may accept
+an old session ID only if that ID appears in the returned family. Browser
+addresses, email matches and caller-supplied alias lists are not authority.
+
+Gallery integration remains a rollout gate: renew the session after a proved
+handoff, preserve access to original journal records without rewriting charge
+history, migrate browser recovery handles only from server-proven owners, and
+reject ambiguous request-ID collisions rather than selecting an arbitrary job.
+Core forbids merges during active value holds, but already-settled results
+whose HTTP response was lost still need this recovery path. Endpoint tests
+alone are not proof of a deployed cross-frontend merge lifecycle.
+
 ## Credit policy
 
 | Pocket | Default | Reset or expiry | Sybil control | Live gate |
