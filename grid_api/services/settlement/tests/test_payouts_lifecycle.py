@@ -18,6 +18,7 @@ advisory-lock concurrency test (skipped on SQLite — no pg_advisory_lock).
 
 import os
 import uuid
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -26,14 +27,20 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from grid_api import database
-from grid_api.v2.schema import metadata as v2_metadata
 from grid_api.services.settlement import payouts as P
+from grid_api.v2.schema import metadata as v2_metadata
 
 AIPG = P.AIPG_TOKEN_ADDRESS
 WALLET = "0x9da91df1becbab9015fd6ba9e2a2e2d8a90273c1"
 HOT = "0x20A82fD11e4A5fC8d4b5A44083C05e4b28dB53B9"
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 _PG = os.environ.get("PAYOUTS_TEST_DB_URL", "")
+
+
+@pytest.fixture(autouse=True)
+def isolated_screening(monkeypatch):
+    monkeypatch.setattr(P.sanctions, "ORACLE_ADDRESS", "")
+    monkeypatch.delenv("GRID_SANCTIONS_DENYLIST", raising=False)
 
 
 @pytest_asyncio.fixture
@@ -254,6 +261,98 @@ async def test_reconcile_settles_pending_via_nonce(db, monkeypatch):
     assert res["settled"] == 1
     assert eth.broadcasts == []
     assert (await P._row("h1", acct))["status"] == "sent"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entrypoint", ["fresh", "accrued", "pending", "failed"])
+@pytest.mark.parametrize("held", [False, True])
+async def test_every_sender_screens_before_broadcast(db, monkeypatch, entrypoint, held):
+    acct = uuid.uuid4()
+    eth = _FakeEth()
+    screen = AsyncMock(return_value={"sanctioned": not held, "hold": held, "source": "test"})
+    monkeypatch.setattr(P.sanctions, "screen", screen)
+    monkeypatch.setattr(P, "_ctx", lambda: _ctx(eth))
+    monkeypatch.setattr(P, "BASE_RPC_URL", "test")
+    monkeypatch.setattr(P, "TREASURY_PK", "test")
+
+    def unexpected_sign(*args, **kwargs):
+        raise AssertionError("screened payout must not be signed")
+
+    monkeypatch.setattr(P, "_signed_transfer", unexpected_sign)
+    nonce = 9 if entrypoint in ("pending", "failed") else None
+    tx_hash = str(_hash_for(9)) if nonce is not None else None
+    if entrypoint == "fresh":
+        monkeypatch.setattr(P, "aggregate_den_by_account", AsyncMock(return_value=[
+            {"account_id": str(acct), "den": 1.0, "payout_address": WALLET},
+        ]))
+        await P.send_period(None, None, 1.0, "screen")
+    else:
+        async with await P.new_session() as session:
+            await session.execute(P.accounts_t.insert().values(id=acct, payout_wallet=WALLET))
+            await session.commit()
+        await P._write("screen", acct, address=WALLET, den=1, aipg=1,
+                       status=entrypoint, nonce=nonce, tx_hash=tx_hash)
+        if entrypoint == "accrued":
+            await P.pay_accrued()
+        else:
+            result = await P.reconcile_and_retry()
+            assert result["failed"] == 0
+    screen.assert_awaited_once_with(WALLET)
+    assert eth.broadcasts == []
+    row = await P._row("screen", acct)
+    assert row["status"] == "manual_review"
+    assert row["nonce"] == nonce
+    assert row["tx_hash"] == tx_hash
+
+
+@pytest.mark.asyncio
+async def test_mined_proof_can_be_recorded_without_a_new_screen(db, monkeypatch):
+    acct = uuid.uuid4()
+    eth = _FakeEth()
+    eth.mined = 10
+    eth.receipts[str(_hash_for(9))] = _transfer_receipt(WALLET, 1.0)
+    screen = AsyncMock(side_effect=RuntimeError("screen unavailable"))
+    monkeypatch.setattr(P.sanctions, "screen", screen)
+    await P._write("mined", acct, address=WALLET, den=1, aipg=1,
+                   status="pending", nonce=9, tx_hash=str(_hash_for(9)))
+    result = await P._settle_one(_ctx(eth), period_id="mined", account_id=acct,
+                                 address=WALLET, den=1, aipg=1, stored_nonce=9,
+                                 stored_tx=str(_hash_for(9)))
+    assert result == "sent"
+    screen.assert_not_awaited()
+    assert eth.broadcasts == []
+
+
+@pytest.mark.asyncio
+async def test_unexpected_screen_failure_never_signs(db, monkeypatch):
+    eth = _FakeEth()
+    monkeypatch.setattr(P.sanctions, "screen", AsyncMock(side_effect=RuntimeError("screen unavailable")))
+
+    def unexpected_sign(*args, **kwargs):
+        raise AssertionError("unverified payout must not be signed")
+
+    monkeypatch.setattr(P, "_signed_transfer", unexpected_sign)
+    with pytest.raises(RuntimeError, match="screen unavailable"):
+        await P._settle_one(_ctx(eth), period_id="error", account_id=uuid.uuid4(),
+                            address=WALLET, den=1, aipg=1, stored_nonce=None)
+    assert eth.broadcasts == []
+    assert await P._max_assigned_nonce() == -1
+
+
+@pytest.mark.asyncio
+async def test_uncertain_broadcast_keeps_hash_for_later_proof(db):
+    acct = uuid.uuid4()
+    eth = _FakeEth()
+    eth.send_raises = "RPC response lost after acceptance"
+    args = dict(period_id="uncertain", account_id=acct, address=WALLET, den=1, aipg=1)
+    assert await P._settle_one(_ctx(eth), **args, stored_nonce=None) == "failed"
+    row = await P._row("uncertain", acct)
+    assert row["tx_hash"] == str(_hash_for(0))
+    eth.mined = 1
+    eth.receipts[str(_hash_for(0))] = _transfer_receipt(WALLET, 1.0)
+    assert await P._settle_one(_ctx(eth), **args, stored_nonce=row["nonce"],
+                               stored_tx=row["tx_hash"]) == "sent"
+    assert eth.broadcasts == []
 
 
 # ── 1 (Postgres only). concurrent runners can't both hold the lock ──────────
