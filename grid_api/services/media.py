@@ -334,6 +334,8 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
     expresses soft affinity — the grid prefers that worker but won't stall if it's
     offline or busy."""
     generation_admission.require_media(job_type, payload)
+    if progress_token and (not isinstance(progress_token, str) or len(progress_token) > 128):
+        raise HTTPException(status_code=422, detail="progress_token must be at most 128 characters")
     n = int(payload.get("n", 1) or 1)
     validate_batch_request(
         job_type,
@@ -363,7 +365,8 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
             has_source=bool(payload.get("source_image_url")),
         ) or DEFAULT_VIDEO_SECONDS
     auth = await credits.authorize_media(account_id, model, job_type, n, seconds, job_id,
-                                         record_reservation=True, user=billing_user)
+                                         record_reservation=True, user=billing_user,
+                                         client_ref=progress_token or None)
     if not auth["ok"]:
         raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
     if account_id is not None and concurrency_limit:

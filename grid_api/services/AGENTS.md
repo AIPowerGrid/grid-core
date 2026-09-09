@@ -479,6 +479,20 @@ content sanitization, and reward settlement.
 - Successful image, video, 3D, and audio responses expose the Core-generated
   `grid.job_id`. Consumer applications should retain it as the immutable handle
   joining the generation to the completion and credit ledgers.
+- `media_results.py` validates a private, maximum-64-KiB media result envelope.
+  The ordinary worker terminal persists it in the reservation's held-to-settled
+  transaction, alongside the completion ledger insert. A receipt-write failure
+  commits neither success nor payout. Duplicate/late terminals cannot replace
+  the winner's result. The envelope holds server-issued output URLs/keys and
+  bounded receipt metadata, never prompts, source images or credentials.
+  `media_client_ref` captures the caller's bounded progress token at reserve
+  time. It is correlation only, not dispatch idempotency or authorization.
+  Read-only recovery scopes both selectors to the canonical account family;
+  ambiguous references fail instead of returning an arbitrary job.
+  Unreserved preview/legacy work has no recoverable reservation. Old settled
+  rows without results return `closed_without_result`, not fabricated output
+  or a promise of refund. This does not extend R2 object retention, make
+  Gallery's pending store durable, or authorize automatically resubmitting work.
 - Media storage requires an explicit `R2_TRANSIENT_BUCKET`; missing storage
   configuration fails closed and must never fall back to a repository-embedded
   operational bucket name.

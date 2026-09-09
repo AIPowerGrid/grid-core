@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0039`
+- `versions/` - ordered migration revisions. Current source head: `0040`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -51,8 +51,16 @@ production database match the Grid-owned schema contracts without relying on
   it grants no payment approval and enables no background sender.
   `0039` adds empty bounded operator wallet/node consent requests; no recipient
   is approved and no account wallet is adopted automatically.
+  `0040` adds nullable private media recovery metadata to reservations without
+  changing historical credit, completion, reward, or identity records.
 
 ## Local Contracts
+
+- Apply `0040` before deploying media result recovery: ordinary reservation
+  inserts and terminal UPDATEs reference its columns, including text jobs.
+  Roll back the application while retaining these additive columns; explicit
+  downgrade refuses any existing client correlation or media result. Migration
+  presence is not proof of Gallery recovery or a successful paid canary.
 
 - **Hot-path columns migrate FIRST:** `0009`'s payout-preference columns are
   SELECTed by `resolve_api_key` on every request — deploying code before the
