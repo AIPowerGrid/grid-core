@@ -89,6 +89,9 @@ executes an immutable release selected through `/home/aipg/current`.
   and preserve settlement/recovery and stopped payouts. `GRID_CHARGING_MODE=off`
   alone leaves free generation open. Follow the runbook's closed-generation
   rollback and separate global-activation sequence.
+- The billing runbook's operator-response table assigns action to the sole
+  maintainer. Discord delivery is best-effort, not a durable incident ledger or
+  proof of acknowledgment; pair it with direct read-only reconciliation.
 - Old `GRID_PROBE_*` coordinator sampling variables are retired. Disable the
   old enable flag when deploying so rollback cannot restart the sampler; the
   new release ignores it and cannot dispatch ordinary unreserved canary work. Keep current

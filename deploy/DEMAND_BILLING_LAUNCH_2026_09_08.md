@@ -7,6 +7,47 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Activation handoff (2026-09-09, 23:15 UTC)
+
+PR172 merged as `81403db02b1978d3be8ea735f4148e7dcee6a029` at 23:10 UTC.
+Its exact-head required CI passed 1,890 Grid tests with nine explicit skips,
+plus the separate PostgreSQL/Core/Console/node handoff. Backup/restore through
+Alembic `0041`, schema parity, dependency audit, CodeQL and secret scans passed.
+This tests/docs merge does not need a runtime restart: production remains
+immutable `3ab6d933` / `0041`, allowlisted, with payout senders stopped.
+
+Fresh read-only production reconciliation passed again after the merge candidate
+was tested: all recorded successful/failed canaries and global balances agree,
+configuration and historical payout fingerprints are unchanged, and there are
+no frozen payout plans. No new generation or spending was initiated. The actual
+treasury monitor's read-only check returned `low_eth=false`, `low_token=true`;
+the operator response is to retain stopped senders, not refill automatically.
+
+Signed-in browser inspection shows Console USD 9.7727 and Chat, Art and Music
+USD 9.773, consistent with USD 9.772654 after display rounding. Chat retained
+its session on a fresh page load. The other three were existing signed-in tabs;
+their earlier reload/generation evidence remains distinct. Art shows a USD 0.005
+image quote and funding link; Music shows USD 0.012 for 60 seconds. Matching UI
+numbers supplement the earlier canonical-account/job evidence, not replace it.
+
+The handoff follow-up adds nine synthetic monitor-loop tests for drift, aging,
+failure redaction, independent treasury/reward checks, recovery and cancellation,
+and two exhausted-allowance tests. The combined alert, treasury, reward, billing,
+free/promo, native identity and service-policy suites passed 214 locally. These
+new tests use mocks/SQLite, not production fault injection or new PostgreSQL
+concurrency proof; the prior PostgreSQL evidence remains separate. The runbook
+now assigns concrete responses to the sole maintainer and accurately describes
+the non-durable alert queue. Prior Discord HTTP acceptance proves transport,
+not human acknowledgment.
+
+Remaining activation work is not hidden behind another implementation phase:
+finish the same-cohort observation, reconcile current state, take the fresh
+activation backup, enable global mode with the existing admission/caps/cutoff,
+then perform outside-cohort rejection and bounded funded frontend canaries.
+The conservative 24-hour boundary is `2026-09-10T17:06:56Z`; elapsed time alone
+does not pass it. No cohort expansion, payout restart, deposit, grant or treasury
+refill is authorized by this document update.
+
 ## Prospective payout and shutdown review (2026-09-09, 22:58 UTC)
 
 Read-only production preview on `3ab6d933` covered the five complete UTC hours
@@ -203,7 +244,7 @@ allowlisted and payouts paused. It requires no production restart. Earlier
 sections describing component-only crash evidence are historical snapshots.
 
 An independently labeled operational alert canary was also delivered through
-production's real Redis-backed alert queue and accepted by Discord (HTTP
+production's bounded in-process alert queue with Redis deduplication and accepted by Discord (HTTP
 200/204). The private `alert-delivery.json` beside the release evidence records
 the check. This proves transport delivery, not human acknowledgment or an
 injected monetary fault; operational response remains open.
@@ -1320,14 +1361,22 @@ The reviewed deployment above supersedes the initial local-only posture.
 - [x] Select and verify the immutable prospective cutoff; preserve it on rollback.
 - [x] Review payout query performance at current production load; see 21:56 UTC
       EXPLAIN evidence. This is not a large-fleet load qualification.
-- [ ] Reconcile requested emission budget, no overlapping payout periods, and
-      every payout entrypoint before restarting any sender. No treasury refill.
+- [x] Verify fixed hourly budget/overlap and sender-entrypoint guards: deployed
+      frozen-period contract, 193 local PostgreSQL tests and the 22:58 UTC
+      read-only prospective preview. Reconcile fresh allocations and treasury
+      again before a supervised send; no historical adoption or automatic refill.
 - [x] Verify credits and free/promo ceilings in actual production processes;
       retain the exact builder campaign, not a blanket promotion enablement.
 - [x] Complete request-to-terminal inventory below, including negative tests;
       global runtime activation remains separate from route coverage.
-- [ ] Prove Google-only, wallet-linked, zero-balance, free-exhausted, and capped
-      direct-service cases; same canonical balance across first-party apps.
+- [x] Test Google-only, wallet-linked, zero-balance, free-exhausted, and capped
+      direct-service cases: 43 PG consumer cases, native proof/exchange and
+      free/service suites, including the explicit exhausted-allowance cases.
+      Upstream provider proofs/free storage are fixtures where stated, not
+      live Google-only browser or Redis-failure claims.
+- [x] Verify the live owner's canonical account and balance across all four
+      frontends using retained paid jobs and signed-in UI evidence. This is
+      the linked Google/wallet owner, not a second Google-only live customer.
 - [x] Run funded success canaries on the seven enabled paths, including
       streaming disconnects and multistage Director; reconcile receipts.
 - [x] Prove actual worker-handler failures/timeouts on PostgreSQL for all six
@@ -1340,16 +1389,29 @@ The reviewed deployment above supersedes the initial local-only posture.
 - [x] Retry the real funding receipt twice without another transfer or credit.
 - [x] Verify funding retry persists receipt without another transfer (required
       Console browser fixtures, deployed UI and separate live duplicate claim).
-- [ ] Verify billing/orphan/reward/treasury alerts and operational response.
+- [x] Verify alert decisions, redaction, transport and a documented operator
+      response: monitor tests, real Discord transport acceptance, read-only
+      production reconciliation and treasury warning. No injected production
+      monetary fault or human Discord acknowledgment is claimed.
 - [x] Deploy reviewed Core/Music code with existing configuration preserved.
-- [ ] Verify remaining frontend releases and final activation configuration.
+- [x] Verify reviewed frontend releases and allowlisted balance/charge displays;
+      see dated deployment, paid-job and 23:15 UTC UI evidence.
+- [ ] Apply final global configuration and verify actual processes, outside-
+      cohort no-dispatch rejection, bounded funded canaries and reloaded
+      frontend charging state. Existing allowlisted evidence cannot replace it.
 - [x] Migrate Chat image provider to canonical service credentials only with
       the delegated-image release; verify the charged account and retain a
       protected rollback record. Fresh running-source/provider check passed.
-- [ ] Inventory old-key consumers before revocation.
+- [x] Inventory stored key kinds and inherited billing policy; see the 169-key
+      privacy-safe inventory and global-mode PG legacy-key tests. Individual
+      third-party ownership is still unknown; do not revoke keys en masse.
 - [x] Restrict admission to the seven verified public paths; preserve the list
       on rollback. Global charging remains a separate activation gate.
 - [ ] Resume payouts only after prospective policy reconciliation passes.
+
+Individual legacy-key ownership/revocation is follow-up housekeeping, not an
+exception to global charging or permission to keep an old consumer free. No
+revocation is part of this activation; identify an owner before retiring a key.
 
 ## Entry-point inventory
 

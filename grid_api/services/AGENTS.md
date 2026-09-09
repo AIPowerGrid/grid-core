@@ -713,6 +713,11 @@ content sanitization, and reward settlement.
 
 ## Verification
 
+- `tests/test_billing_monitor.py` exercises the actual background loop with
+  synthetic health and delivery dependencies: drift and aging are distinct,
+  failures are redacted without skipping treasury/reward checks, the next
+  iteration recovers, and cancellation is not an incident. This is not a
+  production fault injection or Discord acknowledgment proof.
 - `tests/test_consumer_activation.py` uses isolated PostgreSQL schemas to pin
   global charging through actual stored legacy-empty-scope/session/scoped key
   authentication and durable text/image/video/audio authorization. Quota-exempt
