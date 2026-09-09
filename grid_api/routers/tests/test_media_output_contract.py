@@ -3,9 +3,35 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from grid_api.routers import worker_ws
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("job_type", ["image", "video"])
+async def test_media_persists_core_recipe_not_worker_claim(monkeypatch, job_type):
+    root = "0x" + "a" * 64
+    socket = AsyncMock()
+    socket.receive_json.return_value = {
+        "type": "done", "recipe_root": "0x" + "b" * 64,
+        "results": [{"index": 0, "sha256": "c" * 64, "seed": 7}],
+    }
+    monkeypatch.setattr(worker_ws.storage, "presign_outputs", lambda *_a, **_k: _slots(1))
+    monkeypatch.setattr(worker_ws.storage, "uploaded_outputs_present", lambda *_a, **_k: True)
+    settle = AsyncMock(return_value="settled")
+    monkeypatch.setattr(worker_ws.credits, "record_and_settle", settle)
+    monkeypatch.setattr(worker_ws.token_stream, "publish_done", AsyncMock())
+    monkeypatch.setattr(worker_ws.signing, "verify_worker_sig", lambda *_a: None)
+    assert await worker_ws._handle_media_job(socket, {
+        "job_id": "recipe-job", "job_type": job_type,
+        "payload": {"n": 1, "recipe_root": root},
+    }, "checkpoint", "worker", {"name": "test"}) is True
+    result = settle.call_args.kwargs["media_result"]
+    assert result["recipe_root"] == root
+    assert result["model"] == "checkpoint"
 
 
 def _slots(count: int) -> list[dict]:

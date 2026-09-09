@@ -31,6 +31,10 @@ transport, accounts, stats, health/metrics.
   enrollment ID plus poll secret; prepare/approve require a recent scoped user
   token and a payout-wallet signature.
 - `worker_ws.py` - `/v1/workers/ws`: registration + dispatch + health/eviction + streaming.
+  Durable media recovery retains Core's dispatched recipe root for image and
+  video as well as audio. Never replace it with the worker's reported root.
+  Audio still requires its existing matching-root echo; image/video retention
+  is routing evidence only and does not add an execution-attestation claim.
   **God-file (~1.1K LOC); split target = registration / dispatch / health / stream.** Highest
   bug history (eviction cascade, idle-redelivery) - change carefully, add tests.
   Assignment-bound image/video probes branch before ordinary media settlement: they
