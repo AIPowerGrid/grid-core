@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0040`
+- `versions/` - ordered migration revisions. Current source head: `0041`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -53,8 +53,14 @@ production database match the Grid-owned schema contracts without relying on
   is approved and no account wallet is adopted automatically.
   `0040` adds nullable private media recovery metadata to reservations without
   changing historical credit, completion, reward, or identity records.
+  `0041` adds empty immutable hourly worker payout plans. It adopts no historical
+  payout row and does not enable any sender or timer.
 
 ## Local Contracts
+
+- Apply `0041` before running the frozen-period worker sender. Retain it on
+  application rollback; downgrade refuses any recorded plan, including an
+  empty allocation for a closed hour. Historical obligations are not backfilled.
 
 - Apply `0040` before deploying media result recovery: ordinary reservation
   inserts and terminal UPDATEs reference its columns, including text jobs.

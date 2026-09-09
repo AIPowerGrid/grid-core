@@ -20,6 +20,13 @@ validator shadow-observation records.
 
 ## Local Contracts
 
+- `grid_payout_periods` is the immutable prospective worker payout plan, added
+  empty by `0041`. One unique integer UTC-hour bucket prevents duplicate hourly
+  budgets; the commitment binds cutoff, Base token, emission cap, minimum and
+  all allocations. The plan and `grid_payouts` allocation rows commit together.
+  Existing payout history receives no plan and is excluded from automatic
+  accrued/retry sending. Never fabricate a plan to authorize historical backpay.
+
 - Alembic `0040` adds nullable private `grid_reservations.media_client_ref`
   and `media_result` plus an account/ref lookup index. Historical rows stay
   SQL NULL; no result is reconstructed from an unverified worker claim.
