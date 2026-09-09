@@ -7,6 +7,47 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Media recovery deployment (2026-09-09, 01:39 UTC)
+
+- Core `4891565001ba18ca2bc4b4cfcdb818aeb7da5aeb` is selected at
+  `/home/aipg/releases/grid-core-48915650`. This includes PR #149's durable
+  media result/settlement and PR #150's private canonical ownership endpoint.
+  Required PR and merged-main CI passed, including PostgreSQL 16 restore,
+  schema parity, tests, and secret/security checks.
+- A fresh `grid-postgres-20260909T013852Z.dump` was checksum-verified and
+  restored into a generated scratch database. The exact candidate upgraded it
+  from `0039` to `0040`; Alembic check found no new upgrade operations. The
+  scratch database was dropped. Production remained `0039` during the proof.
+- Only after that proof did production upgrade to `0040`, pass schema parity,
+  and switch the immutable release. Production dependency lock, environment,
+  Nginx and systemd definitions stayed unchanged. Payout service and timer
+  remain inactive; the backup timer state was preserved.
+- Read-only process inspection verifies the supervisor and children use the
+  new release, `GRID_CHARGING_MODE=allowlist`, disabled daily-free spending,
+  enabled billing/reward/treasury monitoring, disabled legacy probes, and the
+  still-unset prospective reward cutoff and generation-path allowlist. The
+  exact promotional campaign/cohort settings were preserved, not expanded.
+- Public health returns the exact commit and healthy Redis. After reconnection,
+  the connected-worker count returned from 8 to the pre-cutover 12, with the
+  same model set. No error/traceback/handshake-timeout entries were found in the
+  inspected post-cutover journal window. Both new private endpoints return 401
+  without authentication. Those checks are not a funded-generation proof.
+- Protected host evidence is in
+  `/var/lib/aipg-backup/demand-release-48915650/`. Retain the compatible
+  `c34c7da5` code rollback and the additive `0040` columns; do not downgrade or
+  delete paid recovery records.
+- Gallery PR #27 merged as `c23014761acc14f83030601b5f9bb71311ca6662`
+  after PostgreSQL 16 backend, frontend, browser, full-history Gitleaks and
+  Go/TypeScript CodeQL checks passed. It adds verified account-family recovery
+  on top of PRs #25/#26. At this checkpoint Gallery still runs `9e7ff3dc`;
+  its candidate is building but not activated, and its own backup/migration
+  proof, session checks, and paid multistage canary remain required.
+- No funds moved, grants were minted, historical ledger entries edited, or
+  charging/payout gates expanded. The last verified canary remainder is
+  675 micro-USD. A funded streamed-text/audio/Director canary still requires
+  additional user funding and spend approval; do not reuse the exhausted
+  earlier USD 0.02 allowance as authorization for more spending.
+
 ## Reviewed deployment
 
 - Core PR #132 initially deployed as `a754b6898b4a6111758b104ee633de18ef0fe252`.
