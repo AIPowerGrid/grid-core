@@ -387,9 +387,10 @@ async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     from .services import alerts
     from .services import credits as _credits
+    from .services.generation_admission import validate_rollout
 
     # Validate before starting dependencies or accepting any unbilled work.
-    _credits.charging_mode()
+    validate_rollout(_credits.charging_mode())
 
     logger.info("Starting Grid Streaming API...")
     await alerts.start()

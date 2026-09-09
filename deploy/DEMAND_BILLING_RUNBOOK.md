@@ -48,7 +48,13 @@ users delegated through that service. `GRID_CHARGING_ALLOW_MODELS`, when
 non-empty, further restricts the selected cohort to exact model IDs.
 
 `GRID_CHARGING_MODE=on` charges every authenticated request and default-denies
-unpriced work. Do not use this mode for the first production test.
+unpriced work. It also requires an explicit `GENERATION_ENABLED_PATHS` JSON
+list; an omitted list rejects startup before dependencies or background tasks
+start. This applies to global charging through the legacy boolean too. `[]`
+is a valid closed rollout. Select only paths with recorded successful canaries;
+the explicit-list guard cannot establish that evidence for you. Dark and
+allowlisted modes retain their existing admission defaults. Do not use global
+mode for the first production test.
 
 The legacy `GRID_CHARGING_ENABLED` boolean is consulted only when
 `GRID_CHARGING_MODE` is absent. Keep it `0` once the mode is configured.
