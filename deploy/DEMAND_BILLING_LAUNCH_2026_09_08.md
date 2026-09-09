@@ -39,9 +39,12 @@ Historical accrual and disputed payments are outside this rollout.
 - Gallery PR #27 merged as `c23014761acc14f83030601b5f9bb71311ca6662`
   after PostgreSQL 16 backend, frontend, browser, full-history Gitleaks and
   Go/TypeScript CodeQL checks passed. It adds verified account-family recovery
-  on top of PRs #25/#26. At this checkpoint Gallery still runs `9e7ff3dc`;
-  its candidate is building but not activated, and its own backup/migration
-  proof, session checks, and paid multistage canary remain required.
+  on top of PRs #25/#26. Gallery then activated that release at 01:49:57 UTC
+  after its own restored-backup/full-Go-race proof and migration 0003. Existing
+  rows and old migration checksums were preserved, the live journal started
+  empty with RLS, and the existing Google session loaded private creations
+  without re-login. Gallery PR #28 records the detailed host evidence. Paid
+  multistage/restart and live wallet-merge canaries remain unproven.
 - No funds moved, grants were minted, historical ledger entries edited, or
   charging/payout gates expanded. The last verified canary remainder is
   675 micro-USD. A funded streamed-text/audio/Director canary still requires
