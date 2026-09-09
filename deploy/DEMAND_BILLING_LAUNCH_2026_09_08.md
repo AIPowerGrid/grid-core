@@ -7,6 +7,52 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Consumer and payout review (2026-09-09, 21:56 UTC)
+
+- Fresh Chat container inspection confirms API/background/web release
+  `085e7394b5-r2`. The running identity assertion, tool constructor and image
+  tool source hashes match reviewed commit `085e7394b5`. Its only configured
+  image provider (`aipg_krea2_turbo`) now matches both the canonical service
+  endpoint and credential. No credentials were printed or changed. An
+  authenticated read returned 200 and allowlist charging. The earlier
+  mismatched-image-provider warning below is historical; the paid Chat image
+  canary already recorded here supplies the charged-account evidence.
+- The undelegated Chat credit summary's null service budget is not an inference
+  exemption: the bridge has no direct-service-submit scope and must delegate
+  inference to a user. Inventory/revocation of old consumer keys remains open.
+- Read-only production PostgreSQL EXPLAIN ANALYZE checked the actual account,
+  total-DEN and backing-health aggregation statements, with five-second
+  statement limits. Last closed hour: execution 6.998/1.875/3.708 ms. Fixed
+  reward cutoff through 21:56 UTC: 32.735/10.189/18.618 ms. Those windows had
+  one/two eligible accounts and zero unbacked eligible jobs/DEN. These are
+  current-load measurements, not a high-volume load test or payment proof.
+- Sender review reproduced two defects in local regression tests: accrued and
+  pending/failed retry broadcasts skipped sanctions screening, and uncertain
+  broadcast errors replaced the persisted candidate hash with exception text.
+  The candidate centralizes pre-sign screening, retains nonce/hash evidence,
+  and permits proof-only reconciliation of already-mined transfers. No
+  screening decision claims to cancel an already-broadcast transaction.
+  Real PostgreSQL also rejected the prior `blocked_sanctions` label because
+  the status column is VARCHAR(16); holds now use existing `manual_review`,
+  preserving the current schema and excluding automatic retries.
+- Separate payout blockers remain: period allocations are recomputed on retry,
+  no durable overlapping-window guard exists, and historical retry/accrued
+  commands select broadly. Example: paying one of two equal recipients 50 of
+  a 100-token period, then changing weights from (1, 1) to (1, 1, 2), can
+  cause rerun allocations of 25 + 50 for the remaining recipients: 125 total.
+  Freeze/reconcile allocations and historical exclusions before any sender.
+- Focused PostgreSQL 16 sender lifecycle, allocation and screening verification:
+  70 tests passed, including the advisory-lock concurrency test. Eleven new
+  cases cover all four sender paths, screen failure, mined-proof-only recovery,
+  and retained-hash reconciliation after uncertain broadcast. No Base sends.
+  The expanded settlement, PostgreSQL reward-eligibility, multi-asset, revenue
+  and screening suite passed 167 tests with no skips. These use simulated
+  chain responses, not live transfer validation.
+
+Production is unchanged at `94be0cc1`, allowlisted, with payouts paused. This
+review does not restart the 24-hour cohort observation or authorize global
+charging, treasury funding, backpay, or a runtime deployment.
+
 ## Core process crash proof (2026-09-09, local)
 
 `grid_api/routers/tests/test_core_process_crash.py` adds 27 real Core-process
@@ -1154,7 +1200,8 @@ The reviewed deployment above supersedes the initial local-only posture.
 
 - [x] Review and merge candidate; record exact release SHA and CI evidence.
 - [x] Select and verify the immutable prospective cutoff; preserve it on rollback.
-- [ ] Review payout query performance before restarting any sender.
+- [x] Review payout query performance at current production load; see 21:56 UTC
+      EXPLAIN evidence. This is not a large-fleet load qualification.
 - [ ] Reconcile requested emission budget, no overlapping payout periods, and
       every payout entrypoint before restarting any sender. No treasury refill.
 - [x] Verify credits and free/promo ceilings in actual production processes;
@@ -1177,9 +1224,10 @@ The reviewed deployment above supersedes the initial local-only posture.
 - [ ] Verify billing/orphan/reward/treasury alerts and operational response.
 - [x] Deploy reviewed Core/Music code with existing configuration preserved.
 - [ ] Verify remaining frontend releases and final activation configuration.
-- [ ] Migrate Chat image provider to canonical service credentials only with
+- [x] Migrate Chat image provider to canonical service credentials only with
       the delegated-image release; verify the charged account and retain a
-      protected rollback record. Inventory old-key consumers before revocation.
+      protected rollback record. Fresh running-source/provider check passed.
+- [ ] Inventory old-key consumers before revocation.
 - [x] Restrict admission to the seven verified public paths; preserve the list
       on rollback. Global charging remains a separate activation gate.
 - [ ] Resume payouts only after prospective policy reconciliation passes.
