@@ -49,8 +49,18 @@ Historical accrual and disputed payments are outside this rollout.
   database URL wired into the full suite. Do not present local skips as PG proof.
 - The initial post-boundary read had zero completed jobs and zero unbacked
   eligible DEN. That verifies configuration, not a live workload outcome.
-  Post-boundary traffic reconciliation and funded/rejected workload canaries
-  remain required before payout resumption.
+  A later `post-ingress-proof.json` at `16:29:36Z` observed seven real completed
+  jobs with 106.3 raw DEN and zero eligible DEN; unbacked eligible exposure was
+  zero. This proves exclusion on live unbilled traffic, not just an empty window.
+- A bounded direct-API owner canary then returned HTTP 200 and the visible text
+  `Billing verified.` Job `26e6049e-59f4-4743-9430-c3033463621e` reserved 78
+  micro-USD, settled six purchased micro-USD and refunded 72. Its nonempty
+  completion hash and 26.68 DEN were recorded, with all 26.68 remaining
+  reward-eligible. The additional inference-only test key was revoked and
+  rejected with HTTP 401 afterward. This did not send a worker payout.
+  Private proof: `paid-canary.json`. Cumulative owner test spend is USD
+  0.222616 of the approved USD 1; purchased balance is USD 9.778059.
+  Remaining failure/modality canaries and payout economics still gate resumption.
 
 Global user charging, remaining identity/failure and modality canaries,
 explicit enabled-path selection, and payout economics/reconciliation remain
