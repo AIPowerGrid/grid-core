@@ -16,8 +16,10 @@ Set PAYOUTS_TEST_DB_URL=postgresql+asyncpg://… to additionally run the
 advisory-lock concurrency test (skipped on SQLite — no pg_advisory_lock).
 """
 
+import datetime as dt
 import os
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -35,12 +37,24 @@ WALLET = "0x9da91df1becbab9015fd6ba9e2a2e2d8a90273c1"
 HOT = "0x20A82fD11e4A5fC8d4b5A44083C05e4b28dB53B9"
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 _PG = os.environ.get("PAYOUTS_TEST_DB_URL", "")
+START = dt.datetime(2026, 9, 9, 20, tzinfo=dt.UTC)
+END = START + dt.timedelta(hours=1)
+PERIOD = "hour-2026-09-09T20"
 
 
 @pytest.fixture(autouse=True)
 def isolated_screening(monkeypatch):
     monkeypatch.setattr(P.sanctions, "ORACLE_ADDRESS", "")
     monkeypatch.delenv("GRID_SANCTIONS_DENYLIST", raising=False)
+    monkeypatch.setattr(P, "_now", lambda: END + dt.timedelta(hours=1))
+    monkeypatch.setattr(P, "get_settings", lambda: SimpleNamespace(worker_rewards_paid_only_since=START))
+    monkeypatch.setattr(P, "HOURLY_BUDGET", "208.33")
+
+
+async def _freeze(acct, address=WALLET, aipg=1, den=1):
+    await P.payout_periods.freeze(PERIOD, P._period_contract(START, END, aipg, PERIOD), AsyncMock(return_value=[
+        {"account_id": str(acct), "payout_address": address, "aipg": aipg, "den": den},
+    ]))
 
 
 @pytest_asyncio.fixture
@@ -236,7 +250,8 @@ async def test_consumed_nonce_with_proof_is_sent_no_rebroadcast(db):
 @pytest.mark.asyncio
 async def test_send_period_skips_already_sent(db, monkeypatch):
     acct = uuid.uuid4()
-    await P._write("h1", acct, address=WALLET, den=1, aipg=1, status="sent", tx_hash="0xabc", nonce=3, paid=True)
+    await _freeze(acct, aipg=100, den=5)
+    await P._write(PERIOD, acct, address=WALLET, den=5, aipg=100, status="sent", tx_hash="0xabc", nonce=3, paid=True)
 
     async def fake_agg(start, end, **kw):
         return [{"account_id": str(acct), "den": 5.0, "payout_address": WALLET}]
@@ -244,7 +259,7 @@ async def test_send_period_skips_already_sent(db, monkeypatch):
     eth = _FakeEth()
     monkeypatch.setattr(P, "_ctx", lambda: _ctx(eth))
     monkeypatch.setattr(P, "BASE_RPC_URL", "x"); monkeypatch.setattr(P, "TREASURY_PK", "x")
-    res = await P.send_period(None, None, 100.0, "h1")
+    res = await P.send_period(START, END, 100.0, PERIOD)
     assert res["skipped"] == 1 and res.get("sent", 0) == 0
     assert eth.broadcasts == []
 
@@ -253,14 +268,15 @@ async def test_send_period_skips_already_sent(db, monkeypatch):
 @pytest.mark.asyncio
 async def test_reconcile_settles_pending_via_nonce(db, monkeypatch):
     acct = uuid.uuid4()
-    await P._write("h1", acct, address=WALLET, den=1, aipg=1.0, status="pending", tx_hash=str(_hash_for(9)), nonce=9)
+    await _freeze(acct)
+    await P._write(PERIOD, acct, address=WALLET, den=1, aipg=1.0, status="pending", tx_hash=str(_hash_for(9)), nonce=9)
     eth = _FakeEth(); eth.mined = 10
     eth.receipts[str(_hash_for(9))] = _transfer_receipt(WALLET, 1.0)
     monkeypatch.setattr(P, "_ctx", lambda: _ctx(eth))
     res = await P.reconcile_and_retry()
     assert res["settled"] == 1
     assert eth.broadcasts == []
-    assert (await P._row("h1", acct))["status"] == "sent"
+    assert (await P._row(PERIOD, acct))["status"] == "sent"
 
 
 @pytest.mark.asyncio
@@ -285,12 +301,13 @@ async def test_every_sender_screens_before_broadcast(db, monkeypatch, entrypoint
         monkeypatch.setattr(P, "aggregate_den_by_account", AsyncMock(return_value=[
             {"account_id": str(acct), "den": 1.0, "payout_address": WALLET},
         ]))
-        await P.send_period(None, None, 1.0, "screen")
+        await P.send_period(START, END, 1.0, PERIOD)
     else:
         async with await P.new_session() as session:
             await session.execute(P.accounts_t.insert().values(id=acct, payout_wallet=WALLET))
             await session.commit()
-        await P._write("screen", acct, address=WALLET, den=1, aipg=1,
+        await _freeze(acct, address=None if entrypoint == "accrued" else WALLET)
+        await P._write(PERIOD, acct, address=None if entrypoint == "accrued" else WALLET, den=1, aipg=1,
                        status=entrypoint, nonce=nonce, tx_hash=tx_hash)
         if entrypoint == "accrued":
             await P.pay_accrued()
@@ -299,7 +316,7 @@ async def test_every_sender_screens_before_broadcast(db, monkeypatch, entrypoint
             assert result["failed"] == 0
     screen.assert_awaited_once_with(WALLET)
     assert eth.broadcasts == []
-    row = await P._row("screen", acct)
+    row = await P._row(PERIOD, acct)
     assert row["status"] == "manual_review"
     assert row["nonce"] == nonce
     assert row["tx_hash"] == tx_hash
@@ -366,6 +383,5 @@ async def test_advisory_lock_serializes_runners(db):
         assert await P._try_payout_lock(s1) is True
         assert await P._try_payout_lock(s2) is False
     finally:
-        await s1.execute(sa.text("SELECT pg_advisory_unlock(:k)"), {"k": P._PAYOUT_LOCK_KEY})
         await s1.commit()
         await s1.close(); await s2.close()

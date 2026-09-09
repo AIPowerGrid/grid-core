@@ -23,13 +23,16 @@ import math
 import os
 import uuid as _uuid
 from decimal import ROUND_DOWN, Decimal
+from functools import wraps
 
 import sqlalchemy as sa
 
+from ...config import get_settings
 from ...database import close_database, init_database, new_session
 from ...v2.schema import accounts as accounts_t
+from ...v2.schema import payout_periods as periods_t
 from ...v2.schema import payouts as payouts_t
-from . import sanctions
+from . import payout_periods, sanctions
 from .aggregate import aggregate_den_by_account, total_den_in_window
 
 logger = logging.getLogger("grid_api.payouts")
@@ -38,6 +41,7 @@ AIPG_TOKEN_ADDRESS = os.getenv("AIPG_TOKEN_ADDRESS", "0xa1c0deCaFE3E9Bf06A5F29B7
 BASE_RPC_URL = os.getenv("BASE_RPC_URL", "")
 TREASURY_PK = os.getenv("SETTLEMENT_TREASURY_PK", "")  # funded AIPG sender; never logged
 MIN_AIPG = float(os.getenv("PAYOUT_MIN_AIPG", "0.01"))
+HOURLY_BUDGET = os.getenv("PAYOUT_HOURLY_BUDGET", "208.33")
 # Versioned prospective policy: at most 0.5% of a period's emission budget
 # across the whole SmolLM family and all accounts; clipped value stays unspent.
 SMOLLM_EMISSION_CAP_BPS = 50
@@ -122,7 +126,32 @@ def _window(days, since, until):
 
 # ── dry-run preview ──────────────────────────────────────────────────────────
 
-async def preview_period(start, end, budget_aipg: float) -> dict:
+async def preview_period(start, end, budget_aipg: float, *, period_id=None) -> dict:
+    if period_id is not None:
+        async with await new_session() as session:
+            frozen = await session.scalar(sa.select(periods_t.c.period_id).where(periods_t.c.period_id == period_id))
+        if frozen:
+            expected = _period_contract(start, end, budget_aipg, period_id)
+
+            async def never_reaggregate():
+                raise RuntimeError("frozen payout preview cannot create a plan")
+
+            plan = await payout_periods.freeze(period_id, expected, never_reaggregate)
+            recorded = {str(row["account_id"]): row for row in await _planned_rows(period_id)}
+            values = plan["allocations"]
+            total = sum(row["den"] for row in values)
+            rows = [dict(account_id=row["account_id"], den=row["den"],
+                         payout_address=recorded[row["account_id"]]["address"], aipg=float(row["aipg"]),
+                         status=recorded[row["account_id"]]["status"],
+                         share=row["den"] / total if total else 0,
+                         payable=bool(recorded[row["account_id"]]["address"])) for row in values]
+            active = [row for row in rows if row["status"] in ("pending", "failed")]
+            accrued = [row for row in rows if row["status"] == "accrued"]
+            return dict(accounts=len(rows), total_den=total, budget_aipg=budget_aipg,
+                        unallocated_aipg=float(Decimal(str(budget_aipg)) - sum((Decimal(row["aipg"]) for row in values), Decimal(0))),
+                        payouts=rows, payable_now_aipg=sum(row["aipg"] for row in active),
+                        n_payable=len(active), accrued_aipg=sum(row["aipg"] for row in accrued),
+                        n_accrued=len(accrued), no_account_den=None, frozen=True)
     rows = await aggregate_den_by_account(start, end)
     pay = compute_account_payouts(rows, budget_aipg)
     attributed = sum(float(r["den"]) for r in rows)
@@ -158,9 +187,9 @@ def _as_uuid(v):
 async def _row(period_id, account_id) -> dict | None:
     account_id = _as_uuid(account_id)
     async with await new_session() as s:
-        r = (await s.execute(sa.select(payouts_t.c.status, payouts_t.c.nonce, payouts_t.c.tx_hash).where(
-            payouts_t.c.period_id == period_id, payouts_t.c.account_id == account_id))).first()
-        return {"status": r[0], "nonce": r[1], "tx_hash": r[2]} if r else None
+        r = (await s.execute(sa.select(payouts_t).where(
+            payouts_t.c.period_id == period_id, payouts_t.c.account_id == account_id))).mappings().first()
+        return dict(r) if r else None
 
 
 async def _max_assigned_nonce(session=None) -> int:
@@ -186,8 +215,21 @@ async def _write(period_id, account_id, *, address, den, aipg, status,
     marking sent via the nonce check, where the winning hash may differ)."""
     account_id = _as_uuid(account_id)
     async with await new_session() as s:
-        existing = (await s.execute(sa.select(payouts_t.c.id).where(
-            payouts_t.c.period_id == period_id, payouts_t.c.account_id == account_id))).first()
+        existing = (await s.execute(sa.select(payouts_t).where(
+            payouts_t.c.period_id == period_id, payouts_t.c.account_id == account_id).with_for_update())).mappings().first()
+        if existing:
+            if Decimal(str(aipg)) != existing["aipg_amount"] or float(den) != existing["den"]:
+                raise ValueError("cannot change a recorded payout allocation")
+            old_address = payout_periods.wallet(existing["address"])
+            new_address = payout_periods.wallet(address)
+            binding = (old_address is None and existing["status"] == "accrued"
+                       and existing["nonce"] is None and existing["tx_hash"] is None)
+            if old_address != new_address and not binding:
+                raise ValueError("cannot redirect a recorded payout")
+            if existing["nonce"] is not None and nonce is not None and nonce != existing["nonce"]:
+                raise ValueError("cannot rebind a payout nonce")
+            if existing["status"] in ("sent", "confirmed") and status != existing["status"]:
+                raise ValueError("cannot reopen a completed payout")
         vals = dict(address=address, den=den, aipg_amount=aipg, status=status)
         if set_tx:
             vals["tx_hash"] = tx_hash
@@ -196,7 +238,7 @@ async def _write(period_id, account_id, *, address, den, aipg, status,
         if paid:
             vals["paid"] = _now()
         if existing:
-            await s.execute(sa.update(payouts_t).where(payouts_t.c.id == existing[0]).values(**vals))
+            await s.execute(sa.update(payouts_t).where(payouts_t.c.id == existing["id"]).values(**vals))
         else:
             await s.execute(sa.insert(payouts_t).values(
                 period_id=period_id, account_id=account_id, created=_now(), **vals))
@@ -218,11 +260,13 @@ def _w3():
 def _ctx():
     """(Web3, w3, acct, token, decimals) — the on-chain handle bundle for sends."""
     Web3, w3, acct, token = _w3()
+    if w3.eth.chain_id != 8453:
+        raise RuntimeError("payout RPC must be on Base")
     return (Web3, w3, acct, token, token.functions.decimals().call())
 
 
 def _signed_transfer(Web3, w3, acct, token, decimals, to_addr, aipg, nonce, attempt):
-    amount_wei = int(round(aipg * (10 ** decimals)))
+    amount_wei = _token_units(aipg, decimals)
     # Tip escalates per attempt so a retry actually REPLACES a stuck tx at the
     # same nonce; maxFee derives from the live base fee so a Base spike can't
     # reject it. Base base fees are tiny → still sub-cent.
@@ -236,6 +280,13 @@ def _signed_transfer(Web3, w3, acct, token, decimals, to_addr, aipg, nonce, atte
         "maxFeePerGas": base_fee * 5 + priority, "maxPriorityFeePerGas": priority,
     })
     return acct.sign_transaction(tx)
+
+
+def _token_units(value, decimals):
+    units = Decimal(str(value)) * (10 ** decimals)
+    if not units.is_finite() or units < 0 or units != units.to_integral_value():
+        raise ValueError("invalid payout token precision")
+    return int(units)
 
 
 def _hx(x) -> str:
@@ -289,7 +340,7 @@ async def _settle_one(ctx, *, period_id, account_id, address, den, aipg,
 
     # (1) Bound nonce already consumed → require on-chain PROOF before settling.
     if stored_nonce is not None and mined > stored_nonce:
-        expected_wei = int(round(aipg * (10 ** decimals)))
+        expected_wei = _token_units(aipg, decimals)
         if _verify_transfer(w3, stored_tx, address, expected_wei):
             await _write(period_id, account_id, address=address, den=den, aipg=aipg,
                          status="sent", nonce=stored_nonce, paid=True, set_tx=False)
@@ -298,8 +349,7 @@ async def _settle_one(ctx, *, period_id, account_id, address, den, aipg,
         # we didn't record / unrelated tx). Do NOT re-send and do NOT call it paid.
         await _write(period_id, account_id, address=address, den=den, aipg=aipg,
                      status="manual_review", nonce=stored_nonce, set_tx=False)
-        logger.error("payout %s/%s: nonce %s consumed but transfer UNPROVEN (tx=%s) — manual_review",
-                     period_id, account_id, stored_nonce, stored_tx)
+        logger.error("payout nonce consumed without transfer proof: manual_review")
         return "manual_review"
 
     # Every sender, including accrued/retry paths, reaches this gate. Already
@@ -350,36 +400,66 @@ async def _settle_one(ctx, *, period_id, account_id, address, den, aipg,
             await _write(period_id, account_id, address=address, den=den, aipg=aipg,
                          status="failed", tx_hash=h.hex(), nonce=nonce)
             return "failed"
-        expected_wei = int(round(aipg * (10 ** decimals)))
+        expected_wei = _token_units(aipg, decimals)
         if _receipt_proves_transfer(w3, rec, address, expected_wei):
             await _write(period_id, account_id, address=address, den=den, aipg=aipg,
                          status="sent", tx_hash=h.hex(), nonce=nonce, paid=True)
             return "sent"
         await _write(period_id, account_id, address=address, den=den, aipg=aipg,
                      status="manual_review", tx_hash=h.hex(), nonce=nonce)
-        logger.error("payout %s/%s: receipt status 1 but no matching Transfer (tx=%s) — manual_review",
-                     period_id, account_id, h.hex())
+        logger.error("payout receipt lacks matching Transfer: manual_review")
         return "manual_review"
     except Exception:
         return "pending"  # UNKNOWN — not failed. The nonce check settles it next run.
 
 
+def _serialized_sender(function):
+    @wraps(function)
+    async def wrapped(*args, **kwargs):
+        async with await new_session() as session, session.begin():
+            if not await _try_payout_lock(session):
+                raise RuntimeError("another payout sender holds the treasury lock")
+            return await function(*args, **kwargs)
+    return wrapped
+
+
+def _period_contract(start, end, budget, period_id):
+    contract = payout_periods.contract(
+        start, end, budget, period_id,
+        cutoff=get_settings().worker_rewards_paid_only_since,
+        hourly_cap=HOURLY_BUDGET, token=AIPG_TOKEN_ADDRESS, now=_now(),
+    )
+    contract["smollm_cap_bps"] = SMOLLM_EMISSION_CAP_BPS
+    contract["minimum_aipg"] = format(payout_periods.amount(MIN_AIPG), ".8f")
+    return contract
+
+
+async def _planned_rows(period_id):
+    return await payout_periods.load_rows(period_id, _period_contract)
+
+
 async def send_period(start, end, budget_aipg: float, period_id: str) -> dict:
-    """Pay accounts with a wallet (nonce-bound, idempotent); record the rest as
-    'accrued'. Safe to re-run — an already-settled payout is detected via its
-    bound nonce, so re-running never double-pays."""
-    rows = await aggregate_den_by_account(start, end)
-    pay = compute_account_payouts(rows, budget_aipg)
+    """Freeze and send a bounded, closed UTC hour; never reprice on retry."""
+    expected = _period_contract(start, end, budget_aipg, period_id)
+    return await _send_period_locked(start, end, budget_aipg, period_id, expected)
+
+
+@_serialized_sender
+async def _send_period_locked(start, end, budget_aipg, period_id, expected):
+
+    async def build():
+        return compute_account_payouts(await aggregate_den_by_account(start, end), budget_aipg)
+
+    await payout_periods.freeze(period_id, expected, build)
+    pay = await _planned_rows(period_id)
     counts = {"sent": 0, "pending": 0, "accrued": 0, "skipped": 0, "failed": 0}
-    ctx = _ctx() if (any(p["payable"] for p in pay) and BASE_RPC_URL and TREASURY_PK) else None
+    ctx = _ctx() if (any(p["address"] and p["status"] in ("pending", "failed") for p in pay)
+                    and BASE_RPC_URL and TREASURY_PK) else None
     for p in pay:
-        existing = await _row(period_id, p["account_id"])
-        if existing and existing["status"] in ("sent", "confirmed", "manual_review"):
+        if p["status"] not in ("pending", "failed", "accrued"):
             counts["skipped"] += 1
             continue
-        if not p["payable"]:
-            await _write(period_id, p["account_id"], address=None, den=p["den"],
-                         aipg=p["aipg"], status="accrued")
+        if not p["address"]:
             counts["accrued"] += 1
             continue
         if ctx is None:
@@ -387,16 +467,16 @@ async def send_period(start, end, budget_aipg: float, period_id: str) -> dict:
             continue
         try:
             st = await _settle_one(ctx, period_id=period_id, account_id=p["account_id"],
-                                   address=p["payout_address"], den=p["den"], aipg=p["aipg"],
-                                   stored_nonce=(existing or {}).get("nonce"),
-                                   stored_tx=(existing or {}).get("tx_hash"))
+                                   address=p["address"], den=p["den"], aipg=p["aipg_amount"],
+                                   stored_nonce=p["nonce"], stored_tx=p["tx_hash"])
             counts[st] = counts.get(st, 0) + 1
         except Exception as e:
-            logger.error("payout error account=%s: %s", p["account_id"], e)
+            logger.error("payout failed: %s", type(e).__name__)
             counts["failed"] += 1
     return {"period_id": period_id, **counts}
 
 
+@_serialized_sender
 async def pay_accrued() -> dict:
     """Pay every 'accrued' balance whose account NOW has a wallet — the 'pay later'
     path. Run after operators connect a payout wallet in the console."""
@@ -406,27 +486,34 @@ async def pay_accrued() -> dict:
                       payouts_t.c.aipg_amount, payouts_t.c.nonce, payouts_t.c.tx_hash,
                       sa.func.coalesce(sa.func.nullif(accounts_t.c.payout_wallet, ""),
                                        sa.func.nullif(accounts_t.c.wallet, "")).label("addr"))
-            .select_from(payouts_t.join(accounts_t, accounts_t.c.id == payouts_t.c.account_id))
+            .select_from(payouts_t.join(accounts_t, accounts_t.c.id == payouts_t.c.account_id)
+                         .join(periods_t, periods_t.c.period_id == payouts_t.c.period_id))
             .where(payouts_t.c.status == "accrued")
         )).all()
     targets = [r for r in rows if r.addr]
     if not targets:
         return {"paid": 0, "still_accrued": len(rows)}
-    ctx = _ctx()
     paid = 0
+    for period in {r.period_id for r in targets}:
+        await _planned_rows(period)
+    ctx = _ctx()
     for r in targets:
         try:
+            address = payout_periods.wallet(r.addr)
+            await _write(r.period_id, r.account_id, address=address, den=r.den,
+                         aipg=r.aipg_amount, status="pending", set_tx=False)
             st = await _settle_one(ctx, period_id=r.period_id, account_id=r.account_id,
-                                   address=r.addr, den=float(r.den or 0),
-                                   aipg=float(r.aipg_amount), stored_nonce=r.nonce,
+                                   address=address, den=float(r.den or 0),
+                                   aipg=r.aipg_amount, stored_nonce=r.nonce,
                                    stored_tx=r.tx_hash)
             if st == "sent":
                 paid += 1
         except Exception as e:
-            logger.error("pay_accrued error %s/%s: %s", r.period_id, r.account_id, e)
+            logger.error("accrued payout failed: %s", type(e).__name__)
     return {"paid": paid, "still_accrued": len(rows) - paid}
 
 
+@_serialized_sender
 async def reconcile_and_retry() -> dict:
     """Resolve in-flight ('pending') and genuinely-failed payouts idempotently.
     Each row runs through _settle_one, which FIRST checks whether its bound nonce
@@ -437,22 +524,25 @@ async def reconcile_and_retry() -> dict:
         rows = (await s.execute(
             sa.select(payouts_t.c.period_id, payouts_t.c.account_id, payouts_t.c.address,
                       payouts_t.c.aipg_amount, payouts_t.c.den, payouts_t.c.nonce, payouts_t.c.tx_hash)
+            .select_from(payouts_t.join(periods_t, periods_t.c.period_id == payouts_t.c.period_id))
             .where(payouts_t.c.status.in_(("pending", "failed")), payouts_t.c.address.isnot(None))
         )).all()
     if not rows:
         return {"settled": 0, "pending": 0, "failed": 0, "manual_review": 0}
-    ctx = _ctx()
     out = {"settled": 0, "pending": 0, "failed": 0, "manual_review": 0}
+    for period in {r.period_id for r in rows}:
+        await _planned_rows(period)
+    ctx = _ctx()
     for r in rows:
         try:
             st = await _settle_one(ctx, period_id=r.period_id, account_id=r.account_id,
                                    address=r.address, den=float(r.den or 0),
-                                   aipg=float(r.aipg_amount), stored_nonce=r.nonce,
+                                   aipg=r.aipg_amount, stored_nonce=r.nonce,
                                    stored_tx=r.tx_hash, attempt=1)
             out["settled" if st == "sent" else st] += 1
         except Exception as e:
             out["failed"] += 1
-            logger.error("reconcile %s/%s: %s", r.period_id, r.account_id, e)
+            logger.error("payout reconciliation failed: %s", type(e).__name__)
     return out
 
 
@@ -460,6 +550,8 @@ async def reconcile_and_retry() -> dict:
 
 def _print_preview(pv, period_id):
     print(f"\n=== payout preview — period {period_id} ===")
+    if pv.get("frozen"):
+        print("Frozen allocation; no aggregation or repricing on replay.")
     print(f"accounts={pv['accounts']}  total_den={pv['total_den']:.2f}  budget={pv['budget_aipg']:.2f} AIPG")
     print(f"payable now: {pv['payable_now_aipg']:.4f} AIPG to {pv['n_payable']} acct(s) | "
           f"ACCRUED (no wallet yet): {pv['accrued_aipg']:.4f} AIPG owed to {pv['n_accrued']} acct(s)")
@@ -468,6 +560,8 @@ def _print_preview(pv, period_id):
     print(f"{'account_id':38}{'den':>12}{'share':>9}{'AIPG':>14}  wallet")
     for p in pv["payouts"]:
         tag = (p['payout_address'][:10] + '…') if p['payable'] else 'ACCRUED (set wallet)'
+        if p.get("status"):
+            tag += f" [{p['status']}]"
         print(f"{p['account_id']:38}{p['den']:>12.2f}{p['share']*100:>8.2f}%{p['aipg']:>14.4f}  {tag}")
     print()
 
@@ -484,7 +578,7 @@ async def _try_payout_lock(session) -> bool:
     if session.get_bind().dialect.name != "postgresql":
         raise RuntimeError("payout lock requires PostgreSQL")
     return bool((await session.execute(
-        sa.text("SELECT pg_try_advisory_lock(:k)"), {"k": _PAYOUT_LOCK_KEY})).scalar())
+        sa.text("SELECT pg_try_advisory_xact_lock(:k)"), {"k": _PAYOUT_LOCK_KEY})).scalar())
 
 
 async def _amain():
@@ -497,13 +591,7 @@ async def _amain():
     ap.add_argument("--retry-failed", action="store_true", help="reconcile pending + retry failed payouts (nonce-bound, idempotent)")
     a = ap.parse_args()
     await init_database()
-    # Hold a single advisory-lock session for the whole run when we may WRITE
-    # transfers; a concurrent runner can't proceed (no duplicate nonce / no race).
-    writes = a.pay_accrued or a.retry_failed or a.send
-    lock_s = await new_session() if writes else None
     try:
-        if lock_s is not None and not await _try_payout_lock(lock_s):
-            print("another payout run holds the lock — exiting"); return
         if a.retry_failed:
             print("reconciling pending + failed payouts ...", await reconcile_and_retry()); return
         if a.pay_accrued:
@@ -513,19 +601,12 @@ async def _amain():
         start, end, pid = _window(a.days, a.since, a.until)
         if a.period_id:
             pid = a.period_id
-        _print_preview(await preview_period(start, end, a.budget), pid)
+        _print_preview(await preview_period(start, end, a.budget, period_id=pid), pid)
         if a.send:
             print(f"SENDING for {pid} ...", await send_period(start, end, a.budget, pid))
         else:
             print("(dry-run — re-run with --send to execute)")
     finally:
-        if lock_s is not None:
-            try:
-                await lock_s.execute(sa.text("SELECT pg_advisory_unlock(:k)"), {"k": _PAYOUT_LOCK_KEY})
-                await lock_s.commit()
-            except Exception:
-                pass
-            await lock_s.close()
         await close_database()
 
 
