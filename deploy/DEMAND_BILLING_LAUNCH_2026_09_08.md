@@ -7,6 +7,75 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Passthrough and remaining image canaries (2026-09-09, 16:48 UTC)
+
+Core remains immutable `ad5a1257` / Alembic `0040`, charging allowlisted,
+with the exact `16:26:27Z` prospective reward boundary preserved. Payouts
+remain inactive. The following live tests used the owner's existing purchased
+credit and short-lived inference-only keys, revoked after each run.
+
+| Path / mode | Model | Actual micro-USD | Refund micro-USD | Grid job |
+| --- | --- | ---: | ---: | --- |
+| Responses, non-streaming | GPT-OSS-120B | 4 | 74 | `808aa659-b34f-4c16-b94f-4efe4ce7ccbc` |
+| Responses, streaming | GPT-OSS-120B | 6 | 72 | `01f9fc9b-5998-46b9-bb46-6148745087ec` |
+| Anthropic, non-streaming | Qwen3-27B | 7 | 32 | `b744d908-1f58-416b-af98-77dea2eb5a58` |
+| Anthropic, streaming | Qwen3-27B | 6 | 33 | `fb4b06a7-6bea-4a31-a04e-01a6d152d124` |
+| Image-to-image | Krea 2 Turbo | 5,000 | 0 | `2a184d84-7d26-4288-960d-cb75641549fc` |
+| Four-image batch, failed | Krea 2 Turbo | 0 | 20,000 | `0646f390-ff67-4388-9dd4-05e0e3cc17ef` |
+
+- Both text formats returned HTTP 200, durable settled reservations, nonempty
+  completion hashes, and fully purchased-backed reward eligibility. Streaming
+  included actual text deltas and the native terminal (`response.completed`
+  or `message_stop`). Non-streaming extraction also includes reasoning content;
+  its truncated operator preview is not a claim that reasoning is visible UI.
+  `all-paid-audit.json` reconciles all four jobs, credit refs and global/account
+  balances without findings. Evidence: `/var/lib/aipg-backup/passthrough-canary-20260909/`.
+- GPT-OSS-120B is not advertised for Anthropic: its live attempt returned 404
+  before any reservation or charge. GPT-OSS-20B is advertised, but has no price
+  entry. Its pricing preflight stopped before key issuance; a separate deliberate
+  live rejection test then returned 402 (`has no text price`) without a
+  reservation or balance change. Qwen38 Flash 125B also has no price entry.
+  Neither is grandfathered into free paid-mode inference; pricing is unresolved.
+- To exercise supported paid Anthropic traffic, the owner model restriction
+  expanded in two supervised config-only changes: first GPT-OSS-20B, then the
+  already-priced Qwen3-27B and DeepSeek V4 Flash NVFP4. No account, direct-service,
+  promotion, free-credit, price, or reward-boundary setting changed. Both used
+  environment snapshots, fresh backup/restore proofs, deployment locks, queue
+  drains and temporary ingress gates. All six current processes match the
+  nine-model cohort. Evidence: `/var/lib/aipg-backup/canary-model-20260909/`
+  and its `-r2` sibling; second activation `16:42:10Z`.
+- The existing empty direct-service account returned 402 for chat, Responses,
+  Anthropic, image, video and audio. Both Redis stream last-generated IDs,
+  reservation/credit-ledger counts and balance remained unchanged across all
+  six requests. No generation was dispatched and the temporary key was revoked
+  (subsequent read 401). `six-route-negative.json` records the zero-spend proof.
+- Image-to-image used the owner's earlier Director first frame as input and
+  requested a blue-to-red cube edit. It persisted one output and the reviewed
+  img2img recipe root `0x238bcd412d1d677b38d9f512fec8158c9d2d71d4ca2ff9b93d3aee4aad57b6a6`.
+  Authenticated result recovery returned the same output. This proves API,
+  billing and recovery, not visual editing quality: browser QA was blocked by
+  the locked Mac and remains pending. Evidence:
+  `/var/lib/aipg-backup/image-billing-canary-20260909/img2img.json`.
+- **Batch is NOT cleared:** the four-image request returned 502 because the
+  worker-reported result count did not match four requested outputs. The initial
+  canary observed the hold just before normal failure cleanup. The subsequent
+  read-only `batch-failure-audit.json` proves a full 20,000 micro-USD refund,
+  no worker completion/reward row, no stale hold, and no balance drift. A release
+  uses terminal reservation status `settled` with null actual here; do not
+  mistake that status alone for a paid success. No manual ledger edit or refund
+  was made. Keep `image-batch` excluded from global paid admission until fixed
+  and retested; this run is preserved as failure evidence, not a passed batch.
+- Focused local passthrough/admission/media-contract verification: 77 tests
+  passed with one existing websockets deprecation warning. Reward-cutoff docs
+  PR #162 merged after its required PostgreSQL 16 CI and security checks passed.
+- After the automatic batch refund, purchased balance is USD 9.773036;
+  cumulative test spend is USD 0.227639 of the approved USD 1. Raw temporary
+  hold deductions are not final spend. No new funding or worker payout occurred.
+
+Remaining launch work includes visual/account failure QA, explicit global path
+selection (unverified batch/3D/timeline must stay out), frontend rollout state,
+and payout economics/reconciliation. Global billing is not yet enabled.
+
 ## Prospective reward boundary live (2026-09-09, 16:26 UTC)
 
 - `WORKER_REWARDS_PAID_ONLY_SINCE=2026-09-09T16:26:27+00:00` is now loaded
