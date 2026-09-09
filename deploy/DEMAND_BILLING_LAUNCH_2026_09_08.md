@@ -7,6 +7,75 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Explicit admission and auth proof (2026-09-09, 17:07 UTC)
+
+**Current state:** Core `ad5a1257`, Alembic `0040`, charging still allowlisted,
+fixed prospective reward boundary unchanged, payouts still paused. This is a
+verified-path containment step, not global charging activation.
+
+| Public generation path | Current admission | Latest evidence / next gate |
+| --- | --- | --- |
+| Chat completions | Enabled | Paid first-party text/tool/image and direct-API receipts reconciled |
+| Responses | Enabled | Paid normal and streaming terminals reconciled |
+| Anthropic messages | Enabled | Paid normal and streaming Qwen3-27B terminals reconciled |
+| Single text-to-image | Enabled | Paid Gallery/Chat images reconciled |
+| Text-to-video | Enabled | Paid Gallery output and reload recovery verified |
+| Image-to-video | Enabled | Paid multistage Director canary and second-segment recipe root verified |
+| Audio | Enabled | Paid Music canary and reload recovery verified |
+| Image-to-image | Disabled | API billing/recovery passed; visual editing QA remains outstanding |
+| Image batches | Disabled | Four-output live attempt failed and fully refunded; worker deployment/retest required |
+| Video timeline | Disabled | No successful paid timeline canary |
+| 3D | Disabled | No online worker or paid canary |
+
+- `GENERATION_ENABLED_PATHS` now explicitly selects the seven enabled rows
+  above. It applies independently of charging mode to new work, including
+  preview traffic. Existing result/history reads remain available. Ordinary
+  chained Director segments use image-to-video; this does not enable the
+  separate timeline recipe input. Do not infer every advertised model is
+  priced or independently qualified from this per-path table.
+- Activation at `2026-09-09T17:06:56Z` used the unchanged immutable release,
+  both deployment locks, a fresh PostgreSQL backup/restore, temporary ingress
+  gate and two quiet observations. Only the path-list environment key changed.
+  All six supervisor/child environments match the seven paths and preserved
+  account/model/service cohorts plus exact reward cutoff. Public ingress was
+  restored, health reported healthy Redis and nine connected workers.
+  Private evidence: `/var/lib/aipg-backup/verified-paths-20260909/`.
+- A funded inference-only temporary key tested batch, timeline and img2img:
+  all returned the explicit admission 503. 3D also returned 503, but its HTTP
+  response was the earlier no-worker availability check; a separate check of
+  the deployed admission function and environment proves 3D remains denied
+  even if a worker connects. Do not label the HTTP response alone as that proof.
+  Both Redis stream last-generated IDs, owner balance, reservation and credit
+  row counts stayed unchanged. No work was dispatched and no charge occurred.
+  Temporary key revoked; subsequent authenticated read returned 401.
+- Before this change, all six base generation routes rejected missing keys
+  with 401 and account-read-only keys with 403. The read-only key could read
+  its funded account's credits, proving rejection was due to generation scope,
+  not lack of funding. The twelve requests changed neither job stream nor
+  owner economic rows. That key was also revoked and rejected afterward.
+  Private evidence: `/var/lib/aipg-backup/auth-admission-20260909/proof.json`.
+- Media-worker PR #25 merged as `b8324989df6a575a031a2c32d8e3e66799d3b310`.
+  Authoritative `n` now overrides the adapter's legacy batch-size field; slot
+  count must match before rendering and output count must match before upload
+  or a signed success. Seven regressions failed before the runtime fix;
+  191 local tests passed afterward, with two legacy-template tests skipped
+  because their uncommitted Dreamshaper fixture is absent. Python 3.10/3.11/3.12,
+  Linux/Windows manager builds, release gate and security CI passed. This code
+  is merged, **not deployed to the live media worker**. Its actual host and
+  version still need confirmation; the production batch root cause is not
+  established by mocked tests. Never reopen batching on this merge alone.
+- These checks spent zero credits. Last verified purchased balance remains
+  USD 9.773036, cumulative canary spend USD 0.227639 of the approved USD 1.
+  No new grant, treasury transfer, historical ledger rewrite or payout occurred.
+
+Next gates: finish identity/failure and frontend QA, reconcile the configured
+free/promo policy with tests (both spend gates remain dark), satisfy the
+runbook's canary observation/reconciliation requirement, and then explicitly
+activate global charging on the verified list. Payout economics and historical
+obligations are a separate review; paid-only eligibility is not payout approval.
+The older snapshots and unchecked inventory below are chronological evidence,
+not overrides of this current admission table.
+
 ## Passthrough and remaining image canaries (2026-09-09, 16:48 UTC)
 
 Core remains immutable `ad5a1257` / Alembic `0040`, charging allowlisted,
