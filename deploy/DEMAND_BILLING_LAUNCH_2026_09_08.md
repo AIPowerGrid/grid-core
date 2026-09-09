@@ -7,6 +7,55 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Prospective reward boundary live (2026-09-09, 16:26 UTC)
+
+- `WORKER_REWARDS_PAID_ONLY_SINCE=2026-09-09T16:26:27+00:00` is now loaded
+  by all six Core supervisor/child processes on immutable `ad5a1257`.
+  Preserve this exact boundary on rollback. Charging remains allowlisted;
+  worker payout service and timer remain inactive. No funds moved.
+- Before this timestamp, historical DEN eligibility is unchanged. At/after it,
+  only the purchased fraction of settled credit-backed work qualifies for the
+  unrestricted emissions pool. Free, promo-only, absent, held, released, and
+  malformed reservations do not qualify. x402 still requires its separate
+  settled-payment proof and remains dark.
+- The deployed custodial allocator applies the prospective SmolLM-family cap
+  across all accounts, including walletless accrual: at most 50 basis points
+  of the period budget, preserving a smaller natural share and leaving clipped
+  allocation unspent. This is not permission to send payouts or a full solution
+  to low-traffic farming against the remaining fixed-budget model.
+- Activation used both deployment locks, a fresh PostgreSQL backup/restore
+  proof at Alembic `0040`, a bounded generation gate, and two quiet queue
+  observations. A future boundary was chosen only after the drain. Only that
+  environment setting changed; historical economic rows were not edited.
+- The first post-restart operator check stopped because byte-exact hashes of
+  floating-point aggregate results differed. The boundary and ingress gate were
+  retained. The revised read-only proof checked per-record SQL eligibility
+  exactly (zero changed historical rows) and compared every account/wallet
+  allocation with identical attribution and a tight numerical tolerance.
+  Maximum observed aggregate difference was `6.007030606269836e-08` DEN.
+  The original operator script and failed check are retained, not relabeled
+  as a successful run. No production accounting algorithm changed for this.
+- The frozen pre-change window contains 124,407 completion rows, 14 account
+  aggregates, and 11 wallet aggregates. Counts and historical totals match;
+  comparison uses relative tolerance `1e-12` / absolute `1e-8` solely for
+  floating-point sums. Per-record eligibility has no tolerance.
+- Private evidence: `/var/lib/aipg-backup/reward-cutoff-20260909/`, including
+  `policy.json`, original scripts, `verified-v2.json`, environment digest and
+  backup/restore logs. Public ingress was restored after successful verification;
+  health reports the exact release, Redis healthy, and nine connected workers.
+- Local focused verification: 45 payout-allocation tests passed; reward tests
+  passed 34 with 33 PostgreSQL cases skipped locally. The deployed commit's
+  main CI `34372676936` passed with PostgreSQL 16 and the disposable reward-test
+  database URL wired into the full suite. Do not present local skips as PG proof.
+- The initial post-boundary read had zero completed jobs and zero unbacked
+  eligible DEN. That verifies configuration, not a live workload outcome.
+  Post-boundary traffic reconciliation and funded/rejected workload canaries
+  remain required before payout resumption.
+
+Global user charging, remaining identity/failure and modality canaries,
+explicit enabled-path selection, and payout economics/reconciliation remain
+open. Do not clear the reward boundary to roll back an unrelated frontend issue.
+
 ## Direct services now charged (2026-09-09, 16:09 UTC)
 
 - The current four direct-service principals are now selected in
@@ -47,7 +96,7 @@ Historical accrual and disputed payments are outside this rollout.
   because these four are in the cohort.
 
 The prior direct-service exposure gate is closed for the current inventory.
-Global user charging, the prospective paid-only reward boundary, remaining
+At that observation, global user charging, the prospective paid-only reward boundary, remaining
 identity/failure and modality canaries, and payout reconciliation remain open.
 
 ## Service-cohort hardening and Director evidence (2026-09-09)
