@@ -64,8 +64,9 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   of existing holds. Explicit selection is not evidence that canaries passed.
 - Startup validates the charging mode before starting dependencies or loops.
   Invalid explicit configuration must not fall back to free inference.
-  Typed `grid_charging_all_model_services` selects only bounded direct-service
-  principals for model-independent charging; default empty, global off wins.
+  Typed `grid_charging_all_model_services` selects direct-service principals
+  for model-independent charging; default empty, global off wins. Missing or
+  malformed service caps reject admission without deselecting charging.
 - `worker_rewards_paid_only_since` is a typed, timezone-aware prospective
   reward boundary. Its activation is separate from demand charging and must
   retain historical ledger rows; see settlement contracts before changing it.

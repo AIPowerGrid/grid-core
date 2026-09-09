@@ -44,11 +44,15 @@ def test_all_model_service_is_scoped_and_honest(homepage_service, monkeypatch):
     assert not credits.charging_enabled_for({"account_id": "image-user"}, PRICED_MODEL)
     assert credits.charging_enabled_for({"account_id": "image-user"}, "z-image-turbo")
     assert not credits.charging_enabled_for({**user, "service_id": "other-service"}, PRICED_MODEL)
-    for change in ({"key_kind": "delegated_user"}, {"scopes": ["inference.submit"]}, {"service_limits": {}},
-                   {"service_limits": {"per_request_micro": 0, "daily_micro": 500000}},
-                   {"service_limits": {"per_request_micro": True, "daily_micro": 500000}}):
+    for change in ({"key_kind": "delegated_user"}, {"scopes": ["inference.submit"]}):
         candidate = {**user, **change}
         assert not credits.charging_enabled_for(candidate, PRICED_MODEL)
+        assert credits.service_budget_policy(candidate) is None
+    for limits in (None, {}, [], "invalid", {"per_request_micro": 0, "daily_micro": 500000},
+                   {"per_request_micro": True, "daily_micro": 500000},
+                   {"per_request_micro": 500001, "daily_micro": 500000}):
+        candidate = {**user, "service_limits": limits}
+        assert credits.charging_enabled_for(candidate, PRICED_MODEL)
         assert credits.service_budget_policy(candidate) is None
     monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "off")
     assert not credits.charging_enabled_for(user, PRICED_MODEL)
