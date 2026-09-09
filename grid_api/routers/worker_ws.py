@@ -2225,7 +2225,7 @@ async def _handle_worker_generation(ws: WebSocket, job: dict, worker_info: dict)
             was_cancelled = bool(msg.get("cancelled"))
             # Once output was streamed, the terminal self-report cannot replace
             # the bytes witnessed by Core (including an empty visible channel).
-            if token_count == 0:
+            if not (full_text or full_reasoning or tool_acc):
                 full_text = msg.get("full_text") or full_text
                 full_reasoning = msg.get("full_reasoning") or full_reasoning
             usage = msg.get("usage") or usage

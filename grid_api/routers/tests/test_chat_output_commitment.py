@@ -105,7 +105,8 @@ async def test_done_cannot_replace_witnessed_stream(monkeypatch, delta):
 
 
 @pytest.mark.asyncio
-async def test_legacy_done_only_output_is_still_witnessed(monkeypatch):
-    result = await generation(monkeypatch, [{"type": "done", "full_text": "legacy result"}])
+@pytest.mark.parametrize("prefix", [[], [{"type": "token", "delta": {"role": "assistant"}}]])
+async def test_legacy_done_only_output_is_still_witnessed(monkeypatch, prefix):
+    result = await generation(monkeypatch, prefix + [{"type": "done", "full_text": "legacy result"}])
     assert result["full_text"] == "legacy result"
     assert not result["failed"]
