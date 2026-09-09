@@ -38,6 +38,46 @@ def test_environment_json_allowlist_and_empty_deny_all(monkeypatch):
         GridSettings(_env_file=None)
 
 
+@pytest.mark.parametrize("mode", ["off", "allowlist"])
+def test_dark_rollout_preserves_omitted_admission(monkeypatch, mode):
+    monkeypatch.delenv("GENERATION_ENABLED_PATHS", raising=False)
+    settings = GridSettings(_env_file=None)
+    monkeypatch.setattr(generation_admission, "get_settings", lambda: settings)
+    generation_admission.validate_rollout(mode)
+    assert settings.generation_enabled_paths == frozenset(get_args(GenerationPath))
+
+
+@pytest.mark.parametrize("paths", ['[]', '["openai-chat"]', '["image", "image-batch"]'])
+def test_global_rollout_accepts_explicit_environment_paths(monkeypatch, paths):
+    monkeypatch.setenv("GENERATION_ENABLED_PATHS", paths)
+    settings = GridSettings(_env_file=None)
+    monkeypatch.setattr(generation_admission, "get_settings", lambda: settings)
+    generation_admission.validate_rollout("on")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode,legacy_enabled", [("on", False), ("", True)])
+async def test_global_rollout_without_explicit_paths_stops_before_dependencies(monkeypatch, mode, legacy_enabled):
+    from grid_api import main
+    from grid_api.services import alerts
+
+    monkeypatch.delenv("GENERATION_ENABLED_PATHS", raising=False)
+    settings = GridSettings(_env_file=None)
+    monkeypatch.setattr(generation_admission, "get_settings", lambda: settings)
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", mode)
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", legacy_enabled)
+    database_start, redis_start, alerts_start = AsyncMock(), AsyncMock(), AsyncMock()
+    monkeypatch.setattr(main, "init_database", database_start)
+    monkeypatch.setattr(main, "init_redis", redis_start)
+    monkeypatch.setattr(alerts, "start", alerts_start)
+    with pytest.raises(RuntimeError, match="Global charging requires explicit GENERATION_ENABLED_PATHS"):
+        async with main.lifespan(main.app):
+            pytest.fail("global charging accepted implicit admission")
+    database_start.assert_not_awaited()
+    redis_start.assert_not_awaited()
+    alerts_start.assert_not_awaited()
+
+
 @pytest.mark.parametrize("path", get_args(GenerationPath))
 def test_empty_configuration_closes_every_path(monkeypatch, path):
     configure(monkeypatch, [])
