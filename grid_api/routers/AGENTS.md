@@ -362,6 +362,18 @@ expired or out-of-scope pilots return 503 without revealing membership.
 ## Verification
 
 - `pytest grid_api/routers/`.
+- `tests/test_worker_billing_failures_postgres.py` uses disposable
+  `CREDITS_TEST_DB_URL` and a unique schema per test. It runs the actual worker
+  registration/dispatch loop and credit transactions for chat, both native
+  passthrough formats, image, video and audio: errors refund once; disconnects
+  retain holds only while requeued; give-up refunds; an interrupted refund
+  transaction remains held until the sweeper recovers it; late success cannot
+  mint a reward afterward. A child process is killed after the refund's SQL
+  status update but before its credit write; rollback and sweeper recovery are
+  checked from another connection. Auth, worker I/O, Redis queue/registry, client
+  event delivery and R2 are simulated. This is not live-worker qualification,
+  elapsed receive-timeout verification or a full Uvicorn/Redis crash test. Required
+  PR/main CI supplies PostgreSQL 16 to the full suite.
 - `tests/test_validator_evidence_postgres.py` requires disposable
   `VALIDATORS_TEST_DB_URL`: signed binding/identity corruption, expired or
   unfinished probes, concurrent duplicate/conflicting votes, and disagreement.
