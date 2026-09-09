@@ -118,14 +118,23 @@ def _direct_service_limits(user: dict) -> dict | None:
         or "inference.service_submit" not in (user.get("scopes") or [])
     ):
         return None
-    limits = user.get("service_limits") or {}
+    limits = user.get("service_limits")
+    if not isinstance(limits, dict):
+        return None
     if not all(type(limits.get(k)) is int and limits[k] > 0 for k in ("per_request_micro", "daily_micro")):
+        return None
+    if limits["per_request_micro"] > limits["daily_micro"]:
         return None
     return {k: limits[k] for k in ("per_request_micro", "daily_micro")}
 
 
 def _all_model_service(user: dict) -> bool:
-    return _direct_service_limits(user) is not None and str(user.get("service_id")).lower() in {
+    # Invalid caps must reach fail-closed authorization, never deselect billing.
+    return (
+        user.get("key_kind") == "service"
+        and bool(user.get("service_id"))
+        and "inference.service_submit" in (user.get("scopes") or [])
+    ) and str(user["service_id"]).lower() in {
         value.strip().lower() for value in get_settings().grid_charging_all_model_services
     }
 
