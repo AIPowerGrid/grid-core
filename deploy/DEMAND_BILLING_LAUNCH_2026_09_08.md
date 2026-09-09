@@ -502,6 +502,50 @@ The reviewed deployment above supersedes the initial local-only posture.
   reward ceiling. Revalidate current configuration and backup freshness before
   cutover; preserve stopped payout units until policy reconciliation passes.
 
+## Payout and admission guards deployed - 2026-09-09
+
+- Core `0d4545cda406bdd67181b55ab733b4ce177675c0` is selected through
+  the immutable `grid-core-0d4545cd` release, activated at
+  `2026-09-09T05:20:19Z`. It includes PR #152 payout-input validation and
+  PR #154's explicit-path requirement for global charging. It supersedes the
+  staged-only payout candidate above; that candidate was never selected.
+- PR #154 and exact-main run `34313977617` passed, including PostgreSQL
+  backup/restore/schema checks, the full Grid suite and the Core/Console/node
+  handoff. CodeQL and secret/infra checks passed. The merged tree matches the
+  reviewed PR head. Local suite: 1,326 passed and 296 environment-dependent skips.
+- Fresh backup `grid-postgres-20260909T051533Z.dump` passed checksum,
+  disposable restore and schema parity at `0040` before activation. The
+  scratch database was removed. Production schema and locked dependencies
+  are unchanged; no live migration ran.
+- New public generation routes were briefly rejected at the proxy. Two drain
+  checks found zero pending jobs and no actual undelivered stream entries.
+  Redis's text lag counter alone was stale after deletions; it was not used
+  as proof that nine jobs existed or as a reason to mutate the stream.
+  The release switched only after draining; the temporary gate was removed
+  following health/configuration checks and successful Nginx validation.
+- Supervisor and child-process working directories identify the exact release.
+  Running configuration remains `allowlist`, legacy charging flag `0`, daily
+  free spending `0`, and the prospective reward cutoff unset. Promotional
+  spending remains subject to its existing campaign policy. Reward/treasury
+  monitoring stays enabled, and the legacy sampler stays disabled. The
+  environment checksum and payout/backup timer state are unchanged; both payout
+  units remain inactive. Public health reports the new commit and anonymous
+  generation returns `401` after admission restoration.
+- All 12 pre-cutover workers reconnected and the prior model set is preserved.
+  Read-only, repeatable-read purchased-balance reconciliation checked six
+  accounts: zero mismatches, negative balances or net drift. This is current
+  accounting consistency, not proof of a new paid inference or reward policy.
+- Protected evidence is under
+  `/var/lib/aipg-backup/demand-release-0d4545cd/`, including configuration,
+  backup/restore, drain, cutover and process proofs. No generation, credit grant,
+  funding, payout or historical ledger rewrite was performed by this deployment.
+- Code rollback selects `grid-core-48915650` with schema `0040` retained.
+  Preserve current economic settings and stopped payouts; do not restore a
+  stale environment snapshot or enable global charging on a release without
+  the explicit-admission guard. Prefer a compatible forward fix.
+- This is a dark safety deployment, not completion of signed-in account/balance,
+  funded multimodal, Director, refund/recovery or reward-policy canaries.
+
 ## Remaining launch checklist
 
 - [x] Review and merge candidate; record exact release SHA and CI evidence.
