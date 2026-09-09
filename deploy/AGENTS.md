@@ -102,6 +102,10 @@ executes an immutable release selected through `/home/aipg/current`.
   and spendable balance before a cohort expansion. Zero balance must reject;
   do not synthesize purchased credit. After restart, wait for each tested
   modality's workers, not merely healthy Redis, before a live rejection canary.
+  For text format canaries, verify both advertised API format and a positive
+  price for the exact model before expanding the account/model cohort; general
+  network availability alone proves neither. Preserve unsupported/unpriced
+  rejection evidence separately from successful paid-format tests.
   Verify the authenticated credit summary says all models are charged before
   attempting an unfunded generation, and revoke any temporary test key.
 - Promotional spending requires both the global emergency gate and a non-empty
