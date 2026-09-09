@@ -447,6 +447,61 @@ The reviewed deployment above supersedes the initial local-only posture.
   that would restart the unsafe sampler on the old code. Preserve any later
   economic configuration changes as well.
 
+## Music durable recovery deployed - 2026-09-09
+
+- Music PR #6 merged as `125141cbea1e93732cd0622ab0105eb3266611a0`
+  after passing PR and exact-main CI. The immutable `music-125141cb` release
+  is deployed; its source archive checksum was verified on the app host.
+  Frozen installation, lint, types, production build, built-app auth/journal
+  smoke and dependency audit passed there under Node `24.18.0`.
+- The private SQLite request journal now lives outside release directories.
+  Explicit one-time initialization, service ownership and restrictive modes
+  were verified. Runtime uses that path and the exact reviewed release;
+  service/session credentials and the original environment file are unchanged.
+  Live journal and initial backup each passed integrity checks with zero rows.
+- Generation admission was briefly closed for activation, with no established
+  app connections observed before restart, then restored after HTTP checks.
+  The proxy now rate-limits authenticated receipt recovery. Anonymous generation
+  and recovery returned `401`; a bounded recovery burst also produced `429`.
+  No production generation, credit grant or payment was performed.
+- The implementation commits a local request claim before the one allowed Core
+  submission, and recovers the owner's original Core result without resubmitting.
+  Cross-process races and kill/restart were tested against local HTTP stand-ins,
+  not a paid production job. Preserve the journal and WAL across rollback;
+  keep admission closed on a pre-journal release.
+- Signed-in Music account/balance parity, funded audio, actual debit/result
+  reconciliation, and recovery during a real job/restart remain open. Browser
+  access was locked during deployment. Neither deployment nor anonymous HTTP
+  checks close these gates. Core charging remains allowlisted, global charging
+  and spendable daily-free credit are off, and both payout units are inactive.
+- Detailed evidence and rollback boundaries are recorded in
+  [Music's journal release record](https://github.com/AIPowerGrid/aipg-music/blob/2558ef3cf9d852d4f0c1258f2b8d4c73c48b167a/deploy/JOURNAL_RELEASE_2026_09_09.md).
+
+## Payout input hardening staged - 2026-09-09
+
+- Reviewed main `e1c75d7e091468267ca40ad4e483b3c66edfda94` (PR #152)
+  passed exact-main test run `34310152427`, including PostgreSQL backup/restore
+  and the Core/Console/node handoff. Secret and CodeQL checks also passed.
+  Its only runtime-source change since deployed `48915650` rejects malformed
+  payout inputs before producing any payable or accrued allocations. It does
+  not alter the reward rate, prospective cutoff or historical obligations.
+- Prepared `/home/aipg/releases/grid-core-e1c75d7e` from the exact Git commit.
+  The detached checkout is clean; production lockfile, schema and migration
+  sources match the live release. Fresh hash-locked binary-wheel installation
+  and `pip check` passed. This release is staged, **not selected or running**.
+- Fresh backup `grid-postgres-20260909T045746Z.dump` passed checksum,
+  scratch restore and candidate Alembic parity at `0040`, completed at
+  `2026-09-09T04:58:23Z`. The generated scratch database was dropped; an
+  independent query found no remaining restore-proof databases.
+- Protected proof and configuration snapshot are under
+  `/var/lib/aipg-backup/demand-release-e1c75d7e/`. The environment checksum and
+  service/timer state, including the live API PID, matched before and after.
+  Production remains `48915650` at `0040`; both payout units remain inactive.
+  No source configuration, live schema, account balance or ledger was changed.
+- Candidate preparation does not authorize a payout or resolve the earned
+  reward ceiling. Revalidate current configuration and backup freshness before
+  cutover; preserve stopped payout units until policy reconciliation passes.
+
 ## Remaining launch checklist
 
 - [x] Review and merge candidate; record exact release SHA and CI evidence.
