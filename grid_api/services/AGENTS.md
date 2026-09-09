@@ -575,7 +575,10 @@ content sanitization, and reward settlement.
   cap must be valid; their own durable credit reservation remains mandatory.
 - `GRID_CHARGING_ALL_MODEL_SERVICES` is a default-empty JSON list of exact
   direct-service IDs allowed to charge across models in allowlist mode. Both
-  positive server-owned ceilings and `inference.service_submit` are required;
+  positive server-owned ceilings and `inference.service_submit` are required
+  to admit work. Cohort selection depends on identity/scope, not cap validity:
+  missing or malformed caps must reach the fail-closed authorization check,
+  never turn a selected service into uncharged preview traffic;
   delegated users and ordinary cohorts retain the model restriction. Global
   `off` still wins. The authenticated credit summary exposes a versioned
   `service_budget` with actual caps and `all_models_charged`; this reports
