@@ -771,12 +771,18 @@ reservations = sa.Table(
     # Final grid-counted charge. This makes variable-price external settlement
     # auditable without reconstructing historical pricing code.
     sa.Column("actual_micro", sa.BigInteger, nullable=True),
+    # Private recovery metadata, never part of public ledger/stat responses.
+    sa.Column("media_client_ref", sa.String(128), nullable=True),
+    sa.Column("media_result", sa.JSON(none_as_null=True), nullable=True),
     # 'held' until a terminal state settles it; the held→settled UPDATE is the
     # exactly-once guard (only the winning UPDATE moves money).
     sa.Column("status", sa.String(16), nullable=False, default="held", index=True),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
     sa.Column("settled", sa.DateTime(timezone=True), nullable=True),
 )
+
+sa.Index("ix_grid_reservations_media_owner_ref", reservations.c.account_id,
+         reservations.c.media_client_ref)
 
 
 # x402 is a post-response on-chain settlement rail. A verified authorization is

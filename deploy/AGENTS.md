@@ -47,6 +47,12 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Media-result recovery requires Alembic `0040` before the candidate starts.
+  Verify backup/restore and schema parity with the exact release. Ordinary
+  holds and terminals reference the new columns even with charging off.
+  Keep additive columns on rollback; never drop retained recovery evidence.
+  Core recovery alone does not close Gallery/Director's restart/retry gate.
+
 - Env names in `env.template`, systemd, code, and docs must match exactly.
 - Old `GRID_PROBE_*` coordinator sampling variables are retired. Disable the
   old enable flag when deploying so rollback cannot restart the sampler; the

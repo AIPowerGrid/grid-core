@@ -167,6 +167,16 @@ transport, accounts, stats, health/metrics.
 
 ## Local Contracts
 
+- `media_results.py` owns `GET /v1/media/results?job_id=...` or `?client_ref=...`
+  (exactly one). It requires `inference.submit` with the same real service/user
+  delegation as generation, returns only the canonical account family's
+  reservation/result, and is rate-limited to 60 reads/minute. Responses are
+  no-store. Missing/foreign jobs return indistinguishable 404s, conflicting
+  refs 409, and unavailable/corrupt storage 503 without upstream details.
+  `pending`, `completed`, and `closed_without_result` are recovery states;
+  absent output is not proof that work was cancelled or refunded. The endpoint
+  neither submits jobs nor changes credit, reward, or free-allowance state.
+
 - Faithful passthrough: forward request/response shape unchanged except metering + sanitize.
 - Paid inference/media routes go through the shared rate limiter (`ratelimit.py`) keyed by
   API key. Not every endpoint is limited — `models`, `stats`, `health`/`metrics`, and progress

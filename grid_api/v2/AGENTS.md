@@ -20,6 +20,14 @@ validator shadow-observation records.
 
 ## Local Contracts
 
+- Alembic `0040` adds nullable private `grid_reservations.media_client_ref`
+  and `media_result` plus an account/ref lookup index. Historical rows stay
+  SQL NULL; no result is reconstructed from an unverified worker claim.
+  Results commit only with the winning media settlement, never independently
+  of the charge/payout. Do not expose these fields in public stats or ledgers.
+  The correlation index is deliberately nonunique: callers may reuse progress
+  tokens, so reads must reject ambiguity and never interpret it as deduplication.
+
 - `schema.py` and `alembic/versions/` must match. `create_all(checkfirst=True)`
   cannot repair existing production tables or add missing constraints.
 - Ledger tables are economic truth:
