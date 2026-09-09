@@ -7,6 +7,36 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Frozen payout release deployed (2026-09-09, 22:44 UTC)
+
+- PR171 merged as `3ab6d9330b07aebc1cef795bd1dc826ab896f654` after required
+  Python 3.12 CI: 1,847 passed, nine explicit skips, plus the separate real
+  PostgreSQL Core/Console/node handoff. Dependency audit, restored migration,
+  schema parity, CodeQL and secret checks passed.
+- Production selected immutable `grid-core-3ab6d933` at
+  `2026-09-09T22:44:38Z`. A fresh checksum-verified production backup restored
+  and migrated to `0041` in an isolated database before live migration.
+  Exact generation routes were briefly gated; two empty queue observations
+  preceded migration and restart. The maintenance gate was removed afterward.
+- `grid_payout_periods` is empty. Full historical payout row fingerprints
+  match before backup, after restore, after live migration and after final
+  reconciliation. No plan, obligation, transfer, grant or backpay was created.
+- Public health reports the exact commit, healthy Redis and nine workers.
+  All six inspected processes use the new release; the environment checksum,
+  seven admitted paths, exact reward cutoff, allowlisted charging and stopped
+  payout timer/service remain unchanged. No new billing cohort was introduced.
+- Read-only reconciliation of recorded canaries and global balances passed:
+  no findings, balance drift, negative balances, stale holds or invalid splits.
+  Owner balance remains USD 9.772654; no additional canary funds were spent.
+  Private evidence is under
+  `/var/lib/aipg-backup/demand-release-3ab6d933/`.
+- API rollback is `94be0cc1` with the additive schema retained and all payout
+  senders paused. Older senders do not honor frozen plans. Global activation,
+  same-cohort observation, and reviewed payout resumption remain open.
+
+See [the frozen-period contract](WORKER_PAYOUT_FREEZE_2026_09_09.md).
+Earlier candidate-only and old-sender defect sections are historical snapshots.
+
 ## Legacy consumer activation review (2026-09-09, 22:36 UTC)
 
 A read-only production transaction, with a five-second statement timeout,

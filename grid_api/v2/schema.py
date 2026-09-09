@@ -825,6 +825,21 @@ x402_payments = sa.Table(
 )
 
 
+# One immutable prospective allocation per UTC hour. Historical payouts are not
+# backfilled into plans: retry authority requires an explicitly frozen period.
+payout_periods = sa.Table(
+    "grid_payout_periods", metadata,
+    sa.Column("period_id", sa.String(48), primary_key=True),
+    sa.Column("utc_hour", sa.BigInteger, nullable=False, unique=True),
+    sa.Column("budget_aipg", sa.Numeric(38, 8), nullable=False),
+    sa.Column("plan", sa.JSON(none_as_null=True), nullable=False),
+    sa.Column("plan_hash", sa.String(64), nullable=False),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint("utc_hour >= 0", name="ck_payout_period_hour"),
+    sa.CheckConstraint("budget_aipg >= 0", name="ck_payout_period_budget"),
+    sa.CheckConstraint("length(plan_hash) = 64", name="ck_payout_period_hash"),
+)
+
 # Custodial worker payouts (v1, pre-on-chain): one row per (period, account).
 # Den is attributed to the ACCOUNT (the worker authenticates with its account key),
 # so earnings never strand for lack of a wallet — an account with no payout_wallet
