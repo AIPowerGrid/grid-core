@@ -7,6 +7,46 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Recovery and deposit retry proof (2026-09-09, 17:35 UTC)
+
+- Retried the owner's already-credited Base USDC transaction
+  `0x96bc723b567c8ff27bf1a550ab2768b553d8fb0f52885d9f1445cf6d62e74b6c`
+  twice through the production deposit-claim API. Both returned HTTP 200,
+  `credited=false`, `already_claimed=true`, and original deposit ID `3`.
+  Purchased balance remained USD 9.772660; deposit and credit-ledger row counts
+  were unchanged. No new transfer or credit was created. The short-lived
+  account-read key was revoked and a subsequent credit read returned 401.
+  Private proof: `/var/lib/aipg-backup/deposit-retry-20260909/proof.json`.
+  This proves live backend idempotency, not the browser's complete failed-
+  receipt recovery workflow.
+- Fresh browser tabs restored the owner's existing linked-account sessions on
+  Gallery, Music, Console and Chat without another login. Displayed purchased
+  balances were USD 9.773 / 9.7727, consistent rounding of USD 9.772660.
+  Console retained the USD 10 funding receipt. This is one linked real account,
+  not an independent Google-only or wallet-only login ceremony.
+- Music PR #8 merged as `92d0fba9df1f3a3d87f622e473a71183a3e9ff4c` after
+  its production-build auth smoke passed. The new case kills the actual Next
+  process with SIGKILL after a local Core stand-in accepts the job but before
+  its response arrives. Restart against the same disposable SQLite journal,
+  repeat request, and later result recovery preserve the original job with
+  exactly one Core generation submission. These are isolated crash tests,
+  not a production outage experiment; no runtime deployment was needed.
+- Gallery PR #31 adds equivalent real-subprocess crash tests for signed
+  Google-only and wallet-only fixture sessions against disposable PostgreSQL
+  16. The restarted process preserves the accepted request, reports its
+  uncertain internal state as public `processing`, recovers the original Core
+  result, and never requotes or submits again. Local `go test -race ./...`,
+  `go vet ./...`, and PostgreSQL-backed backend CI passed. Browser CI initially
+  failed before tests during dependency installation (Google apt repository
+  checksum mismatch); a retry reproduced it. Browser CI now excludes the
+  unused system Chrome apt source on its disposable runner, while retaining
+  dependency integrity checks and Playwright's own Chromium installation.
+  Merge status must be checked separately. These tests use a local Core
+  stand-in and fixture JWTs, not live OAuth or a production Core process crash.
+- No additional canary spend, production generation, grant, payout or global
+  charging expansion occurred in this proof pass. Cumulative actual spend is
+  still USD 0.228015 of the approved USD 1.
+
 ## Streaming disconnect proof (2026-09-09, 17:13 UTC)
 
 Each request emitted streaming output before the HTTP client deliberately
@@ -978,15 +1018,20 @@ The reviewed deployment above supersedes the initial local-only posture.
 ## Remaining launch checklist
 
 - [x] Review and merge candidate; record exact release SHA and CI evidence.
-- [ ] Review query performance and immutable prospective cutoff selection.
+- [x] Select and verify the immutable prospective cutoff; preserve it on rollback.
+- [ ] Review payout query performance before restarting any sender.
 - [ ] Reconcile requested emission budget, no overlapping payout periods, and
       every payout entrypoint before restarting any sender. No treasury refill.
-- [ ] Verify credits and free/promo ceilings in actual production processes.
+- [x] Verify credits and free/promo ceilings in actual production processes;
+      retain the exact builder campaign, not a blanket promotion enablement.
 - [ ] Complete request-to-terminal inventory below, including negative tests.
 - [ ] Prove Google-only, wallet-linked, zero-balance, free-exhausted, and capped
       direct-service cases; same canonical balance across first-party apps.
-- [ ] Run real funded canaries, including streaming and multistage Director;
-      reconcile reservation/debit/refund/reward eligibility for each job.
+- [x] Run funded success canaries on the seven enabled paths, including
+      streaming disconnects and multistage Director; reconcile receipts.
+- [ ] Complete forced worker-failure/timeout coverage for each lifecycle family
+      and the runbook's 24-hour allowlist observation before global expansion.
+- [x] Retry the real funding receipt twice without another transfer or credit.
 - [ ] Verify funding retry persists receipt without another transfer.
 - [ ] Verify billing/orphan/reward/treasury alerts and operational response.
 - [x] Deploy reviewed Core/Music code with existing configuration preserved.
@@ -994,7 +1039,8 @@ The reviewed deployment above supersedes the initial local-only posture.
 - [ ] Migrate Chat image provider to canonical service credentials only with
       the delegated-image release; verify the charged account and retain a
       protected rollback record. Inventory old-key consumers before revocation.
-- [ ] Enable only verified public paths; record disabled paths and rollback.
+- [x] Restrict admission to the seven verified public paths; preserve the list
+      on rollback. Global charging remains a separate activation gate.
 - [ ] Resume payouts only after prospective policy reconciliation passes.
 
 ## Entry-point inventory
