@@ -7,6 +7,77 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Service-cohort hardening and Director evidence (2026-09-09)
+
+- Core PR #158 merged as `275cda22275cc12e9983a033710abc875c72473d` after
+  required PostgreSQL 16 CI, restore/schema parity, dependency audit, security
+  scans, and the separate Core/Console/node integration passed. Its tree
+  exactly matches tested head `9934f4c1`.
+- A configured all-model direct service no longer drops out of charging when
+  its request/day policy is missing or malformed. It reaches the fail-closed
+  policy guard rather than returning a successful preview authorization.
+  Global-off behavior and delegated user/model/account boundaries are unchanged.
+- Production activated immutable `grid-core-275cda22` at `15:43:11Z`, after
+  fresh backup/restore proof at `0040` and two drained-queue observations.
+  Dependency lock, schema, migrations, environment, systemd and base Nginx
+  config were unchanged. The temporary generation gate was removed, public
+  health reports the exact commit, and an anonymous image submission returns
+  401. All six inspected supervisor/child processes use the new release and
+  preserved allowlisted charging configuration. Evidence:
+  `/var/lib/aipg-backup/demand-release-275cda22/`; compatible rollback is
+  `7cb79de8`. Payout service and timer remain inactive.
+- This deploy does not add the remaining direct services to a billed cohort.
+  Fresh read-only inventory found four direct-service keys with valid caps,
+  but only the homepage demo in the all-model cohort. One of the other three
+  has neither a purchased-credit row nor an active promotional grant. Do not
+  invent purchased balance or grandfather unlimited free inference; enforce
+  funded caps or reject before dispatch as the cohort is expanded.
+- The first Director canary generated a paid first frame and a three-second
+  segment, retained the signed-in session and result after browser reload,
+  and played moving video. The first frame cost 5,000 micro-USD and the segment
+  cost 60,000. Cumulative approved test spend reached USD 0.162610 within the
+  USD 1 limit; account/global credit ledgers reconcile exactly.
+- The unmodified audit correctly retained a `model_mismatch` finding: the
+  reservation names the Director recipe and the ledger names its LTX-2.3
+  checkpoint. Core's job-specific logs record a recipe content root matching
+  the reviewed Director JSON and the required checkpoint route. However,
+  image/video durable results were discarding the root (audio retained it).
+  Keep the failed private `director-missing-recipe-root-audit.json`; historical
+  economic rows are not rewritten. This is a routing-evidence defect, not a
+  demonstrated billing loss or proof of worker model substitution.
+- Console and Music retained login and refreshed to the same purchased balance
+  after these canaries. Existing open pages can show a stale balance until
+  refreshed; this check is not real-time cross-tab balance synchronization.
+- Core PR #159 merged as `ad5a12572ab3539bd0e4ca3d4d396ee819b7197d` after
+  required PostgreSQL 16 CI and security checks passed. The merged tree matches
+  tested head `e51d372f`. The combined local suite passed 1,416 tests with 296
+  external-service skips; those skips are not claimed as database proof.
+- Production activated `grid-core-ad5a1257` at `15:52:09Z` after another fresh
+  backup/restore proof at `0040` and queue drain. Public health reports the exact
+  commit and healthy Redis; environment, admission cohorts, schema, dependency
+  lock, and paused payout units remain unchanged. Protected evidence:
+  `/var/lib/aipg-backup/demand-release-ad5a1257/`; compatible rollback is
+  `275cda22`. Main CI is a separate follow-up from the completed PR checks.
+- Image/video recovery now retains Core's dispatched recipe root. The canary
+  audit accepts a differing checkpoint name only when the exact retained root
+  resolves to the reviewed requested model, job type, and required checkpoint.
+  It never relies on pricing aliases or a worker-supplied root. This is routing
+  bookkeeping, not an execution-fidelity attestation. No historical row was
+  backfilled, and the original Director audit remains a recorded failure.
+- A second three-second segment used the first segment's last frame. Browser
+  reload during rendering recovered the original pending job; it completed
+  once, retained its Core receipt, and the six-second two-segment timeline
+  played through. The read-only audit passed with exactly one 60,000-micro-USD
+  debit, the matching durable Director recipe root, and zero account/global
+  discrepancies, negative balances, invalid splits, or stale holds. Keep
+  `director-chained-post-fix-audit.json` alongside the earlier failed report.
+  Cumulative approved canary spend is USD 0.222610, within the USD 1 limit.
+  This proves browser reload recovery, not a Gallery/Core process-crash test,
+  video motion fidelity, export quality, or the remaining identity/failure cases.
+
+Public charging activation, direct-service cohort expansion, prospective reward
+eligibility, and payout resumption are still separate uncompleted gates.
+
 ## Funded owner canary and Chat output fix (2026-09-09)
 
 Funding and a bounded test-spend approval have now been supplied. The prior
