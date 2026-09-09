@@ -214,11 +214,65 @@ bounded queue and never blocks account, inference, deposit, or settlement work.
 
 ## Kill switch and rollback
 
-Set `GRID_CHARGING_MODE=off` and restart to stop new charges. Do not delete
-reservation rows or stop the sweeper: already-held jobs still need to settle or
-refund. If code rollback is required, choose a retained release compatible with
-the current Alembic schema as described in `deploy/README.md`.
+For a public billing incident, stop accepting new generation, not just new
+charges. Gate the exact generation routes at the reverse proxy first, then set
+`GENERATION_ENABLED_PATHS=[]` and restart using the drained immutable-release
+procedure. Preserve the selected charging mode and all economic policy. Verify
+every generation family rejects before reserve/dispatch, then remove the
+temporary proxy gate only when the application admission gate is confirmed.
+
+`GRID_CHARGING_MODE=off` alone is NOT an inference kill switch: it permits
+uncharged generation. Use it only for an explicitly authorized preview cohort
+or while public generation remains closed. Never use it as the sole rollback
+for a global billing outage.
+
+Do not delete reservation rows or stop the sweeper: already-held jobs still
+need to settle or refund. Keep payout senders paused. If code rollback is
+required, choose a retained release compatible with the current Alembic schema
+as described in `deploy/README.md`. Retain the exact prospective reward cutoff
+and additive payout plans; older senders must not run against frozen periods.
 
 Do not enable free/promotional spending, deposits, or global `on` mode merely
 because the allowlisted canary passes. Each expands financial exposure and has
 its own explicit launch decision.
+
+## Global activation
+
+This procedure does not waive the release, identity, canary or 24-hour
+same-cohort observation gates above. The launch record must identify which
+gates are proven and which remain open. An elapsed clock without reconciliation
+is not sufficient.
+
+1. Confirm the exact deployed commit, Alembic revision, all serving processes,
+   seven reviewed generation capabilities, healthy workers, and stopped payout
+   service/timer. Reconcile balances, reservations, completion/reward backing,
+   funding receipts and alerts. Preserve private evidence; do not log secrets.
+2. Snapshot the protected environment and take a fresh verified database backup.
+   Retain the prior compatible API release. Record the prospective cutoff and
+   current service ceilings, promotion campaign allowlist and free-credit state.
+3. Gate new generation at the proxy and drain queued/in-flight work. Change
+   only `GRID_CHARGING_MODE` from `allowlist` to `on`; leave the legacy boolean
+   at `0`, explicit admitted paths, cohort lists, reward cutoff, budgets and
+   funding configuration untouched. Retained cohort lists do not narrow `on`.
+4. Validate typed configuration before restart. After restart verify the actual
+   supervisor and serving-worker environments, immutable commit and public
+   health. Keep the proxy gate until those checks pass. If they do not, follow
+   the closed-generation rollback above, not an uncharged public fallback.
+5. With generation reopened, test an ordinary account outside the former
+   allowlist and an empty bounded direct service. Both must report global `on`
+   and reject insufficient credit before queueing. A bridge without delegated
+   identity must still reject authentication. Inspect economic rows and queue
+   evidence; an HTTP error alone does not prove no dispatch.
+6. Use only the remaining approved canary spend for successful work. Reconcile
+   the exact account, hold, charge, refund, terminal and purchased-backed reward
+   for each enabled modality. Confirm Chat, Art, Music and Console show the same
+   current balance and charging state after reload; stale preview text is not
+   acceptable. Unverified image batches, img2img, timelines and 3D stay closed.
+7. Any invariant failure closes generation and preserves evidence. A depleted
+   user's normal 402 is expected, not a reason to turn charging off. Monitor
+   service caps and operational alerts; do not expand grants or caps to mask
+   failures.
+8. Payout activation is separate: reconcile frozen prospective allocations,
+   historical pending nonces and treasury state, then perform the separately
+   reviewed supervised send/replay before enabling the hourly timer. Global
+   billing activation itself must not move worker funds.

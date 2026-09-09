@@ -7,6 +7,41 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Prospective payout and shutdown review (2026-09-09, 22:58 UTC)
+
+Read-only production preview on `3ab6d933` covered the five complete UTC hours
+17 through 21 after the immutable cutoff. Each passed the sender's exact
+hour/ID/cutoff/budget contract at 208.33 AIPG/hour. Hours 17 and 20 each allocate
+208.33 to the owner's configured wallet; hours 18, 19 and 21 allocate zero and
+leave their budgets unspent. Total preview is 416.66 AIPG, not a transfer or a
+new persisted obligation. The plan table remains empty. Full private results
+are in `prospective-preview-20260909T225552Z.json` in the release evidence folder.
+
+This confirms an important policy property, not a new arithmetic defect: a
+small amount of eligible non-SmolLM work can receive the entire fixed hourly
+budget when no other account contributes. The preview is an emissions split,
+not a cost-proportional reimbursement. No budget or allocation was changed.
+
+At Base block 51102666, the configured sender matched the treasury monitor;
+the verified chain ID was 8453. Mined and RPC-pending nonce were both 1807;
+the maximum recorded nonce was 1806, with no recorded unconsumed nonce rows.
+This is one RPC snapshot, not proof that historical transfers were all correct.
+The 1,719 `sent`, 87 `manual_review` and 1,895 `accrued` historical rows remain
+untouched and excluded from automatic prospective retries.
+
+The payout wallet held 0.007227499493259457 ETH but only
+0.002843159999506788 AIPG. Gas is available; AIPG funding is insufficient for
+the preview. Do not refill or send as a side effect of this review. This wallet
+is distinct from the deposit Safe and purchased-credit ledger. A reviewed
+funding action and supervised send/replay remain prerequisites to resumption.
+
+The runbook now closes generation with explicit empty admission during a
+billing incident, preserving terminal settlement. Turning charging `off`
+alone would leave public uncharged generation open and is not an inference
+kill switch. The new global-activation procedure preserves the seven admitted
+paths, caps, cutoff and paused payouts and requires process and negative-canary
+readback. It does not waive the 24-hour observation or other open gates.
+
 ## Frozen payout release deployed (2026-09-09, 22:44 UTC)
 
 - PR171 merged as `3ab6d9330b07aebc1cef795bd1dc826ab896f654` after required
