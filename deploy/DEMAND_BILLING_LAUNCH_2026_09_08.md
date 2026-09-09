@@ -7,6 +7,41 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
+## Worker failure and Console recovery evidence (2026-09-09)
+
+- New PostgreSQL-backed worker tests exercise the actual registration/dispatch
+  loop for chat, Responses, Anthropic, image, video and audio. Explicit errors
+  refund once; timeout/disconnect exceptions keep the original hold while
+  requeued and refund on give-up; partial chat failure cannot create a reward.
+  Interrupted refund transactions leave a recoverable hold. The actual sweeper
+  restores it once, and a late successful terminal cannot mint a ledger entry.
+- Six additional cases kill a real child process after Core updates reservation
+  status inside a refund transaction but before its credit write. A separate
+  PostgreSQL connection sees no committed terminal change, and the unchanged
+  sweeper recovers the hold after process death. Together, 43 new tests pass
+  locally against isolated PostgreSQL 16. Local Python is 3.13; required CI
+  verifies the production Python 3.12/Linux dependency lock separately.
+- These tests simulate authentication, worker frames, Redis queue/registry,
+  R2 and client delivery. They do not prove elapsed production timeouts, real
+  GPU faults, Redis redelivery after a Uvicorn process crash, or independent
+  operator behavior. No live worker was interrupted, no new generation was
+  submitted, and no production credit/payout state changed.
+- Console PR31 merged as `98e96a4c30f20c6f236049731122c622c0bf680e` and
+  deployed as Vercel `dpl_GJ8fKCArScCLqcJyzoAJiLsswt2V`. Its required browser
+  test proves receipt reload, 425/503 retries, already-credited completion,
+  denied storage and failed cleanup without another wallet payment. The
+  production alias, retained owner login and funding history were checked;
+  anonymous deposit reads/claims rejected. Console PR32 records the deployment
+  and merged as `043a3b49a52d18c31029898196876161bb97540d`. These are fixtures
+  plus production read checks, not a second real funding transfer.
+- Refreshed Gallery, Music and Console sessions showed the same purchased
+  balance with their normal rounding. Core remains `ad5a1257`/0040,
+  charging allowlisted, with the prospective reward cutoff and seven-path
+  restriction preserved. Payout service/timer remain inactive. Full activation,
+  the runbook observation window and remaining negative/alert tests are still
+  separate gates. Gallery's earlier recovery PR31 is now merged as
+  `7f6bb31d6a1e0c463b15d25520e4321f3f91f80c`.
+
 ## Recovery and deposit retry proof (2026-09-09, 17:35 UTC)
 
 - Retried the owner's already-credited Base USDC transaction
@@ -1032,7 +1067,8 @@ The reviewed deployment above supersedes the initial local-only posture.
 - [ ] Complete forced worker-failure/timeout coverage for each lifecycle family
       and the runbook's 24-hour allowlist observation before global expansion.
 - [x] Retry the real funding receipt twice without another transfer or credit.
-- [ ] Verify funding retry persists receipt without another transfer.
+- [x] Verify funding retry persists receipt without another transfer (required
+      Console browser fixtures, deployed UI and separate live duplicate claim).
 - [ ] Verify billing/orphan/reward/treasury alerts and operational response.
 - [x] Deploy reviewed Core/Music code with existing configuration preserved.
 - [ ] Verify remaining frontend releases and final activation configuration.
