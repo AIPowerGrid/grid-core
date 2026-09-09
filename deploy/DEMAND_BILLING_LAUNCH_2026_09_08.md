@@ -7,14 +7,49 @@ The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
 
-## Atomic queue recovery candidate (2026-09-09)
+## Atomic queue recovery deployed (2026-09-09, 20:03 UTC)
+
+- Core PR167 merged as `94be0cc128d7b2f5a62981549a70cece7eeab8d6`.
+  Required CI ran Python 3.12.14, PostgreSQL 16 and Redis 7.0.15: 1,783 passed,
+  9 explicit skips, plus the separate real Core/Console/node integration.
+  Dependency audit, backup/restore, migration parity, CodeQL and secret scans
+  passed. The full objective is not complete merely because CI passed.
+- At `2026-09-09T20:03:49Z`, production selected immutable
+  `/home/aipg/releases/grid-core-94be0cc1`. A fresh checksum-verified backup
+  restored into a generated scratch database and passed Alembic `0040` parity.
+  Dependencies, schema, migrations, systemd and Nginx source are unchanged.
+  Exact generation routes were gated while one pending text job drained;
+  two consecutive empty-queue observations preceded restart. The temporary
+  maintenance overlay was removed after health verification.
+- Public health and network status report the exact commit, operational Redis,
+  nine online workers and all previously tested modality models. The supervisor
+  and five children use the new release and preserved configuration: one owner,
+  nine models, the same four model-independent direct services, seven enabled
+  paths and the exact `2026-09-09T16:26:27+00:00` reward cutoff. Daily-free
+  spending remains off, existing promotion/monitor settings unchanged, payout
+  service and timer inactive, and Core automatic restart count zero.
+- Fresh zero-spend service requests to chat, Responses, Anthropic, image, video
+  and audio each returned `402`. Queue IDs, reservation/credit counts and the
+  service balance were unchanged. A valid anonymous chat request returned
+  `401`. Temporary canary keys were revoked and then rejected by Core.
+- The new funded chat job `3f8196a0-0b67-4269-bb27-ca82b3ae5432` returned
+  visible output, reserved 40 micro-USD, charged 6 and refunded 34. Exactly one
+  committed completion has a result hash and 26.68 purchased-backed eligible
+  DEN. No payout was sent. Balance is USD 9.772654; cumulative actual canary
+  spend is USD 0.228021 of the approved USD 1.
+- Read-only reconciliation of the recorded jobs and global balances passed,
+  with zero drift, negative balances, invalid splits or stale holds. Private
+  backup, drain, process, canary and audit evidence is retained under
+  `/var/lib/aipg-backup/demand-release-94be0cc1/`. Compatible rollback is
+  `ad5a1257`; retain schema, the exact reward cutoff, path restrictions and
+  stopped payouts. Do not re-enable old retry behavior as a global launch.
 
 - Found and reproduced an acknowledgement-before-append gap in mismatch,
   affinity, generation-failure and stale-recovery paths. Real Redis append
   errors removed the original pending claim in all four paths. Concurrent
   retry callers also duplicated work, and duplicate generation retries could
   incorrectly tell a caller to refund an already-requeued job.
-- The candidate moves each handoff into a pending-checked Lua operation with
+- The release moves each handoff into a pending-checked Lua operation with
   append before acknowledgement. Repeat handoffs are nonterminal no-ops.
   Affinity exhaustion retains the running claim; original progress/targeting
   fields and message-carried retry budgets survive retries and stale recovery.
@@ -26,12 +61,14 @@ Historical accrual and disputed payments are outside this rollout.
   red run reproduced 15 failures against the unmodified implementation.
 - This is not a full Uvicorn/worker/PostgreSQL restart or Redis-server crash
   proof. It does not make GPU execution exactly once or close stream retention
-  under overload. Production deployment and end-to-end rollout remain separate
-  gates; no production flags, holds, balances, payments or timers changed here.
+  under overload. The production restart above drained work first, so it is
+  not an in-flight Uvicorn/worker/PostgreSQL crash experiment. Global rollout,
+  remaining identity/alert coverage and the observation window remain gates.
 - PR/main CI explicitly installs Redis so these proofs cannot silently skip
   because the executable is absent. Do not deploy a mixed-version fleet and
   assume old retry code honors the new handoff; confirm all Core processes
-  run the reviewed candidate before relying on it.
+  run the reviewed release before relying on it; the six-process production
+  inspection above verifies that upgrade.
 
 ## Worker failure and Console recovery evidence (2026-09-09)
 
@@ -1090,8 +1127,11 @@ The reviewed deployment above supersedes the initial local-only posture.
       direct-service cases; same canonical balance across first-party apps.
 - [x] Run funded success canaries on the seven enabled paths, including
       streaming disconnects and multistage Director; reconcile receipts.
-- [ ] Complete forced worker-failure/timeout coverage for each lifecycle family
-      and the runbook's 24-hour allowlist observation before global expansion.
+- [x] Prove actual worker-handler failures/timeouts on PostgreSQL for all six
+      formats, and Redis retry/duplicate/process-kill boundaries; PR166/167.
+      These are controlled component tests, not a live GPU outage experiment.
+- [ ] Complete end-to-end Core crash recovery and the runbook's 24-hour
+      allowlist observation before global expansion.
 - [x] Retry the real funding receipt twice without another transfer or credit.
 - [x] Verify funding retry persists receipt without another transfer (required
       Console browser fixtures, deployed UI and separate live duplicate claim).
@@ -1251,19 +1291,19 @@ sources, rather than the older local Gallery main checkout.
 
 | Path | Core ownership / shared billing path | Live canary status |
 | --- | --- | --- |
-| Chat completions, including media shim | `routers/openai.py`, credits or media service | Pending |
-| Responses | `routers/responses.py`, `_passthrough.py` | Pending |
-| Anthropic messages | `routers/anthropic.py`, `_passthrough.py` | Pending |
-| Image and image-to-image | `routers/images.py`, `services/media.py` | Paid Gallery Z-Image success verified; img2img pending |
-| Video and image-to-video | `routers/videos.py`, `services/media.py` | Pending |
-| Audio | `routers/audio.py`, `services/media.py` | Pending |
-| 3D | `routers/threed.py`, `services/media.py` | Pending or disable |
-| Batch images | One native request and full-batch hold; validate all output slots before settlement | Source traced; paid four-output canary pending |
-| Director first frame / segments / retries | Gallery orchestration into image/video routes | Pending |
-| Direct API, SDKs, provider integrations | Same public routes; verify no alternate dispatch bypass | Pending |
-| Chat, Art, Music, Console | Delegated identity and shared purchased balance | Pending |
-| Bots and direct service accounts | Explicit service identity and request/day ceilings | Pending |
-| x402 | Independent external payment proof; keep dark unless verified | Pending or remain dark |
+| Chat completions, including media shim | `routers/openai.py`, credits or media service | Paid Chat text/image and streamed-disconnect canaries reconciled; fresh paid text and empty-service 402 on 94be0cc1 |
+| Responses | `routers/responses.py`, `_passthrough.py` | Paid stream/non-stream/disconnect reconciled; fresh empty-service 402 on 94be0cc1 |
+| Anthropic messages | `routers/anthropic.py`, `_passthrough.py` | Paid stream/non-stream/disconnect reconciled; fresh empty-service 402 on 94be0cc1 |
+| Image and image-to-image | `routers/images.py`, `services/media.py` | Paid single-image canaries passed; fresh empty-service 402. Img2img billing passed but visual QA incomplete: disabled |
+| Video and image-to-video | `routers/videos.py`, `services/media.py` | Paid LTX and Director segments reconciled; fresh empty-service video 402. Timeline disabled |
+| Audio | `routers/audio.py`, `services/media.py` | Paid Music result/reload reconciled; fresh empty-service 402 on 94be0cc1 |
+| 3D | `routers/threed.py`, `services/media.py` | Disabled; no qualified live worker/canary |
+| Batch images | One native request and full-batch hold; validate all output slots before settlement | Four-output canary failed cardinality and fully refunded; no worker reward. Disabled pending worker deployment and retest |
+| Director first frame / segments / retries | Gallery orchestration into image/video routes | Multistage paid canary and reload recovery passed; local Gallery restart tests use a Core stand-in, not full Core crash recovery |
+| Direct API, SDKs, provider integrations | Same public routes; verify no alternate dispatch bypass | Direct API paid/negative cases above; exhaustive external-consumer inventory remains open |
+| Chat, Art, Music, Console | Delegated identity and shared purchased balance | One real linked account agrees across sites; signed-in reload and Console funding retry passed. Separate identity matrix remains open |
+| Bots and direct service accounts | Explicit service identity and request/day ceilings | Four exact direct services are charged independently of model; codebase-design empty-service six-route 402/no-dispatch proof refreshed. Remaining consumer/key inventory open |
+| x402 | Independent external payment proof; keep dark unless verified | Remains dark |
 | Validator/worker setup probes | Bound dedicated no-DEN terminals; separate legacy coordinator sampler retired | Legacy sampler retirement deployed at `c34c7da5`; remaining live bound-path proof pending |
 
 ## Rollback boundary

@@ -49,6 +49,13 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Production selected immutable `94be0cc1` / Alembic `0040` for atomic queue
+  retry recovery at `2026-09-09T20:03:49Z`. Fresh restore, drained restart,
+  six-process configuration, funded text and six-route empty-service canaries
+  passed without changing the cohort or payout timers. Preserve the existing
+  admission list and reward cutoff; see the launch evidence for exact limits
+  and rollback. This does not authorize global billing or payout resumption.
+
 - Media-result recovery requires Alembic `0040` before the candidate starts.
   Verify backup/restore and schema parity with the exact release. Ordinary
   holds and terminals reference the new columns even with charging off.
