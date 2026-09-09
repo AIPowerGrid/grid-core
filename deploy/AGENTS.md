@@ -58,6 +58,10 @@ executes an immutable release selected through `/home/aipg/current`.
   The launch record separately documents 27 local Uvicorn/PG/Redis crash tests
   and alert transport delivery; these do not count as elapsed observation or
   authorize a new runtime deployment.
+  The subsequent consumer review verifies Chat's canonical image provider and
+  current-load payout query timings. Sender screening/hash-retention fixes
+  remain separate from unresolved period-allocation/overlap and historical
+  retry gates; no payout restart follows from that review.
 
 - Media-result recovery requires Alembic `0040` before the candidate starts.
   Verify backup/restore and schema parity with the exact release. Ordinary
