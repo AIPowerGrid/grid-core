@@ -82,6 +82,14 @@ executes an immutable release selected through `/home/aipg/current`.
   Clearing or moving it would re-admit unbilled work or reprice history. Keep
   payout timers stopped through demand/reward reconciliation; never treat
   switching charging off as permission to resume unbounded free emissions.
+- Production explicitly narrowed `GENERATION_ENABLED_PATHS` at
+  `2026-09-09T17:06:56Z` to chat, Responses, Anthropic, single image, video,
+  image-to-video and audio. Batch images, img2img, video timeline and 3D are
+  disabled pending their remaining qualification. Preserve this restriction
+  during rollback rather than restoring implicit all-path admission. Consult
+  the current table in `DEMAND_BILLING_LAUNCH_2026_09_08.md`; older snapshots
+  in that file are historical, not the active configuration. Charging remains
+  allowlisted and the path restriction does not authorize payout resumption.
 - `VALIDATOR_COMPENSATION_OPERATOR_ENABLED` defaults off. Apply `0039` and
   ship/test matching node-app and Console consent screens before enabling it.
   Current account association and fresh human proof remain mandatory; this
