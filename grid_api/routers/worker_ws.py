@@ -1828,6 +1828,13 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
             # ATOMIC terminal: worker-payout row + demand settlement in one txn.
             # Media reserves the EXACT cost up front, so success just lets the hold
             # stand (exact=True → flip held→settled, no ledger movement).
+            media_result = {
+                "media": outputs,
+                "model": selected_model,
+                "worker": worker_info.get("name", ""),
+                "gen_time": round(gen_time, 2),
+                "recipe_root": expected_recipe_root,
+            }
             settle_result = await credits.record_and_settle(
                 ledger_values=dict(
                     job_id=job_id,
@@ -1843,6 +1850,7 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                     worker_sig=verified_sig,
                 ),
                 exact=True,
+                media_result=media_result,
             )
             if settle_result == "error":
                 # Terminal didn't commit → error out and DON'T ack (return False),
@@ -1857,15 +1865,7 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
             if _is_paid_settlement(settle_result):
                 await token_stream.publish_done(
                     job_id,
-                    json.dumps(
-                        {
-                            "media": outputs,
-                            "model": selected_model,
-                            "worker": worker_info.get("name", ""),
-                            "gen_time": round(gen_time, 2),
-                            "recipe_root": expected_recipe_root,
-                        },
-                    ),
+                    json.dumps(media_result),
                 )
                 await ws.send_json({"type": "ack", "id": job_id, "den": den_awarded})
                 record_job_complete(tokens=0, den=den_awarded, duration=gen_time)

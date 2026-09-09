@@ -547,6 +547,28 @@ sources, rather than the older local Gallery main checkout.
   was removed. Host proof: `/var/lib/aipg-release-proof/gallery-9e7ff3dc/`.
   No paid generation, reward-policy activation, or payout accompanied this change.
 
+### Media recovery candidate (not deployed)
+
+- Core now has a candidate private result envelope committed atomically with
+  the successful media reservation and completion row. It includes the whole
+  verified output batch, rather than only a hash or a five-minute Redis event.
+  Migration `0040` is additive and must precede the candidate application;
+  historical results remain absent, and rollback retains recovery metadata.
+- `GET /v1/media/results` retrieves by Grid job ID or the original progress
+  token (`client_ref`) using generation's authenticated canonical account.
+  Cross-account lookup is 404, reused ambiguous refs are 409, storage errors
+  fail closed, and reads never retry work. No frontend needs direct DB access.
+- Local SQLite and PostgreSQL 14.19 tests prove commit-before-DONE/ack,
+  duplicate/release races, result-write rollback, owner/alias isolation,
+  delegated HTTP authentication, result bounds and migration preservation.
+  PostgreSQL 16 CI and the release backup/restore proof remain required.
+- This is billed-result recovery infrastructure, not yet Gallery integration
+  or request idempotency. Gallery must durably keep its own request handle,
+  consult this result before retrying an uncertain paid stage, and preserve
+  the recovered output through its normal history flow. Unreserved preview
+  work and old completions have no reconstructed receipt; transient R2 object
+  retention is unchanged. Paid Director and global charging remain unverified.
+
 | Path | Core ownership / shared billing path | Live canary status |
 | --- | --- | --- |
 | Chat completions, including media shim | `routers/openai.py`, credits or media service | Pending |
