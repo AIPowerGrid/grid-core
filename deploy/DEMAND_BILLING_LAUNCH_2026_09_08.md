@@ -48,6 +48,32 @@ Historical accrual and disputed payments are outside this rollout.
 - Console and Music retained login and refreshed to the same purchased balance
   after these canaries. Existing open pages can show a stale balance until
   refreshed; this check is not real-time cross-tab balance synchronization.
+- Core PR #159 merged as `ad5a12572ab3539bd0e4ca3d4d396ee819b7197d` after
+  required PostgreSQL 16 CI and security checks passed. The merged tree matches
+  tested head `e51d372f`. The combined local suite passed 1,416 tests with 296
+  external-service skips; those skips are not claimed as database proof.
+- Production activated `grid-core-ad5a1257` at `15:52:09Z` after another fresh
+  backup/restore proof at `0040` and queue drain. Public health reports the exact
+  commit and healthy Redis; environment, admission cohorts, schema, dependency
+  lock, and paused payout units remain unchanged. Protected evidence:
+  `/var/lib/aipg-backup/demand-release-ad5a1257/`; compatible rollback is
+  `275cda22`. Main CI is a separate follow-up from the completed PR checks.
+- Image/video recovery now retains Core's dispatched recipe root. The canary
+  audit accepts a differing checkpoint name only when the exact retained root
+  resolves to the reviewed requested model, job type, and required checkpoint.
+  It never relies on pricing aliases or a worker-supplied root. This is routing
+  bookkeeping, not an execution-fidelity attestation. No historical row was
+  backfilled, and the original Director audit remains a recorded failure.
+- A second three-second segment used the first segment's last frame. Browser
+  reload during rendering recovered the original pending job; it completed
+  once, retained its Core receipt, and the six-second two-segment timeline
+  played through. The read-only audit passed with exactly one 60,000-micro-USD
+  debit, the matching durable Director recipe root, and zero account/global
+  discrepancies, negative balances, invalid splits, or stale holds. Keep
+  `director-chained-post-fix-audit.json` alongside the earlier failed report.
+  Cumulative approved canary spend is USD 0.222610, within the USD 1 limit.
+  This proves browser reload recovery, not a Gallery/Core process-crash test,
+  video motion fidelity, export quality, or the remaining identity/failure cases.
 
 Public charging activation, direct-service cohort expansion, prospective reward
 eligibility, and payout resumption are still separate uncompleted gates.
