@@ -167,6 +167,13 @@ transport, accounts, stats, health/metrics.
 
 ## Local Contracts
 
+- `GET /v1/account/ownership` is private, read-only, `account.read` gated,
+  rate-limited and `no-store`. Service keys must delegate a user. It accepts no
+  target account and returns only the authenticated canonical account plus
+  proved retired aliases (at most 128 family members); database/graph errors
+  fail closed. This is not permission to merge accounts or rewrite ledgers.
+  Frontends must not accept a browser-supplied alias as equivalent evidence.
+
 - `media_results.py` owns `GET /v1/media/results?job_id=...` or `?client_ref=...`
   (exactly one). It requires `inference.submit` with the same real service/user
   delegation as generation, returns only the canonical account family's

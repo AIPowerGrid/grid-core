@@ -24,6 +24,7 @@ from urllib.parse import urlsplit
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 
@@ -1168,6 +1169,30 @@ async def _require_session(apikey: Optional[str], authorization: Optional[str]) 
             detail="This action needs a fresh Google or wallet proof; an inference or service key cannot manage the account.",
         )
     return user
+
+
+@router.get("/v1/account/ownership")
+@limiter.limit("60/minute")
+async def get_account_ownership(
+    request: Request,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+    x_grid_user_assertion: Optional[str] = Header(None),
+    x_grid_user_token: Optional[str] = Header(None),
+):
+    """Private canonical ownership for recovering app data after proven merges."""
+    headers = {"Cache-Control": "no-store"}
+    try:
+        user = await _require_v2(apikey, authorization, x_grid_user_assertion, x_grid_user_token)
+        if user.get("key_kind") == "service":
+            raise HTTPException(401, detail="Account ownership requires a delegated user token")
+        result = await identities_svc.account_ownership(user["account_id"])
+        return JSONResponse(result, headers=headers)
+    except HTTPException as exc:
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=headers)
+    except Exception:
+        return JSONResponse({"detail": "Account ownership temporarily unavailable"},
+                            status_code=503, headers=headers)
 
 
 @router.get("/v1/account")

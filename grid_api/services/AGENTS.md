@@ -398,6 +398,11 @@ content sanitization, and reward settlement.
 
 ## Local Contracts
 
+- `identities.account_ownership` reads only canonical/retired IDs from proved
+  account merges, bounds the family to 128 and rejects a root changed during
+  the read. It never moves money or changes ownership. Historical ledger IDs
+  remain intact; consumers may use the authenticated result for data recovery.
+
 - An explicit invalid `GRID_CHARGING_MODE` rejects startup and authorization;
   never interpret a typo as `off` and silently admit unbilled work. Only an
   absent mode uses the documented legacy boolean fallback.
