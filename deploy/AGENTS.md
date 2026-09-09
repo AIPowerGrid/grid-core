@@ -77,6 +77,8 @@ executes an immutable release selected through `/home/aipg/current`.
   RPC failure means balances are unknown. Threshold alerts do not authorize a
   refill, payout, or economic-policy change.
 - Preserve the exact `WORKER_REWARDS_PAID_ONLY_SINCE` boundary once activated.
+  Production fixed it at `2026-09-09T16:26:27+00:00`; the launch evidence records
+  the immutable release, historical-equivalence proof and private backup state.
   Clearing or moving it would re-admit unbilled work or reprice history. Keep
   payout timers stopped through demand/reward reconciliation; never treat
   switching charging off as permission to resume unbounded free emissions.
