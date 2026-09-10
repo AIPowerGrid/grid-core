@@ -402,6 +402,15 @@ expired or out-of-scope pilots return 503 without revealing membership.
 - Worker pairing/auth changes: include
   `grid_api/routers/tests/test_worker_enrollment_contract.py` and the service
   lifecycle tests before the full suite.
+- Registration retains `delegation_wallet` with the verified signer/ID/expiry.
+  The service may reuse that exact enrolled identity for the same authenticated
+  account and worker name after a payout-address change; worker registry payout
+  metadata and settlement still use the current account destination. Run
+  `grid_api/services/tests/test_worker_identity.py` for continuity, cross-account,
+  cross-name, missing/tampered identity, signature, expiry and replay checks.
+  `tests/test_core_process_crash.py::test_audio_identity_survives_payout_change_and_reconnect`
+  also proves two reconnects through real Core/WebSocket/scoped authentication,
+  PostgreSQL registry persistence and Redis after changing the reward destination.
 - `pytest grid_api/services/tests/test_credits_billing.py` when changing any
   route that reserves, refunds, or reconciles credits.
 
