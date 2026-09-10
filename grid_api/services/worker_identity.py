@@ -12,12 +12,15 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+import sqlalchemy as sa
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from eth_utils import is_address
 
 from ..config import get_settings
+from ..database import new_session
 from ..redis_client import get_redis
+from ..v2.schema import workers
 from . import audio
 
 IDENTITY_VERSION = 1
@@ -131,14 +134,16 @@ async def verify_registration(
     worker_profile: Mapping[str, Any] | None,
     required: bool,
     now: int | None = None,
+    account_id: Any = None,
 ) -> VerifiedWorkerIdentity | None:
     if proof is None:
         if required:
             raise WorkerIdentityError("payout-wallet worker delegation is required")
         return None
+    authority = await _registration_authority(proof, payout_wallet, worker_name, account_id)
     verified = _verify_registration_proof(
         proof=proof,
-        payout_wallet=payout_wallet,
+        payout_wallet=authority,
         worker_name=worker_name,
         models=models,
         job_types=job_types,
@@ -159,6 +164,42 @@ async def verify_registration(
     if not fresh:
         raise WorkerIdentityError("worker registration proof was already used")
     return verified
+
+
+async def _registration_authority(proof, payout_wallet, worker_name, account_id):
+    """Retain an enrolled identity when its owner changes the reward destination."""
+    certificate = proof.get("delegation") if isinstance(proof, Mapping) else None
+    delegation = certificate.get("payload") if isinstance(certificate, Mapping) else None
+    if not isinstance(delegation, Mapping) or not account_id:
+        return payout_wallet
+    if delegation.get("payout_wallet") == payout_wallet.lower():
+        return payout_wallet
+    async with await new_session() as session:
+        previous = (await session.execute(
+            sa.select(workers.c.wallet, workers.c.capabilities).where(
+                workers.c.name == worker_name, workers.c.account_id == account_id,
+            ),
+        )).mappings().first()
+    if previous is None:
+        return payout_wallet
+    capabilities = previous["capabilities"]
+    if not isinstance(capabilities, Mapping):
+        return payout_wallet
+    # Old rows already retain the verified signer/id/expiry and registration
+    # wallet. Persist the authority separately on the next verified handshake.
+    authority = capabilities.get("delegation_wallet", previous["wallet"])
+    if (not isinstance(authority, str) or not is_address(authority)
+            or not capabilities.get("delegation_id")
+            or not capabilities.get("signer_address")
+            or not capabilities.get("delegation_expires_at")
+            or delegation.get("payout_wallet") != authority.lower()
+            or delegation.get("delegation_id") != capabilities["delegation_id"]
+            or delegation.get("worker_signer") != capabilities["signer_address"]
+            or delegation.get("expires_at") != capabilities["delegation_expires_at"]):
+        return payout_wallet
+    # This selects an authority, never accepts a proof. Both signatures,
+    # certificate expiry, capability binding and the one-use nonce still verify.
+    return authority.lower()
 
 
 def _verify_registration_proof(
