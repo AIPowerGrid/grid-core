@@ -51,21 +51,27 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
-- Global demand charging is active on immutable `3ab6d933` / Alembic `0041`.
+- Global demand charging is active on immutable `793fe904` / Alembic `0041`.
   The mode changed at `2026-09-10T00:14:57Z`; public generation reopened at
   `00:15:53Z` after eighteen no-dispatch rejection checks. Six processes use
   `GRID_CHARGING_MODE=on`; only that environment field changed. Preserve the
   seven admitted capabilities, service caps, exact promotion campaign and
-  reward cutoff. Payout senders remain stopped. See the launch record for
-  public API paid canaries, remaining frontend verification and rollback.
-- Production selected immutable `3ab6d933` / Alembic `0041` at
+  reward cutoff. On September 10, six browser-submitted Chat/Art/Music/Director
+  first-frame jobs reconciled exactly; plain Gallery video passed, but disabled
+  Director timelines still have a rejected-request processing-state defect.
+  The payout timer resumed at `14:19:51Z` only after a supervised frozen-hour
+  send, independent Transfer proofs and a zero-transfer replay. Its first
+  scheduled cycle passed too. Historical accrual/disputes remain excluded.
+  See the launch record for evidence, limits and rollback.
+- The preceding production release selected immutable `3ab6d933` / Alembic `0041` at
   `2026-09-09T22:44:38Z`, including the frozen payout and screening fixes.
   Restored-production migration, drained restart, six-process configuration
   and existing canary/global balance reconciliation passed. The plan table is
-  empty and historical payout fingerprints are unchanged. At that deployment
+  empty at that point and historical payout fingerprints were unchanged. At that deployment
   charging was allowlisted; the later global cutover above supersedes that
-  posture. Keep payout service/timer stopped and exact admission/cutoff/settings
-  preserved. The code deployment alone was not a supervised payout proof.
+  posture. The subsequent supervised payout proof above supersedes the stopped
+  sender posture, not the exact admission/cutoff/settings. The code deployment
+  alone was not a supervised payout proof.
 - The frozen worker-payout code requires Alembic `0041` before any sender.
   It adds empty hourly plans, never adopts historical obligations, and does not
   authorize a timer restart. If this code is rolled back, keep payouts paused:
