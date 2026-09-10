@@ -183,9 +183,12 @@ the production funding rail and is not the launch canary.
     balances, stale holds, invalid pocket splits, wrong account/service
     attribution, missing terminal evidence, or inconsistent per-job credit
     movements.
-12. Leave the same allowlist active for 24 hours of normal first-party use.
-    Reconcile funding receipts, balances, credit ledger, reservations, worker
-    completion ledger, and alerts before expanding the cohort.
+12. Observe and reconcile funding receipts, balances, credit ledger,
+    reservations, worker completion ledger and alerts before expansion. Record
+    the maintainer's rollout decision and supporting evidence. A timed soak
+    may be chosen for a release, but an agent-added 24-hour delay is not an
+    automatic requirement. For this launch the maintainer explicitly selected
+    immediate controlled activation after the checks, with no overnight wait.
 
 ## Alerts
 
@@ -263,10 +266,10 @@ its own explicit launch decision.
 
 ## Global activation
 
-This procedure does not waive the release, identity, canary or 24-hour
-same-cohort observation gates above. The launch record must identify which
-gates are proven and which remain open. An elapsed clock without reconciliation
-is not sufficient.
+This procedure does not waive the release, identity, canary or reconciliation
+gates above. The launch record must identify what is proven, what remains open,
+and the maintainer's decision to expand. An elapsed clock without reconciliation
+is not sufficient; neither is an arbitrary delay a substitute for these checks.
 
 1. Confirm the exact deployed commit, Alembic revision, all serving processes,
    seven reviewed generation capabilities, healthy workers, and stopped payout

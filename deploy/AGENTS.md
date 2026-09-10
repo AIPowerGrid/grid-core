@@ -51,13 +51,21 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Global demand charging is active on immutable `3ab6d933` / Alembic `0041`.
+  The mode changed at `2026-09-10T00:14:57Z`; public generation reopened at
+  `00:15:53Z` after eighteen no-dispatch rejection checks. Six processes use
+  `GRID_CHARGING_MODE=on`; only that environment field changed. Preserve the
+  seven admitted capabilities, service caps, exact promotion campaign and
+  reward cutoff. Payout senders remain stopped. See the launch record for
+  public API paid canaries, remaining frontend verification and rollback.
 - Production selected immutable `3ab6d933` / Alembic `0041` at
   `2026-09-09T22:44:38Z`, including the frozen payout and screening fixes.
   Restored-production migration, drained restart, six-process configuration
   and existing canary/global balance reconciliation passed. The plan table is
-  empty and historical payout fingerprints are unchanged. Keep charging
-  allowlisted, payout service/timer stopped, exact admission/cutoff/settings
-  preserved. This is not global activation or a supervised payout proof.
+  empty and historical payout fingerprints are unchanged. At that deployment
+  charging was allowlisted; the later global cutover above supersedes that
+  posture. Keep payout service/timer stopped and exact admission/cutoff/settings
+  preserved. The code deployment alone was not a supervised payout proof.
 - The frozen worker-payout code requires Alembic `0041` before any sender.
   It adds empty hourly plans, never adopts historical obligations, and does not
   authorize a timer restart. If this code is rolled back, keep payouts paused:
