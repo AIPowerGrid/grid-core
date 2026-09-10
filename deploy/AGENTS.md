@@ -57,8 +57,9 @@ executes an immutable release selected through `/home/aipg/current`.
   `GRID_CHARGING_MODE=on`; only that environment field changed. Preserve the
   seven admitted capabilities, service caps, exact promotion campaign and
   reward cutoff. On September 10, six browser-submitted Chat/Art/Music/Director
-  first-frame jobs reconciled exactly; plain Gallery video passed, but disabled
-  Director timelines still have a rejected-request processing-state defect.
+  first-frame jobs reconciled exactly; plain Gallery video passed. Gallery
+  `24a0fbf0` subsequently fixed and live-verified the disabled Director timeline
+  rejection state without a charge or automatic retry; timelines stay disabled.
   The payout timer resumed at `14:19:51Z` only after a supervised frozen-hour
   send, independent Transfer proofs and a zero-transfer replay. Its first
   scheduled cycle passed too. Historical accrual/disputes remain excluded.
