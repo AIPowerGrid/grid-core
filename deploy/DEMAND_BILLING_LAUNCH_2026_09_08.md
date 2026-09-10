@@ -2,11 +2,85 @@
 
 ## Posture
 
-GLOBAL DEMAND CHARGING ACTIVE; post-launch frontend verification remains in
-progress. This is not permission to resume payouts.
+GLOBAL DEMAND CHARGING ACTIVE; admitted-path frontend canaries passed and
+prospective hourly worker payouts resumed after a supervised send and replay.
+The current runtime is `793fe904` / Alembic `0041`. Director timeline rendering
+remains disabled and has the rejected-request UI defect documented below.
 The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
+
+## Frontend and payout verification (2026-09-10, 14:20 UTC)
+
+PR175 merged as `793fe9049aaad02e45e603852f7e935ad10bf42f`. Its exact tested
+tree passed 1,913 Grid tests (nine explicit skips), the separate PostgreSQL
+handoff, backup/restore, dependency, CodeQL and secret gates. An additional
+real PostgreSQL 16/Redis/Uvicorn test proved two signed worker reconnects after
+a payout-address change. The immutable release was staged, its fresh production
+backup restored and checked at `0041`, then activated behind a drained generation
+gate. All six processes retained global charging and the existing admission,
+service caps and reward cutoff. No schema change was made.
+
+The maintainer approved using `0xA218db26ed545f3476e6c3E827b595cf2E182533`
+for the owner's audio-account payout preference. A guarded update changed only
+that preference, not account identity or economic history. After its owned
+process restarted, `gorgadon-audio-3090` re-registered at `14:11:37Z` with the new
+payout address and its separately retained, signature-verified delegation
+authority. A new paid audio job then completed successfully.
+
+Actual signed-in browser submissions, not direct API substitutes:
+
+| Surface | Core job | Charged USD | Result |
+| --- | --- | ---: | --- |
+| Chat, gpt-oss-120b | `51b6a8f7-fc3b-4d8b-b202-3eac806150f9` | 0.000129 | Answer completed; reload retained conversation; 0.009786 reserve refund |
+| Art, Krea 2 Turbo | `5d7dbdea-0b71-402c-94c4-e2e38d8762c3` | 0.005 | Image rendered; reload retained history |
+| Music, 10 seconds | `42b9dbee-d2ad-42c6-805f-9a0835a62b59` | 0.002 | Playback, seeking and original-request recovery passed |
+| Director, generated first frame | `2907cf47-c8d6-4000-9914-b59efd6d448e` | 0.005 | Frame generated; this is not timeline-render proof |
+| Art, LTX-2.3 video, 4 seconds | `2b717e89-c629-41fa-bde9-8b21da02b655` | 0.080 | Reload while processing recovered the original job; video rendered |
+| Music, after worker reconnect | `c6632592-e353-48a1-b113-4ff6b11b5d37` | 0.002 | New output completed; playback reached the end |
+
+All six jobs have settled reservations, exact purchased-credit debits and
+worker-completion rows under the correct delegated app service. Reconciliation
+at `14:19:01Z` returned no findings: account and global ledger deltas zero,
+negative balances zero, invalid reservation splits zero and stale holds zero.
+The shared purchased balance is USD 9.611518. These six tests spent USD 0.094129;
+cumulative authorized canary spending is USD 0.389157 of the USD 1.00 limit.
+
+**Known Director defect:** rendering even one Director segment includes timeline
+data, so Core correctly rejects it under the disabled `video-timeline` gate.
+Gallery classifies the resulting 503 as an ambiguous submission and displays
+processing indefinitely while recovery returns 404. The tested request was
+rejected before dispatch and created no Core reservation or charge. Only that
+operator-owned test journal row was closed after confirming the rejection and
+preserving its previous contents. This was test cleanup, not a deployed fix.
+Keep timelines disabled. The follow-up must distinguish a definitive admission
+rejection from genuinely ambiguous upstream failures and make availability
+clear in Director; do not broadly treat all 5xx/404 responses as safe to retry.
+
+The funded treasury passed a bounded prospective preview for
+`hour-2026-09-10T00`, budget 208.33 AIPG. The supervised sender committed one
+frozen plan and four transfers, totalling 208.32999999 AIPG, all to the approved
+owner wallet. Independent Base receipt/Transfer checks verified token, sender,
+recipient, amount, canonical receipt block and consecutive nonces 1807-1810.
+Replaying the exact command skipped all four rows: zero new transfers, unchanged
+token balances and unchanged gas balance. The original 3,701 historical payout
+rows retained their complete fingerprint.
+
+After that proof, `aipg-payout.timer` was enabled at `14:19:51Z`. Its first run
+paid the independently previewed closed hour `hour-2026-09-10T13`: three
+transfers totalling 208.33 AIPG, nonces 1811-1813, followed by a no-op retry pass.
+The service exited successfully at `14:20:01Z`; the timer is enabled and active.
+Independent checks verified all seven transfers and exact treasury/recipient
+balance changes. Treasury then held 19,583.342843169999506788 AIPG and
+0.007213327434208045 ETH. Historical 1,895 accrued and 87 manual-review rows
+remain unchanged and outside automatic retries. There was no historical catch-up.
+
+Private deployment, preference, payout-before/after/replay and reconciliation
+evidence lives in `/var/lib/aipg-backup/worker-identity-793fe904/`.
+The hourly wrapper uses only the selected immutable release and frozen plans.
+If rolling back to a sender without this contract, stop the payout timer first.
+Do not downgrade the now-populated plan table or turn charging off as recovery.
+Batch images, img2img, timelines and 3D remain disabled pending separate tests.
 
 ## Global activation (2026-09-10, 00:15 UTC)
 
