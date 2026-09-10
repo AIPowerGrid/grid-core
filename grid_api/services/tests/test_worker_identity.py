@@ -4,12 +4,17 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
+import pytest_asyncio
+import sqlalchemy as sa
 from eth_account import Account
 from eth_account.messages import encode_defunct
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from grid_api.services import audio, worker_identity
+from grid_api.v2.schema import accounts, workers, metadata
 
 
 class FakeRedis:
@@ -90,6 +95,98 @@ def identity_env(monkeypatch):
     monkeypatch.setattr(worker_identity, "get_redis", lambda: redis)
     monkeypatch.setattr(worker_identity, "get_settings", lambda: settings)
     return redis
+
+
+@pytest_asyncio.fixture
+async def identity_registry(monkeypatch):
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as conn:
+        await conn.run_sync(lambda c: metadata.create_all(c, tables=[accounts, workers]))
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def session():
+        return factory()
+
+    monkeypatch.setattr(worker_identity, "new_session", session)
+    try:
+        yield factory
+    finally:
+        await engine.dispose()
+
+
+async def _enroll(factory, proof, *, capabilities_override=None, name="audio-rig"):
+    account_id = uuid4()
+    delegation = proof["delegation"]["payload"]
+    capabilities = {
+        "signer_address": delegation["worker_signer"],
+        "delegation_id": delegation["delegation_id"],
+        "delegation_expires_at": delegation["expires_at"],
+    }
+    capabilities.update(capabilities_override or {})
+    async with factory() as session:
+        await session.execute(sa.insert(accounts).values(id=account_id))
+        await session.execute(sa.insert(workers).values(
+            account_id=account_id, name=name, type="audio", models=[],
+            wallet=delegation["payout_wallet"], capabilities=capabilities,
+        ))
+        await session.commit()
+    return account_id
+
+
+async def _verify_changed_wallet(proof, account_id, *, now=1_800_000_100):
+    return await worker_identity.verify_registration(
+        proof=proof, account_id=account_id,
+        payout_wallet=Account.from_key("0x" + "33" * 32).address,
+        worker_name="audio-rig", models=["ace-step-v1.5-xl-turbo"],
+        job_types=["audio"], bridge_agent="comfy-bridge/ws:1",
+        worker_profile=None, required=True, now=now,
+    )
+
+
+@pytest.mark.asyncio
+async def test_enrolled_identity_survives_payout_change(identity_env, identity_registry):
+    proof, wallet, signer = _proof()
+    account_id = await _enroll(identity_registry, proof)
+    verified = await _verify_changed_wallet(proof, account_id)
+    assert verified.payout_wallet == wallet.address.lower()
+    assert verified.signer_address == signer.address.lower()
+    with pytest.raises(worker_identity.WorkerIdentityError, match="already used"):
+        await _verify_changed_wallet(proof, account_id)
+
+
+@pytest.mark.asyncio
+async def test_persisted_authority_survives_subsequent_reconnect(identity_env, identity_registry):
+    proof, wallet, _ = _proof()
+    account_id = await _enroll(identity_registry, proof, capabilities_override={
+        "delegation_wallet": wallet.address.lower(),
+    })
+    async with identity_registry() as session:
+        await session.execute(sa.update(workers).values(wallet="0x" + "44" * 20))
+        await session.commit()
+    assert (await _verify_changed_wallet(proof, account_id)).payout_wallet == wallet.address.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", [
+    "account", "name", "signer_address", "delegation_id", "delegation_expires_at",
+    "delegation_wallet", "missing_identity", "signature", "expired",
+])
+async def test_payout_continuity_never_bypasses_identity_checks(identity_env, identity_registry, change):
+    now = 1_800_000_000 + 91 * 86400 if change == "expired" else 1_800_000_100
+    proof, _, _ = _proof(now=now)
+    overrides = {}
+    if change in {"signer_address", "delegation_id", "delegation_expires_at", "delegation_wallet"}:
+        overrides[change] = None
+    if change == "missing_identity":
+        overrides = {"signer_address": None, "delegation_id": None, "delegation_expires_at": None}
+    account_id = await _enroll(identity_registry, proof, capabilities_override=overrides,
+                               name="another-rig" if change == "name" else "audio-rig")
+    if change == "account":
+        account_id = uuid4()
+    if change == "signature":
+        proof["signature"] = "0x" + "00" * 65
+    with pytest.raises(worker_identity.WorkerIdentityError):
+        await _verify_changed_wallet(proof, account_id, now=now)
 
 
 async def _verify(proof, wallet, *, profile=None, required=True, now=1_800_000_100):

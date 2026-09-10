@@ -634,6 +634,15 @@ content sanitization, and reward settlement.
 - Never copy a payout private key to a worker. Core resolves the payout wallet
   from the API-key account, then verifies its signed delegation to the worker's
   local signer. Registration nonces are one-use and fail closed if Redis is down.
+- Changing an account's reward destination does not revoke an already enrolled
+  worker identity. Reconnect may use only the same account/name's retained
+  verified delegation wallet, signer, certificate ID and expiry. Both signatures,
+  capability binding, expiry and nonce freshness still verify. New identities
+  require the current payout wallet. `capabilities.delegation_wallet` preserves
+  the signing authority separately from the current payment destination;
+  legacy verified rows bootstrap it from their stored registration wallet.
+  Rotate/revoke worker credentials deliberately; a payout preference is not an
+  identity revocation control. No payout history or frozen plan is rewritten.
 - Managed profile metadata is not self-authenticating. Core accepts an
   allowlisted release digest only with Core-owned profile ID, runtime adapter,
   runtime digest, recipe root, and capability-tier values. Runtime execution
