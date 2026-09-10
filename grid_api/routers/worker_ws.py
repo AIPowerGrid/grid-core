@@ -515,6 +515,7 @@ async def worker_websocket(ws: WebSocket):
                 bridge_agent=bridge_agent,
                 worker_profile=worker_profile,
                 required=identity_required,
+                account_id=user.get("account_id"),
             )
         except worker_identity_svc.WorkerIdentityError as exc:
             await ws.send_json({"type": "error", "message": str(exc)})
@@ -530,6 +531,7 @@ async def worker_websocket(ws: WebSocket):
                     "signer_address": verified_identity.signer_address,
                     "delegation_id": verified_identity.delegation_id,
                     "delegation_expires_at": verified_identity.expires_at,
+                    "delegation_wallet": verified_identity.payout_wallet,
                 },
             )
 

@@ -383,6 +383,48 @@ async def frame(ws, kind):
                 return msg
 
 
+async def test_audio_identity_survives_payout_change_and_reconnect(rig):
+    from grid_api.services import worker_identity
+
+    from grid_api.routers.worker_ws import WORKER_ONLINE_BY_NAME
+
+    core, engine, redis_client, _, _, worker_key = rig
+    init = {
+        "apikey": worker_key,
+        "name": "payout-continuity-fixture",
+        "models": [MEDIA["audio"]],
+        "job_types": ["audio"],
+        "bridge_agent": "crash-fixture/ws:1",
+    }
+    audio_identity(core, init)
+    destination = Account.create().address.lower()
+    for attempt in range(3):
+        proof = init["worker_identity"]
+        proof["payload"].update(timestamp=int(time.time()), nonce=secrets.token_hex(16))
+        proof["signature"] = core.signer.sign_message(
+            encode_defunct(text=worker_identity.registration_message(proof["payload"])),
+        ).signature.hex()
+        async with connect(f"ws://127.0.0.1:{core.port}/v1/workers/ws") as ws:
+            await ws.send(json.dumps(init))
+            await frame(ws, "ready")
+            async with engine.begin() as conn:
+                enrolled = (await conn.execute(sa.select(tables.workers).where(
+                    tables.workers.c.name == init["name"],
+                ))).mappings().one()
+                assert enrolled["wallet"] == (core.wallet.address.lower() if attempt == 0 else destination)
+                assert enrolled["capabilities"]["delegation_wallet"] == core.wallet.address.lower()
+                assert enrolled["capabilities"]["signer_address"] == core.signer.address.lower()
+                if attempt == 0:
+                    await conn.execute(sa.update(tables.accounts).where(
+                        tables.accounts.c.id == enrolled["account_id"],
+                    ).values(payout_wallet=destination))
+
+        async def disconnected():
+            return not await redis_client.exists(f"{WORKER_ONLINE_BY_NAME}{init['name']}")
+
+        await eventually(disconnected)
+
+
 def request(fmt):
     if fmt in MEDIA:
         body = {"model": MEDIA[fmt], "prompt": "Recovery fixture", "seed": 42}
