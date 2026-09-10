@@ -2,10 +2,68 @@
 
 ## Posture
 
-IN PROGRESS. Not a global billing activation or permission to resume payouts.
+GLOBAL DEMAND CHARGING ACTIVE; post-launch frontend verification remains in
+progress. This is not permission to resume payouts.
 The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
+
+## Global activation (2026-09-10, 00:15 UTC)
+
+The maintainer explicitly rejected the agent-added overnight delay and approved
+the controlled global cutover. This supersedes the dated 24-hour gate below,
+not the required accounting, backup, identity and canary checks. PR173 merged
+as `1f4a6a0cf3848c7abafc150f86f21e01b6ac2a5a`; its exact-head CI passed
+1,901 Grid tests plus the PostgreSQL/Core/Console/node handoff, backup/restore,
+schema parity, dependency audit, CodeQL and secret checks. The subsequent
+configuration-only cutover uses the already-reviewed runtime `3ab6d933`.
+
+- Fresh production reconciliation passed before the cutover. A new database
+  backup restored into an isolated database and passed Alembic `0041` parity
+  at `2026-09-10T00:14:28Z`. The protected environment and historical payout
+  fingerprints were unchanged during the proof.
+- New generation was gated at the proxy. Two empty text/media queue
+  observations preceded changing exactly `GRID_CHARGING_MODE=allowlist` to
+  `on`. Legacy boolean `0`, admission, prices, service caps, free/promo policy,
+  reward cutoff, funding configuration and payout settings were preserved.
+- Core restarted in the same immutable release. All six inspected processes
+  verified `on` at `00:14:57Z`; public generation stayed gated until rejection
+  tests passed. No schema or application code changed during this operation.
+- A newly created ordinary account outside the old cohort and a newly created
+  capped direct service each returned 402 across chat, Responses, Anthropic,
+  image, video and audio. A bridge without delegated identity returned 401 on
+  all six paths. Queue IDs, account economic rows and worker-ledger row count
+  did not change. No credit or reward was created. All three temporary keys
+  were revoked, and the temporary service was deactivated; zero-funded account
+  records remain as audit evidence.
+- The proxy gate was removed at `00:15:53Z`. Payout service/timer remain stopped;
+  historical obligations were not adopted, rewritten or sent. Private evidence
+  is in `/var/lib/aipg-backup/demand-global-20260909/`.
+
+Public API funded canaries after reopening all returned 200, settled against
+the owner's purchased credit and had matching purchased-backed reward DEN:
+
+| Kind | Job | Reserved micro-USD | Charged micro-USD | Refunded micro-USD |
+| --- | --- | ---: | ---: | ---: |
+| Text | `d798fff5-9ad1-438c-a48d-c340446110e9` | 40 | 7 | 33 |
+| Krea image | `60f38ac9-3c1a-4c56-8ec9-120b31118596` | 5,000 | 5,000 | 0 |
+| LTX video, 3 seconds | `57e36d49-9523-4d3c-83d0-77edd589c3c7` | 60,000 | 60,000 | 0 |
+| Audio, 10 seconds | `1287e06d-30e7-45ef-aeff-2c9ea33a01f3` | 2,000 | 2,000 | 0 |
+
+Media results also passed authenticated durable-result recovery. Purchased
+balance after these jobs is USD 9.705647. This pass spent USD 0.067007; cumulative
+approved canary spending is USD 0.295028 of USD 1.00. Its temporary key is revoked.
+These are public Grid API submissions, not fresh submissions through each app's
+UI. Earlier paid Chat/Gallery/Music/Director tests remain separate evidence;
+post-global frontend submission verification is still open. No payout was sent.
+
+After these canaries, public funded-key requests for image batches, img2img,
+video timelines and 3D all returned 503. The explicit admission policy rejected
+all four; the 3D HTTP path reported absent worker capacity. Account economic
+rows and queue IDs stayed unchanged, and the temporary key was revoked.
+Read-only reconciliation of the four new successful jobs and global balances
+returned `ok=true` with no findings. The activated environment checksum still
+matches, and both payout units are still inactive.
 
 ## Activation handoff (2026-09-09, 23:15 UTC)
 
@@ -1384,8 +1442,9 @@ The reviewed deployment above supersedes the initial local-only posture.
       These are controlled component tests, not a live GPU outage experiment.
 - [x] Prove Core SIGKILL/restart against actual PostgreSQL/Redis with HTTP and
       worker WebSockets; 27 cases with synthetic worker output/storage.
-- [ ] Complete the runbook's 24-hour allowlist observation before global
-      expansion. Local accelerated-clock tests do not satisfy this window.
+- [x] Record the maintainer's explicit no-overnight-wait decision and controlled
+      expansion after fresh reconciliation, restore proof and negative canaries.
+      The former agent-added 24-hour gate is superseded, not falsely marked elapsed.
 - [x] Retry the real funding receipt twice without another transfer or credit.
 - [x] Verify funding retry persists receipt without another transfer (required
       Console browser fixtures, deployed UI and separate live duplicate claim).
@@ -1396,9 +1455,11 @@ The reviewed deployment above supersedes the initial local-only posture.
 - [x] Deploy reviewed Core/Music code with existing configuration preserved.
 - [x] Verify reviewed frontend releases and allowlisted balance/charge displays;
       see dated deployment, paid-job and 23:15 UTC UI evidence.
-- [ ] Apply final global configuration and verify actual processes, outside-
-      cohort no-dispatch rejection, bounded funded canaries and reloaded
-      frontend charging state. Existing allowlisted evidence cannot replace it.
+- [x] Apply global configuration and verify actual processes, outside-cohort
+      no-dispatch rejection and bounded funded public API canaries; see 00:15 UTC.
+- [ ] Complete post-global app submissions through Chat, Art, Music and Director,
+      and confirm reloaded pricing/error/funding displays. Earlier allowlisted
+      app evidence and the new public API jobs are not interchangeable.
 - [x] Migrate Chat image provider to canonical service credentials only with
       the delegated-image release; verify the charged account and retain a
       protected rollback record. Fresh running-source/provider check passed.
