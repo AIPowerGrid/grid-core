@@ -5,10 +5,40 @@
 GLOBAL DEMAND CHARGING ACTIVE; admitted-path frontend canaries passed and
 prospective hourly worker payouts resumed after a supervised send and replay.
 The current runtime is `793fe904` / Alembic `0041`. Director timeline rendering
-remains disabled and has the rejected-request UI defect documented below.
+remains disabled; Gallery's rejected-request spinner was repaired and verified
+on release `24a0fbf0` at 14:35 UTC. No additional paths were enabled.
 The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
+
+## Launch closeout (2026-09-10)
+
+| Requirement | Evidence |
+| --- | --- |
+| Production accounting and workers | Six paid frontend jobs reconcile exactly; owner/global balance deltas, invalid splits, stale holds and negative balances are zero. Public health reports `793fe904`, Redis healthy and nine connected workers. |
+| Backup and rollback | Fresh 14:07 Core backup restored and passed `0041` parity; protected configuration and prior release retained. Gallery separately restored its fresh backup and passed the candidate race suite without changing existing records. |
+| Global charging | Actual environment/source checks on all six Core processes confirm `on`, unchanged seven-path admission, free policy, reward cutoff and monitors. |
+| Rejection | Eighteen live outside-cohort/empty-service/undelegated tests returned expected 402/401 with no queue or economic changes; keys revoked. Four unqualified path checks remained closed. |
+| Paid frontend usage | Real Chat, Art image/video, Music and Director first-frame jobs settled once, with output/reload proof and the Chat unused-reserve refund. Cumulative authorized test spend USD 0.389157; purchased balance USD 9.611518. |
+| Frontend messaging | Signed-in surfaces display paid estimates and shared balances with funding links. Core/consumer insufficient-credit tests and earlier live low-balance Gallery evidence are recorded below. The remaining Director rejection state was fixed and live-tested without a charge. |
+| Reconcile and monitor | Global/account reconciliation passed after submissions. Billing/reward/treasury monitoring stays enabled; incident response closes generation and preserves settlement, never silently makes requests free. |
+| Prospective payouts | Verified funded treasury, bounded frozen plan, four-transfer send, zero-transfer replay and enabled hourly timer. First timer cycle added three verified transfers. Historical accrual/disputes remain excluded. |
+
+Gallery PR #32 merged as `7c55a429b387e1bc3fed18582dd0b7e867ec77e3`;
+production runs its identical tested head `24a0fbf0`. All required checks and
+the restored-backup race suite passed. A real Director request after deployment
+(`67db859a190bb186458b4352422f26dd`, Gallery client reference) immediately
+persisted a terminal disabled/no-job/no-charge error. Reload preserved that
+error and its previously paid first-frame receipt. Core has zero reservations
+for the reference; purchased credit remained exactly USD 9.611518.
+Only Core's exact pre-dispatch admission response is treated as definitive.
+Generic gateway failures and recovery 404s remain uncertain and cannot trigger
+automatic resubmission. No historical uncertain rows were rewritten by the fix.
+
+This closes the scoped paid launch, not qualification of every product feature:
+batch images, img2img, timelines and 3D remain disabled. Director first frames
+are paid and tested; successful timeline rendering is explicitly not claimed.
+See Gallery's `deploy/README.md` for the exact deployment and rollback evidence.
 
 ## Frontend and payout verification (2026-09-10, 14:20 UTC)
 
@@ -46,7 +76,7 @@ negative balances zero, invalid reservation splits zero and stale holds zero.
 The shared purchased balance is USD 9.611518. These six tests spent USD 0.094129;
 cumulative authorized canary spending is USD 0.389157 of the USD 1.00 limit.
 
-**Known Director defect:** rendering even one Director segment includes timeline
+**Director defect identified in this pass (resolved at 14:35 UTC above):** rendering even one Director segment includes timeline
 data, so Core correctly rejects it under the disabled `video-timeline` gate.
 Gallery classifies the resulting 503 as an ambiguous submission and displays
 processing indefinitely while recovery returns 404. The tested request was
