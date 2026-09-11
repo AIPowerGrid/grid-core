@@ -32,8 +32,8 @@ from ...database import close_database, init_database, new_session
 from ...v2.schema import accounts as accounts_t
 from ...v2.schema import payout_periods as periods_t
 from ...v2.schema import payouts as payouts_t
-from . import payout_periods, sanctions
-from .aggregate import aggregate_den_by_account, total_den_in_window
+from . import demand_rewards, payout_periods, sanctions
+from .aggregate import aggregate_den_by_account, purchased_work_by_account, total_den_in_window
 
 logger = logging.getLogger("grid_api.payouts")
 
@@ -61,7 +61,8 @@ def _now():
 
 # ── pure math (no I/O) ───────────────────────────────────────────────────────
 
-def compute_account_payouts(rows: list[dict], budget_aipg: float, *, min_aipg: float = MIN_AIPG) -> list[dict]:
+def compute_account_payouts(rows: list[dict], budget_aipg: float, *, min_aipg: float = MIN_AIPG,
+                            conservative_rounding: bool = False) -> list[dict]:
     """Split `budget_aipg` across accounts pro-rata by den. Returns
     [{account_id, payout_address, den, share, aipg, payable}] sorted high→low,
     dropping sub-dust rows. `payable` = the account has a wallet (else it accrues).
@@ -87,7 +88,7 @@ def compute_account_payouts(rows: list[dict], budget_aipg: float, *, min_aipg: f
         raise ValueError("Non-finite total payout weight")
     if total_den <= 0 or budget_aipg <= 0:
         return []
-    capped = any("smollm_den" in row for row in rows)
+    capped = conservative_rounding or any("smollm_den" in row for row in rows)
     if capped:
         budget = Decimal(str(budget_aipg))
         total = sum(Decimal(str(r["den"])) for r in rows)
@@ -126,6 +127,36 @@ def _window(days, since, until):
 
 # ── dry-run preview ──────────────────────────────────────────────────────────
 
+def _demand_policy(start, end):
+    policies = getattr(get_settings(), "worker_reward_demand_policies", [])
+    if not policies or end <= policies[0].since:
+        return None
+    for policy in policies:
+        if policy.since <= start and end <= policy.until:
+            return {
+                "since": policy.since.astimezone(_dt.UTC).isoformat(),
+                "until": policy.until.astimezone(_dt.UTC).isoformat(),
+                "price_micro_per_aipg": policy.price_micro_per_aipg,
+                "worker_share_bps": policy.worker_share_bps,
+            }
+    raise ValueError("payout window lacks a reviewed demand reward policy")
+
+
+async def _period_allocations(start, end, budget, *, policy):
+    rows = await aggregate_den_by_account(start, end)
+    pay = compute_account_payouts(rows, budget, conservative_rounding=policy is not None)
+    if policy is not None:
+        pay = demand_rewards.bound_allocations(
+            pay, await purchased_work_by_account(start, end),
+            price_micro_per_aipg=policy["price_micro_per_aipg"],
+            worker_share_bps=policy["worker_share_bps"],
+        )
+        pay = [row for row in pay if row["aipg"] >= Decimal(str(MIN_AIPG))]
+        for row in pay:
+            row["share"] = float(row["aipg"] / Decimal(str(budget)))
+    return rows, pay
+
+
 async def preview_period(start, end, budget_aipg: float, *, period_id=None) -> dict:
     if period_id is not None:
         async with await new_session() as session:
@@ -143,7 +174,9 @@ async def preview_period(start, end, budget_aipg: float, *, period_id=None) -> d
             rows = [dict(account_id=row["account_id"], den=row["den"],
                          payout_address=recorded[row["account_id"]]["address"], aipg=float(row["aipg"]),
                          status=recorded[row["account_id"]]["status"],
-                         share=row["den"] / total if total else 0,
+                         share=(float(Decimal(row["aipg"]) / Decimal(str(budget_aipg)))
+                                if plan["contract"]["version"] == 2 and budget_aipg else
+                                row["den"] / total if total else 0),
                          payable=bool(recorded[row["account_id"]]["address"])) for row in values]
             active = [row for row in rows if row["status"] in ("pending", "failed")]
             accrued = [row for row in rows if row["status"] == "accrued"]
@@ -151,9 +184,10 @@ async def preview_period(start, end, budget_aipg: float, *, period_id=None) -> d
                         unallocated_aipg=float(Decimal(str(budget_aipg)) - sum((Decimal(row["aipg"]) for row in values), Decimal(0))),
                         payouts=rows, payable_now_aipg=sum(row["aipg"] for row in active),
                         n_payable=len(active), accrued_aipg=sum(row["aipg"] for row in accrued),
-                        n_accrued=len(accrued), no_account_den=None, frozen=True)
-    rows = await aggregate_den_by_account(start, end)
-    pay = compute_account_payouts(rows, budget_aipg)
+                        n_accrued=len(accrued), no_account_den=None, frozen=True,
+                        demand_policy=plan["contract"].get("demand_policy"))
+    policy = _demand_policy(start, end)
+    rows, pay = await _period_allocations(start, end, budget_aipg, policy=policy)
     attributed = sum(float(r["den"]) for r in rows)
     no_account_den = round(max(0.0, await total_den_in_window(start, end) - attributed), 2)
     payable = [p for p in pay if p["payable"]]
@@ -162,7 +196,8 @@ async def preview_period(start, end, budget_aipg: float, *, period_id=None) -> d
         "accounts": len(rows),
         "total_den": attributed,
         "budget_aipg": budget_aipg,
-        "unallocated_aipg": round(max(0.0, budget_aipg - sum(p["aipg"] for p in pay)), 8),
+        "unallocated_aipg": float(Decimal(str(budget_aipg)) - sum((Decimal(str(p["aipg"])) for p in pay), Decimal(0))),
+        "demand_policy": policy,
         "payouts": pay,
         "payable_now_aipg": round(sum(p["aipg"] for p in payable), 4), "n_payable": len(payable),
         "accrued_aipg": round(sum(p["aipg"] for p in accrued), 4), "n_accrued": len(accrued),
@@ -431,6 +466,10 @@ def _period_contract(start, end, budget, period_id):
     )
     contract["smollm_cap_bps"] = SMOLLM_EMISSION_CAP_BPS
     contract["minimum_aipg"] = format(payout_periods.amount(MIN_AIPG), ".8f")
+    policy = _demand_policy(start, end)
+    if policy is not None:
+        contract["version"] = 2
+        contract["demand_policy"] = policy
     return contract
 
 
@@ -448,7 +487,8 @@ async def send_period(start, end, budget_aipg: float, period_id: str) -> dict:
 async def _send_period_locked(start, end, budget_aipg, period_id, expected):
 
     async def build():
-        return compute_account_payouts(await aggregate_den_by_account(start, end), budget_aipg)
+        _, allocations = await _period_allocations(start, end, budget_aipg, policy=expected.get("demand_policy"))
+        return allocations
 
     await payout_periods.freeze(period_id, expected, build)
     pay = await _planned_rows(period_id)

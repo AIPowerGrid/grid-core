@@ -126,6 +126,89 @@ async def test_compact_uuid_reservation_remains_eligible(db):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("reservation", "expected"), [
+    (None, 0), ({"status": "held"}, 0), ({"status": "released"}, 0),
+    ({"actual_micro": 0}, 0), ({"actual_micro": None}, 0),
+    ({"actual_micro": 101}, 0), ({"account_id": None}, 0),
+    ({"billing_source": "unknown"}, 0), ({"free_micro": -1}, 0),
+    ({"free_micro": 101}, 0), ({"free_micro": 100}, 0),
+    ({"promo_micro": 100}, 0), ({"free_micro": 60, "promo_micro": 30}, 10),
+    ({}, 100),
+])
+async def test_demand_backing_is_actual_purchased_work(db, reservation, expected):
+    aid = await seed(reservation=reservation)
+    backing = await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1))
+    assert backing.get(str(aid), 0) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("compact", [False, True])
+async def test_demand_backing_handles_job_uuid_spellings_and_walletless_work(db, compact):
+    aid = await seed(reservation={}, compact_job_id=compact, wallet=None)
+    assert await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1)) == {str(aid): 100}
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_duplicate_reservations_never_double_back_rewards(db):
+    await seed(reservation={})
+    async with await database.new_session() as session:
+        row = dict((await session.execute(sa.select(reservations))).mappings().one())
+        row["job_id"] = uuid.UUID(row["job_id"]).hex
+        await session.execute(reservations.insert().values(**row))
+        await session.commit()
+    assert await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1)) == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state,amount,expected", [
+    ("reported", 100, 0), ("settled", 99, 0), ("settled", 100, 100),
+])
+async def test_x402_demand_backing_requires_sufficient_settled_payment(db, state, amount, expected):
+    aid = await seed(reservation={"billing_source": "x402", "account_id": None},
+                     payment={"status": state, "settled_micro": amount})
+    result = await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1))
+    assert result.get(str(aid), 0) == expected
+
+
+@pytest.mark.asyncio
+async def test_backing_only_counts_completions_in_exact_period(db):
+    await seed(created=CUTOVER - timedelta(microseconds=1), reservation={})
+    valid = await seed(reservation={})
+    await seed(created=CUTOVER + timedelta(hours=1), reservation={})
+    assert await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1)) == {str(valid): 100}
+
+
+@pytest.mark.asyncio
+async def test_real_aggregation_flows_through_frozen_demand_sender(db, monkeypatch):
+    from grid_api.config import WorkerRewardDemandPolicy
+    from grid_api.services.settlement import payouts as P
+
+    end = CUTOVER + timedelta(hours=1)
+    pid = CUTOVER.strftime("hour-%Y-%m-%dT%H")
+    aid = await seed(reservation={"reserved_micro": 10000, "actual_micro": 10000})
+    async with await database.new_session() as session:
+        await session.execute(ledger.update().values(model="qwen3-27b"))
+        await session.commit()
+    monkeypatch.setattr(P, "get_settings", lambda: SimpleNamespace(
+        worker_rewards_paid_only_since=CUTOVER,
+        worker_reward_demand_policies=[WorkerRewardDemandPolicy(
+            since=CUTOVER, until=end, price_micro_per_aipg=1000)]))
+    monkeypatch.setattr(P, "_now", lambda: end + timedelta(hours=1))
+    monkeypatch.setattr(P, "BASE_RPC_URL", "")
+    monkeypatch.setattr(P, "TREASURY_PK", "")
+    monkeypatch.setattr(P, "_ctx", lambda: pytest.fail("must not construct a signer"))
+    result = await P.send_period(CUTOVER, end, 208.33, pid)
+    assert result["failed"] == 1
+    row = await P._row(pid, aid)
+    assert row["aipg_amount"] == 8.5 and row["nonce"] is None
+    async with await database.new_session() as session:
+        plan = await session.scalar(sa.select(P.periods_t.c.plan))
+        assert plan["allocations"][0]["purchased_micro"] == 10000
+        assert (await session.execute(sa.select(reservations.c.actual_micro))).scalar_one() == 10000
+        assert (await session.execute(sa.select(ledger.c.den))).scalar_one() == 100
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("state", [None, "verified", "reported", "settled"])
 async def test_x402_requires_external_payment_settlement(db, state):
     await seed(reservation={"billing_source": "x402", "account_id": None},

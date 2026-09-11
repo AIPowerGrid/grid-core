@@ -7,6 +7,9 @@ validation, worker incentives, and trust boundaries.
 
 ## Ownership
 
+- `POST_LAUNCH_HARDENING.md` - active post-launch work across demand-bounded
+  rewards, disabled media qualification, hostile validator tests, and measured
+  independent adoption. Candidate implementation is separate from activation.
 - `GRID_ECONOMICS.md` - demand-side credits, identity, funding rails, developer
   incentives, and worker/protocol economics.
 - `DEMAND_SIDE_AUDIT_BRIEF.md` - audit-oriented billing threat model,

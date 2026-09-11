@@ -196,6 +196,50 @@ async def aggregate_den_by_account(start: datetime, end: datetime, *, min_den: f
         return out
 
 
+async def purchased_work_by_account(start: datetime, end: datetime) -> dict[str, int]:
+    """Settled purchased consumption served by each account, never deposits.
+
+    Deliberately separate from historical DEN arithmetic. Ambiguous UUID
+    spellings and malformed/underfunded receipts supply no emission backing.
+    This is accounting evidence, not proof of independent customer demand.
+    """
+    r = reservations_table.c
+    purchased = sa.case(
+        (r.billing_source == "x402", r.actual_micro),
+        else_=r.actual_micro - r.free_micro - r.promo_micro,
+    )
+    matching_count = (
+        sa.select(sa.func.count()).select_from(reservations_table)
+        .where(_reservation_matches_job()).correlate(ledger_table).scalar_subquery()
+    )
+    paid_x402 = sa.exists(
+        sa.select(sa.literal(1)).select_from(x402_payments_table).where(
+            x402_payments_table.c.job_id == r.job_id,
+            x402_payments_table.c.status == "settled",
+            x402_payments_table.c.settled_micro >= r.actual_micro,
+        )
+    )
+    stmt = (
+        sa.select(workers_table.c.account_id,
+                  sa.func.sum(sa.cast(purchased, sa.Numeric(38, 0))).label("purchased_micro"))
+        .select_from(ledger_table.join(workers_table, workers_table.c.id == ledger_table.c.worker_id)
+                     .join(reservations_table, _reservation_matches_job()))
+        .where(
+            ledger_table.c.created >= start, ledger_table.c.created < end,
+            ledger_table.c.den > 0, workers_table.c.account_id.isnot(None),
+            matching_count == 1, r.status == "settled",
+            r.actual_micro > 0, r.actual_micro <= r.reserved_micro,
+            r.free_micro >= 0, r.promo_micro >= 0,
+            r.free_micro + r.promo_micro <= r.actual_micro,
+            sa.or_(sa.and_(r.billing_source == "credits", r.account_id.isnot(None)),
+                   sa.and_(r.billing_source == "x402", paid_x402)),
+        ).group_by(workers_table.c.account_id)
+    )
+    async with await new_session() as session:
+        rows = (await session.execute(stmt)).mappings().all()
+        return {str(row["account_id"]): int(row["purchased_micro"]) for row in rows}
+
+
 async def total_den_in_window(start: datetime, end: datetime) -> float:
     """All den in [start, end), no attribution filter — for measuring how much
     truly has NO account (vs the per-account rollup which excludes account_id IS

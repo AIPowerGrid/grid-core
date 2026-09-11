@@ -21,6 +21,17 @@ Merkle claims on Base.
 ## Ownership
 
 **Live custodial rail:**
+- `demand_rewards.py` is the candidate per-account purchased-consumption cap,
+  integrated into preview and freeze behind default-empty
+  `WORKER_REWARD_DEMAND_POLICIES`. It clips existing DEN/SmolLM allocations,
+  never redistributes clipped amounts, and uses downward Decimal rounding.
+  `aggregate.purchased_work_by_account` excludes missing, ambiguous, malformed,
+  uncompleted, and underfunded-x402 evidence. Valuation epochs and exact backing
+  are committed in v2 plans; retained v1 plans before activation are unchanged.
+  Expired/missing subsequent epochs hold new payouts, and a persisted v2 hour
+  prevents new later v1 plans after configuration removal. Historical approved
+  epochs must be retained for retries. This is NOT deployed or a market-profit
+  guarantee; see `docs/architecture/POST_LAUNCH_HARDENING.md`.
 - `payout_periods.py` freezes each closed, post-cutoff UTC hour once, together
   with every allocation, before any signing/broadcast. The reviewed hourly cap
   bounds `--budget`; the canonical hour ID and unique hour slot reject aliases
