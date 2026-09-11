@@ -8,8 +8,9 @@ validation, worker incentives, and trust boundaries.
 ## Ownership
 
 - `VALIDATOR_FIDELITY_BASELINE.md` - independently re-verified negative
-  20B-versus-120B answer-logprob study, exact evidence hashes, coverage limits,
-  and the next predeclared experiment. Not model-identity or economic authority.
+  20B-versus-120B answer-logprob and fixed-context studies, exact evidence hashes,
+  coverage limits, and the next predeclared experiment. Neither tested rule
+  detected the held-out substitutions. Not model-identity or economic authority.
 
 - `GRID_ECONOMICS.md` - demand-side credits, identity, funding rails, developer
   incentives, and worker/protocol economics.
