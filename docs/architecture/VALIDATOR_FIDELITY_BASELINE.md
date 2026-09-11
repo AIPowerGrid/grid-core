@@ -51,15 +51,62 @@ Audited summary SHA-256:
 Completed input-manifest SHA-256:
 `5493cfd8cfcf775dff9480e48b57b7cc3871ad9ec2200f9b12692f4855998895`
 
+## Fixed-context follow-up
+
+A separate retained September 7 study was independently re-verified on
+September 11. It tested the alternative of comparing distributions at the same
+externally chosen raw context, without candidate-generated reasoning first.
+The auditor checked identical tokenized/decoded contexts, runtime and model
+artifact hashes, all native responses, the complete schedule, and an independent
+implementation of the public coarsened top-20 probability-distance metric.
+The public scorer and its existing bands matched the frozen manifest.
+
+There were 64 distinct synthetic contexts, split into 32 calibration and 32
+evaluation contexts across four families. Each of three model variants ran
+each context twice: 384 actual calls, not 384 independent prompts. Both repeats
+had exactly identical native distributions for every model/context pair.
+
+| Evaluation comparison | Distinct contexts | Match | Gray | Anomaly |
+| --- | ---: | ---: | ---: | ---: |
+| 20B Q8 vs 20B Q4 | 32 | 31 | 1 | 0 |
+| 20B Q8 vs 120B | 32 | 31 | 1 | 0 |
+| 20B Q4 vs 120B | 32 | 30 | 2 | 0 |
+
+All recorded positions were scoreable. These counts collapse the identical
+repeats; gray means inconclusive, not fraud. At the tested bands, the rule
+flagged zero cross-model substitutions. The same-model quantization comparison
+had no anomalies either, but one engine and 32 contexts cannot establish a
+fleet false-positive guarantee. Copying the reference distribution produces
+zero distance by construction; the metric does not authenticate execution.
+
+This rules out treating fixed contexts plus the current public distance bands
+as a demonstrated solution to the final-answer failure. It does not prove that
+all distribution-based methods are ineffective. This was a raw-context local
+study, not a chat-template, public-worker, cross-engine or blind-routing trial.
+
+Audited fixed-context summary SHA-256:
+`c41e0fbb15146956086c9578f1e908be8de26de5c82b210e5a3e3442f79aed0a`
+
+Completed fixed-context manifest SHA-256:
+`6a1dc6e95737e055149b05b45263a2273bb04608ec1de9fb3c7029fd438054ff`
+
+The independent audit reproduced the retained summary exactly. Its four
+synthetic metric/eligibility tests also passed; those are implementation checks,
+not additional model observations. No fresh generation or production mutation
+was performed during this re-verification.
+
 ## Next experiment
 
 1. Freeze a new synthetic corpus, model/runtime hashes, tokenization/context
    contract, calibration split, held-out split and decision rules before
    measuring the held-out set. Preserve failed and inconclusive observations.
-2. Compare reference and candidate distributions at the same externally chosen
-   context positions, without first feeding candidate-generated reasoning into
-   the reference. Treat this as an experiment, not an assumed fix. Unsupported
-   prompt-logprob APIs must remain unsupported rather than synthesizing scores.
+2. Do not simply repeat fixed contexts with the same distance bands and call it
+   progress. Use a calibration-only analysis to determine whether a proposed
+   multi-context feature separates honest engine/quant variation from model
+   substitutions. Freeze the feature, aggregation and decision rule before a
+   fresh held-out evaluation. The already inspected studies are development
+   evidence, not an untouched test set. Unsupported prompt-logprob APIs remain
+   unsupported rather than receiving synthesized scores.
 3. Include honest same-model controls across supported quants, engines, context
    templates and concurrency, not just one deterministic reference process.
    Count unique contexts and independent runs separately from repeated tokens.
