@@ -28,8 +28,13 @@ Merkle claims on Base.
   `aggregate.purchased_work_by_account` excludes missing, ambiguous, malformed,
   uncompleted, and underfunded-x402 evidence. With migration 0042 it also
   requires exact account/job credit movements whose net funded consumption
-  agrees with the terminal paid charge. Granted purchased-pocket value is
-  spendable but supplies no backing. Valuation epochs and exact backing
+  agrees with the terminal paid charge. `funded_work_by_account` computes DEN
+  weights and backing from the same SQL snapshot, scaling each job by its
+  externally funded fraction. Grant traffic cannot dilute funded workers via
+  the denominator, even from mixed-funded accounts. Granted purchased-pocket
+  value is spendable but supplies no backing. v2 previews report
+  `no_account_den=null`: excluded funded-weight traffic is not evidence of
+  missing account attribution. Valuation epochs and exact backing
   are committed in v2 plans; retained v1 plans before activation are unchanged.
   Expired/missing subsequent epochs hold new payouts, and a persisted v2 hour
   prevents new later v1 plans after configuration removal. Historical approved

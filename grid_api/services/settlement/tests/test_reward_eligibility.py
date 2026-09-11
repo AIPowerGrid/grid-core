@@ -180,6 +180,41 @@ async def test_refund_lineage_reduces_reward_backing(db):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mixed_account", [False, True])
+async def test_grant_traffic_cannot_dilute_funded_workers(db, mixed_account):
+    from grid_api.services.settlement import payouts as P
+
+    honest = await seed(reservation={"reserved_micro": 10000, "actual_micro": 10000})
+    farmer = await seed(reservation={})
+    async with await database.new_session() as session:
+        await session.execute(ledger.update().values(model="qwen3-27b"))
+        await session.commit()
+    policy = {"price_micro_per_aipg": 1000, "worker_share_bps": 8500}
+    _, before = await P._period_allocations(CUTOVER, CUTOVER + timedelta(hours=1), 100, policy=policy)
+    grant = await seed(reservation={}, funded=False)
+    async with await database.new_session() as session:
+        wid = await session.scalar(sa.select(workers.c.id).where(workers.c.account_id == grant))
+        await session.execute(ledger.update().where(ledger.c.worker_id == wid).values(den=1e12, model="qwen3-27b"))
+        if mixed_account:
+            await session.execute(workers.update().where(workers.c.id == wid).values(account_id=farmer))
+        await session.commit()
+    rows, after = await P._period_allocations(CUTOVER, CUTOVER + timedelta(hours=1), 100, policy=policy)
+    assert {r["account_id"]: r["aipg"] for r in after} == {r["account_id"]: r["aipg"] for r in before}
+    assert {r["account_id"]: r["den"] for r in rows} == {str(honest): 100, str(farmer): 100}
+
+
+@pytest.mark.asyncio
+async def test_mixed_funding_scales_den_and_smollm_subset_together(db):
+    aid = await seed(reservation={"promo_micro": 20})
+    async with await database.new_session() as session:
+        await session.execute(credit_ledger.update().where(credit_ledger.c.account_id == aid).values(funded_delta_micro=-30))
+        await session.commit()
+    rows, backing = await aggregate.funded_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1))
+    assert rows == [{"account_id": str(aid), "den": 30, "smollm_den": 30, "payout_address": ADDRESS}]
+    assert backing == {str(aid): 30}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("compact", [False, True])
 async def test_demand_backing_handles_job_uuid_spellings_and_walletless_work(db, compact):
     aid = await seed(reservation={}, compact_job_id=compact, wallet=None)

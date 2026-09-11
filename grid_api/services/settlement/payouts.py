@@ -33,7 +33,7 @@ from ...v2.schema import accounts as accounts_t
 from ...v2.schema import payout_periods as periods_t
 from ...v2.schema import payouts as payouts_t
 from . import demand_rewards, payout_periods, sanctions
-from .aggregate import aggregate_den_by_account, purchased_work_by_account, total_den_in_window
+from .aggregate import aggregate_den_by_account, funded_work_by_account, total_den_in_window
 
 logger = logging.getLogger("grid_api.payouts")
 
@@ -143,11 +143,14 @@ def _demand_policy(start, end):
 
 
 async def _period_allocations(start, end, budget, *, policy):
-    rows = await aggregate_den_by_account(start, end)
+    if policy is None:
+        rows = await aggregate_den_by_account(start, end)
+    else:
+        rows, backing = await funded_work_by_account(start, end)
     pay = compute_account_payouts(rows, budget, conservative_rounding=policy is not None)
     if policy is not None:
         pay = demand_rewards.bound_allocations(
-            pay, await purchased_work_by_account(start, end),
+            pay, backing,
             price_micro_per_aipg=policy["price_micro_per_aipg"],
             worker_share_bps=policy["worker_share_bps"],
         )
@@ -189,7 +192,10 @@ async def preview_period(start, end, budget_aipg: float, *, period_id=None) -> d
     policy = _demand_policy(start, end)
     rows, pay = await _period_allocations(start, end, budget_aipg, policy=policy)
     attributed = sum(float(r["den"]) for r in rows)
-    no_account_den = round(max(0.0, await total_den_in_window(start, end) - attributed), 2)
+    # Funded DEN excludes known-account grants; subtracting it from all DEN
+    # would falsely label that work as unattributed. v2 does not measure this.
+    no_account_den = (round(max(0.0, await total_den_in_window(start, end) - attributed), 2)
+                      if policy is None else None)
     payable = [p for p in pay if p["payable"]]
     accrued = [p for p in pay if not p["payable"]]
     return {
@@ -201,7 +207,7 @@ async def preview_period(start, end, budget_aipg: float, *, period_id=None) -> d
         "payouts": pay,
         "payable_now_aipg": round(sum(p["aipg"] for p in payable), 4), "n_payable": len(payable),
         "accrued_aipg": round(sum(p["aipg"] for p in accrued), 4), "n_accrued": len(accrued),
-        "no_account_den": no_account_den,   # truly unattributable (no account at all)
+        "no_account_den": no_account_den,
     }
 
 

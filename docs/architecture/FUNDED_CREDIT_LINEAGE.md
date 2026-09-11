@@ -1,7 +1,8 @@
 # Externally funded credit lineage
 
-Status: candidate, September 11, 2026. Not deployed. Depends on the prospective
-demand cap in PR 178; neither change authorizes a payout or changes past plans.
+Status: candidate, September 11, 2026. Not deployed. PR 179 includes the
+prospective demand cap from PR 178; do not deploy PR 178 alone. Neither change
+authorizes a payout or changes past plans.
 
 ## Why
 
@@ -28,6 +29,11 @@ pocket. `balance_micro` and every historical spendable delta remain unchanged.
   reservation account and job, only when net spendable movements agree with the
   terminal charge. Missing or contradictory movements provide zero backing.
   x402 retains its separately verified settled-payment requirement.
+- The same SQL snapshot computes each job's funded DEN fraction and its cap
+  backing. Unfunded grant traffic cannot inflate the denominator and dilute
+  other workers, including when one account serves both funded and grant jobs.
+  SmolLM-family weights use the same funded fraction; old v1 weights do not
+  change.
 - SQL constrains funded balance to the nonnegative spendable subset. The
   existing billing monitor independently compares both caches with their
   ledger sums, per account in one consistent snapshot.
@@ -99,9 +105,16 @@ net-consumption accounting through the real aggregation query.
 
 These tests are not production deployment or economic activation evidence.
 
+Final review additionally reproduced grant-denominator dilution in both
+grant-only and mixed-funded accounts: large grant traffic removed honest
+workers from the payable result despite providing no cap backing. New v2
+allocation now uses only funded DEN and reads weights/backing together. The
+regressions fail on the preceding candidate. The following full-suite result
+includes that refinement and its non-finite-weight guard.
+
 Final local candidate verification: a fresh PostgreSQL 16 database upgraded
 through 0042 with `alembic check` reporting no new operations. The full Core
-suite passed 1,807 tests with 251 environment-dependent skips and 39 existing
+suite passed 1,813 tests with 251 environment-dependent skips and 39 existing
 deprecation warnings. New funding and opening races ran on PostgreSQL; their
 SQLite variants deliberately skip concurrency rather than simulate it on one
 connection. Required Linux CI remains a separate release gate.
@@ -113,3 +126,17 @@ subset was 9,610,843 micro-USD. No held reservation blocked that snapshot.
 No balance, metadata, receipt, setting or service was changed. This aggregate
 audit is not the native post-migration apply hash; take a fresh preview during
 the controlled drain because new spending invalidates earlier snapshots.
+
+## Production preparation, not cutover
+
+On September 11, candidate `7cb7465e` was built as a separate immutable release
+using the reviewed hash-locked dependencies; `pip check` passed. A new
+root-only production backup at `23:33:49Z` restored into a generated scratch
+database, upgraded through 0042 and passed schema parity. The restore tool
+removed its scratch database. Production remained on `793fe904` / 0041 with
+the previous charging and payout-timer state.
+
+That built candidate predates the grant-denominator refinement. Do not select
+it merely because its migration proof and CI passed: build and requalify the
+final reviewed commit before any cutover. No live opening entries, funded
+cache updates, or reward-policy changes have been applied.
