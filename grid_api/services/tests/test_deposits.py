@@ -178,6 +178,8 @@ async def test_usdc_claim_is_atomic_and_idempotent(db, funding, monkeypatch):
     async with await database.new_session() as session:
         receipt_count = await session.scalar(sa.select(sa.func.count()).select_from(deposits_t))
         ledger_count = await session.scalar(sa.select(sa.func.count()).select_from(credit_ledger))
+        assert await session.scalar(sa.select(credit_ledger.c.funded_delta_micro)) == 5_000_000
+        assert await session.scalar(sa.select(credits.credits_t.c.funded_balance_micro)) == 5_000_000
     assert receipt_count == 1
     assert ledger_count == 1
     assert await credits.get_balance(db) == 5_000_000

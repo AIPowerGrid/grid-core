@@ -81,6 +81,16 @@ content sanitization, and reward settlement.
   `x402_payments.py` (default-off accountless
   Base USDC authorization and settlement receipts), `model_registry.py`
   (ModelVault sync).
+- `funding_lineage.py` is the offline migration-0042 opening reconciler.
+  Preview replays deposit-bound history, debits, refunds and paired merges;
+  an exact hash and write-excluding locks are required to append zero-spendable
+  opening entries. Never infer funding from a reason label or overwrite old
+  ledger rows. New deposits explicitly carry funded provenance, debits consume
+  it first, refunds restore only its unused part, and merges preserve it.
+  `billing_health` checks funded and spendable caches against their ledger sums
+  in one snapshot. This is reward-backing metadata, not another user balance.
+  See `docs/architecture/FUNDED_CREDIT_LINEAGE.md` for the mandatory drain,
+  migration, opening and all-writer rollout order. No production activation yet.
 - **Remote MCP authorization:** `oauth_server.py` is the default-off OAuth 2.1
   authorization server for public MCP clients. It requires S256 PKCE, exact
   registered HTTPS or native-loopback redirects, short-lived resource-bound

@@ -56,7 +56,13 @@ Activation requires an explicit reviewed valuation, funding-epoch compatibility,
 expiry/renewal procedure, and downside analysis. The cap is an emission bound,
 not proof of model fidelity, independent demand, or impossible arbitrage.
 Purchased-pocket accounting also does not establish external-cash provenance
-for legacy operator-issued purchased grants: audit those before activation.
+for legacy operator-issued purchased grants. The live audit found $5,200 in
+such grants versus $10.02 in USDC receipts. Candidate migration 0042 now carries
+externally funded value through deposits, holds, refunds and account merges,
+and the cap reads actual funded job movements. The opening reconciliation is
+preview-first and preserves all spendable balances. See
+[funded lineage](FUNDED_CREDIT_LINEAGE.md); its tests, all-writer rollout and
+historical reconciliation remain mandatory before activation.
 If the objective is strict cash-cost self-farming unprofitability, earned-USDC
 payment avoids token valuation risk but requires completing and qualifying the
 separate earned-revenue rail, not repurposing deposit balances as revenue.

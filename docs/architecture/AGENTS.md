@@ -7,6 +7,10 @@ validation, worker incentives, and trust boundaries.
 
 ## Ownership
 
+- `FUNDED_CREDIT_LINEAGE.md` - externally funded credit subset, receipt-bound
+  opening reconciliation, grant/refund/merge invariants, and all-writer
+  migration/rollback gates. Candidate code, not production activation.
+
 - `POST_LAUNCH_HARDENING.md` - active post-launch work across demand-bounded
   rewards, disabled media qualification, hostile validator tests, and measured
   independent adoption. Candidate implementation is separate from activation.
