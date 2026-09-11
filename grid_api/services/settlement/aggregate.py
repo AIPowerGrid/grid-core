@@ -19,6 +19,7 @@ periods never double-count a job on the boundary.
 from __future__ import annotations
 
 from datetime import datetime
+import math
 
 import sqlalchemy as sa
 
@@ -197,8 +198,8 @@ async def aggregate_den_by_account(start: datetime, end: datetime, *, min_den: f
         return out
 
 
-async def purchased_work_by_account(start: datetime, end: datetime) -> dict[str, int]:
-    """Settled externally funded consumption served by each account.
+async def funded_work_by_account(start: datetime, end: datetime) -> tuple[list[dict], dict[str, int]]:
+    """Externally funded DEN and consumption in one consistent SQL snapshot.
 
     Deliberately separate from historical DEN arithmetic. Ambiguous UUID
     spellings and malformed/underfunded receipts supply no emission backing.
@@ -238,9 +239,10 @@ async def purchased_work_by_account(start: datetime, end: datetime) -> dict[str,
             x402_payments_table.c.settled_micro >= r.actual_micro,
         )
     )
-    stmt = (
+    work = (
         sa.select(workers_table.c.account_id,
-                  sa.func.sum(sa.cast(backing, sa.Numeric(38, 0))).label("purchased_micro"))
+                  sa.cast(backing, sa.Numeric(38, 0)).label("backing"),
+                  ledger_table.c.den, ledger_table.c.model, r.actual_micro)
         .select_from(ledger_table.join(workers_table, workers_table.c.id == ledger_table.c.worker_id)
                      .join(reservations_table, _reservation_matches_job()))
         .where(
@@ -252,11 +254,35 @@ async def purchased_work_by_account(start: datetime, end: datetime) -> dict[str,
             r.free_micro + r.promo_micro <= r.actual_micro,
             sa.or_(sa.and_(r.billing_source == "credits", r.account_id.isnot(None)),
                    sa.and_(r.billing_source == "x402", paid_x402)),
-        ).group_by(workers_table.c.account_id)
+        ).subquery()
     )
+    # Grant-only jobs must not dilute funded workers via the DEN denominator,
+    # including when the grant traffic belongs to a partially funded account.
+    funded_den = work.c.den * (sa.cast(work.c.backing, sa.Float) / work.c.actual_micro)
+    smollm_den = sa.case((sa.func.lower(work.c.model).contains("smollm"), funded_den), else_=0.0)
+    stmt = (sa.select(
+        work.c.account_id, accounts_table.c.payout_wallet, accounts_table.c.wallet,
+        sa.func.sum(work.c.backing).label("purchased_micro"),
+        sa.func.sum(funded_den).label("den"), sa.func.sum(smollm_den).label("smollm_den"),
+    ).select_from(work.outerjoin(accounts_table, accounts_table.c.id == work.c.account_id))
+        .group_by(work.c.account_id, accounts_table.c.payout_wallet, accounts_table.c.wallet))
     async with await new_session() as session:
         rows = (await session.execute(stmt)).mappings().all()
-        return {str(row["account_id"]): int(row["purchased_micro"]) for row in rows}
+    out = []
+    for row in rows:
+        if not math.isfinite(float(row["den"])) or not math.isfinite(float(row["smollm_den"])):
+            raise ValueError("invalid funded work weight")
+        if row["den"] > 0:
+            out.append({"account_id": str(row["account_id"]), "den": float(row["den"]),
+                        "smollm_den": float(row["smollm_den"]),
+                        "payout_address": (row["payout_wallet"] or "").strip() or (row["wallet"] or "").strip() or None})
+    return out, {str(row["account_id"]): int(row["purchased_micro"]) for row in rows}
+
+
+async def purchased_work_by_account(start: datetime, end: datetime) -> dict[str, int]:
+    """Compatibility view of exact externally funded consumption only."""
+    _, backing = await funded_work_by_account(start, end)
+    return backing
 
 
 async def total_den_in_window(start: datetime, end: datetime) -> float:

@@ -32,11 +32,17 @@ Candidate implementation:
 For each account, the candidate formula is:
 
 ```text
-natural_allocation = existing DEN/hour allocation, including SmolLM cap
+funded_DEN = job_DEN * externally_funded_actual / total_actual
+natural_allocation = DEN/hour allocation over funded_DEN, including SmolLM cap
 backed_ceiling_AIPG = purchased_consumption_microUSD * worker_share_bps
                      / (10,000 * price_microUSD_per_AIPG)
 allocation = floor_8dp(min(natural_allocation, backed_ceiling_AIPG))
 ```
+
+Only prospective v2 plans use funded DEN. Grant traffic is excluded from both
+the backing amount and the weight denominator, preventing it from diluting
+other workers without earning a payout itself. Historical v1 plans/weights
+remain unchanged.
 
 The existing minimum payout still applies after clipping. Below-minimum amounts
 are not new accrued obligations; this preserves the existing dust policy.
@@ -75,13 +81,14 @@ expiry, policy changes, replay, immutable backing, and downgrade refusal.
 These tests never broadcast a transaction. Exact non-binary persisted amounts
 require PostgreSQL; SQLite NUMERIC is not equivalent money-storage evidence.
 
-Local September 11 verification: 264 settlement tests passed on disposable
-PostgreSQL 16, with no skips, after the final downgrade/rounding regressions.
-The broader Grid run passed 1,755 tests with 249 environment-dependent skips
-before those final refinements; full required Linux CI is still a separate
-gate. Both temporary database servers shut down after testing. The staged
-source secret scan and diff checks passed. This is candidate-code evidence,
-not a live payout, GPU, migration deployment, or market-price proof.
+Local September 11 verification: 276 settlement tests passed on disposable
+PostgreSQL 16, with no skips, including grant-denominator dilution regressions.
+The subsequent full Grid run, including the non-finite funded-weight guard,
+passed 1,813 tests with 251 environment-dependent skips and 39 existing warnings.
+Fresh migration through 0042 and schema parity passed. Required Linux CI is
+still a separate gate for the final commit. Both temporary database servers
+shut down after testing. This is candidate-code evidence, not a live payout,
+GPU, migration deployment, or market-price proof.
 
 ## 2. Finish generation paths
 

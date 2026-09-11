@@ -74,30 +74,30 @@ async def test_sender_freezes_cap_and_backing_no_reprice_after_late_demand(db, m
     async with await P.new_session() as session:
         await session.execute(P.accounts_t.insert().values(id=account, payout_wallet=WALLET))
         await session.commit()
-    aggregate = AsyncMock(return_value=[{"account_id": str(account), "den": 100, "payout_address": WALLET}])
-    backing = AsyncMock(return_value={str(account): consumed})
-    monkeypatch.setattr(P, "aggregate_den_by_account", aggregate)
-    monkeypatch.setattr(P, "purchased_work_by_account", backing)
+    aggregate = AsyncMock(return_value=([
+        {"account_id": str(account), "den": 100, "payout_address": WALLET},
+    ], {str(account): consumed}))
+    monkeypatch.setattr(P, "funded_work_by_account", aggregate)
     monkeypatch.setattr(P, "total_den_in_window", AsyncMock(return_value=100))
     monkeypatch.setattr(P, "BASE_RPC_URL", "")
     monkeypatch.setattr(P, "TREASURY_PK", "")
     monkeypatch.setattr(P, "_ctx", lambda: pytest.fail("test cannot sign"))
     preview = await P.preview_period(START, END, 100, period_id=PERIOD)
+    assert preview["no_account_den"] is None
+    P.total_den_in_window.assert_not_awaited()
     assert preview["payouts"][0]["aipg"] == Decimal(paid)
     assert preview["unallocated_aipg"] == float(100 - Decimal(paid))
     assert (await P.send_period(START, END, 100, PERIOD))["failed"] == 1
     row = await P._row(PERIOD, account)
     assert row["aipg_amount"] == Decimal(paid) and row["nonce"] is None
     aggregate.reset_mock()
-    backing.reset_mock()
-    aggregate.side_effect = backing.side_effect = AssertionError("must not reaggregate")
+    aggregate.side_effect = AssertionError("must not reaggregate")
     settings(monkeypatch, [policy(), policy(since=END, until=END + timedelta(hours=1), price_micro_per_aipg=2000)])
     await P.send_period(START, END, 100, PERIOD)
     replay = await P.preview_period(START, END, 100, period_id=PERIOD)
     assert replay["payouts"][0]["share"] == float(Decimal(paid) / 100)
     assert replay["demand_policy"] == preview["demand_policy"]
     aggregate.assert_not_awaited()
-    backing.assert_not_awaited()
     async with await P.new_session() as session:
         plan = await session.scalar(sa.select(P.periods_t.c.plan).where(P.periods_t.c.period_id == PERIOD))
     assert plan["allocations"][0]["purchased_micro"] == consumed
