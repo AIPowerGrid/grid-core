@@ -4,6 +4,11 @@ Status: local implementation and qualification, 2026-09-06. Not deployed.
 No public assignment policy selects Responses. No scoring, reward, routing or
 penalty authority is enabled by this work.
 
+Detection is a separate gate: the retained answer-logprob experiment found no
+substitution flags in eligible held-out 20B cases against its 120B reference.
+See [the independently re-verified baseline](VALIDATOR_FIDELITY_BASELINE.md).
+The transport evidence below must not be presented as a successful detector.
+
 ## Invariants
 
 - Unsupported, missing, malformed and partial probabilities are observations,
