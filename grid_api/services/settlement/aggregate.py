@@ -25,6 +25,7 @@ import sqlalchemy as sa
 from ...database import new_session
 from ...config import get_settings
 from ...v2.schema import accounts as accounts_table
+from ...v2.schema import credit_ledger as credit_ledger_table
 from ...v2.schema import ledger as ledger_table
 from ...v2.schema import reservations as reservations_table
 from ...v2.schema import workers as workers_table
@@ -197,7 +198,7 @@ async def aggregate_den_by_account(start: datetime, end: datetime, *, min_den: f
 
 
 async def purchased_work_by_account(start: datetime, end: datetime) -> dict[str, int]:
-    """Settled purchased consumption served by each account, never deposits.
+    """Settled externally funded consumption served by each account.
 
     Deliberately separate from historical DEN arithmetic. Ambiguous UUID
     spellings and malformed/underfunded receipts supply no emission backing.
@@ -207,6 +208,24 @@ async def purchased_work_by_account(start: datetime, end: datetime) -> dict[str,
     purchased = sa.case(
         (r.billing_source == "x402", r.actual_micro),
         else_=r.actual_micro - r.free_micro - r.promo_micro,
+    )
+    c = credit_ledger_table.c
+    job_movements = sa.and_(
+        c.account_id == r.account_id,
+        c.ref.in_([r.job_id, r.job_id.concat(":refund"), r.job_id.concat(":extra")]),
+    )
+    def consumed(column):
+        return (sa.select(-sa.func.coalesce(sa.func.sum(sa.cast(column, sa.Numeric(38, 0))), 0))
+                .where(job_movements).correlate(reservations_table).scalar_subquery())
+
+    funded = consumed(c.funded_delta_micro)
+    spent = consumed(c.delta_micro)
+    # A label such as "purchased" or "usdc_deposit" is not funding proof.
+    # Refunds reduce backing; missing/contradictory job movements earn none.
+    backing = sa.case(
+        (r.billing_source == "x402", purchased),
+        (sa.and_(spent == purchased, funded >= 0, funded <= purchased), funded),
+        else_=0,
     )
     matching_count = (
         sa.select(sa.func.count()).select_from(reservations_table)
@@ -221,7 +240,7 @@ async def purchased_work_by_account(start: datetime, end: datetime) -> dict[str,
     )
     stmt = (
         sa.select(workers_table.c.account_id,
-                  sa.func.sum(sa.cast(purchased, sa.Numeric(38, 0))).label("purchased_micro"))
+                  sa.func.sum(sa.cast(backing, sa.Numeric(38, 0))).label("purchased_micro"))
         .select_from(ledger_table.join(workers_table, workers_table.c.id == ledger_table.c.worker_id)
                      .join(reservations_table, _reservation_matches_job()))
         .where(

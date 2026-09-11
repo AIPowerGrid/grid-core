@@ -18,7 +18,7 @@ from sqlalchemy.pool import StaticPool
 from grid_api import database
 from grid_api.config import GridSettings
 from grid_api.services.settlement import aggregate
-from grid_api.v2.schema import accounts, ledger, metadata, reservations, workers, x402_payments
+from grid_api.v2.schema import accounts, credit_ledger, ledger, metadata, reservations, workers, x402_payments
 
 CUTOVER = datetime(2026, 9, 9, tzinfo=UTC)
 ADDRESS = "0x" + "12" * 20
@@ -51,7 +51,8 @@ async def db(request, monkeypatch):
         await engine.dispose()
 
 
-async def seed(*, created=CUTOVER, reservation=None, payment=None, wallet=ADDRESS, compact_job_id=False):
+async def seed(*, created=CUTOVER, reservation=None, payment=None, wallet=ADDRESS, compact_job_id=False,
+               funded=True):
     aid, wid, jid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     async with await database.new_session() as session:
         await session.execute(sa.insert(accounts).values(id=aid, payout_wallet=wallet))
@@ -65,6 +66,12 @@ async def seed(*, created=CUTOVER, reservation=None, payment=None, wallet=ADDRES
                           actual_micro=100, status="settled", prompt_toks=1, created=created)
             values.update(reservation)
             await session.execute(sa.insert(reservations).values(**values))
+            if values["account_id"] and values.get("billing_source", "credits") == "credits":
+                paid = max(0, (values["actual_micro"] or 0) - values.get("free_micro", 0) - values.get("promo_micro", 0))
+                await session.execute(sa.insert(credit_ledger).values(
+                    account_id=aid, ref=values["job_id"], reason="reserve:chat",
+                    delta_micro=-paid, funded_delta_micro=-paid if funded else 0,
+                ))
         if payment is not None:
             await session.execute(sa.insert(x402_payments).values(
                 job_id=str(jid), authorization_id=str(jid), payer=ADDRESS, network="eip155:8453",
@@ -139,6 +146,37 @@ async def test_demand_backing_is_actual_purchased_work(db, reservation, expected
     aid = await seed(reservation=reservation)
     backing = await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1))
     assert backing.get(str(aid), 0) == expected
+
+
+@pytest.mark.asyncio
+async def test_granted_purchased_pocket_does_not_back_emissions(db):
+    aid = await seed(reservation={}, funded=False)
+    assert await aggregate.total_den_in_window(CUTOVER, CUTOVER + timedelta(hours=1)) == 100
+    assert await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1)) == {str(aid): 0}
+
+
+@pytest.mark.asyncio
+async def test_missing_or_wrong_account_movements_do_not_back_emissions(db):
+    aid = await seed(reservation={})
+    other = await seed()
+    async with await database.new_session() as session:
+        await session.execute(credit_ledger.update().where(credit_ledger.c.account_id == aid).values(account_id=other))
+        await session.commit()
+    assert await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1)) == {str(aid): 0}
+
+
+@pytest.mark.asyncio
+async def test_refund_lineage_reduces_reward_backing(db):
+    aid = await seed(reservation={"actual_micro": 60})
+    async with await database.new_session() as session:
+        row = (await session.execute(sa.select(credit_ledger))).mappings().one()
+        await session.execute(credit_ledger.update().values(delta_micro=-100, funded_delta_micro=-80))
+        await session.execute(credit_ledger.insert().values(
+            account_id=aid, ref=row["ref"] + ":refund", reason="reconcile:refund",
+            delta_micro=40, funded_delta_micro=20,
+        ))
+        await session.commit()
+    assert await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1)) == {str(aid): 60}
 
 
 @pytest.mark.asyncio

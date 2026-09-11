@@ -425,30 +425,37 @@ async def merge_accounts(destination_account_id, source_account_id, *, reason: s
         if promote:
             await session.execute(sa.update(accounts).where(accounts.c.id == destination).values(**promote))
 
-        source_balance = int((await session.scalar(
-            sa.select(credits.c.balance_micro).where(credits.c.account_id == source).with_for_update()
-        )) or 0)
+        source_credit = (await session.execute(
+            sa.select(credits.c.balance_micro, credits.c.funded_balance_micro)
+            .where(credits.c.account_id == source).with_for_update()
+        )).first()
+        source_balance = int(source_credit.balance_micro) if source_credit else 0
+        source_funded = int(source_credit.funded_balance_micro) if source_credit else 0
         if source_balance > 0:
             dest_balance = await session.scalar(
                 sa.select(credits.c.balance_micro).where(credits.c.account_id == destination).with_for_update()
             )
             if dest_balance is None:
                 await session.execute(sa.insert(credits).values(
-                    account_id=destination, balance_micro=source_balance, updated=now,
+                    account_id=destination, balance_micro=source_balance,
+                    funded_balance_micro=source_funded, updated=now,
                 ))
             else:
                 await session.execute(
                     sa.update(credits).where(credits.c.account_id == destination)
-                    .values(balance_micro=credits.c.balance_micro + source_balance, updated=now)
+                    .values(balance_micro=credits.c.balance_micro + source_balance,
+                            funded_balance_micro=credits.c.funded_balance_micro + source_funded, updated=now)
                 )
             await session.execute(
                 sa.update(credits).where(credits.c.account_id == source)
-                .values(balance_micro=0, updated=now)
+                .values(balance_micro=0, funded_balance_micro=0, updated=now)
             )
             await session.execute(sa.insert(credit_ledger), [
                 {"account_id": source, "delta_micro": -source_balance,
+                 "funded_delta_micro": -source_funded,
                  "reason": "account:merge_out", "ref": f"{merge_ref}:out"},
                 {"account_id": destination, "delta_micro": source_balance,
+                 "funded_delta_micro": source_funded,
                  "reason": "account:merge_in", "ref": f"{merge_ref}:in"},
             ])
 

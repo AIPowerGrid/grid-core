@@ -654,7 +654,9 @@ credits = sa.Table(
         primary_key=True,
     ),
     sa.Column("balance_micro", sa.BigInteger, nullable=False, default=0),
+    sa.Column("funded_balance_micro", sa.BigInteger, nullable=False, default=0, server_default="0"),
     sa.Column("updated", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.CheckConstraint("funded_balance_micro >= 0 AND funded_balance_micro <= CASE WHEN balance_micro > 0 THEN balance_micro ELSE 0 END", name="ck_grid_credits_funded_subset"),
 )
 
 credit_ledger = sa.Table(
@@ -678,6 +680,7 @@ credit_ledger = sa.Table(
     ),
     # Signed micro-USD: positive = top-up, negative = charge.
     sa.Column("delta_micro", sa.BigInteger, nullable=False),
+    sa.Column("funded_delta_micro", sa.BigInteger, nullable=False, default=0, server_default="0"),
     sa.Column("reason", sa.String(64), nullable=False),
     # Idempotency key: the charged job_id (debit) or deposit/Stripe event id
     # (credit). UNIQUE + NOT NULL so a value-moving row ALWAYS carries a dedup key
