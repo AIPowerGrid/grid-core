@@ -7,6 +7,10 @@ validation, worker incentives, and trust boundaries.
 
 ## Ownership
 
+- `VALIDATOR_FIDELITY_BASELINE.md` - independently re-verified negative
+  20B-versus-120B answer-logprob study, exact evidence hashes, coverage limits,
+  and the next predeclared experiment. Not model-identity or economic authority.
+
 - `GRID_ECONOMICS.md` - demand-side credits, identity, funding rails, developer
   incentives, and worker/protocol economics.
 - `DEMAND_SIDE_AUDIT_BRIEF.md` - audit-oriented billing threat model,

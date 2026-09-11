@@ -39,6 +39,12 @@ evidence of hardening.
 
 ## Quality Lane Contract
 
+The retained answer-logprob study also failed to detect 20B substitutions
+against its 120B reference in scoreable held-out cases. Read
+[the measured baseline](VALIDATOR_FIDELITY_BASELINE.md) before proposing
+logprob-based promotion. Successful transport, predictable final answers and
+zero flagged reference controls do not establish model-identity detection.
+
 A future quality-eligible audit must satisfy all of these conditions:
 
 1. The workload is consented or synthetic and shaped like an ordinary request;
