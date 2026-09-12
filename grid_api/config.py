@@ -6,7 +6,7 @@ from functools import lru_cache
 from typing import Annotated, Literal, get_args
 from uuid import UUID
 
-from pydantic import AwareDatetime, Field, SecretStr, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ReviewedValidatorVersion = Annotated[
@@ -18,6 +18,25 @@ GenerationPath = Literal[
     "openai-chat", "openai-responses", "anthropic", "image", "image-to-image",
     "image-batch", "video", "image-to-video", "video-timeline", "audio", "3d",
 ]
+
+
+class WorkerRewardDemandPolicy(BaseModel):
+    """Append-only reviewed valuation windows, not a live spot-price oracle."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
+    since: AwareDatetime
+    until: AwareDatetime
+    price_micro_per_aipg: int = Field(strict=True, ge=1, le=10**15)
+    worker_share_bps: int = Field(default=8500, strict=True, ge=1, lt=10000)
+
+    @model_validator(mode="after")
+    def validate_window(self):
+        start, end = self.since.astimezone(UTC), self.until.astimezone(UTC)
+        if any(t.minute or t.second or t.microsecond for t in (start, end)):
+            raise ValueError("Reward valuation windows require whole UTC hours")
+        if not timedelta(hours=1) <= end - start <= timedelta(days=7):
+            raise ValueError("Reward valuation windows must span one hour to seven days")
+        return self
 
 
 class GridSettings(BaseSettings):
@@ -47,6 +66,7 @@ class GridSettings(BaseSettings):
     # Prospective emission eligibility boundary. Unset preserves legacy history;
     # once activated, retain the exact timestamp across deploys and rollbacks.
     worker_rewards_paid_only_since: AwareDatetime | None = None
+    worker_reward_demand_policies: list[WorkerRewardDemandPolicy] = Field(default_factory=list, max_length=366)
 
     # Timeouts
     job_timeout_seconds: int = 300  # 5 min max generation time
@@ -191,6 +211,16 @@ class GridSettings(BaseSettings):
     grid_treasury_monitor_token: str = Field(default="", pattern=r"^(?:0x[0-9a-fA-F]{40})?$")
     grid_treasury_min_eth_wei: int = Field(default=0, ge=0, le=2**256 - 1)
     grid_treasury_min_token_raw: int = Field(default=0, ge=0, le=2**256 - 1)
+
+    @model_validator(mode="after")
+    def validate_worker_reward_demand(self):
+        policies = self.worker_reward_demand_policies
+        if policies:
+            if self.worker_rewards_paid_only_since is None or policies[0].since < self.worker_rewards_paid_only_since:
+                raise ValueError("Demand reward policy requires a preceding paid-only cutoff")
+            if any(a.until != b.since for a, b in zip(policies, policies[1:])):
+                raise ValueError("Demand reward policies must be ordered contiguous windows")
+        return self
 
     @model_validator(mode="after")
     def validate_treasury_monitor(self):

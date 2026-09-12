@@ -74,6 +74,12 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - `worker_rewards_paid_only_since` is a typed, timezone-aware prospective
   reward boundary. Its activation is separate from demand charging and must
   retain historical ledger rows; see settlement contracts before changing it.
+- `worker_reward_demand_policies` is a default-empty sequence of retained,
+  contiguous, at-most-seven-day valuation windows. Its first whole UTC hour
+  must follow the paid-only cutoff. Selection caps new worker allocations by
+  their own settled externally funded consumption after the 0042 lineage
+  reconciliation; granted purchased-pocket credits do not back it. Expiry holds new payouts, not
+  inference or already frozen payments. It is not a spot-price oracle.
 - **OAuth storage:** public client registration and authorization requests are
   operational state, not permanent identity or economic records. The lifecycle
   sweeper removes day-old authorization rows and never-used orphan clients even

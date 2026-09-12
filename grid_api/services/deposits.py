@@ -629,6 +629,7 @@ async def _record_and_credit(
                 credited_micro,
                 reason=f"{asset.lower()}_deposit",
                 ref=ref,
+                funded_micro=credited_micro,
             )
             balance = (
                 await session.execute(
