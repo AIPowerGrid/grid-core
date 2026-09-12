@@ -21,6 +21,25 @@ Merkle claims on Base.
 ## Ownership
 
 **Live custodial rail:**
+- `demand_rewards.py` is the candidate per-account purchased-consumption cap,
+  integrated into preview and freeze behind default-empty
+  `WORKER_REWARD_DEMAND_POLICIES`. It clips existing DEN/SmolLM allocations,
+  never redistributes clipped amounts, and uses downward Decimal rounding.
+  `aggregate.purchased_work_by_account` excludes missing, ambiguous, malformed,
+  uncompleted, and underfunded-x402 evidence. With migration 0042 it also
+  requires exact account/job credit movements whose net funded consumption
+  agrees with the terminal paid charge. `funded_work_by_account` computes DEN
+  weights and backing from the same SQL snapshot, scaling each job by its
+  externally funded fraction. Grant traffic cannot dilute funded workers via
+  the denominator, even from mixed-funded accounts. Granted purchased-pocket
+  value is spendable but supplies no backing. v2 previews report
+  `no_account_den=null`: excluded funded-weight traffic is not evidence of
+  missing account attribution. Valuation epochs and exact backing
+  are committed in v2 plans; retained v1 plans before activation are unchanged.
+  Expired/missing subsequent epochs hold new payouts, and a persisted v2 hour
+  prevents new later v1 plans after configuration removal. Historical approved
+  epochs must be retained for retries. This is NOT deployed or a market-profit
+  guarantee; see `docs/architecture/POST_LAUNCH_HARDENING.md`.
 - `payout_periods.py` freezes each closed, post-cutoff UTC hour once, together
   with every allocation, before any signing/broadcast. The reviewed hourly cap
   bounds `--budget`; the canonical hour ID and unique hour slot reject aliases

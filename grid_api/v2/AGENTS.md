@@ -20,6 +20,15 @@ validator shadow-observation records.
 
 ## Local Contracts
 
+- Migration `0042` adds `grid_credits.funded_balance_micro` and the append-only
+  `grid_credit_ledger.funded_delta_micro`. Both default to zero: historical
+  grants and purchased labels are not proof of external funding. A DB check
+  constrains funded balance to the nonnegative spendable subset. The offline
+  opening reconciler may append zero-spendable provenance entries after
+  replaying verified receipts; it never rewrites historical deltas. Apply the
+  migration before all writers, preserve provenance on rollback, and never
+  resume a pre-0042 credit writer once funded history exists.
+
 - `grid_payout_periods` is the immutable prospective worker payout plan, added
   empty by `0041`. One unique integer UTC-hour bucket prevents duplicate hourly
   budgets; the commitment binds cutoff, Base token, emission cap, minimum and

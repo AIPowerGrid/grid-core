@@ -408,24 +408,51 @@ async def _locked_canonical_account(s, account_id):
     return current
 
 
-async def _credit_in_session(s, account_id, amount_micro: int, reason: str, ref: str, model: str | None = None) -> None:
+async def _refund_funded_micro(s, account_id, amount_micro: int, reason: str, ref: str) -> int:
+    if reason not in {"reconcile:refund", "release:failed", "refund:media"} or not ref.endswith(":refund"):
+        return 0
+    original = (await s.execute(sa.select(ledger_t.c.delta_micro, ledger_t.c.funded_delta_micro).where(
+        ledger_t.c.account_id == account_id, ledger_t.c.ref == ref[:-7], ledger_t.c.delta_micro < 0,
+    ))).first()
+    if original is None:
+        return 0
+    held, funded = -int(original.delta_micro), -int(original.funded_delta_micro)
+    if not 0 <= funded <= held or not 0 <= amount_micro <= held:
+        raise ValueError("invalid refund funding lineage")
+    # Funded value is consumed first; return only its unused part, never
+    # convert an operator grant into externally funded credit on a refund.
+    return max(0, funded - (held - amount_micro))
+
+
+async def _credit_in_session(s, account_id, amount_micro: int, reason: str, ref: str, model: str | None = None,
+                             *, funded_micro: int | None = None) -> None:
+    if funded_micro is None:
+        funded_micro = await _refund_funded_micro(s, account_id, amount_micro, reason, ref)
+    if type(funded_micro) is not int or not 0 <= funded_micro <= amount_micro:
+        raise ValueError("funded credit must be a subset of spendable credit")
     await s.execute(sa.insert(ledger_t).values(
         account_id=account_id, delta_micro=amount_micro, reason=reason, ref=ref, model=model,
+        funded_delta_micro=funded_micro,
     ))
     res = await s.execute(
         sa.update(credits_t)
         .where(credits_t.c.account_id == account_id)
-        .values(balance_micro=credits_t.c.balance_micro + amount_micro, updated=_now())
+        .values(balance_micro=credits_t.c.balance_micro + amount_micro,
+                funded_balance_micro=credits_t.c.funded_balance_micro + funded_micro, updated=_now())
     )
     if res.rowcount == 0:
         await s.execute(sa.insert(credits_t).values(
-            account_id=account_id, balance_micro=amount_micro, updated=_now(),
+            account_id=account_id, balance_micro=amount_micro, funded_balance_micro=funded_micro, updated=_now(),
         ))
 
 
 async def _debit_in_session(s, account_id, amount_micro: int, reason: str, ref: str, model: str | None = None) -> str:
+    funded = int((await s.scalar(sa.select(credits_t.c.funded_balance_micro)
+                                .where(credits_t.c.account_id == account_id).with_for_update())) or 0)
+    funded_used = min(funded, amount_micro)
     await s.execute(sa.insert(ledger_t).values(
         account_id=account_id, delta_micro=-amount_micro, reason=reason, ref=ref, model=model,
+        funded_delta_micro=-funded_used,
     ))
     res = await s.execute(
         sa.update(credits_t)
@@ -433,7 +460,8 @@ async def _debit_in_session(s, account_id, amount_micro: int, reason: str, ref: 
             credits_t.c.account_id == account_id,
             credits_t.c.balance_micro >= amount_micro,
         ))
-        .values(balance_micro=credits_t.c.balance_micro - amount_micro, updated=_now())
+        .values(balance_micro=credits_t.c.balance_micro - amount_micro,
+                funded_balance_micro=credits_t.c.funded_balance_micro - funded_used, updated=_now())
     )
     return "ok" if res.rowcount else "insufficient"
 
@@ -518,21 +546,11 @@ async def _reservation_reserved_micro(job_id) -> int | None:
 
 async def _try_extra_debit_in_session(s, account_id, amount_micro: int, ref: str, model: str | None = None) -> bool:
     """Best-effort settlement extra without making the terminal claim retry forever."""
-    res = await s.execute(
-        sa.update(credits_t)
-        .where(sa.and_(
-            credits_t.c.account_id == account_id,
-            credits_t.c.balance_micro >= amount_micro,
-        ))
-        .values(balance_micro=credits_t.c.balance_micro - amount_micro, updated=_now())
-    )
-    if res.rowcount == 0:
+    balance = await s.scalar(sa.select(credits_t.c.balance_micro)
+                             .where(credits_t.c.account_id == account_id).with_for_update())
+    if balance is None or balance < amount_micro:
         return False
-    await s.execute(sa.insert(ledger_t).values(
-        account_id=account_id, delta_micro=-amount_micro,
-        reason="reconcile:extra", ref=ref, model=model,
-    ))
-    return True
+    return await _debit_in_session(s, account_id, amount_micro, "reconcile:extra", ref, model) == "ok"
 
 
 async def credit(account_id, amount_micro: int, reason: str, ref: str | None = None, model: str | None = None) -> bool:
@@ -1769,13 +1787,18 @@ async def billing_health(held_warning_seconds: int = 900) -> dict[str, int | boo
             credits_t.c.account_id,
             credits_t.c.balance_micro.label("balance"),
             sa.literal(0).label("ledger"),
+            credits_t.c.funded_balance_micro.label("funded_balance"),
+            sa.literal(0).label("funded_ledger"),
         ),
-        sa.select(ledger_t.c.account_id, sa.literal(0), ledger_t.c.delta_micro),
+        sa.select(ledger_t.c.account_id, sa.literal(0), ledger_t.c.delta_micro,
+                  sa.literal(0), ledger_t.c.funded_delta_micro),
     ).subquery()
     accounts = (
         sa.select(
             sa.func.sum(movements.c.balance).label("balance"),
             sa.func.sum(movements.c.ledger).label("ledger"),
+            sa.func.sum(movements.c.funded_balance).label("funded_balance"),
+            sa.func.sum(movements.c.funded_ledger).label("funded_ledger"),
         )
         .group_by(movements.c.account_id)
         .subquery()
@@ -1785,6 +1808,7 @@ async def billing_health(held_warning_seconds: int = 900) -> dict[str, int | boo
         sa.func.coalesce(sa.func.sum(accounts.c.ledger), 0).label("ledger_total_micro"),
         sa.func.count().filter(accounts.c.balance < 0).label("negative_balances"),
         sa.func.count().filter(accounts.c.balance != accounts.c.ledger).label("mismatched_accounts"),
+        sa.func.count().filter(accounts.c.funded_balance != accounts.c.funded_ledger).label("mismatched_funded_accounts"),
         sa.select(sa.func.count())
         .select_from(reservations_t)
         .where(reservations_t.c.status == "held", reservations_t.c.created < held_cutoff)
@@ -1804,6 +1828,7 @@ async def billing_health(held_warning_seconds: int = 900) -> dict[str, int | boo
         **health,
         "ok": (
             health["mismatched_accounts"] == 0
+            and health["mismatched_funded_accounts"] == 0
             and health["negative_balances"] == 0
             and health["invalid_reservation_splits"] == 0
         ),
