@@ -18,7 +18,7 @@ from sqlalchemy.pool import StaticPool
 from grid_api import database
 from grid_api.config import GridSettings
 from grid_api.services.settlement import aggregate
-from grid_api.v2.schema import accounts, ledger, metadata, reservations, workers, x402_payments
+from grid_api.v2.schema import accounts, credit_ledger, ledger, metadata, reservations, workers, x402_payments
 
 CUTOVER = datetime(2026, 9, 9, tzinfo=UTC)
 ADDRESS = "0x" + "12" * 20
@@ -51,7 +51,8 @@ async def db(request, monkeypatch):
         await engine.dispose()
 
 
-async def seed(*, created=CUTOVER, reservation=None, payment=None, wallet=ADDRESS, compact_job_id=False):
+async def seed(*, created=CUTOVER, reservation=None, payment=None, wallet=ADDRESS, compact_job_id=False,
+               funded=True):
     aid, wid, jid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     async with await database.new_session() as session:
         await session.execute(sa.insert(accounts).values(id=aid, payout_wallet=wallet))
@@ -65,6 +66,12 @@ async def seed(*, created=CUTOVER, reservation=None, payment=None, wallet=ADDRES
                           actual_micro=100, status="settled", prompt_toks=1, created=created)
             values.update(reservation)
             await session.execute(sa.insert(reservations).values(**values))
+            if values["account_id"] and values.get("billing_source", "credits") == "credits":
+                paid = max(0, (values["actual_micro"] or 0) - values.get("free_micro", 0) - values.get("promo_micro", 0))
+                await session.execute(sa.insert(credit_ledger).values(
+                    account_id=aid, ref=values["job_id"], reason="reserve:chat",
+                    delta_micro=-paid, funded_delta_micro=-paid if funded else 0,
+                ))
         if payment is not None:
             await session.execute(sa.insert(x402_payments).values(
                 job_id=str(jid), authorization_id=str(jid), payer=ADDRESS, network="eip155:8453",
@@ -123,6 +130,155 @@ async def test_unattributed_diagnostics_use_same_eligibility(db):
 async def test_compact_uuid_reservation_remains_eligible(db):
     await seed(reservation={}, compact_job_id=True)
     assert await aggregate.total_den_in_window(CUTOVER, CUTOVER + timedelta(hours=1)) == 100
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("reservation", "expected"), [
+    (None, 0), ({"status": "held"}, 0), ({"status": "released"}, 0),
+    ({"actual_micro": 0}, 0), ({"actual_micro": None}, 0),
+    ({"actual_micro": 101}, 0), ({"account_id": None}, 0),
+    ({"billing_source": "unknown"}, 0), ({"free_micro": -1}, 0),
+    ({"free_micro": 101}, 0), ({"free_micro": 100}, 0),
+    ({"promo_micro": 100}, 0), ({"free_micro": 60, "promo_micro": 30}, 10),
+    ({}, 100),
+])
+async def test_demand_backing_is_actual_purchased_work(db, reservation, expected):
+    aid = await seed(reservation=reservation)
+    backing = await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1))
+    assert backing.get(str(aid), 0) == expected
+
+
+@pytest.mark.asyncio
+async def test_granted_purchased_pocket_does_not_back_emissions(db):
+    aid = await seed(reservation={}, funded=False)
+    assert await aggregate.total_den_in_window(CUTOVER, CUTOVER + timedelta(hours=1)) == 100
+    assert await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1)) == {str(aid): 0}
+
+
+@pytest.mark.asyncio
+async def test_missing_or_wrong_account_movements_do_not_back_emissions(db):
+    aid = await seed(reservation={})
+    other = await seed()
+    async with await database.new_session() as session:
+        await session.execute(credit_ledger.update().where(credit_ledger.c.account_id == aid).values(account_id=other))
+        await session.commit()
+    assert await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1)) == {str(aid): 0}
+
+
+@pytest.mark.asyncio
+async def test_refund_lineage_reduces_reward_backing(db):
+    aid = await seed(reservation={"actual_micro": 60})
+    async with await database.new_session() as session:
+        row = (await session.execute(sa.select(credit_ledger))).mappings().one()
+        await session.execute(credit_ledger.update().values(delta_micro=-100, funded_delta_micro=-80))
+        await session.execute(credit_ledger.insert().values(
+            account_id=aid, ref=row["ref"] + ":refund", reason="reconcile:refund",
+            delta_micro=40, funded_delta_micro=20,
+        ))
+        await session.commit()
+    assert await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1)) == {str(aid): 60}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mixed_account", [False, True])
+async def test_grant_traffic_cannot_dilute_funded_workers(db, mixed_account):
+    from grid_api.services.settlement import payouts as P
+
+    honest = await seed(reservation={"reserved_micro": 10000, "actual_micro": 10000})
+    farmer = await seed(reservation={})
+    async with await database.new_session() as session:
+        await session.execute(ledger.update().values(model="qwen3-27b"))
+        await session.commit()
+    policy = {"price_micro_per_aipg": 1000, "worker_share_bps": 8500}
+    _, before = await P._period_allocations(CUTOVER, CUTOVER + timedelta(hours=1), 100, policy=policy)
+    grant = await seed(reservation={}, funded=False)
+    async with await database.new_session() as session:
+        wid = await session.scalar(sa.select(workers.c.id).where(workers.c.account_id == grant))
+        await session.execute(ledger.update().where(ledger.c.worker_id == wid).values(den=1e12, model="qwen3-27b"))
+        if mixed_account:
+            await session.execute(workers.update().where(workers.c.id == wid).values(account_id=farmer))
+        await session.commit()
+    rows, after = await P._period_allocations(CUTOVER, CUTOVER + timedelta(hours=1), 100, policy=policy)
+    assert {r["account_id"]: r["aipg"] for r in after} == {r["account_id"]: r["aipg"] for r in before}
+    assert {r["account_id"]: r["den"] for r in rows} == {str(honest): 100, str(farmer): 100}
+
+
+@pytest.mark.asyncio
+async def test_mixed_funding_scales_den_and_smollm_subset_together(db):
+    aid = await seed(reservation={"promo_micro": 20})
+    async with await database.new_session() as session:
+        await session.execute(credit_ledger.update().where(credit_ledger.c.account_id == aid).values(funded_delta_micro=-30))
+        await session.commit()
+    rows, backing = await aggregate.funded_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1))
+    assert rows == [{"account_id": str(aid), "den": 30, "smollm_den": 30, "payout_address": ADDRESS}]
+    assert backing == {str(aid): 30}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("compact", [False, True])
+async def test_demand_backing_handles_job_uuid_spellings_and_walletless_work(db, compact):
+    aid = await seed(reservation={}, compact_job_id=compact, wallet=None)
+    assert await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1)) == {str(aid): 100}
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_duplicate_reservations_never_double_back_rewards(db):
+    await seed(reservation={})
+    async with await database.new_session() as session:
+        row = dict((await session.execute(sa.select(reservations))).mappings().one())
+        row["job_id"] = uuid.UUID(row["job_id"]).hex
+        await session.execute(reservations.insert().values(**row))
+        await session.commit()
+    assert await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1)) == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state,amount,expected", [
+    ("reported", 100, 0), ("settled", 99, 0), ("settled", 100, 100),
+])
+async def test_x402_demand_backing_requires_sufficient_settled_payment(db, state, amount, expected):
+    aid = await seed(reservation={"billing_source": "x402", "account_id": None},
+                     payment={"status": state, "settled_micro": amount})
+    result = await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1))
+    assert result.get(str(aid), 0) == expected
+
+
+@pytest.mark.asyncio
+async def test_backing_only_counts_completions_in_exact_period(db):
+    await seed(created=CUTOVER - timedelta(microseconds=1), reservation={})
+    valid = await seed(reservation={})
+    await seed(created=CUTOVER + timedelta(hours=1), reservation={})
+    assert await aggregate.purchased_work_by_account(CUTOVER, CUTOVER + timedelta(hours=1)) == {str(valid): 100}
+
+
+@pytest.mark.asyncio
+async def test_real_aggregation_flows_through_frozen_demand_sender(db, monkeypatch):
+    from grid_api.config import WorkerRewardDemandPolicy
+    from grid_api.services.settlement import payouts as P
+
+    end = CUTOVER + timedelta(hours=1)
+    pid = CUTOVER.strftime("hour-%Y-%m-%dT%H")
+    aid = await seed(reservation={"reserved_micro": 10000, "actual_micro": 10000})
+    async with await database.new_session() as session:
+        await session.execute(ledger.update().values(model="qwen3-27b"))
+        await session.commit()
+    monkeypatch.setattr(P, "get_settings", lambda: SimpleNamespace(
+        worker_rewards_paid_only_since=CUTOVER,
+        worker_reward_demand_policies=[WorkerRewardDemandPolicy(
+            since=CUTOVER, until=end, price_micro_per_aipg=1000)]))
+    monkeypatch.setattr(P, "_now", lambda: end + timedelta(hours=1))
+    monkeypatch.setattr(P, "BASE_RPC_URL", "")
+    monkeypatch.setattr(P, "TREASURY_PK", "")
+    monkeypatch.setattr(P, "_ctx", lambda: pytest.fail("must not construct a signer"))
+    result = await P.send_period(CUTOVER, end, 208.33, pid)
+    assert result["failed"] == 1
+    row = await P._row(pid, aid)
+    assert row["aipg_amount"] == 8.5 and row["nonce"] is None
+    async with await database.new_session() as session:
+        plan = await session.scalar(sa.select(P.periods_t.c.plan))
+        assert plan["allocations"][0]["purchased_micro"] == 10000
+        assert (await session.execute(sa.select(reservations.c.actual_micro))).scalar_one() == 10000
+        assert (await session.execute(sa.select(ledger.c.den))).scalar_one() == 100
 
 
 @pytest.mark.asyncio

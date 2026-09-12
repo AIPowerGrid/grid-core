@@ -70,7 +70,7 @@ def _hash(plan):
     return hashlib.sha256(json.dumps(plan, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
-def _allocations(rows, budget):
+def _allocations(rows, budget, policy=None):
     out, seen = [], set()
     for row in rows:
         account_id = str(uuid.UUID(str(row["account_id"])))
@@ -79,7 +79,16 @@ def _allocations(rows, budget):
         if account_id in seen or not math.isfinite(den) or den < 0 or value <= 0:
             raise ValueError("invalid or duplicate payout allocation")
         seen.add(account_id)
-        out.append({"account_id": account_id, "den": den, "aipg": str(value), "address": wallet(row["payout_address"])})
+        allocation = {"account_id": account_id, "den": den, "aipg": str(value), "address": wallet(row["payout_address"])}
+        if policy is not None:
+            purchased = row.get("purchased_micro")
+            if type(purchased) is not int or not 0 < purchased <= 10**28:
+                raise ValueError("demand payout requires purchased-work evidence")
+            numerator, denominator = value.as_integer_ratio()
+            if numerator * 10000 * policy["price_micro_per_aipg"] > purchased * policy["worker_share_bps"] * denominator:
+                raise ValueError("demand payout exceeds purchased-work ceiling")
+            allocation["purchased_micro"] = purchased
+        out.append(allocation)
     if sum((amount(row["aipg"]) for row in out), Decimal(0)) > amount(budget):
         raise ValueError("payout allocations exceed period budget")
     return sorted(out, key=lambda row: row["account_id"])
@@ -110,7 +119,16 @@ async def freeze(period_id, expected, build_allocations):
             return plan
         if (await session.execute(sa.select(payouts.c.id).where(payouts.c.period_id == period_id).limit(1))).first():
             raise ValueError("legacy payout period requires separate reconciliation")
-        rows = _allocations(await build_allocations(), expected["budget_aipg"])
+        if expected["version"] == 1:
+            bounded_since = await session.scalar(sa.select(sa.func.min(
+                payout_periods.c.plan["contract"]["demand_policy"]["since"].as_string(),
+            )).where(
+                payout_periods.c.plan["contract"]["version"].as_integer() == 2,
+            ))
+            bounded_hour = int(dt.datetime.fromisoformat(bounded_since).timestamp()) // 3600 if bounded_since else None
+            if bounded_hour is not None and expected["utc_hour"] >= bounded_hour:
+                raise ValueError("cannot downgrade demand-bounded payout policy")
+        rows = _allocations(await build_allocations(), expected["budget_aipg"], expected.get("demand_policy"))
         plan = {"contract": expected, "allocations": rows}
         now = dt.datetime.now(dt.UTC)
         await session.execute(
