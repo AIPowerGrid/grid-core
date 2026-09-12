@@ -51,6 +51,14 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Demand-bounded rewards are candidate code, not an activated production rule.
+  `WORKER_REWARD_DEMAND_POLICIES=[]` retains the existing sender. Activation
+  needs a reviewed valuation and future whole-hour boundary, preserved policy
+  history, funded canary/replay and old-plan equivalence. After a v2 plan exists,
+  retain the cap-aware sender; rollback must stop payouts, not restore an older
+  sender that lacks the downgrade guard. Policy exhaustion holds new payout
+  hours while keeping inference and prior frozen retries available. See
+  `docs/architecture/POST_LAUNCH_HARDENING.md` for the full remaining scope.
 - Global demand charging is active on immutable `793fe904` / Alembic `0041`.
   The mode changed at `2026-09-10T00:14:57Z`; public generation reopened at
   `00:15:53Z` after eighteen no-dispatch rejection checks. Six processes use
