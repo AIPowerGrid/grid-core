@@ -3347,11 +3347,14 @@ async def test_code_probe_forwards_only_prompt_and_scores_hidden_tests(db, monke
 
 
 @pytest.mark.asyncio
-async def test_token_limit_probe_forwards_budget_and_commits_terminal_evidence(db, monkeypatch):
+@pytest.mark.parametrize("version", ["v1", "v2"])
+async def test_token_limit_probe_forwards_budget_and_commits_terminal_evidence(
+    db, monkeypatch, version,
+):
     from grid_api.services import den, job_queue, token_stream
 
     account_id = uuid.uuid4()
-    validator_id = await _register(account_id, capabilities=["text.token_limit.v1"])
+    validator_id = await _register(account_id, capabilities=["text.token_limit." + version])
     issued = await validators_svc.issue_assignments(
         account_id=account_id,
         validator_id=validator_id,
@@ -3369,6 +3372,8 @@ async def test_token_limit_probe_forwards_budget_and_commits_terminal_evidence(d
     while den.count_tokens(" ".join(pieces)) < challenge["max_tokens"] // 2:
         pieces.append(token)
     output_text = " ".join(pieces)
+    if version == "v2":
+        output_text += " " + token[:-1]
     submitted = {}
 
     async def capture_submit(job_id, payload, models, **kwargs):
@@ -3393,7 +3398,7 @@ async def test_token_limit_probe_forwards_budget_and_commits_terminal_evidence(d
     )
 
     assert result["status"] == "completed"
-    assert result["canary_kind"] == "token.limit"
+    assert result["canary_kind"] == ("token.limit" if version == "v1" else "token.limit.v2")
     assert result["finish_reason"] == "length"
     assert result["score_reason"] == "accepted"
     assert submitted["payload"]["request"]["max_tokens"] == challenge["max_tokens"]
@@ -3413,6 +3418,34 @@ async def test_token_limit_probe_forwards_budget_and_commits_terminal_evidence(d
     assert row["probe_verdict"] == "healthy"
     assert row["probe_result"]["score_reason"] == "accepted"
     assert row["probe_response_hash"] == result["response_hash"]
+
+
+@pytest.mark.asyncio
+async def test_upgraded_token_limit_node_drains_existing_v1_group(db):
+    active_workers = [{
+        "worker_id": str(uuid.uuid4()), "name": "rig-token-upgrade",
+        "models": ["qwen3-27b"], "job_types": ["text"],
+    }]
+    issued = []
+    for capabilities in (
+        ["text.token_limit.v1"],
+        ["text.token_limit.v1", "text.token_limit.v2"],
+    ):
+        signer = Account.create()
+        account_id = uuid.uuid4()
+        validator_id = await _register(account_id, signer.key, capabilities)
+        result = await validators_svc.issue_assignments(
+            account_id=account_id,
+            validator_id=validator_id,
+            validator_wallet=signer.address.lower(),
+            active_workers=active_workers,
+            limit=1,
+        )
+        issued.append(result["assignments"][0])
+    assert issued[0]["probe_group_id"] == issued[1]["probe_group_id"]
+    assert issued[1]["capability"] == "text.token_limit.v1"
+    assert issued[1]["challenge"]["kind"] == "token.limit"
+    assert issued[0]["challenge"] != issued[1]["challenge"]
 
 
 def test_validator_capabilities_expose_assignment_gates():
