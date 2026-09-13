@@ -305,6 +305,26 @@ async def test_daily_and_operator_caps_conserve_unallocated_budget(db, monkeypat
     assert result["excluded"] == {"daily_cap": 2}
 
 
+async def test_revised_approved_budget_freezes_caps_and_replays_once(db, monkeypatch):
+    group = await members(db)
+    await create(db, group, budget_atomic=str(100_000 * 10**18),
+                 operator_cap_atomic=str(25_000 * 10**18))
+    for member in group:
+        await report(db, member)
+    close_time(monkeypatch)
+    preview = await comp.finalize_campaign("pilot-fixture")
+    assert preview["allocated_atomic"] == str(75_000 * 10**18)
+    assert preview["unallocated_atomic"] == str(25_000 * 10**18)
+    result = await comp.finalize_campaign("pilot-fixture", apply=True, expected_digest=preview["digest"])
+    assert result["sendable"] is False
+    assert await comp.finalize_campaign("pilot-fixture", apply=True, expected_digest=result["digest"]) == result
+    async with db() as session:
+        amounts = (await session.scalars(sa.select(tables.validator_compensation_allocations.c.amount_atomic))).all()
+        assert len(amounts) == 3 and all(int(amount) == 25_000 * 10**18 for amount in amounts)
+        assert await session.scalar(sa.select(sa.func.count()).select_from(tables.validator_compensation_work)) == 3
+        assert await session.scalar(sa.select(sa.func.count()).select_from(tables.validator_compensation_payments)) == 0
+
+
 async def test_overlapping_approved_campaign_cannot_pay_the_same_work_twice(db, monkeypatch):
     group = await members(db)
     await create(db, group)
@@ -387,8 +407,8 @@ async def test_unchanged_campaign_replay_and_changed_budget_are_distinguished(db
 @pytest.mark.parametrize(
     "field,value",
     [
-        ("budget_atomic", "10000000000000000000001"),
-        ("operator_cap_atomic", "2000000000000000000001"),
+        ("budget_atomic", str(100_000 * 10**18 + 1)),
+        ("operator_cap_atomic", str(25_000 * 10**18 + 1)),
         ("budget_atomic", "0"),
         ("budget_atomic", 10.0),
         ("daily_unit_cap", True),
