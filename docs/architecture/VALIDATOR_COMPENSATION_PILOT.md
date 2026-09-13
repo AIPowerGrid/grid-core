@@ -1,7 +1,7 @@
 # Validator Compensation Pilot
 
-Status (verified September 13, 2026): **backends deployed dark; node consent
-client released; no approved live campaign or validator payments**.
+Status (verified September 13, 2026): **budget approved; backends deployed dark;
+node consent client released; no active campaign or validator payments**.
 Production selects immutable Core `d606e4d8` with Alembic `0042`, which includes
 the compensation migrations. Both `VALIDATOR_COMPENSATION_OPERATOR_ENABLED`
 and `VALIDATOR_COMPENSATION_SEND_ENABLED` are false; the campaign table is empty.
@@ -10,14 +10,15 @@ runs on all three first-party nodes. This upgrade preserves identities and is
 not external operator qualification or payout consent. Console
 PR27 is merged, but this audit has not proven the live wallet/browser journey.
 The manual PostgreSQL path exists alongside the earlier offline simulation.
-No real campaign/budget has been approved or created, funds are not reserved
-on-chain, and the explicit payment adapter remains disabled.
+The maintainer approved the budget and duration below on September 13, 2026.
+No campaign has been created, funds are not reserved on-chain, and the explicit
+payment adapter remains disabled.
 This is separate from worker den and from paying workers to execute blind audits.
 It cannot activate routing, reputation penalties, bonds, or slashing.
 
-## Proposed Terms
+## Approved Budget And Proposed Allocation Terms
 
-- Proposed first pilot: at most 4,000 AIPG total over exactly seven days.
+- Approved first-pilot budget: at most 4,000 AIPG total over exactly seven days.
 - At most 1,000 AIPG per reviewed independent operator across all their nodes.
 - At most 100 reviewed contributions per operator per UTC day.
 - One unit per operator and probe group, not per node, retry or heartbeat.
@@ -28,18 +29,29 @@ It cannot activate routing, reputation penalties, bonds, or slashing.
   the operator cap. Leave both rounding and capped remainders in treasury;
   do not redistribute them or automatically raise any budget.
 
-The earlier proposal was 2,000 total / 500 per operator. After the maintainer
-requested a larger allowance, the amounts above were proposed; numerical
-approval is still pending. Neither version is authorized or activated.
+The maintainer explicitly replied "approved" to the 4,000-total / 1,000-per-operator
+seven-day proposal on September 13, 2026. This supersedes the earlier unapproved
+2,000 / 500 proposal. Record this budget decision as
+`approval:validator-pilot-budget-20260913`; it is a decision reference, not a
+credential, proof of operator independence or recipient consent.
 
-These are maximum draft terms, not payment promises. The maintainer must approve
-the budget, earning window, eligibility and beneficiary accounts before the pilot.
+These are maximum budget limits, not guaranteed individual payments. The daily
+contribution cap and allocation rules above remain the proposed implementation
+terms. Freeze the actual earning dates, eligibility and beneficiary accounts in
+the reviewed campaign before launch; do not request the same numerical budget
+approval again unless its amounts or duration change.
 Resolve separately proven payout destinations before any transfer.
 Publish the terms before earning starts. Do not retrofit this draft onto past
 unpaid participation without a separate explicit decision.
 The earlier 10,000/2,000 AIPG figures were draft safety ceilings, not an approved
-campaign. Increasing this proposal is not implied by available treasury funds
+campaign. Increasing the approved budget is not implied by available treasury funds
 or by an approval for the separate worker-reward pilot.
+
+A read-only production check at 17:24 UTC found nine fresh nodes, zero current
+verified independent operator groups and zero campaigns. Three owned nodes were
+on preview.20; the six other fresh nodes were on .13, .15 or .18. Budget approval
+does not waive the cohort, version, review, live-consent or transfer-verification
+gates. No production flags or economic records changed when recording it.
 
 ## Durable Allocation Contract
 
