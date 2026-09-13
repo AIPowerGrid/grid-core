@@ -1,12 +1,17 @@
 # Validator Payout Consent
 
-Status: **Core API and both client implementations merged; production
-compensation remains disabled and the node client is not released.** Core PR127
+Status (verified September 13, 2026): **Core API deployed dark and both client
+implementations merged; the node client shipped in preview.18; production
+compensation remains disabled.** Core PR127
 is `2d16a019`; validator PR107 is `1c3b8122`; Console PR27 is `28dbf5f3`.
 Migration `0039` and
 `VALIDATOR_COMPENSATION_OPERATOR_ENABLED` are separate from the payment sender
 flag. No new API approves a recipient, creates an earning campaign, or moves
-funds. Keep the flag off until both clients and their end-to-end tests ship.
+funds. Production Core `93a21eec` reports Alembic `0042`; both compensation
+flags remain false and no campaign exists. Preview.18 was published September 7
+from `fef5e924`, which contains node PR107. This does not prove a real operator's
+wallet consent journey; keep collection disabled until the coordinated client
+deployment and supervised qualification gates are complete.
 
 ## Operator Journey
 
@@ -31,8 +36,8 @@ funds. Keep the flag off until both clients and their end-to-end tests ship.
    exports the proof privately and uses the existing digest-bound recipient
    approval command. The separately approved sender operates later.
 
-The three implementations support this sequence. Coordinated deployment,
-native release and live operator qualification remain delivery requirements.
+The three implementations support this sequence. Native release is complete;
+coordinated live client qualification and operator review remain requirements.
 Do not send administrative commands to node operators.
 
 ## HTTP Contract
@@ -151,7 +156,8 @@ binds a recipient or sends funds.
 
 ## Rollout Gates
 
-Apply `0039` before enabling the operator API. Ship and test both clients,
+Migration `0039` is present in production `0042`; verify that remains true
+before enabling the operator API. Qualify both deployed clients,
 including refresh, cancellation, duplicates, changed links and unavailable
 wallets. Keep payment authorization and cohort qualification separate. Rollback
 disables the operator flag and retains pending proof; downgrade refuses nonempty

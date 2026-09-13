@@ -36,7 +36,8 @@ for humans and agents.
   before any payment.
 - `architecture/VALIDATOR_PAYOUT_CONSENT.md` - default-off operator status and
   wallet/node signature collection; private review boundary, request recovery,
-  client verification and remaining node-app/Console release gates.
+  client verification and remaining live node-app/Console qualification gates.
+  The node client shipped in preview.18; compensation remains disabled.
 - `architecture/NETWORK_READINESS.md` - current implementation and rollout
   status for validator, worker-growth, economics, blockchain, and operations
   requirements.

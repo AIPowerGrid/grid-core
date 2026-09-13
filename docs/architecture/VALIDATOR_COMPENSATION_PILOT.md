@@ -1,6 +1,12 @@
 # Validator Compensation Pilot
 
-Status: **allocation, recipient-consent and sender backends; not deployed or payment-enabled**.
+Status (verified September 13, 2026): **backends deployed dark; node consent
+client released; no approved live campaign or validator payments**.
+Production selects immutable Core `93a21eec` with Alembic `0042`, which includes
+the compensation migrations. Both `VALIDATOR_COMPENSATION_OPERATOR_ENABLED`
+and `VALIDATOR_COMPENSATION_SEND_ENABLED` are false; the campaign table is empty.
+The node consent client is included in published `v0.1.0-preview.18`. Console
+PR27 is merged, but this audit has not proven the live wallet/browser journey.
 The manual PostgreSQL path exists alongside the earlier offline simulation.
 No real campaign/budget has been approved or created, funds are not reserved
 on-chain, and the explicit payment adapter remains disabled.
@@ -9,8 +15,8 @@ It cannot activate routing, reputation penalties, bonds, or slashing.
 
 ## Proposed Terms
 
-- At most 10,000 AIPG total over at most seven days.
-- At most 2,000 AIPG per reviewed independent operator across all their nodes.
+- Proposed first pilot: at most 2,000 AIPG total over exactly seven days.
+- At most 500 AIPG per reviewed independent operator across all their nodes.
 - At most 100 reviewed contributions per operator per UTC day.
 - One unit per operator and probe group, not per node, retry or heartbeat.
 - Exclude first-party, unreviewed, rejected and expired-review operators.
@@ -25,6 +31,9 @@ the budget, earning window, eligibility and beneficiary accounts before the pilo
 Resolve separately proven payout destinations before any transfer.
 Publish the terms before earning starts. Do not retrofit this draft onto past
 unpaid participation without a separate explicit decision.
+The earlier 10,000/2,000 AIPG figures were draft safety ceilings, not an approved
+campaign. Increasing this proposal is not implied by available treasury funds
+or by an approval for the separate worker-reward pilot.
 
 ## Durable Allocation Contract
 
@@ -103,17 +112,18 @@ failed output write can follow a committed transaction: retry the same campaign
 and digest with a new private output path. Never create a replacement campaign
 to recover an uncertain result. The complete create preview/apply path and
 finalization have been exercised against synthetic PostgreSQL records, not an
-approved live compensation cohort. Operator consent/status UI, deployment and
-supervised real-transfer qualification are still required. The separate sender
+approved live compensation cohort. The operator clients exist and the backend
+is deployed dark; live client qualification, activation and supervised
+real-transfer qualification are still required. The separate sender
 and reconciliation backend below does not imply those gates have passed.
 
 ## Recipient Consent Backend
 
 Migration `0037` adds one private immutable consent row per finalized positive
 allocation. The separate default-off authenticated collection API is documented
-in `VALIDATOR_PAYOUT_CONSENT.md`; its local-app and Console screens do not yet
-exist. Do not instruct operators to paste private keys
-or run the administrative command. Node signing must eventually use the existing
+in `VALIDATOR_PAYOUT_CONSENT.md`; the local-app screen shipped in preview.18
+and Console PR27 is merged. Do not instruct operators to paste private keys
+or run the administrative command. Node signing uses the existing
 local node key internally; the human approves in their chosen payout wallet.
 
 `scripts/manage_validator_recipient.py prepare` reads exactly `campaign_id`,
@@ -307,8 +317,8 @@ a second payable entitlement.
    and verdict review. Resolve a separately proven recipient wallet bound to
    the frozen beneficiary account; never assume an ephemeral validator signer is the
    desired payout destination.
-2. Deploy and qualify the implemented campaign/allocation/work ledger, then
-   qualify the recipient backend and ship the operator consent flow. PostgreSQL allocation
+2. Qualify the dark-deployed campaign/allocation/work ledger and recipient
+   backend with the released node and deployed Console consent flow. PostgreSQL allocation
    deduplication alone does not prevent a sender paying twice.
 3. Bind approved allocations to payment attempts without changing their frozen
    caps, amounts or evidence. Freeze the recipient before broadcast. An expired
