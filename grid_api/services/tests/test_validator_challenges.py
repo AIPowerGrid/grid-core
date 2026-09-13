@@ -25,6 +25,7 @@ from grid_api.services import den, validators
         ("tool.chain", "tool.chain", "text.tool_chain.v1"),
         ("stop.sequence", "stop.sequence", "text.stop_sequence.v1"),
         ("token.limit", "token.limit", "text.token_limit.v1"),
+        ("token.limit.v2", "token.limit.v2", "text.token_limit.v2"),
     ],
 )
 def test_generated_challenge_families_hide_expected_answer(family, kind, capability):
@@ -88,6 +89,7 @@ def test_group_challenge_generation_fails_closed_when_randomness_repeats(monkeyp
         ("text", "text.structured.v1", "protocol_conformance"),
         ("text", "text.stop_sequence.v1", "protocol_conformance"),
         ("text", "text.token_limit.v1", "protocol_conformance"),
+        ("text", "text.token_limit.v2", "protocol_conformance"),
         ("text", "text.tool_call.v1", "protocol_conformance"),
         ("text", "text.reasoning.multistep.v1", "capability"),
         ("text", "text.code.v1", "capability"),
@@ -443,6 +445,54 @@ def test_token_limit_scoring_requires_repetition_cutoff_and_bounded_grid_count()
     assert validators._score_text_challenge(
         challenge, oversized, 10, finish_reason="length"
     ) == "failed"
+
+
+@pytest.mark.parametrize("fragment", ["r", "repeat", "repeat_marke"])
+@pytest.mark.parametrize("finish_reason", ["length", "max_tokens"])
+def test_token_limit_v2_accepts_only_committed_terminal_fragment(fragment, finish_reason):
+    token = "repeat_marker"
+    challenge = {"kind": "token.limit.v2", "expected_hash": hashlib.sha256(token.encode()).hexdigest(), "max_tokens": 64}
+    answer = _repeat_to_grid_tokens(token, 40) + " " + fragment
+    assert validators._score_text_challenge(challenge, answer, 10, finish_reason=finish_reason) == "healthy"
+    legacy = {**challenge, "kind": "token.limit"}
+    assert validators._score_text_challenge_detail(legacy, answer, 10, finish_reason=finish_reason) == ("failed", "invalid_repetition")
+
+
+@pytest.mark.parametrize("mutation", ["wrong_last", "wrong_middle", "single_complete", "early_stop", "oversized", "wrong_commitment"])
+def test_token_limit_v2_does_not_relax_other_guards(mutation):
+    token = "repeat_marker"
+    challenge = {"kind": "token.limit.v2", "expected_hash": hashlib.sha256(token.encode()).hexdigest(), "max_tokens": 64}
+    answer = _repeat_to_grid_tokens(token, 40) + " repeat_"
+    finish = "length"
+    if mutation == "wrong_last":
+        answer += "WRONG"
+    elif mutation == "wrong_middle":
+        answer = answer.replace(token, "WRONG", 1)
+    elif mutation == "single_complete":
+        answer = token + " repeat_"
+    elif mutation == "early_stop":
+        finish = "stop"
+    elif mutation == "oversized":
+        answer = _repeat_to_grid_tokens(token, 100) + " repeat_"
+    else:
+        challenge["expected_hash"] = hashlib.sha256(b"wrong_marker").hexdigest()
+    assert validators._score_text_challenge(challenge, answer, 10, finish_reason=finish) == "failed"
+
+
+def test_token_limit_v2_requires_explicit_scorer_capability():
+    kinds, _ = validators._supported_text_challenges(["text.token_limit.v1"])
+    assert kinds == ("token.limit",)
+    kinds, _ = validators._supported_text_challenges(["text.token_limit.v2"])
+    assert kinds == ("token.limit.v2",)
+    assert not validators._quality_eligible("text", "text.token_limit.v2")
+
+
+def test_token_limit_upgrade_preserves_old_capability_without_doubling_new_lane():
+    kinds, capabilities = validators._supported_text_challenges(
+        ["text.token_limit.v1", "text.token_limit.v2"]
+    )
+    assert kinds == ("token.limit.v2",)
+    assert capabilities == {"text.token_limit.v1", "text.token_limit.v2"}
 
 
 def test_token_limit_count_includes_reasoning_output():
