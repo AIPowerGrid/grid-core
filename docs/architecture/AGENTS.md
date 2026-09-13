@@ -70,7 +70,9 @@ validation, worker incentives, and trust boundaries.
 - `VALIDATOR_COMPENSATION_PILOT.md` - capped operator compensation, implemented
   dark-deployed PostgreSQL contracts/allocations, offline simulation,
   recipient-consent and default-off transfer backends. Preview.18 includes the
-  node UI; live wallet qualification and an approved campaign remain required.
+  node UI, retained in .20; live wallet qualification and an approved campaign
+  remain required. The revised 4000-total / 1000-per-operator seven-day proposal
+  is unapproved and must not become an implicit runtime default.
   Not worker-audit funding or payment approval.
 - `VALIDATOR_PAYOUT_CONSENT.md` - default-off private operator status and
   wallet/node signature collection, Console handoff, replay/expiry policy and
