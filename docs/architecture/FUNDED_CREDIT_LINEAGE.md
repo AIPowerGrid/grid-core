@@ -1,8 +1,9 @@
 # Externally funded credit lineage
 
-Status: candidate, September 11, 2026. Not deployed. PR 179 includes the
-prospective demand cap from PR 178; do not deploy PR 178 alone. Neither change
-authorizes a payout or changes past plans.
+Status: deployed September 13, 2026 UTC on immutable `93a21eec` / Alembic
+`0042`. PR 179 includes the prospective demand cap from PR 178; do not deploy
+PR 178 alone. The maintainer approved a separate 24-hour reward pilot, recorded
+below. Deployment does not reprice or authorize historical payouts.
 
 ## Why
 
@@ -61,7 +62,7 @@ zero-spendable `funding:opening` entries and updates funded caches in one
 transaction. It cannot increase user credit, rewrite history, or send tokens.
 Replaying a committed hash returns `already`, including after later spending.
 
-Tested command interface (disposable databases only):
+Tested command interface (also used during the controlled production opening):
 
 ```sh
 python -m grid_api.services.funding_lineage
@@ -129,6 +130,9 @@ the controlled drain because new spending invalidates earlier snapshots.
 
 ## Production preparation, not cutover
 
+This section records September 11 preparation. The following September 13
+cutover supersedes its deployment status, not its rollback warnings.
+
 On September 11, candidate `7cb7465e` was built as a separate immutable release
 using the reviewed hash-locked dependencies; `pip check` passed. A new
 root-only production backup at `23:33:49Z` restored into a generated scratch
@@ -140,3 +144,62 @@ That built candidate predates the grant-denominator refinement. Do not select
 it merely because its migration proof and CI passed: build and requalify the
 final reviewed commit before any cutover. No live opening entries, funded
 cache updates, or reward-policy changes have been applied.
+
+## September 13 production cutover and pilot
+
+The final reviewed merge `93a21eec18e583e9c2bda8e914828434accb9d13` passed
+required Linux/PostgreSQL CI before deployment. A fresh production backup
+restored and migrated in scratch. Admission and funding claims were temporarily
+closed, MCP and the payout timer paused, queues drained, and all credit writers
+stopped before the live migration and opening. Both queue streams had zero
+pending/undelivered work and there were no held reservations.
+
+The native opening preview/apply matched six balances, 5,210,133,096 micro-USD
+spendable, 10,020,000 micro-USD verified deposits, and 9,610,843 micro-USD
+unspent funded value. Repeating the reviewed hash returned `already`.
+Fingerprints proved the original spendable balances, historical credit ledger,
+all payout rows and all 59 frozen plans unchanged. No payout was broadcast.
+
+Two real loopback-API canaries ran through production workers behind the
+maintenance gate, using temporary expiring keys revoked afterward:
+
+| Demand source | Reserved micro-USD | Actual | Refund | New reward backing |
+| --- | ---: | ---: | ---: | ---: |
+| Verified funded owner credit | 40 | 6 | 34 | 6 |
+| Existing grant-only operator service | 40 | 6 | 34 | 0 |
+
+The grant-only job supplied no funded DEN weight either. Both spendable and
+funded caches reconciled to their ledgers, with no negative balances, stale
+holds or invalid reservation splits. These two tests spent 12 micro-USD in
+total, only six from externally funded credit; they were not customer traction.
+
+Public traffic reopened at `2026-09-13T01:20:40Z`. All six API processes use
+the new release and `GRID_CHARGING_MODE=on`. The existing generation admission,
+promotion/service policy and immutable paid-only cutoff were preserved. MCP,
+the prior database statistics schedules and payout timer resumed.
+
+Approved prospective reward policy:
+
+- Window: `2026-09-13T02:00:00Z` through `2026-09-14T02:00:00Z`.
+- Accounting valuation: 2,000 micro-USD per AIPG ($0.002), not a market oracle.
+- Worker share: 8,500 basis points (85%) of each worker's backed consumption.
+- Existing 208.33 AIPG hourly ceiling, minimum payout and SmolLM cap retained.
+- No backing means no new allocation; unused budget is not redistributed.
+
+A production systemd service drop-in, `40-demand-pilot-start.conf`, prevents
+the automated sender from running before `2026-09-13T03:00:00Z`, the first
+complete pilot hour. Its skip was executed and verified. This intentionally
+does not send the pre-pilot canary hour under legacy fixed-budget weights.
+It does not edit prior plans or authorize backpay. Preserve this additional
+deployment gate when reconciling units; the versioned base unit is unchanged.
+
+Native preview of the prospective first hour returned zero allocations and the
+entire ceiling unallocated. The expiry guard rejected a new hour beyond the
+approved window. Keep the policy history and lineage-aware sender: never clear
+the policy to bypass expiry or restore an old credit writer.
+
+Remaining evidence: observe the first complete pilot period, then a nonzero
+eligible frozen allocation, exact Transfer verification and an idempotent
+replay. The six-micro funded canary is below the retained minimum payout and
+cannot prove that transfer path. Do not call the 24-hour observation or a
+nonzero capped payout complete from these deployment checks.

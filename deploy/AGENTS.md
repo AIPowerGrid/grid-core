@@ -51,15 +51,23 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
-- Demand-bounded rewards are candidate code, not an activated production rule.
-  `WORKER_REWARD_DEMAND_POLICIES=[]` retains the existing sender. Activation
-  needs a reviewed valuation and future whole-hour boundary, preserved policy
-  history, funded canary/replay and old-plan equivalence. After a v2 plan exists,
+- Funded lineage and demand-bounded rewards are deployed on `93a21eec` /
+  `0042`. The approved 24-hour policy spans September 13 02:00 UTC to September
+  14 02:00 UTC at 2,000 micro-USD/AIPG and 8,500 basis points. A production
+  `40-demand-pilot-start.conf` service drop-in holds the sender until the first
+  complete pilot hour at 03:00 UTC, avoiding legacy payouts for pre-pilot tests.
+  Preserve it when reconciling units. Real funded/grant canaries and historical
+  equivalence passed; first complete capped payout/replay and observation are
+  still pending. See `docs/architecture/FUNDED_CREDIT_LINEAGE.md`. An empty
+  `WORKER_REWARD_DEMAND_POLICIES` is only the code default, not live policy.
+  After funded history exists, never restore an old credit writer. After a v2 plan exists,
   retain the cap-aware sender; rollback must stop payouts, not restore an older
   sender that lacks the downgrade guard. Policy exhaustion holds new payout
   hours while keeping inference and prior frozen retries available. See
   `docs/architecture/POST_LAUNCH_HARDENING.md` for the full remaining scope.
-- Global demand charging is active on immutable `793fe904` / Alembic `0041`.
+- Global demand charging originally activated on immutable `793fe904` /
+  Alembic `0041`; the lineage deployment above supersedes that release, not
+  the charging policy. Historical launch evidence follows.
   The mode changed at `2026-09-10T00:14:57Z`; public generation reopened at
   `00:15:53Z` after eighteen no-dispatch rejection checks. Six processes use
   `GRID_CHARGING_MODE=on`; only that environment field changed. Preserve the
