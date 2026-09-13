@@ -207,6 +207,26 @@ stream/non-stream parity and a complete two-stage chain before any rollout.
 Do not silently rewrite content as calls, relax scoring, or change model
 identity claims to conceal this protocol failure. Compensation remains separate.
 
+## Independent Logic Oracle
+
+A read-only bounded query recovered the original four larger-model multistep
+logic failures, all reported as `qwen38-flash-next-125b-nvfp4`. A separate parser
+accepted only the documented start value and four ordered add/subtract/multiply
+operations, then computed the answer independently without calling Core's
+generator or trusting its expected value. All four computed hashes matched
+their assignment's expected-answer commitment.
+
+Each retained reply was a syntactically valid but incorrect integer under the
+released normalizer. All finished with stop and reported only 3-5 completion
+tokens. These are wrong-answer observations, not formatting-only rejection,
+reasoning exhaustion, an incorrect Core oracle, or a demonstrated transport
+failure. No new model call was made. The reported model name remains unverified;
+these observations do not establish substitution or deliberate misconduct.
+
+Private capture SHA-256:
+`9962139bfe84a31031d72245d1cca1a2e4fc092594eacb83708ca16c0cee8708`.
+Keep these four original failures; no historical score was rewritten.
+
 ## Compensation remains separate
 
 Correctly reporting a genuine failed assignment is useful audit work, not a
