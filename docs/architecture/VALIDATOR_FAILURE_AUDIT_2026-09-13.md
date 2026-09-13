@@ -139,9 +139,12 @@ All six returned HTTP 200. An independent parser verified that each of the
 three malformed argument strings was byte-identical to its corresponding
 historical Grid result. Non-streaming failures demonstrate that Grid stream
 assembly is not required to reproduce this defect. Native backend output is
-already malformed for the API contract. The exact serving version/configuration
-has not yet been inspected, so do not claim a particular upstream parser patch
-or that all nine historical calls had one independently witnessed cause.
+already malformed for the API contract. The endpoint subsequently reported
+`0.1.dev1+gedc82b614`; that suffix resolves to upstream vLLM commit
+`edc82b614f51f4f9ce16c7010e879571e5c46136`. This HTTP metadata does not verify
+the running image, launch flags or local patches. Do not claim a particular
+upstream parser patch repairs it, or that all nine historical calls had one
+independently witnessed cause.
 
 The private capture SHA-256 is
 `ac5b56714582d7f2ed010f0b3e58e9beeacfa3bda5ddfae3a174c9eb7d63df8f`.
@@ -154,9 +157,55 @@ public synthetic fixture, then qualify named and auto calls in streaming and
 non-streaming modes plus a complete two-stage chain. Require valid JSON,
 correct names/arguments, and no leaked markup before changing the backend.
 Keep strict validator scoring; do not repair arbitrary worker JSON to turn a
-failure into a pass. The three GPT-OSS no-call cases still need their own
-backend-versus-transport diagnosis. No worker service, runtime configuration,
-score or economic record changed during these tests.
+failure into a pass. The GPT-OSS comparison below diagnoses its no-call cases
+separately. No worker service, runtime configuration, score or economic record
+changed during these tests.
+
+## GPT-OSS No-Call Follow-Up
+
+Six direct requests reused two of the three retained GPT-OSS-120B first-stage
+tool-chain cases. Named-tool streaming/non-streaming and auto-tool streaming
+were compared at the original 1,024-token budget and temperature zero. These
+are two repeated first-stage cases, not six independent tests or a complete
+two-stage workflow.
+
+| Variant | Case A | Case B |
+| --- | --- | --- |
+| Named tool, streaming | Text, no call | One correct structured call |
+| Named tool, non-streaming | Text, no call | Text, no call |
+| Auto tool, streaming | Text, no call | Text, no call |
+
+All six returned HTTP 200. In the three failing named-tool responses, ordinary
+visible text contained the correct argument object. An offline comparison
+using the original step commitment confirms the values, but this is **not** an
+actual tool call and must not be promoted to one by the validator. One
+non-streamed response was byte-identical to its historical stored visible text.
+The one actual structured call matched the original first-stage commitment.
+Five missing calls and one success demonstrate an intermittent backend contract
+failure, not model incapability or a Grid-only stream-assembly defect.
+
+Private capture SHA-256:
+`de4c6d5fce0d62f9643f66b02912ae07d47dd62c9bd4d214788c7f4ea37da390`.
+An earlier helper attempt incorrectly sent an empty Authorization header and
+failed locally in HTTPX on all six attempts before obtaining an HTTP response.
+It is retained separately and excluded from the six real backend requests.
+The corrected helper omits an absent key, matching the deployed worker.
+
+The GPT endpoint's `/version` reports vLLM `0.10.2`; its port number is not
+evidence that it runs Ollama (`/api/version` returned 404). The
+[published v0.10.2 serving source](https://github.com/vllm-project/vllm/blob/v0.10.2/vllm/entrypoints/openai/serving_chat.py)
+handles GPT-OSS/Harmony before the generic named-tool branch, extracting calls
+from the generated Harmony channel/recipient. This supports inspecting the
+actual serving/parser setup rather than assuming generic named-tool guarantees
+apply. Endpoint metadata and upstream source do not prove the deployed image
+or absence of local patches. Existing SSH authentication to the backend was
+rejected; no alternative credentials, host changes or restarts were attempted.
+
+Next: obtain the correct host access, inspect launch flags and artifact version,
+and test a pinned candidate backend with ordinary chat, named/auto tools,
+stream/non-stream parity and a complete two-stage chain before any rollout.
+Do not silently rewrite content as calls, relax scoring, or change model
+identity claims to conceal this protocol failure. Compensation remains separate.
 
 ## Compensation remains separate
 
