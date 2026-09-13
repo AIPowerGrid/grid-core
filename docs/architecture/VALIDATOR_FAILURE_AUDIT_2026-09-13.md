@@ -55,6 +55,14 @@ new experiments, or proof that every affected group would change outcome.
 - One larger-model response stops early. Twelve tool-call/tool-chain responses
   are malformed, and four logic responses mismatch their commitment. These
   remain unresolved task failures, not evidence for automatic penalties.
+- Structural inspection narrows the twelve larger-model tool failures: nine
+  DeepSeek replies contain one call whose arguments are invalid JSON, with a
+  stop finish and no visible text; three GPT-OSS-120B replies contain visible
+  text and no call at the first tool-chain stage. SmolLM's 25 tool replies
+  contain visible text, no call and a length finish. This does not distinguish
+  backend emission from stream assembly defects: inspect an owned backend's
+  raw deltas and their collected form before changing the scorer. Do not turn
+  malformed arguments into a passing result through permissive JSON repair.
 - Healthy individual replies can coexist with a failed group. Group outcomes
   must not be used to rewrite every individual verdict.
 
