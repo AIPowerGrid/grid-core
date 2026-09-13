@@ -64,12 +64,14 @@ validation, worker incentives, and trust boundaries.
   bounded scheduler-owned audits. Schema, budgets, ordinary atomic payout, and
   recovery exist dark; scheduling, scoring, and classifier gates remain absent.
 - `VALIDATOR_COMPENSATION_PILOT.md` - capped operator compensation, implemented
-  dark PostgreSQL contracts/allocations, offline simulation, recipient-consent
-  and default-off transfer backends, with operator UI and live approval gates.
+  dark-deployed PostgreSQL contracts/allocations, offline simulation,
+  recipient-consent and default-off transfer backends. Preview.18 includes the
+  node UI; live wallet qualification and an approved campaign remain required.
   Not worker-audit funding or payment approval.
 - `VALIDATOR_PAYOUT_CONSENT.md` - default-off private operator status and
   wallet/node signature collection, Console handoff, replay/expiry policy and
-  remaining node-app/Console delivery gates. No recipient approval or sending.
+  remaining live node-app/Console qualification gates. Node client release is
+  not proof of operator consent. No recipient approval or sending.
 - `MEDIA_VALIDATION_V1.md` - accepted fail-closed image/video validation design:
   private challenges, cached bond eligibility, rotating references, Core object
   hashing, validator fetch defenses, dark validator-side modality scoring, and
