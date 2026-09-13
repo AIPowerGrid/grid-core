@@ -7,6 +7,10 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Ownership
 
+- `VALIDATOR_TOKEN_LIMIT_ROLLOUT_2026_09_13.md` - immutable `d606e4d8` / `0042`
+  backup/restore and drained compatibility deployment. Preserves billing and
+  worker-payout controls; retained-response v2 verification is not a released
+  node scorer, fresh assignment loop or validator payment activation.
 - `WORKER_PAYOUT_FREEZE_2026_09_09.md` - prospective hourly allocation candidate,
   PostgreSQL proof, migration and rollback gates. Not payout activation evidence.
 - `bootstrap.sh` - fresh-host bootstrap pinned to an operator-supplied full
@@ -51,6 +55,12 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Core `d606e4d8` / Alembic `0042` was selected on September 13 at 02:44:58 UTC
+  for versioned token-limit scoring compatibility. The environment and payout
+  timer controls were unchanged from the live `93a21eec` funded-lineage pilot.
+  Validator compensation, media and shadow gates remain off. Published
+  preview.18 does not advertise the new scorer; later node release/admission
+  and live v2 evidence are separate gates. Preserve v1 historical semantics.
 - Demand-bounded rewards are candidate code, not an activated production rule.
   `WORKER_REWARD_DEMAND_POLICIES=[]` retains the existing sender. Activation
   needs a reviewed valuation and future whole-hour boundary, preserved policy
