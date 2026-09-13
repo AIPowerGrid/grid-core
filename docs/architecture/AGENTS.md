@@ -9,7 +9,9 @@ validation, worker incentives, and trust boundaries.
 
 - `FUNDED_CREDIT_LINEAGE.md` - externally funded credit subset, receipt-bound
   opening reconciliation, grant/refund/merge invariants, and all-writer
-  migration/rollback gates. Candidate code, not production activation.
+  migration/rollback gates. Deployed `93a21eec` / `0042`, real funded/grant
+  canaries and the approved September 13 UTC prospective reward pilot; first
+  completed capped payout and 24-hour observation remain separate evidence.
 
 - `POST_LAUNCH_HARDENING.md` - active post-launch work across demand-bounded
   rewards, disabled media qualification, hostile validator tests, and measured

@@ -1,10 +1,12 @@
 # Post-launch hardening
 
-Status: active work, September 11, 2026. Sole maintainer owns rollout approval.
+Status: active work, September 13, 2026 UTC. Sole maintainer owns rollout approval.
 This document retains the full four-part objective; the billing launch being
-complete does not complete these requirements. Production remains `793fe904`
-with global charging and the existing hourly AIPG sender. No change below is
-production activation evidence.
+complete does not complete these requirements. Production runs `93a21eec` /
+`0042` with global charging. The approved demand-bounded reward pilot runs
+September 13 02:00 UTC through September 14 02:00 UTC; the first complete
+hour is eligible for sending at 03:00 UTC. See the actual deployment/canary
+record in [funded lineage](FUNDED_CREDIT_LINEAGE.md).
 
 ## 1. Demand-bounded worker rewards
 
@@ -12,7 +14,7 @@ Problem: purchased-backed DEN removes free-work emissions but still lets a tiny
 paid job capture a whole 208.33 AIPG hour. A farmer can use multiple identities;
 checking that customer and worker wallets differ cannot solve this.
 
-Candidate implementation:
+Implementation and rollout:
 
 - [x] Read actual settled purchased consumption for work served by each worker
   account. Exclude free/promo portions, missing/ambiguous job reservations,
@@ -24,12 +26,15 @@ Candidate implementation:
 - [x] Keep old plans unchanged; retries never reread current demand. A new
   policy changes only new whole hours. A persisted v2 plan prevents later v1
   plan creation if the configuration is accidentally removed.
-- [ ] Finish review, full-suite/CI qualification, and production read-only
+- [x] Finish review, full-suite/CI qualification, and production read-only
   comparative reports before selecting a real valuation and activation hour.
+- [x] Deploy funded lineage with unchanged historical records; verify real
+  funded reserve/refund and grant-only zero backing/weight; schedule the approved
+  24-hour policy at $0.002/AIPG and 85%, preserving existing emission ceilings.
 - [ ] Announce the prospective earning change and roll it out with a frozen
   tiny-payment/replay proof. Do not reprice prior rewards or backpay.
 
-For each account, the candidate formula is:
+For each account, the prospective formula is:
 
 ```text
 funded_DEN = job_DEN * externally_funded_actual / total_actual
@@ -49,7 +54,7 @@ are not new accrued obligations; this preserves the existing dust policy.
 Walletless positive allocations follow the same cap and existing accrual path.
 
 `WORKER_REWARD_DEMAND_POLICIES` is empty by default. Entries have `since`,
-`until`, `price_micro_per_aipg`, and `worker_share_bps` (candidate default 8500).
+`until`, `price_micro_per_aipg`, and `worker_share_bps` (default 8500).
 Entries must be contiguous whole-UTC-hour windows of one hour to seven days,
 beginning no earlier than the immutable paid-only cutoff. Keep prior entries;
 append reviewed new windows. After the last window, new payout hours fail
@@ -63,12 +68,12 @@ expiry/renewal procedure, and downside analysis. The cap is an emission bound,
 not proof of model fidelity, independent demand, or impossible arbitrage.
 Purchased-pocket accounting also does not establish external-cash provenance
 for legacy operator-issued purchased grants. The live audit found $5,200 in
-such grants versus $10.02 in USDC receipts. Candidate migration 0042 now carries
+such grants versus $10.02 in USDC receipts. Deployed migration 0042 now carries
 externally funded value through deposits, holds, refunds and account merges,
 and the cap reads actual funded job movements. The opening reconciliation is
 preview-first and preserves all spendable balances. See
-[funded lineage](FUNDED_CREDIT_LINEAGE.md); its tests, all-writer rollout and
-historical reconciliation remain mandatory before activation.
+[funded lineage](FUNDED_CREDIT_LINEAGE.md) for the completed tests, all-writer
+rollout, historical reconciliation and outstanding pilot observation.
 If the objective is strict cash-cost self-farming unprofitability, earned-USDC
 payment avoids token valuation risk but requires completing and qualifying the
 separate earned-revenue rail, not repurposing deposit balances as revenue.
@@ -85,10 +90,11 @@ Local September 11 verification: 276 settlement tests passed on disposable
 PostgreSQL 16, with no skips, including grant-denominator dilution regressions.
 The subsequent full Grid run, including the non-finite funded-weight guard,
 passed 1,813 tests with 251 environment-dependent skips and 39 existing warnings.
-Fresh migration through 0042 and schema parity passed. Required Linux CI is
-still a separate gate for the final commit. Both temporary database servers
-shut down after testing. This is candidate-code evidence, not a live payout,
-GPU, migration deployment, or market-price proof.
+Fresh migration through 0042 and schema parity passed. Required Linux CI later
+passed for the final reviewed merge. Both temporary database servers shut down
+after testing. This paragraph records test evidence; the separate funded-lineage
+deployment record contains production migration and canary proof, not a
+completed capped payout or market-price proof.
 
 ## 2. Finish generation paths
 
