@@ -2,10 +2,12 @@
 
 Status (verified September 13, 2026): **backends deployed dark; node consent
 client released; no approved live campaign or validator payments**.
-Production selects immutable Core `93a21eec` with Alembic `0042`, which includes
+Production selects immutable Core `d606e4d8` with Alembic `0042`, which includes
 the compensation migrations. Both `VALIDATOR_COMPENSATION_OPERATOR_ENABLED`
 and `VALIDATOR_COMPENSATION_SEND_ENABLED` are false; the campaign table is empty.
-The node consent client is included in published `v0.1.0-preview.18`. Console
+The node consent client first shipped in `v0.1.0-preview.18`; published .20 now
+runs on all three first-party nodes. This upgrade preserves identities and is
+not external operator qualification or payout consent. Console
 PR27 is merged, but this audit has not proven the live wallet/browser journey.
 The manual PostgreSQL path exists alongside the earlier offline simulation.
 No real campaign/budget has been approved or created, funds are not reserved
@@ -15,8 +17,8 @@ It cannot activate routing, reputation penalties, bonds, or slashing.
 
 ## Proposed Terms
 
-- Proposed first pilot: at most 2,000 AIPG total over exactly seven days.
-- At most 500 AIPG per reviewed independent operator across all their nodes.
+- Proposed first pilot: at most 4,000 AIPG total over exactly seven days.
+- At most 1,000 AIPG per reviewed independent operator across all their nodes.
 - At most 100 reviewed contributions per operator per UTC day.
 - One unit per operator and probe group, not per node, retry or heartbeat.
 - Exclude first-party, unreviewed, rejected and expired-review operators.
@@ -25,6 +27,10 @@ It cannot activate routing, reputation penalties, bonds, or slashing.
 - Allocate pro rata by reviewed units, floor to integer base units, then apply
   the operator cap. Leave both rounding and capped remainders in treasury;
   do not redistribute them or automatically raise any budget.
+
+The earlier proposal was 2,000 total / 500 per operator. After the maintainer
+requested a larger allowance, the amounts above were proposed; numerical
+approval is still pending. Neither version is authorized or activated.
 
 These are maximum draft terms, not payment promises. The maintainer must approve
 the budget, earning window, eligibility and beneficiary accounts before the pilot.
