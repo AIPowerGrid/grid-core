@@ -87,12 +87,55 @@ other bytes in the environment were preserved. No funds were sent by this
 operation. The prior v2 code backup/restore proof still applies: no code or
 database changed in this admission-only restart.
 
+## Combined Preview.20 Admission
+
+Validator PR115's merged source `c73a284f155e86358f5348ab017747cd51d02e58`
+was published as immutable `v0.1.0-preview.20` at **03:53:15 UTC**. Native
+workflow `34736178270` passed all four builds, payload verification and all four
+clean installs; container workflow `34736178277` also passed. All nine downloaded
+release assets passed the exact manifest/archive/checksum check, and all eight
+checksummed files passed exact-source/tag/workflow GitHub provenance verification
+with self-hosted runners denied. Windows is unsigned and macOS unnotarized;
+this remains a preview, not stable. The exact source suite ran 427 tests:
+420 passed and seven skipped.
+
+At **03:57:06 UTC**, the same bounded, drained admission procedure added only
+preview.20 to the upgrade list. Baseline .13 and upgrades .15/.16/.17/.18/.19
+remain admitted. The running process independently confirmed all six upgrade
+tags and charging mode `on`. Core stayed on `d606e4d8`, with eight workers,
+healthy Redis, unchanged payout controls and the temporary gate removed.
+The typed old/new configuration comparison preserved every other setting,
+including the four default-off validator economic/media/shadow controls.
+No campaign, qualification reset, schema change or sender invocation occurred.
+
+Three first-party nodes then rolled to the exact .20 Linux artifact one at a
+time. Active registrations were confirmed at 03:58:46, 04:01:25 and 04:02:14
+UTC. Each switch verified the previous release, candidate hash/size, non-root
+version and offline decoder self-test, and preserved configuration and all
+journal bytes before restart. Dead-letter counts at stop were 161, 161 and 141;
+the first node also retained one pending assignment. No identity was recreated
+and no dead letter was revived.
+
+Fresh report `127694` at 03:58:50 UTC independently passed signature,
+assignment/evidence binding and zero economic-row checks. It is a healthy Qwen
+tool-chain result, not a v2 or committed-empty live canary. The other two
+nodes' registrations are proven; their post-upgrade reports are not yet claimed.
+The next fleet snapshot had nine recent heartbeats: three .20, one .18, one
+.15 and four .13. Other nodes were not changed.
+
+This combined node release also fixes skipped committed-empty text replies.
+An offline replay of original sealed assignments and retained responses verified
+114 completed-empty results, scored/signed them locally and exercised mocked
+delivery; 47 unavailable responses remained unsigned. Those are historical
+captures, not fresh jobs or live accepted reports, and are not revived for pay.
+
 ## Remaining Rollout
 
 Core now supports exact `text.token_limit.v2` assignments. Existing v1 evidence
 and open v1 groups retain their original semantics. Published preview.18 does
-not contain the node-side v2 scorer from validator PR112. Preview.19 is now
-published and admitted, but a fresh live v2 assignment remains unverified.
+not contain the node-side v2 scorer from validator PR112. Preview.19 and the
+combined preview.20 are published and admitted, but a fresh live v2 assignment
+remains unverified.
 
 Both remaining owned preview.17 services were separately upgraded to the
 published preview.18 binary earlier that hour, preserving identity/configuration
@@ -104,14 +147,18 @@ checks: a failed SmolLM instruction result, not a token-limit v2 canary.
 
 The journal audit additionally found a node-side delivery gap for committed
 empty responses, independent of the Core token-limit correction. The validator
-repository's `EMPTY_COMPLETION_DELIVERY.md` records its reproduction, bounded
-fix and not-yet-released status. Do not promote another public upgrade before
-that correction is qualified. Neither finding authorizes compensation or
+repository's `EMPTY_COMPLETION_DELIVERY.md` records its reproduction and bounded
+fix, now released in preview.20. Fresh owned-node v2 and committed-empty live
+delivery remain distinct verification gates before public promotion.
+Neither finding authorizes compensation or
 worker penalties. See `PREVIEW18_ROLLOUT.md` and `PREVIEW19_ROLLOUT.md` there for
 the separate release checkpoints.
 
 Private .19 canary aggregate SHA-256:
 `471cdd548fdb9ac467316e58d2dd3b18bf5bfb622964a7911a1b5be4e3113273`.
+
+Private first .20 canary aggregate SHA-256:
+`b9cddc554972c3e24a29a199e55237e347c930d3ce2ea33f55f1fbc1fe7b9de6`.
 
 Before rolling back to `93a21eec`, account for any newly issued v2 assignments
 and pause that lane until they are drained. Preserve all additive schema,

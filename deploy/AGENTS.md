@@ -9,9 +9,11 @@ executes an immutable release selected through `/home/aipg/current`.
 
 - `VALIDATOR_TOKEN_LIMIT_ROLLOUT_2026_09_13.md` - immutable `d606e4d8` / `0042`
   backup/restore and drained compatibility deployment. Preserves billing and
-  worker-payout controls; the subsequent .19-only admission preserves all
-  prior reviewed versions. Fresh owned .19 evidence is instruction-only;
-  neither it nor retained-response v2 verification proves a live v2 loop.
+  worker-payout controls; subsequent exact .19/.20 admissions preserve all
+  prior reviewed versions. Preview.20 combines the qualified token-limit and
+  committed-empty delivery corrections. Fresh owned .19 evidence is
+  instruction-only; neither it nor retained-response verification proves
+  a live v2 or committed-empty delivery loop.
 - `WORKER_PAYOUT_FREEZE_2026_09_09.md` - prospective hourly allocation candidate,
   PostgreSQL proof, migration and rollback gates. Not payout activation evidence.
 - `bootstrap.sh` - fresh-host bootstrap pinned to an operator-supplied full
@@ -62,8 +64,10 @@ executes an immutable release selected through `/home/aipg/current`.
   Validator compensation, media and shadow gates remain off. Published
   preview.18 does not advertise the new scorer. Preview.19 was published and
   admitted at 03:16:03 UTC; its first owned-node report is instruction-only.
-  Live v2 evidence and the separately found empty-response delivery correction
-  remain gates before public promotion. Preserve v1 historical semantics.
+  Combined preview.20 was published at 03:53:15 UTC and admitted at 03:57:06
+  UTC, after four-platform native qualification and local payload/provenance
+  checks. Fresh v2 and committed-empty live delivery remain gates before
+  public promotion. Preserve v1 historical semantics.
 - Demand-bounded rewards are candidate code, not an activated production rule.
   `WORKER_REWARD_DEMAND_POLICIES=[]` retains the existing sender. Activation
   needs a reviewed valuation and future whole-hour boundary, preserved policy
