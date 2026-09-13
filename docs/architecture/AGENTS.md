@@ -16,6 +16,8 @@ validation, worker incentives, and trust boundaries.
   Six GPT-OSS direct controls reproduce missing calls despite correct argument
   text. Reported vLLM versions are not verified runtime artifacts; host access
   and pinned backend qualification remain prerequisites for deployment.
+  An independent arithmetic parser verifies the four original logic commitments;
+  those retained integer answers are wrong, not merely malformed or truncated.
 
 - `FUNDED_CREDIT_LINEAGE.md` - externally funded credit subset, receipt-bound
   opening reconciliation, grant/refund/merge invariants, and all-writer
