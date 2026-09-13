@@ -9,7 +9,10 @@ validation, worker incentives, and trust boundaries.
 
 - `VALIDATOR_FAILURE_AUDIT_2026-09-13.md` - retained failed-group diagnosis,
   versioned token-limit partial-marker correction and remaining task failures.
-  Read-only evidence, not a deployed scorer or an economic-authority grant.
+  Token-limit v2 is now deployed in Core d606e4d8 and preview.20. Bounded
+  stop/reasoning controls and direct DeepSeek tool-format reproductions separate
+  probe calibration from backend output defects. These follow-ups change no
+  scores or economics; backend fixes and external upgrades remain separate.
 
 - `FUNDED_CREDIT_LINEAGE.md` - externally funded credit subset, receipt-bound
   opening reconciliation, grant/refund/merge invariants, and all-writer
