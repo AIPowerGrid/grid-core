@@ -157,8 +157,14 @@ content sanitization, and reward settlement.
   expression against assignment-only hidden inputs; it must never `exec`,
   import, call, or otherwise run worker-supplied code. Token-limit scoring uses
   Grid-side `o200k_base` counting over visible plus reasoning output, a
-  length-style finish, and a documented cross-tokenizer tolerance;
-  worker order must not determine the family. Multi-model workers rotate toward
+  length-style finish, and a documented cross-tokenizer tolerance.
+  `text.token_limit.v2` / `token.limit.v2` permits one final proper prefix of
+  the committed repeated marker at that cutoff, after at least two complete
+  identical markers. Original output (including the fragment) remains counted
+  and evidence-hashed. V1 scoring is unchanged for historical replay and open
+  assignments. New work prefers v2 only when explicitly advertised, without
+  doubling the token-limit lane; v1 capability remains usable for old groups.
+  Worker order must not determine the family. Multi-model workers rotate toward
   the least recently covered advertised model; a validator already assigned to
   an unfilled group for one model may cover another model, but cannot create a
   second group for the blocked model. New `text.generated.v8` batches

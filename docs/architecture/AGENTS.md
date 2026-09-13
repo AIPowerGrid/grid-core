@@ -7,6 +7,10 @@ validation, worker incentives, and trust boundaries.
 
 ## Ownership
 
+- `VALIDATOR_FAILURE_AUDIT_2026-09-13.md` - retained failed-group diagnosis,
+  versioned token-limit partial-marker correction and remaining task failures.
+  Read-only evidence, not a deployed scorer or an economic-authority grant.
+
 - `FUNDED_CREDIT_LINEAGE.md` - externally funded credit subset, receipt-bound
   opening reconciliation, grant/refund/merge invariants, and all-writer
   migration/rollback gates. Candidate code, not production activation.
