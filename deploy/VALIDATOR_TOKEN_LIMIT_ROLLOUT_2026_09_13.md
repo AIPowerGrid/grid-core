@@ -64,20 +64,54 @@ occur inside a group whose finalized outcome is failed. This is a retained-data
 counterfactual, not fresh inference, a rescore of stored records or proof of
 model identity. No historical verdict, signature or commitment was rewritten.
 
+## September 13 Release Admission
+
+Published validator preview.19 from `7bbda889` passed four-platform native
+qualification, complete downloaded payload validation and exact-source GitHub
+provenance. At **03:16:03 UTC**, Core's upgrade list gained only the exact .19
+tag, retaining the .13 baseline and .15/.16/.17/.18 overlap. No source release,
+schema, baseline, qualification record or payment policy changed.
+
+A compare-and-swap update validated the old and new settings and changed only
+`VALIDATOR_COHORT_UPGRADE_VERSIONS`. An exact-route maintenance overlay and
+stopped MCP ingress allowed two quiet reservation/queue checks before the
+restart, with another quiet check after Core stopped. Core/MCP and public
+generation resumed; the overlay was removed. Public health reports `d606e4d8`,
+healthy Redis and all eight workers. The running Core process environment
+independently contains the exact five-version upgrade list.
+
+The preexisting payout start-boundary drop-in kept its hash, and the timer
+remained enabled and active. Validator compensation collection/sending, media
+and shadow controls remain false. The configuration backup is private; all
+other bytes in the environment were preserved. No funds were sent by this
+operation. The prior v2 code backup/restore proof still applies: no code or
+database changed in this admission-only restart.
+
 ## Remaining Rollout
 
 Core now supports exact `text.token_limit.v2` assignments. Existing v1 evidence
 and open v1 groups retain their original semantics. Published preview.18 does
-not contain the node-side v2 scorer from validator PR112: a tested subsequent
-release and exact Core admission are still needed before new nodes can receive
-v2 work. This deployment alone does not demonstrate a live v2 assignment loop.
+not contain the node-side v2 scorer from validator PR112. Preview.19 is now
+published and admitted, but a fresh live v2 assignment remains unverified.
 
 Both remaining owned preview.17 services were separately upgraded to the
 published preview.18 binary earlier that hour, preserving identity/configuration
-and journals. At this checkpoint fresh post-upgrade attestations from those
-two services were not yet observed. Their heartbeat checks are not delivery or
-independent-operator proof. See the validator repository's
-`PREVIEW18_ROLLOUT.md` for that distinct rollout.
+and journals. Fresh reports `127667` and `127668` at 02:57 UTC subsequently
+passed independent signature/binding and zero-economic-row checks. One of
+these nodes then upgraded .18-to-.19, retaining identity/configuration and its
+journal. Its first fresh report `127676` at 03:20:23 UTC also passed those
+checks: a failed SmolLM instruction result, not a token-limit v2 canary.
+
+The journal audit additionally found a node-side delivery gap for committed
+empty responses, independent of the Core token-limit correction. The validator
+repository's `EMPTY_COMPLETION_DELIVERY.md` records its reproduction, bounded
+fix and not-yet-released status. Do not promote another public upgrade before
+that correction is qualified. Neither finding authorizes compensation or
+worker penalties. See `PREVIEW18_ROLLOUT.md` and `PREVIEW19_ROLLOUT.md` there for
+the separate release checkpoints.
+
+Private .19 canary aggregate SHA-256:
+`471cdd548fdb9ac467316e58d2dd3b18bf5bfb622964a7911a1b5be4e3113273`.
 
 Before rolling back to `93a21eec`, account for any newly issued v2 assignments
 and pause that lane until they are drained. Preserve all additive schema,
