@@ -13,6 +13,9 @@ validation, worker incentives, and trust boundaries.
   stop/reasoning controls and direct DeepSeek tool-format reproductions separate
   probe calibration from backend output defects. These follow-ups change no
   scores or economics; backend fixes and external upgrades remain separate.
+  Six GPT-OSS direct controls reproduce missing calls despite correct argument
+  text. Reported vLLM versions are not verified runtime artifacts; host access
+  and pinned backend qualification remain prerequisites for deployment.
 
 - `FUNDED_CREDIT_LINEAGE.md` - externally funded credit subset, receipt-bound
   opening reconciliation, grant/refund/merge invariants, and all-writer
