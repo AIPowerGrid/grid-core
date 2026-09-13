@@ -943,6 +943,7 @@ _TEXT_CHALLENGE_KINDS = (
     "tool.chain",
     "stop.sequence",
     "token.limit",
+    "token.limit.v2",
 )
 _TEXT_CHALLENGE_CAPABILITIES = {
     "echo": "text.instruction.v1",
@@ -957,6 +958,7 @@ _TEXT_CHALLENGE_CAPABILITIES = {
     "tool.chain": "text.tool_chain.v1",
     "stop.sequence": "text.stop_sequence.v1",
     "token.limit": "text.token_limit.v1",
+    "token.limit.v2": "text.token_limit.v2",
 }
 
 _TEXT_PROTOCOL_CAPABILITIES = frozenset(
@@ -965,6 +967,7 @@ _TEXT_PROTOCOL_CAPABILITIES = frozenset(
         "text.structured.v1",
         "text.stop_sequence.v1",
         "text.token_limit.v1",
+        "text.token_limit.v2",
         "text.tool_call.v1",
     },
 )
@@ -1013,6 +1016,8 @@ def _supported_text_challenges(capabilities: list[str] | None) -> tuple[tuple[st
         kind
         for kind in _TEXT_CHALLENGE_KINDS
         if _TEXT_CHALLENGE_CAPABILITIES[kind] in supported_capabilities
+        # New work prefers v2; retain the v1 capability to drain open groups.
+        and not (kind == "token.limit" and "text.token_limit.v2" in supported_capabilities)
     )
     return kinds, supported_capabilities
 
@@ -1634,8 +1639,8 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
             "repeating it until the generation limit stops you. Do not stop early, "
             "add punctuation, or output any other visible text."
         )
-        kind = "token.limit"
-        capability = "text.token_limit.v1"
+        kind = selected
+        capability = _TEXT_CHALLENGE_CAPABILITIES[selected]
     challenge = {
         "kind": kind,
         "prompt": prompt,
@@ -1905,7 +1910,17 @@ def _normalized_token_limit_answer_detail(
     if not answer:
         return None, "empty_visible_output"
     pieces = answer.split()
-    if len(pieces) < 2 or any(piece != pieces[0] for piece in pieces):
+    # v1 remains immutable for retained evidence. At a genuine length cutoff,
+    # v2 permits only a prefix of the committed token as the final fragment.
+    complete = pieces
+    if (
+        challenge.get("kind") == "token.limit.v2"
+        and len(pieces) >= 3
+        and pieces[-1] != pieces[0]
+        and pieces[0].startswith(pieces[-1])
+    ):
+        complete = pieces[:-1]
+    if len(complete) < 2 or any(piece != complete[0] for piece in complete):
         return None, "invalid_repetition"
 
     from .den import count_tokens
@@ -1956,7 +1971,7 @@ def _score_text_challenge_detail(
     if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
         return "failed", "invalid_expected_commitment"
     kind = str(challenge.get("kind") or "")
-    if kind == "token.limit":
+    if kind in {"token.limit", "token.limit.v2"}:
         candidate, reason = _normalized_token_limit_answer_detail(
             challenge,
             text,
@@ -1968,7 +1983,7 @@ def _score_text_challenge_detail(
     else:
         candidate = _normalized_text_answer(kind, text, tool_calls, tool_chain)
     if candidate is None:
-        if kind != "token.limit":
+        if kind not in {"token.limit", "token.limit.v2"}:
             reason = (
                 "empty_visible_output"
                 if kind not in {"tool.call", "tool.chain"} and not _strip_think(text)
@@ -4450,7 +4465,7 @@ async def probe_assignment(
         response_commitment = _canonical({"text": full_text, "tool_calls": tool_calls})
     elif kind == "tool.chain":
         response_commitment = _canonical({"steps": tool_chain})
-    elif kind == "token.limit":
+    elif kind in {"token.limit", "token.limit.v2"}:
         response_commitment = _canonical({
             "text": full_text,
             "reasoning": full_reasoning,
@@ -4495,7 +4510,7 @@ async def probe_assignment(
         "target_worker_name": row["target_worker_name"],
         **_assignment_disclosure(row),
         "output_text": full_text,
-        "reasoning_text": full_reasoning if kind == "token.limit" else None,
+        "reasoning_text": full_reasoning if kind in {"token.limit", "token.limit.v2"} else None,
         "tool_calls": tool_calls,
         "tool_chain": tool_chain,
         "finish_reason": finish_reason,
