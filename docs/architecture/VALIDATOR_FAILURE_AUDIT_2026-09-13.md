@@ -1,7 +1,8 @@
 # Validator failure audit: September 13, 2026
 
-Status: read-only production diagnosis; versioned scoring correction is a
-candidate, not deployed or present in preview.18. No historical verdicts,
+Status: read-only production diagnosis and bounded owned-backend follow-ups.
+The versioned token-limit correction is deployed in Core `d606e4d8` / Alembic
+`0042` and validator preview.20, not present in preview.18. No historical verdicts,
 operator reviews, balances, allocations or payments were changed by this audit.
 
 ## Scope and limits
@@ -82,12 +83,149 @@ older nodes cannot receive an unsupported v2 group. The distinct-assignment
 batch contract remains `text.generated.v8`; scorer semantics are explicitly
 bound by capability and challenge kind within that batch.
 
-Required rollout: paired source review and CI, immutable Core deployment,
-a new provenance-verified validator release, owned-node observation and then
-identity-preserving operator upgrades. Preview.18 binaries do not acquire v2
-retroactively. Compare fresh v1/v2 observations by policy without overwriting
+Core and preview.20 are deployed, with reviewed source, four-platform release
+qualification, exact-source artifact provenance and owned-node observation.
+All three owned nodes preserved identities and journals; fresh v2 and completed
+empty-visible evidence passed signature/binding checks without economic rows.
+Website PR79 promoted .20. External operator upgrades remain necessary.
+Preview.18 binaries do not acquire v2 retroactively. Compare fresh v1/v2
+observations by policy without overwriting
 old votes. All generated checks remain non-economic protocol/capability
 evidence; this patch does not enable slashing, routing or worker rewards.
+
+## Stop Follow-Up
+
+Two newer owned Qwen stop assignments were compared with six direct backend
+calls. Original stop, streamed and non-streamed, yielded reasoning but no
+visible answer. No-stop controls produced the expected normalized answer
+prefixes and included the stop marker inside reasoning. Original budgets were
+1,024 tokens, with only 51/58 completion tokens consumed in the stored jobs.
+
+Four additional calls used a documented per-request non-reasoning control.
+Both stop-present replies exactly matched the expected answer; both no-stop
+replies continued through the marker and suffix. This qualifies those two
+cases on the owned backend, not all engines or a new production-wide option.
+
+Core currently retains `reasoning_text` only for token-limit v1/v2 probes.
+Null reasoning in stored stop evidence therefore does not establish zero
+backend reasoning. The preview.20 empty-visible delivery fix remains valid;
+do not use that canary as evidence that no reasoning was generated.
+See the [bounded stop diagnosis](https://github.com/AIPowerGrid/grid-validator/blob/fedd431ef563bc91419dd1512ce9c447ab19b272/STOP_REASONING_DIAGNOSIS.md)
+for capture hashes, controls and versioned-evidence follow-up requirements.
+These newer stop cases are not additional members of the original 36-group
+snapshot and must not be added to its denominator.
+
+## Tool-Format Follow-Up
+
+A new read-only query over the original fixed creation window retained the
+same twelve larger-model failed tool assignments: nine DeepSeek results whose
+arguments contain native tool markup rather than JSON, and three GPT-OSS-120B
+first-stage replies with text but no tool call. No raw challenges are public.
+
+Six sequential direct calls to the currently configured owned DeepSeek backend
+reused one single-call assignment and one chain assignment's **first stage**.
+Each retained its original prompt, tools and output budget, with a 45-second
+request timeout. Named-tool streaming/non-streaming and auto-tool streaming
+were compared. This is two reused cases, not six independent trials or a
+completed two-stage tool-chain test.
+
+| Variant | Single-call case | Chain first-stage case |
+| --- | --- | --- |
+| Named tool, streaming | JSON arguments, no visible text | Native markup in arguments, invalid JSON |
+| Named tool, non-streaming | Native markup in arguments, invalid JSON | Native markup in arguments, invalid JSON |
+| Auto tool, streaming | JSON arguments plus native markup in visible text | JSON arguments plus native markup in visible text |
+
+All six returned HTTP 200. An independent parser verified that each of the
+three malformed argument strings was byte-identical to its corresponding
+historical Grid result. Non-streaming failures demonstrate that Grid stream
+assembly is not required to reproduce this defect. Native backend output is
+already malformed for the API contract. The endpoint subsequently reported
+`0.1.dev1+gedc82b614`; that suffix resolves to upstream vLLM commit
+`edc82b614f51f4f9ce16c7010e879571e5c46136`. This HTTP metadata does not verify
+the running image, launch flags or local patches. Do not claim a particular
+upstream parser patch repairs it, or that all nine historical calls had one
+independently witnessed cause.
+
+The private capture SHA-256 is
+`ac5b56714582d7f2ed010f0b3e58e9beeacfa3bda5ddfae3a174c9eb7d63df8f`.
+Both auto-mode replies also leaked native tool markup into visible content;
+switching every validator request to auto is not a verified repair. The one
+successful named streaming sample likewise does not prove a reliable endpoint.
+
+Next: inspect the actual backend parser/template version, reproduce with a
+public synthetic fixture, then qualify named and auto calls in streaming and
+non-streaming modes plus a complete two-stage chain. Require valid JSON,
+correct names/arguments, and no leaked markup before changing the backend.
+Keep strict validator scoring; do not repair arbitrary worker JSON to turn a
+failure into a pass. The GPT-OSS comparison below diagnoses its no-call cases
+separately. No worker service, runtime configuration, score or economic record
+changed during these tests.
+
+## GPT-OSS No-Call Follow-Up
+
+Six direct requests reused two of the three retained GPT-OSS-120B first-stage
+tool-chain cases. Named-tool streaming/non-streaming and auto-tool streaming
+were compared at the original 1,024-token budget and temperature zero. These
+are two repeated first-stage cases, not six independent tests or a complete
+two-stage workflow.
+
+| Variant | Case A | Case B |
+| --- | --- | --- |
+| Named tool, streaming | Text, no call | One correct structured call |
+| Named tool, non-streaming | Text, no call | Text, no call |
+| Auto tool, streaming | Text, no call | Text, no call |
+
+All six returned HTTP 200. In the three failing named-tool responses, ordinary
+visible text contained the correct argument object. An offline comparison
+using the original step commitment confirms the values, but this is **not** an
+actual tool call and must not be promoted to one by the validator. One
+non-streamed response was byte-identical to its historical stored visible text.
+The one actual structured call matched the original first-stage commitment.
+Five missing calls and one success demonstrate an intermittent backend contract
+failure, not model incapability or a Grid-only stream-assembly defect.
+
+Private capture SHA-256:
+`de4c6d5fce0d62f9643f66b02912ae07d47dd62c9bd4d214788c7f4ea37da390`.
+An earlier helper attempt incorrectly sent an empty Authorization header and
+failed locally in HTTPX on all six attempts before obtaining an HTTP response.
+It is retained separately and excluded from the six real backend requests.
+The corrected helper omits an absent key, matching the deployed worker.
+
+The GPT endpoint's `/version` reports vLLM `0.10.2`; its port number is not
+evidence that it runs Ollama (`/api/version` returned 404). The
+[published v0.10.2 serving source](https://github.com/vllm-project/vllm/blob/v0.10.2/vllm/entrypoints/openai/serving_chat.py)
+handles GPT-OSS/Harmony before the generic named-tool branch, extracting calls
+from the generated Harmony channel/recipient. This supports inspecting the
+actual serving/parser setup rather than assuming generic named-tool guarantees
+apply. Endpoint metadata and upstream source do not prove the deployed image
+or absence of local patches. Existing SSH authentication to the backend was
+rejected; no alternative credentials, host changes or restarts were attempted.
+
+Next: obtain the correct host access, inspect launch flags and artifact version,
+and test a pinned candidate backend with ordinary chat, named/auto tools,
+stream/non-stream parity and a complete two-stage chain before any rollout.
+Do not silently rewrite content as calls, relax scoring, or change model
+identity claims to conceal this protocol failure. Compensation remains separate.
+
+## Independent Logic Oracle
+
+A read-only bounded query recovered the original four larger-model multistep
+logic failures, all reported as `qwen38-flash-next-125b-nvfp4`. A separate parser
+accepted only the documented start value and four ordered add/subtract/multiply
+operations, then computed the answer independently without calling Core's
+generator or trusting its expected value. All four computed hashes matched
+their assignment's expected-answer commitment.
+
+Each retained reply was a syntactically valid but incorrect integer under the
+released normalizer. All finished with stop and reported only 3-5 completion
+tokens. These are wrong-answer observations, not formatting-only rejection,
+reasoning exhaustion, an incorrect Core oracle, or a demonstrated transport
+failure. No new model call was made. The reported model name remains unverified;
+these observations do not establish substitution or deliberate misconduct.
+
+Private capture SHA-256:
+`9962139bfe84a31031d72245d1cca1a2e4fc092594eacb83708ca16c0cee8708`.
+Keep these four original failures; no historical score was rewritten.
 
 ## Compensation remains separate
 
