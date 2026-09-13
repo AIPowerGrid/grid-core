@@ -454,6 +454,10 @@ content sanitization, and reward settlement.
   require non-null refs and must not overdraft under concurrency.
 - Validator compensation is separate from worker den and audit-execution
   budgets. The manual preview/apply command freezes a seven-day contract and
+  requires explicit integer amounts. Candidate validation ceilings are 100000
+  AIPG total and 25000 per operator, matching the revised September 13 approval;
+  these are not defaults, live activation or changes to existing contracts.
+  The command freezes
   reviewed beneficiaries before work, then commits allocations and unique work
   claims together after the receipt grace. It pays neither majority agreement
   nor accusations: only independently reverified, correctly scored generated
