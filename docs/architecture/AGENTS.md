@@ -79,8 +79,10 @@ validation, worker incentives, and trust boundaries.
   dark-deployed PostgreSQL contracts/allocations, offline simulation,
   recipient-consent and default-off transfer backends. Preview.18 includes the
   node UI, retained in .20; live wallet qualification and an approved campaign
-  remain required. The maintainer approved the 4000-total / 1000-per-operator
-  seven-day budget on September 13, 2026; no campaign is active. Preserve that
+  remain required. The maintainer approved the revised 100000-total /
+  25000-per-operator seven-day budget on September 13, 2026, replacing 4000/1000;
+  no campaign is active. Matching allocator ceiling changes are candidates,
+  not deployed. Preserve that
   decision without treating it as an implicit runtime default, independence
   review, recipient consent or worker-audit funding.
 - `VALIDATOR_PAYOUT_CONSENT.md` - default-off private operator status and

@@ -179,10 +179,37 @@ def test_flooring_never_exceeds_budget_and_does_not_redistribute_remainder():
     assert result["unallocated_atomic"] == "1"
 
 
-@pytest.mark.parametrize("value", [True, 100, 1.2, "0", "-1", "NaN", str(10001 * AIPG)])
+@pytest.mark.parametrize("value", [True, 100, 1.2, "0", "-1", "NaN", str(100_000 * AIPG + 1)])
 def test_invalid_or_oversized_budget_rejected(value):
     payload = snapshot()
     payload["terms"]["budget_atomic"] = value
+    with pytest.raises(PreviewError):
+        run(payload)
+
+
+@pytest.mark.parametrize("groups", [1, 3, 4, 7, 30])
+def test_approved_pilot_limits_conserve_value_and_do_not_change_old_terms(groups):
+    old_terms = snapshot(groups)
+    old_result = run(old_terms)
+    payload = copy.deepcopy(old_terms)
+    payload["terms"].update(
+        budget_atomic=str(100_000 * AIPG),
+        operator_cap_atomic=str(25_000 * AIPG),
+    )
+    result = run(payload)
+    amounts = [int(row["amount_atomic"]) for row in result["allocations"]]
+    assert all(amount <= 25_000 * AIPG for amount in amounts)
+    assert sum(amounts) + int(result["unallocated_atomic"]) == 100_000 * AIPG
+    assert result["sendable"] is False
+    assert result["simulation_digest"] != old_result["simulation_digest"]
+    assert run(old_terms) == old_result
+    payload["contributions"] *= 2
+    assert run(payload) == result
+
+
+def test_one_atomic_unit_above_operator_limit_is_rejected():
+    payload = snapshot()
+    payload["terms"]["operator_cap_atomic"] = str(25_000 * AIPG + 1)
     with pytest.raises(PreviewError):
         run(payload)
 
