@@ -11,7 +11,9 @@ validation, worker incentives, and trust boundaries.
   audit, released-scorer and signature replay, direct owned-backend controls,
   triage limits, candidate shadow integration fixes and September 22 deliverables.
   The collector rejection follow-up binds durable error recording before Redis
-  acknowledgement; it is a candidate until separately verified and deployed.
+  acknowledgement; it deployed as `d1aafcf4` with separate PostgreSQL/Redis CI
+  and production restore proof. F18 adds a third reproduced backend defect;
+  30 frozen cases remain root-cause inconclusive.
   Not proof of completed adversarial qualification, observer activation,
   finalized allocations or transfers.
 - `VALIDATOR_FAILURE_AUDIT_2026-09-13.md` - retained failed-group diagnosis,
