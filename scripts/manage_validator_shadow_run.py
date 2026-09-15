@@ -15,10 +15,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from grid_api import database
 from grid_api.config import get_settings
-from grid_api.database import close_database, init_database
 from grid_api.services import validator_shadow as shadow
 from grid_api.services.route_events import CAPTURE_TIMEOUT_SECONDS, STREAM_KEY
 from grid_api.services.validator_shadow_collector import CONSUMER_GROUP, LEADER_KEY
@@ -249,7 +251,15 @@ async def _run(args) -> dict[str, Any]:
     at = _parse_time(getattr(args, "at", None))
     if args.command == "transport":
         return await _transport()
-    await init_database()
+    # Operator previews/reports must never bootstrap schema or get write access.
+    engine = create_async_engine(
+        get_settings().async_database_url,
+        connect_args={"server_settings": {
+            "default_transaction_read_only": "off" if getattr(args, "apply", False) else "on",
+        }},
+    )
+    previous = database._session_factory
+    database._session_factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
         if args.command == "prepare":
             return await _prepare(args, at)
@@ -264,7 +274,8 @@ async def _run(args) -> dict[str, Any]:
             observed_at=at,
         )
     finally:
-        await close_database()
+        database._session_factory = previous
+        await engine.dispose()
 
 
 def _add_at(parser: argparse.ArgumentParser) -> None:

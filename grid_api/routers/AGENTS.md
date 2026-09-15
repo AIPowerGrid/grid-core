@@ -361,6 +361,10 @@ expired or out-of-scope pilots return 503 without revealing membership.
 
 ## Verification
 
+- `tests/test_validator_anti_gaming.py` includes 20 paired randomized synthetic
+  controls per malformed-tool, truncated-output and ignored-stop fault. Correct
+  template replies pass and corrupted replies fail. These are scorer tests, not
+  real GPU/worker transport qualification or measured model-substitution recall.
 - `pytest grid_api/routers/`.
 - `tests/test_core_process_crash.py` starts the real Uvicorn application with
   scoped API keys, HTTP clients and worker WebSockets, a dedicated PostgreSQL

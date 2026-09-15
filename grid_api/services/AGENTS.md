@@ -293,7 +293,13 @@ content sanitization, and reward settlement.
   attestation, signature, nonce, evidence-hash, frozen-version, heartbeat, and
   expiring operator-review bindings. Duplicate operator groups count once.
   Its public observation function never accepts caller-asserted binding
-  validity. Shadow runs, observations, outcomes, Core-derived capacity samples,
+  validity. V8 text batches have no shared execution: only their completed,
+  fully bound assignments support a finalized group whose shared probe status
+  remains `not_started`. This exception is exact-policy/text-only; media and
+  legacy shared probes still require completed group execution. New run defaults
+  freeze the configured baseline and sampling interval; explicit mismatches and
+  changes to an existing frozen contract fail closed.
+  Shadow runs, observations, outcomes, Core-derived capacity samples,
   and bounded errors are private replay records only; routing, worker health,
   credits, settlement, payouts, rewards, bonds, strikes, and slashing must
   neither import this module nor query its tables. The flag defaults off, the

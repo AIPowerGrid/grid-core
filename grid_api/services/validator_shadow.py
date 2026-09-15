@@ -227,13 +227,17 @@ def frozen_policy_config(overrides: Mapping[str, Any] | None = None) -> dict[str
 
 def runtime_policy_config(overrides: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Freeze policy only when it matches this release's rollout controls."""
-    config = frozen_policy_config(overrides)
     settings = get_settings()
+    configured_interval = int(getattr(settings, "validator_shadow_sample_seconds", 300))
+    config = frozen_policy_config({
+        "validator_baseline_version": settings.validator_cohort_baseline_version,
+        "sample_interval_seconds": configured_interval,
+        **dict(overrides or {}),
+    })
     expected_baseline = str(settings.validator_cohort_baseline_version or "").removeprefix("v")
     actual_baseline = str(config["validator_baseline_version"]).removeprefix("v")
     if not expected_baseline or actual_baseline != expected_baseline:
         raise ValueError("shadow policy must use the configured cohort baseline")
-    configured_interval = int(getattr(settings, "validator_shadow_sample_seconds", 300))
     if int(config["sample_interval_seconds"]) != configured_interval:
         raise ValueError("shadow policy sample interval must match deployment configuration")
     return config
@@ -352,7 +356,16 @@ async def _authoritative_support_rows(
     lower = observed_at - timedelta(seconds=int(config["evidence_window_seconds"]))
     conditions: list[Any] = [
         probe_groups_t.c.status == "finalized",
-        probe_groups_t.c.probe_status == "completed",
+        sa.or_(
+            probe_groups_t.c.probe_status == "completed",
+            # v8 text batches execute distinct assignments, not a shared witness.
+            # Every supporting assignment must still be completed and bound below.
+            sa.and_(
+                probe_groups_t.c.modality == "text",
+                probe_groups_t.c.scoring_policy_id == "text.generated.v8",
+                probe_groups_t.c.probe_status == "not_started",
+            ),
+        ),
         probe_groups_t.c.quorum_status == "finalized",
         probe_groups_t.c.quorum_outcome.in_(tuple(sorted(_OBJECTIVE_OUTCOMES))),
         probe_groups_t.c.finalized.isnot(None),
@@ -584,7 +597,7 @@ async def live_start_gate_snapshot(
     from .validator_cohort_monitor import inspect_cohort_health
 
     current = _aware(observed_at or _now())
-    config = frozen_policy_config(policy_config)
+    config = runtime_policy_config() if policy_config is None else frozen_policy_config(policy_config)
     capacity = await live_capacity_snapshot(
         observed_at=current,
         policy_config=config,

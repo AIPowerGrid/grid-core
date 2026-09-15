@@ -2,19 +2,27 @@
 
 ## Status
 
+September 15 production: Core `bc49519c` / Alembic `0042`; observer disabled,
+no shadow runs. Five reviewed public operators now run preview.20, but deployed
+policy defaults target preview.13 and its shared-execution predicate discards
+v8 per-assignment text evidence. See the candidate correction and current gates
+in [period evidence](architecture/VALIDATOR_PERIOD_EVIDENCE_2026-09-15.md).
+Do not enable the collector before that correction is reviewed and deployed.
+
 Prepared procedure only. Do not execute it while Core reports fewer than three
 recently participating, independently reviewed validator operator groups. Shadow
 collection has no routing, reward, strike, bond, payout, or slashing authority.
 
-Core `e1e4ad4c9eeb277f385a2359f3bc418917a7f0e1` and Alembic `0034` are
-production-live with the observer disabled. The dark deploy passed a
+Historical deployment: Core `e1e4ad4c9eeb277f385a2359f3bc418917a7f0e1` and
+Alembic `0034` first deployed this path with the observer disabled. It passed a
 production-backup restore/migration/drift proof; the shadow tables remained
 empty and no route-event stream existed. A 2026-09-01 read-only gate run failed
 only the three expected cohort checks. This does not authorize enabling the
 collector.
 
-The cohort baseline remains `v0.1.0-preview.13`. Do not publish a replacement
-validator release merely to start this server-side run.
+The configured baseline is preview.13 with reviewed upgrades through .20.
+Starting the new experiment requires deliberately freezing .20 and removing
+version overlap through the normal rollout. No new node release is needed.
 
 ## Safety contract
 
@@ -23,7 +31,8 @@ validator release merely to start this server-side run.
   shadow records, `0033` adds the database-enforced single-running-run guard,
   and `0034` adds exact privacy-safe ledger correlation. `0034` intentionally
   fails if any observation already exists because the raw job id is unavailable
-  for an honest backfill. `alembic current` must report `0034`.
+  for an honest backfill. `alembic current` must report the selected release's
+  head, currently `0042`.
 - Use one stable, randomly generated 32+ character
   `VALIDATOR_SHADOW_ROUTE_HMAC_SECRET` for the entire run. Store it only through
   the production secret path and retain it with protected final-report evidence.
@@ -83,9 +92,8 @@ not contain database credentials or the route HMAC secret.
 The shadow gate counts verified operator groups, not candidates. Finalize each
 candidate only after its public status reports a fresh heartbeat and the
 maintainer has confirmed that the operator-control facts have not changed. Do
-not run another `candidate` transition at the end of a qualification window:
-that starts a new 72-hour window. Candidate re-entry is separately guarded by
-an explicit restart flag.
+not reset qualification at the end of its window. Current candidate review
+preserves observed history unless an explicit restart is requested.
 
 Use the immutable production release and a non-sensitive review reference. The
 tool's output includes the private opaque operator group, so inspect it only in
