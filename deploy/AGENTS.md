@@ -10,7 +10,9 @@ executes an immutable release selected through `/home/aipg/current`.
 - `VALIDATOR_BUDGET_DEPLOYMENT_2026_09_15.md` - immutable `f5211254` / `0042`
   deployment of owner-approved compensation ceilings, backup/restore and
   drained cutover proof, followed by the approved three-member earning campaign
-  September 15-22 at 14:30 UTC. Payout-wallet consent does not gate earning.
+  September 15-22 at 14:30 UTC. The later `bc49519c` deployment adds a two-member
+  linked supplement starting September 15 at 16:45 UTC with the same end and
+  no increase in maximum liability. Payout-wallet consent does not gate earning.
 - `VALIDATOR_TOKEN_LIMIT_ROLLOUT_2026_09_13.md` - immutable `d606e4d8` / `0042`
   backup/restore and drained compatibility deployment. Preserves billing and
   worker-payout controls; subsequent exact .19/.20 admissions preserve all
@@ -62,6 +64,11 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Core `bc49519c` / `0042` replaced `f5211254` September 15 at 16:41:03 UTC.
+  Five reviewed operators belong to the original three-member campaign or its
+  two-member supplement. Original members/dates/hash remain unchanged. Maximum
+  liabilities are 75k and 25k AIPG, not additive 100k budgets. No re-enrollment,
+  qualification reset, new key or transfer was required. Preserve both contracts.
 - Core `f5211254` / Alembic `0042` was selected September 15 at 13:53:06 UTC.
   This supersedes `d606e4d8` as the running release but preserves its runtime
   controls. No validator campaign or transfer was created by deployment.
