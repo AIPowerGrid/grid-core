@@ -98,7 +98,9 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 - `manage_validator_shadow_run.py` - preview-first draft/start/finish control,
   aggregate reporting, and read-only Redis backlog health for the economically
   inert seven-day shadow run. Every mutation requires the exact fixed UTC time
-  and gate/state hash from a fresh preview.
+  and gate/state hash from a fresh preview. Preview/report database sessions
+  enforce PostgreSQL read-only mode; no command initializes schema. Only explicit
+  apply uses a write-capable session, restored/disposed on all exit paths.
 - `backup_postgres.sh` - root-only custom-format backup of the Grid-owned
   PostgreSQL schema with checksum, archive validation, locking, and bounded
   local retention. It excludes unrelated extension and legacy schemas.

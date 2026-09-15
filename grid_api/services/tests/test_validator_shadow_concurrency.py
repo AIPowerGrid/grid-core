@@ -22,6 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from grid_api import database
 from grid_api.services import validator_shadow as shadow
 from grid_api.v2.schema import accounts as accounts_t
+from grid_api.v2.schema import validator_assignments as assignments_t
+from grid_api.v2.schema import validator_probe_groups as probe_groups_t
 from grid_api.v2.schema import metadata
 from grid_api.v2.schema import validator_shadow_observations as observations_t
 from grid_api.v2.schema import validators as validators_t
@@ -121,6 +123,40 @@ async def _start():
         observed_at=NOW,
     )
     await shadow.start_run(RUN_ID, started_at=NOW)
+
+
+@pytest.mark.asyncio
+async def test_postgres_distinct_batch_preserves_completed_assignment_and_quorum_gates(pg):
+    from grid_api.services.tests.test_validator_shadow import _seed_authoritative_group
+
+    async with await database.new_session() as session:
+        await session.execute(sa.insert(accounts_t), [
+            {"id": UUID(int=i), "display_name": f"Shadow test {i}"} for i in range(1, 8)
+        ])
+        await session.commit()
+    await _seed_authoritative_group()
+    async with await database.new_session() as session:
+        await session.execute(sa.update(probe_groups_t).values(probe_status="not_started"))
+        await session.commit()
+    kwargs = dict(
+        candidates=[{"worker_id": "worker-a", "model": "model-a"}],
+        modality="text", capability="text.instruction.v1", observed_at=NOW,
+    )
+    evidence = await shadow.authoritative_evidence_snapshot(**kwargs)
+    assert len(evidence) == 1
+    assert evidence[0]["distinct_operator_count"] == 3
+    async with await database.new_session() as session:
+        await session.execute(sa.update(assignments_t).where(
+            assignments_t.c.validator_id == "val_valid_3",
+        ).values(probe_status="failed"))
+        await session.commit()
+    evidence = await shadow.authoritative_evidence_snapshot(**kwargs)
+    assert evidence[0]["distinct_operator_count"] == 2
+    result = shadow.evaluate_advisory(
+        candidates=kwargs["candidates"], evidence=evidence, actual_worker_id="worker-a",
+        actual_model="model-a", modality="text", requested_capability="text.instruction.v1", observed_at=NOW,
+    )
+    assert result["decision_class"] == "insufficient_evidence"
 
 
 def _kwargs(*, task_class: str = "simple"):
