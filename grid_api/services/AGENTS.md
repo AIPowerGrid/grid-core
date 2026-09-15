@@ -464,6 +464,15 @@ content sanitization, and reward settlement.
   text tasks count. Failed-worker evidence can be valid work. Reference/fidelity
   experiments remain excluded. Allocation records are not sent payments; no
   ordinary worker sender or live validator handler may consume them.
+- Candidate budget-linked supplements use `create --parent-campaign-id` to add
+  separately reviewed omitted operators prospectively without changing a frozen
+  parent. One to ten distinct members are allowed only for a supplement; normal
+  campaigns retain the three-member minimum. Parent maximum allocation plus all
+  sibling budgets cannot exceed the original ceiling. Parent/sibling control
+  groups, accounts, signers and node IDs cannot overlap. Supplements share the
+  parent end/release/asset/policy, cannot nest, and cannot extend caps or backdate
+  work. Preview/apply and finalization revalidate the linkage under the existing
+  PostgreSQL transaction discipline. This is not deployed or activated yet.
 - Recipient consent commits the exact campaign, allocation, account, node,
   Base token, integer amount, destination and at-most-24-hour signing window.
   Both parties sign the same domain-separated message; no private key enters

@@ -55,6 +55,10 @@ account provisioning tools, and an incomplete testnet model-registry helper.
   `0600` output, and prints aggregates only. It has no send mode and never
   inserts into the hourly worker payout queue. A file failure after commit is
   recovered with the same campaign/digest, not a newly named campaign.
+  Candidate create-only `--parent-campaign-id` reserves a capped supplement from
+  an immutable parent's mathematically unreachable allocation capacity. It does
+  not modify the parent, add budget, waive operator review or send funds. Full
+  sibling budgets count against the parent ceiling under the same advisory lock.
 - `manage_validator_recipient.py` - private `prepare`/`bind`/`export` command for
   allocation-specific consent. Preparation reads only and returns exact text
   for the node and recipient to sign outside Core. Bind previews cryptographic
