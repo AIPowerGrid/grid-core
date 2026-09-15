@@ -308,6 +308,20 @@ def test_runtime_policy_cannot_drift_from_deployed_baseline_or_sample_interval(d
         shadow.runtime_policy_config({"sample_interval_seconds": 600})
 
 
+def test_runtime_policy_defaults_follow_reviewed_rollout_settings(monkeypatch):
+    monkeypatch.setattr(shadow, "get_settings", lambda: SimpleNamespace(
+        validator_cohort_baseline_version="v0.1.0-preview.20",
+        validator_shadow_sample_seconds=600,
+    ))
+    policy = shadow.runtime_policy_config()
+    assert policy["validator_baseline_version"] == "v0.1.0-preview.20"
+    assert policy["sample_interval_seconds"] == 600
+    # Pure historical defaults and explicitly frozen contracts remain unchanged.
+    assert shadow.frozen_policy_config()["validator_baseline_version"] == "v0.1.0-preview.13"
+    with pytest.raises(ValueError, match="configured cohort baseline"):
+        shadow.runtime_policy_config({"validator_baseline_version": "v0.1.0-preview.13"})
+
+
 def test_actual_healthy_is_same():
     result = _evaluate([_evidence("worker-a", "model-a", "healthy", commitment_char="a")])
     assert result["candidate_basis"] == shadow.CANDIDATE_BASIS
@@ -450,6 +464,35 @@ async def test_authoritative_snapshot_counts_control_groups_once_and_excludes_in
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("policy,group_status,assignment_status,expected", [
+    ("text.generated.v8", "not_started", "completed", 1),
+    ("text.generated.v8", "not_started", "failed", 0),
+    ("text.generated.v8", "failed", "completed", 0),
+    ("text.generated.v7", "not_started", "completed", 0),
+    ("text.generated.v7", "completed", "completed", 1),
+    ("image.fidelity.v1", "not_started", "completed", 0),
+])
+async def test_distinct_text_batch_uses_completed_assignments_not_shared_execution(
+    db, policy, group_status, assignment_status, expected,
+):
+    await _seed_authoritative_group()
+    async with await database.new_session() as session:
+        await session.execute(sa.update(probe_groups_t).values(
+            scoring_policy_id=policy, probe_status=group_status,
+        ))
+        await session.execute(sa.update(assignments_t).values(
+            scoring_policy_id=policy, probe_status=assignment_status,
+        ))
+        await session.commit()
+    evidence = await shadow.authoritative_evidence_snapshot(
+        candidates=_candidates(), modality="text", capability="text.instruction.v1", observed_at=NOW,
+    )
+    assert len(evidence) == expected
+    if expected:
+        assert evidence[0]["distinct_operator_count"] == 3
+
+
+@pytest.mark.asyncio
 async def test_core_evidence_mismatch_is_excluded_before_policy_evaluation(db):
     await _seed_authoritative_group(mismatch_validator="val_valid_3")
     evidence = await shadow.authoritative_evidence_snapshot(
@@ -492,6 +535,30 @@ async def test_live_gate_is_derived_from_verified_independent_core_evidence(db):
             "no_side_effect_verified": True,
         },
         observed_at=NOW,
+    )
+    assert snapshot["verified_independent_operators"] == 3
+    assert snapshot["participating_independent_operators"] == 3
+    assert snapshot["finalized_independent_probe_groups"] == 1
+    assert snapshot["evaluation"]["eligible"] is True
+
+
+@pytest.mark.asyncio
+async def test_live_gate_uses_configured_release_with_distinct_completed_probes(db, monkeypatch):
+    await _seed_authoritative_group()
+    settings = shadow.get_settings()
+    settings.validator_cohort_baseline_version = "v0.1.0-preview.20"
+    monkeypatch.setattr(shadow, "get_settings", lambda: settings)
+    async with await database.new_session() as session:
+        await session.execute(sa.update(validators_t).where(
+            validators_t.c.id.in_(["val_valid_1", "val_valid_2", "val_valid_3"]),
+        ).values(software_version="v0.1.0-preview.20"))
+        await session.execute(sa.update(probe_groups_t).values(probe_status="not_started"))
+        await session.commit()
+    snapshot = await shadow.live_start_gate_snapshot(
+        verification={key: True for key in (
+            "postgres_migration_verified", "postgres_concurrency_verified",
+            "replay_verified", "no_side_effect_verified",
+        )}, observed_at=NOW,
     )
     assert snapshot["verified_independent_operators"] == 3
     assert snapshot["participating_independent_operators"] == 3
