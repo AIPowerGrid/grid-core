@@ -2,6 +2,38 @@
 
 ## Live Release
 
+Core `d1aafcf4ab9727ddfc273e76c2e55e794816eba0` / Alembic `0042` superseded
+the release below at **2026-09-15 22:27:13 UTC**. PR197 adds durable rejected
+observer-event accounting before Redis acknowledgement. Observation remains
+off; no customer routing or economic setting changed.
+
+### Collector Follow-up Verification
+
+- Exact-main [CI run 35029833688](https://github.com/AIPowerGrid/grid-core/actions/runs/35029833688)
+  passed: 2,114 tests, 12 skips, two separate actual-Redis tests and one real
+  PostgreSQL/Core/Console/node handoff test. PR197 passed the same gates.
+- Clean detached release, matching hash-locked binary-wheel installation and
+  `pip check` passed. A fresh 22:14:42 UTC production backup restored into an
+  isolated scratch database with candidate Alembic `0042` and schema parity;
+  the restore helper cleaned up that scratch database.
+- The same generation/probe ingress gate, stopped MCP, two quiet transport
+  checks and a final stopped-Core check preceded atomic cutover. Held and
+  pending counts were zero, with no actual undelivered entries. The stale
+  historical text lag counter was not reset.
+- Core/MCP health, Nginx validation and gate removal passed. Public health
+  reports the exact new SHA and all nine workers returned. Unauthenticated
+  validator assignments return 401. No customer generation was submitted.
+- Environment and payout-drop-in hashes and payout timer state were unchanged.
+  Read-only post-deploy SQL confirms `0042`, zero shadow runs, two campaigns
+  and zero validator payment records. No payout retry or transfer was made.
+- Fresh 22:27 UTC preflight still finds five independently reviewed participating
+  operators and 51 finalized supported groups under proposed preview.20.
+  Actual baseline/overlap, absent HMAC and the stale-candidate critical gate
+  remain unchanged. Diagnostic proof booleans remain false, not an activation
+  proposal. Backend repairs and observer activation remain separate work.
+
+### Earlier Shadow-evidence Release
+
 Core `64d3895184536ebbb780f25bbf42883c9884423d` / Alembic `0042` was selected
 at **2026-09-15 21:38:17 UTC**. This deploys PR #194 only: verified v8 text
 evidence selection, runtime-derived shadow policy defaults, and the read-only,
