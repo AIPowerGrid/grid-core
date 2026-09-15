@@ -1,12 +1,16 @@
 # Validator Compensation Pilot
 
-Status (verified September 15, 2026): **three-member earning campaign committed;
+Status (verified September 15, 2026): **five reviewed operators enrolled across
+the original campaign and its bounded supplement;
 recipient consent and transfers remain separate**. Production selects immutable
-Core `f5211254` with Alembic `0042`. Campaign `validator-pilot-20260915` earns
+Core `bc49519c` with Alembic `0042`. Campaign `validator-pilot-20260915` earns
 September 15-22 at 14:30 UTC; earliest finalization is September 22 at 15:30 UTC.
 Both `VALIDATOR_COMPENSATION_OPERATOR_ENABLED` and
 `VALIDATOR_COMPENSATION_SEND_ENABLED` remain false. Campaign creation does not
-require either flag. There are no validator transfers from this launch.
+require either flag. There are no validator transfers from this launch. The
+two-member supplement starts September 15 at 16:45 UTC and shares the same
+September 22 end. Operators keep their existing preview.20 nodes running;
+no re-enrollment is required.
 The node consent client first shipped in `v0.1.0-preview.18`; published .20 now
 runs on all three first-party nodes. This upgrade preserves identities and is
 not external operator qualification or payout consent. Console
@@ -59,7 +63,7 @@ on preview.20; the six other fresh nodes were on .13, .15 or .18. Budget approva
 does not waive the cohort, version, review, live-consent or transfer-verification
 gates. The September 15 activation above supersedes that historical snapshot.
 
-## Omitted-Operator Supplements (Candidate)
+## Omitted-Operator Supplements
 
 The initial campaign froze only three reviewed operators before the complete
 fleet intake was reconciled. Two additional named public nodes met the technical
@@ -67,7 +71,7 @@ checks. Operator-control review remains required; missing intake must not be
 invented. Existing evidence and qualification history must not be reset.
 
 Do not rewrite the original contract or redistribute its earned entitlement.
-The candidate `create --parent-campaign-id` path creates a separately committed,
+The deployed `create --parent-campaign-id` path creates a separately committed,
 prospective supplement for distinct reviewed operators. Its start must still be
 in the future, at most one day ahead; its end equals the parent's end. It may
 therefore last less than seven days. The normal three-to-ten-member, seven-day
@@ -89,9 +93,13 @@ end date must match, and contribution caps may only be narrower. Finalization
 rechecks the family budget before allocating under the existing work-dedup rules.
 
 No campaign is cancelled, extended, backdated or overwritten by this mechanism.
-No money is sent and no recipient consent is inferred. The candidate requires
-review, PostgreSQL tests and immutable deployment before production use. The
-two omitted operators are not enrolled merely because this code exists.
+No money is sent and no recipient consent is inferred. PR192 passed the required
+PostgreSQL 16/full-suite checks and deployed as immutable `bc49519c` September 15.
+Official preview/apply then committed both omitted reviewed operators in
+`validator-pilot-20260915-supplement`; their shared pool is 25,000 AIPG and their
+start is 16:45 UTC, with the original end unchanged. Enrollment is verified in
+PostgreSQL, not inferred from code deployment. See the deployment record for
+exact contract commitments, control preservation and the no-transfer boundary.
 
 ## Durable Allocation Contract
 
