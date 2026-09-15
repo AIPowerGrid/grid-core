@@ -66,6 +66,39 @@ requalification. The other 31 are `inconclusive` at root-cause level, with
 specific retained symptoms. None is labelled model fraud. This is preliminary
 triage, not completion of the reproduction and repair requirement.
 
+### Case Dispositions
+
+These are root-cause labels, not changes to the retained failed task verdicts.
+
+| Cases | Classification | Next proof needed |
+| --- | --- | --- |
+| F01, F29 | Genuine worker/backend API defect | Pinned serving/parser repair and full tool-chain regression |
+| F18 | Inconclusive | Its own tool-call reproduction; same model name does not establish the same cause |
+| F15, F27 | Inconclusive | Reasoning-aware stop controls without excusing empty visible output |
+| F03, F07, F24, F32 | Inconclusive | Separate visible-task failure from native-token budget compliance |
+| F11 | Inconclusive | Direct owned reference for the independently verified wrong integer |
+| F02, F04-F06, F08-F10, F12-F14, F16-F17, F19-F23, F25-F26, F28, F30-F31, F33 | Inconclusive | SmolLM reference/backend controls; malformed output is not proof of substitution |
+
+### Tool Selection Controls
+
+A proposed new-challenge change from named selection to `required` passes local
+LM Studio controls, but is **held as draft PR195**, not deployed. Four direct
+DeepSeek variants retained the same two original cases and original budgets:
+only the single-call non-streamed variant passed. Both streamed variants and
+the chain's non-streamed first stage returned no call. Required-choice capture:
+`c38fa65f7765c0257b93760a89629a03f3891cad01490a899b0461b537e7219a`.
+
+A separately captured `auto` diagnostic completed five calls: single-call
+non-streaming and the complete two-stage non-streamed chain passed, while both
+streamed cases leaked native markup into visible content and failed. Capture:
+`0940aacbbf724c82f1e9bf815223675e330e9d1d88ede40ea5169206e6c93d1d`.
+These mode changes are diagnostics, not retrospective repairs of named-choice
+evidence. Upstream reports describe similar
+[streaming markup leakage](https://github.com/vllm-project/vllm/issues/40801),
+but are not proof of the deployed parser's cause or a qualified patch.
+Actual runtime/launch access and pinned backend qualification remain necessary.
+Do not rewrite all customer requests, strip leaked markup, or weaken scoring.
+
 ## Routing Experiment Defects
 
 Read-only production preflight found two integration defects:
@@ -107,10 +140,48 @@ on deterministic actors, **not real-model false-alarm rate** or end-to-end
 transport detection. Existing tests still demonstrate that a regex solver and
 probe-aware backend switch can pass public templates without a useful model.
 
-Still required: isolated actual worker/backend fault injection, honest engine/
-quant baselines, deliberate smaller-model substitution, fabricated logprobs and
-probe-aware switching. Preserve the existing negative fidelity studies; do not
-relabel them as successful detection.
+### Actual Worker Transport Controls
+
+An isolated loopback HTTP/WebSocket/Redis harness used published worker v0.3.9
+source `1e5feb38d9ccc5ff94d4c08892f86a31fd48a65b`, Core `cada63c7`, released
+preview.20 scoring and actual LM Studio GPT-OSS-20B/MXFP4 responses. Original
+named-tool requests received backend HTTP 400; those failed harness/preflight
+attempts remain captured separately. A new frozen study changed only the
+single-tool choice to `required`, retaining the six original tasks and budgets.
+That study does not qualify the held global tool-choice proposal.
+
+| Path | Observed result |
+| --- | --- |
+| Six actual valid 20B controls | Six healthy; no false failures in this sample |
+| Six paired mutations of native outputs | All malformed-tool, ignored-stop and wrong-output cases failed |
+| Two additional partial native-output truncations | Both failed |
+| Six fresh actual 20B responses advertised as 120B | All healthy: functional canaries missed substitution |
+| Six synthetic controls and six synthetic faults | Controls passed; faults failed |
+
+The 32 paths include paired/correlated observations, not 32 independent model
+trials. Eight injected native-output faults detected is not a population
+detection rate. Two further complete native tool chains (four backend calls)
+passed with Core's exact second-stage message construction and independently
+verified combined commitments. No public registration, signed quorum, customer
+job, reward or credit movement occurred. Public workers were left untouched.
+
+Private manifests: main
+`2ebad489a0195007c28d2876f746350ac944665b73d80aaca274a3eb1f69da8c`,
+partial truncation
+`7aaa12087a49b551d15e60a2e56275468595b3a617f125a90f9dc967e44da8d9`,
+complete native chains
+`960082950d9677248e827d8a7d663f808681d07a53e93722a3af9e8466474b30`.
+The independent auditor rechecked response hashes, commitments, schedules,
+budgets, ground-truth answers and source bindings without importing the scorer.
+
+Still required: broader honest engine/quant baselines and a production-relevant
+fidelity qualification. The functional substitution miss above is not a test
+of the separate logprob comparator. Prior fixed-context batch evidence detects
+three eligible cross-model batches with one unavailable batch, but copied
+probabilities evade it; earlier answer-logprob rules missed substitutions.
+Preserve both positive and negative studies and their coverage limits. No
+model-possession claim, probe-aware-switching defense or economic authority
+follows from these results.
 
 ## September 22 Deliverables
 
@@ -137,11 +208,13 @@ and a private Unix-socket Redis. Required CI and deployment of this correction
 remain separate. Observation stays disabled until this and the existing cohort,
 runtime, secret and collector gates are qualified.
 
-Candidate verification: 89 focused tests passed on local Python 3.13 and a
+Shadow-evidence correction: 89 focused tests passed on local Python 3.13 and a
 disposable PostgreSQL 14 database, including concurrency/replay, v8 evidence
 selection, unfinished-assignment exclusion, read-only CLI cleanup and hostile
-scorer controls. The database was dropped afterward. Required PostgreSQL 16 /
-Python 3.12 CI and full deployment qualification remain separate gates.
+scorer controls. The database was dropped afterward. The deployed `64d38951`
+then passed full Python 3.12/PostgreSQL 16 CI (2,103 passed, 11 skipped), a
+separate cross-repo handoff check and production restore/migration proof.
+This does not qualify the later collector correction or tool-choice proposal.
 
 - Close the F01-F33 ledger with reproduced causes or explicit unresolved limits,
   actual backend fixes and regression controls.
