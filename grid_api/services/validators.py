@@ -1552,7 +1552,8 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
                 },
             },
         }]
-        tool_choice = {"type": "function", "function": {"name": function_name}}
+        # Only one tool is exposed; required also works on string-only backends.
+        tool_choice = "required"
     elif selected == "tool.chain":
         lookup_name = f"lookup_{secrets.token_hex(4)}"
         submit_name = f"submit_{secrets.token_hex(4)}"
@@ -1609,13 +1610,13 @@ def _make_text_challenge(kind: str | None = None) -> dict[str, Any]:
         steps = [
             {
                 "tools": [lookup_tool],
-                "tool_choice": {"type": "function", "function": {"name": lookup_name}},
+                "tool_choice": "required",
                 "expected_hash": _hash_text(first_expected),
             },
             {
                 "tool_result": tool_result,
                 "tools": [submit_tool],
-                "tool_choice": {"type": "function", "function": {"name": submit_name}},
+                "tool_choice": "required",
                 "expected_hash": _hash_text(second_expected),
             },
         ]

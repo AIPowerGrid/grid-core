@@ -10,6 +10,10 @@ validation, worker incentives, and trust boundaries.
 - `VALIDATOR_PERIOD_EVIDENCE_2026-09-15.md` - frozen 33-group/165-assignment
   audit, released-scorer and signature replay, direct owned-backend controls,
   triage limits, candidate shadow integration fixes and September 22 deliverables.
+  Includes 32 isolated released-worker transport paths, native 20B controls,
+  detected injected faults, undetected 20B-as-120B substitutions, and the
+  single-tool-choice LM Studio compatibility correction. Narrow trial counts
+  must not be presented as population accuracy or signed public qualification.
   Not proof of completed adversarial qualification, observer activation,
   finalized allocations or transfers.
 - `VALIDATOR_FAILURE_AUDIT_2026-09-13.md` - retained failed-group diagnosis,
