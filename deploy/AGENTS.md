@@ -9,8 +9,8 @@ executes an immutable release selected through `/home/aipg/current`.
 
 - `VALIDATOR_BUDGET_DEPLOYMENT_2026_09_15.md` - immutable `f5211254` / `0042`
   deployment of owner-approved compensation ceilings, backup/restore and
-  drained cutover proof. Campaign creation and independent-control reviews
-  remain separate; payout-wallet consent does not gate earning.
+  drained cutover proof, followed by the approved three-member earning campaign
+  September 15-22 at 14:30 UTC. Payout-wallet consent does not gate earning.
 - `VALIDATOR_TOKEN_LIMIT_ROLLOUT_2026_09_13.md` - immutable `d606e4d8` / `0042`
   backup/restore and drained compatibility deployment. Preserves billing and
   worker-payout controls; subsequent exact .19/.20 admissions preserve all
@@ -65,9 +65,12 @@ executes an immutable release selected through `/home/aipg/current`.
 - Core `f5211254` / Alembic `0042` was selected September 15 at 13:53:06 UTC.
   This supersedes `d606e4d8` as the running release but preserves its runtime
   controls. No validator campaign or transfer was created by deployment.
-  Three known public operators meet technical qualification; independent-control
-  confirmation and prospective campaign creation remain. Do not reset observed
-  qualification or substitute a node signing wallet for recipient consent.
+  Following explicit owner control confirmation, three reviews and campaign
+  `validator-pilot-20260915` committed at 14:11 UTC. Frozen earning dates are
+  September 15-22 at 14:30 UTC; earliest finalization is September 22 at 15:30
+  UTC. Three members and a 25,000 AIPG/operator cap imply at most 75,000 AIPG
+  allocated from the approved 100,000 ceiling. No transfers occurred. Do not
+  reset qualification, append members or substitute node keys for consent.
 - Core `d606e4d8` / Alembic `0042` was selected on September 13 at 02:44:58 UTC
   for versioned token-limit scoring compatibility. The environment and payout
   timer controls were unchanged from the live `93a21eec` funded-lineage pilot.
