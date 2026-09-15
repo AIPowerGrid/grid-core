@@ -2,12 +2,13 @@
 
 ## Status
 
-September 15 production: Core `bc49519c` / Alembic `0042`; observer disabled,
-no shadow runs. Five reviewed public operators now run preview.20, but deployed
-policy defaults target preview.13 and its shared-execution predicate discards
-v8 per-assignment text evidence. See the candidate correction and current gates
-in [period evidence](architecture/VALIDATOR_PERIOD_EVIDENCE_2026-09-15.md).
-Do not enable the collector before that correction is reviewed and deployed.
+September 15 production: Core `64d38951` / Alembic `0042`; observer disabled,
+no shadow runs. The v8 per-assignment evidence and policy-default fixes are now
+deployed. Five reviewed public operators run preview.20; an explicit baseline
+transition, stale-candidate incident resolution, protected HMAC and collector
+proof still precede activation. See the [deployment record](../deploy/VALIDATOR_PERIOD_ROLLOUT_2026_09_15.md).
+All 13 advertised models currently have one worker, limiting same-model replica
+comparison. Do not describe collection with no alternatives as a routing win.
 
 Prepared procedure only. Do not execute it while Core reports fewer than three
 recently participating, independently reviewed validator operator groups. Shadow
