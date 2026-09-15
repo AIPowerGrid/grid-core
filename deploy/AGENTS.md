@@ -7,6 +7,10 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Ownership
 
+- `VALIDATOR_PERIOD_ROLLOUT_2026_09_15.md` - immutable `64d38951` / `0042`
+  backup/restore and drained shadow-evidence-fix deployment, unchanged live
+  controls, remaining observer/cohort gates and single-replica capacity limit.
+  The broader tool-choice candidate PR #195 remains draft and undeployed.
 - `VALIDATOR_BUDGET_DEPLOYMENT_2026_09_15.md` - immutable `f5211254` / `0042`
   deployment of owner-approved compensation ceilings, backup/restore and
   drained cutover proof, followed by the approved three-member earning campaign
@@ -62,6 +66,10 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Core `64d38951` / Alembic `0042` was selected September 15 at 21:38:17 UTC.
+  This supersedes `bc49519c` while preserving environment, charging, worker
+  payout controls, qualification and compensation contracts. Shadow observation
+  stays disabled; its code fix is not experiment activation or routing authority.
 - Core `f5211254` / Alembic `0042` was selected September 15 at 13:53:06 UTC.
   This supersedes `d606e4d8` as the running release but preserves its runtime
   controls. No validator campaign or transfer was created by deployment.
