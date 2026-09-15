@@ -1,22 +1,23 @@
 # Validator Compensation Pilot
 
-Status (verified September 13, 2026): **budget approved; backends deployed dark;
-node consent client released; no active campaign or validator payments**.
-Production selects immutable Core `d606e4d8` with Alembic `0042`, which includes
-the compensation migrations. Both `VALIDATOR_COMPENSATION_OPERATOR_ENABLED`
-and `VALIDATOR_COMPENSATION_SEND_ENABLED` are false; the campaign table is empty.
+Status (verified September 15, 2026): **three-member earning campaign committed;
+recipient consent and transfers remain separate**. Production selects immutable
+Core `f5211254` with Alembic `0042`. Campaign `validator-pilot-20260915` earns
+September 15-22 at 14:30 UTC; earliest finalization is September 22 at 15:30 UTC.
+Both `VALIDATOR_COMPENSATION_OPERATOR_ENABLED` and
+`VALIDATOR_COMPENSATION_SEND_ENABLED` remain false. Campaign creation does not
+require either flag. There are no validator transfers from this launch.
 The node consent client first shipped in `v0.1.0-preview.18`; published .20 now
 runs on all three first-party nodes. This upgrade preserves identities and is
 not external operator qualification or payout consent. Console
 PR27 is merged, but this audit has not proven the live wallet/browser journey.
 The manual PostgreSQL path exists alongside the earlier offline simulation.
 The maintainer approved the budget and duration below on September 13, 2026.
-No campaign has been created, funds are not reserved on-chain, and the explicit
-payment adapter remains disabled.
+Funds are not reserved on-chain, and the explicit payment adapter remains disabled.
 This is separate from worker den and from paying workers to execute blind audits.
 It cannot activate routing, reputation penalties, bonds, or slashing.
 
-## Approved Budget And Proposed Allocation Terms
+## Approved Budget And Allocation Terms
 
 - Approved first-pilot budget: at most 100,000 AIPG total over exactly seven days.
 - At most 25,000 AIPG per reviewed independent operator across all their nodes.
@@ -39,25 +40,58 @@ credential, proof of operator independence or recipient consent. The commitment
 is in AIPG, not a guaranteed dollar return or a live-price-indexed payment.
 
 These are maximum budget limits, not guaranteed individual payments. The daily
-contribution cap and allocation rules above remain the proposed implementation
-terms. Freeze the actual earning dates, eligibility and beneficiary accounts in
-the reviewed campaign before launch; do not request the same numerical budget
+contribution cap and allocation rules above are frozen in the three-member
+campaign. Freeze actual dates, eligibility and beneficiary accounts before any
+additional approved campaign; do not request the same numerical budget
 approval again unless its amounts or duration change.
 Resolve separately proven payout destinations before any transfer.
 Publish the terms before earning starts. Do not retrofit this draft onto past
 unpaid participation without a separate explicit decision.
-The candidate allocator raises the earlier 10,000/2,000 AIPG validation ceilings
-to exactly 100,000/25,000. The deployed Core still has the old ceilings until
-the reviewed code is deployed. Existing contracts retain their explicit amounts
+The deployed allocator raises the earlier 10,000/2,000 AIPG validation ceilings
+to exactly 100,000/25,000. Existing contracts retain their explicit amounts
 and digests; increasing a ceiling neither reprices them nor creates a campaign.
 Increasing the approved budget is not implied by available treasury funds
 or by an approval for the separate worker-reward pilot.
 
-A read-only production check at 17:24 UTC found nine fresh nodes, zero current
+A historical September 13 production check at 17:24 UTC found nine fresh nodes, zero current
 verified independent operator groups and zero campaigns. Three owned nodes were
 on preview.20; the six other fresh nodes were on .13, .15 or .18. Budget approval
 does not waive the cohort, version, review, live-consent or transfer-verification
-gates. No production flags or economic records changed when recording it.
+gates. The September 15 activation above supersedes that historical snapshot.
+
+## Omitted-Operator Supplements (Candidate)
+
+The initial campaign froze only three reviewed operators before the complete
+fleet intake was reconciled. Two additional named public nodes met the technical
+checks. Operator-control review remains required; missing intake must not be
+invented. Existing evidence and qualification history must not be reset.
+
+Do not rewrite the original contract or redistribute its earned entitlement.
+The candidate `create --parent-campaign-id` path creates a separately committed,
+prospective supplement for distinct reviewed operators. Its start must still be
+in the future, at most one day ahead; its end equals the parent's end. It may
+therefore last less than seven days. The normal three-to-ten-member, seven-day
+campaign remains unchanged; a linked supplement can have one to ten members.
+
+The original three 25,000 AIPG caps bound its maximum allocation to 75,000 AIPG.
+The remaining 25,000 can cover supplements without increasing the approved
+100,000 total maximum liability. This is not a second 100,000 pool and does not
+promise 25,000 to every added operator. Within each supplement, reviewed work
+determines pro-rata allocations, followed by its individual cap.
+
+Creation serializes under the existing PostgreSQL advisory lock. The parent's
+maximum possible allocation plus the full budgets of all supplements must stay
+within the parent's original ceiling, regardless of how much work is eventually
+accepted. Each supplement commits the parent ID and hash. Parent/sibling node
+IDs, operator groups, accounts and signing wallets cannot overlap. Nested
+supplements and altered parent commitments reject; release, token, scoring and
+end date must match, and contribution caps may only be narrower. Finalization
+rechecks the family budget before allocating under the existing work-dedup rules.
+
+No campaign is cancelled, extended, backdated or overwritten by this mechanism.
+No money is sent and no recipient consent is inferred. The candidate requires
+review, PostgreSQL tests and immutable deployment before production use. The
+two omitted operators are not enrolled merely because this code exists.
 
 ## Durable Allocation Contract
 

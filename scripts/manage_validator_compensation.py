@@ -36,7 +36,7 @@ async def run(args):
             request = read_private(args.input)
             if not isinstance(request, dict) or set(request) != {"terms", "validator_ids"}:
                 raise ValueError("invalid campaign request")
-            return await create_campaign(request["terms"], request["validator_ids"], **options)
+            return await create_campaign(request["terms"], request["validator_ids"], parent_campaign_id=args.parent_campaign_id, **options)
         return await finalize_campaign(args.campaign_id, **options)
     finally:
         database._session_factory = previous
@@ -48,6 +48,7 @@ def main():
     parser.add_argument("action", choices=("create", "finalize"))
     parser.add_argument("--input", type=Path, help="Private create request: terms and validator_ids")
     parser.add_argument("--campaign-id", help="Existing campaign for finalization")
+    parser.add_argument("--parent-campaign-id", help="Create a distinct-member supplement within a frozen parent's unused capacity")
     parser.add_argument("--output", type=Path, required=True, help="New private output file, never overwritten")
     parser.add_argument("--apply", action="store_true", help="Commit with an exact reviewed preview digest")
     parser.add_argument("--expect-digest")
@@ -56,7 +57,7 @@ def main():
         parser.error("--apply requires --expect-digest")
     if args.action == "create" and (not args.input or args.campaign_id):
         parser.error("create requires only --input")
-    if args.action == "finalize" and (not args.campaign_id or args.input):
+    if args.action == "finalize" and (not args.campaign_id or args.input or args.parent_campaign_id):
         parser.error("finalize requires only --campaign-id")
     try:
         if args.output.exists() or args.output.is_symlink():

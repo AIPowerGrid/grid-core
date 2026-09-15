@@ -59,10 +59,10 @@ async def db(monkeypatch):
             await engine.dispose()
 
 
-async def members(db):
+async def members(db, count=3, offset=0):
     result = []
     async with db() as session:
-        for i in range(3):
+        for i in range(offset, offset + count):
             signer = Account.create()
             account = uuid.uuid4()
             validator = "val_" + uuid.uuid4().hex
@@ -196,6 +196,102 @@ def close_time(monkeypatch):
     monkeypatch.setattr(comp, "_now", lambda: END + timedelta(seconds=comp.RECEIPT_GRACE_SECONDS + 1))
 
 
+async def supplement_fixture(db):
+    original = await members(db)
+    parent = await create(db, original, budget_atomic=str(100_000 * 10**18), operator_cap_atomic=str(25_000 * 10**18))
+    added = await members(db, count=2, offset=3)
+    request = {
+        **terms("pilot-supplement", 25_000 * 10**18),
+        "starts_at": (START + timedelta(hours=1)).isoformat(),
+        "operator_cap_atomic": str(25_000 * 10**18),
+    }
+    return original, parent, added, request
+
+
+async def test_supplement_preserves_parent_and_combined_budget(db, monkeypatch):
+    original, parent, added, request = await supplement_fixture(db)
+    ids = [m[0] for m in added]
+    preview = await comp.create_campaign(request, ids, parent_campaign_id="pilot-fixture")
+    child = await comp.create_campaign(request, ids, parent_campaign_id="pilot-fixture", apply=True, expected_digest=preview["digest"])
+    assert child["contract"]["budget_parent"]["maximum_allocatable_atomic"] == str(75_000 * 10**18)
+    assert await comp.create_campaign(request, ids, parent_campaign_id="pilot-fixture", apply=True, expected_digest=preview["digest"])
+    for member in original + added:
+        await report(db, member, completed=START + timedelta(hours=2))
+    close_time(monkeypatch)
+    parent_result = await comp.finalize_campaign("pilot-fixture")
+    child_result = await comp.finalize_campaign("pilot-supplement")
+    assert int(parent_result["allocated_atomic"]) == 75_000 * 10**18
+    assert int(child_result["allocated_atomic"]) == 25_000 * 10**18
+    assert int(parent_result["allocated_atomic"]) + int(child_result["allocated_atomic"]) == 100_000 * 10**18
+    await comp.finalize_campaign("pilot-fixture", apply=True, expected_digest=parent_result["digest"])
+    await comp.finalize_campaign("pilot-supplement", apply=True, expected_digest=child_result["digest"])
+    assert await comp.finalize_campaign("pilot-supplement", apply=True, expected_digest=child_result["digest"])
+    async with db() as session:
+        frozen = (
+            (
+                await session.execute(
+                    sa.select(tables.validator_compensation_campaigns).where(
+                        tables.validator_compensation_campaigns.c.id == "pilot-fixture",
+                    ),
+                )
+            )
+            .mappings()
+            .one()
+        )
+        assert frozen["contract"] == parent["contract"] and frozen["contract_hash"] == parent["digest"]
+        assert await session.scalar(sa.select(sa.func.count()).select_from(tables.validator_compensation_payments)) == 0
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"budget_atomic": str(25_000 * 10**18 + 1)},
+        {"ends_at": (END + timedelta(seconds=1)).isoformat()},
+        {"starts_at": (START - timedelta(seconds=1)).isoformat()},
+        {"daily_unit_cap": 11},
+    ],
+)
+async def test_supplement_rejects_expanded_terms(db, change):
+    _, _, added, request = await supplement_fixture(db)
+    with pytest.raises(comp.CompensationError):
+        await comp.create_campaign({**request, **change}, [m[0] for m in added], parent_campaign_id="pilot-fixture")
+
+
+async def test_supplement_cannot_repeat_parent_operator_or_nest(db):
+    original, _, added, request = await supplement_fixture(db)
+    with pytest.raises(comp.CompensationError, match="distinct"):
+        await comp.create_campaign(request, [original[0][0]], parent_campaign_id="pilot-fixture")
+    ids = [m[0] for m in added]
+    preview = await comp.create_campaign(request, ids, parent_campaign_id="pilot-fixture")
+    await comp.create_campaign(request, ids, parent_campaign_id="pilot-fixture", apply=True, expected_digest=preview["digest"])
+    with pytest.raises(comp.CompensationError, match="nested"):
+        await comp.create_campaign({**request, "campaign_id": "pilot-nested"}, [original[0][0]], parent_campaign_id="pilot-supplement")
+
+
+async def test_supplement_budget_race_allows_only_one_winner(db):
+    _, _, added, request = await supplement_fixture(db)
+    plans = []
+    for index, member in enumerate(added):
+        req = {**request, "campaign_id": f"supplement-race-{index}", "budget_atomic": str(20_000 * 10**18)}
+        preview = await comp.create_campaign(req, [member[0]], parent_campaign_id="pilot-fixture")
+        plans.append((req, member[0], preview["digest"]))
+    results = await asyncio.gather(
+        *[
+            comp.create_campaign(req, [node], parent_campaign_id="pilot-fixture", apply=True, expected_digest=digest)
+            for req, node, digest in plans
+        ],
+        return_exceptions=True,
+    )
+    assert sum(isinstance(r, dict) for r in results) == 1
+    assert sum(isinstance(r, comp.CompensationError) for r in results) == 1
+
+
+async def test_small_ordinary_campaign_still_rejected(db):
+    group = await members(db)
+    with pytest.raises(comp.CompensationError, match="three"):
+        await comp.create_campaign(terms(), [group[0][0]])
+
+
 async def test_exact_allocations_no_payout_and_idempotent_finalization(db, monkeypatch):
     group = await members(db)
     await create(db, group)
@@ -307,8 +403,7 @@ async def test_daily_and_operator_caps_conserve_unallocated_budget(db, monkeypat
 
 async def test_revised_approved_budget_freezes_caps_and_replays_once(db, monkeypatch):
     group = await members(db)
-    await create(db, group, budget_atomic=str(100_000 * 10**18),
-                 operator_cap_atomic=str(25_000 * 10**18))
+    await create(db, group, budget_atomic=str(100_000 * 10**18), operator_cap_atomic=str(25_000 * 10**18))
     for member in group:
         await report(db, member)
     close_time(monkeypatch)
@@ -456,7 +551,7 @@ async def test_cli_previews_readonly_without_schema_initialization(db, monkeypat
     monkeypatch.setattr(cli, "get_settings", lambda: SimpleNamespace(async_database_url=PG))
     monkeypatch.setattr(cli, "create_async_engine", engine)
     monkeypatch.setattr(database, "init_database", forbidden)
-    args = SimpleNamespace(action="create", input=request, campaign_id=None, apply=False, expect_digest=None)
+    args = SimpleNamespace(action="create", input=request, campaign_id=None, parent_campaign_id=None, apply=False, expect_digest=None)
     preview = await cli.run(args)
     assert database._session_factory is db
     async with db() as session:
