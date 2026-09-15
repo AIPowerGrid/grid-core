@@ -103,6 +103,9 @@ owning AGENTS.md and any affected parent Child DOX Index.
   `VALIDATOR_SHADOW_TEST_DB_URL` into the full Grid suite so the shadow-run
   idempotency, conflicting-write, single-run, and live eligibility tests execute
   on PostgreSQL 16 instead of reporting skipped coverage.
+- PR and main CI also start an isolated Unix-socket Redis for the shadow-outbox
+  reclaim tests. Rejected-event acknowledgement must wait for durable observer
+  error recording; Redis retries and SQL/report behavior have separate proofs.
 - Service units: `pytest grid_api/services/`.
 - Required PR/main tests additionally build pinned, reviewed validator/Console
   commits and run the real PostgreSQL/Core/Console/node compensation handoff.

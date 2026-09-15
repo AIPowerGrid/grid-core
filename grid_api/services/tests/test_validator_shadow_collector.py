@@ -179,3 +179,70 @@ async def test_orphan_outcome_retries_then_becomes_a_bounded_error(monkeypatch):
 
 async def _async_value(value):
     return value
+
+
+@pytest.mark.asyncio
+async def test_unknown_event_kind_is_not_silently_discarded():
+    with pytest.raises(ValueError, match="unknown shadow event kind"):
+        await collector.process_event({"kind": "unknown", "route_ref": "a" * 64})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [RuntimeError("db unavailable"), collector.shadow.ShadowRuntimeMismatch("wrong release")])
+async def test_rejected_event_remains_pending_when_error_cannot_be_recorded(monkeypatch, failure):
+    async def read_batch(**_kwargs):
+        return [("123-0", {"route_ref": "invalid"})]
+
+    async def record_rejection(*_args):
+        raise failure
+
+    class Redis:
+        async def xack(self, *_args):
+            raise AssertionError("unrecorded evidence must stay pending")
+
+        async def xdel(self, *_args):
+            raise AssertionError("unrecorded evidence must not be deleted")
+
+    monkeypatch.setattr(collector, "_read_batch", read_batch)
+    monkeypatch.setattr(collector, "_record_invalid_event", record_rejection)
+    monkeypatch.setattr(collector, "get_redis", Redis)
+    assert await collector.collect_once(consumer="test") == {"acked": 0, "retried": 0, "failed": 1}
+
+
+@pytest.mark.asyncio
+async def test_late_conflict_records_error_against_original_observation(monkeypatch):
+    observation = {"id": 7, "run_id": "original", "observed_at": NOW}
+    monkeypatch.setattr(collector, "_observation_for_route", lambda _ref: _async_value(observation))
+    recorded = []
+
+    async def record_error(**kwargs):
+        recorded.append(kwargs)
+
+    async def no_time_lookup(_at):
+        raise AssertionError("bound original observation determines the affected run")
+
+    monkeypatch.setattr(collector.shadow, "record_error", record_error)
+    monkeypatch.setattr(collector, "_run_for_time", no_time_lookup)
+    late = NOW + timedelta(days=8)
+    await collector._record_invalid_event(f"{int(late.timestamp() * 1000)}-0", _outcome_event(finished_at=late))
+    assert recorded == [{
+        "run_id": "original", "stage": "persist", "error_code": "invalid_outbox_event", "observed_at": NOW,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_invalid_event_outside_run_does_not_contaminate_later_run(monkeypatch):
+    event_at = NOW - timedelta(days=8)
+    seen = []
+
+    async def run_for_time(at):
+        seen.append(at)
+        return None if at < NOW else {"id": "later-run"}
+
+    async def no_error(**_kwargs):
+        raise AssertionError("events from before this run must not be charged to it")
+
+    monkeypatch.setattr(collector, "_run_for_time", run_for_time)
+    monkeypatch.setattr(collector.shadow, "record_error", no_error)
+    await collector._record_invalid_event(f"{int(event_at.timestamp() * 1000)}-0", {"kind": "route"})
+    assert seen == [event_at]
