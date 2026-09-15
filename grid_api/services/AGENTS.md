@@ -326,7 +326,15 @@ content sanitization, and reward settlement.
   report must disclose that its counterfactual is same-model replica preference.
   `validator_shadow_collector.py` is the only outbox consumer allowed to import
   `validator_shadow`; it uses a Redis lease, retries transient faults, records
-  outcomes/capacity, and has no routing or economic output. The Redis outbox has
+  outcomes/capacity, and has no routing or economic output. Invalid or
+  contradictory events must record a bounded durable observer error before
+  acknowledgement/deletion. An unavailable error writer leaves them pending.
+  Attribution uses an existing observation, payload time, then Redis insertion
+  time, never retry time; replaying old events cannot contaminate a later run.
+  Error rows record rejection attempts, not unique-event counts; a crash after
+  error commit can append another error on retry but cannot produce a clean
+  report. Raw event contents and exception messages are never error records.
+  The Redis outbox has
   a 10,000-event emergency bound; SQL retention configuration remains reserved
   until an append-only-compatible pruner is designed and tested.
   Preview group acceptance still records distinct-registration quorum for
