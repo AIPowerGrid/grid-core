@@ -75,7 +75,7 @@ async def _transaction(session, apply):
         await session.execute(sa.text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
 
 
-def _terms(request):
+def _terms(request, *, supplement=False):
     required = {
         "campaign_id",
         "starts_at",
@@ -101,7 +101,9 @@ def _terms(request):
     if not cohort_version_status(result["software_version"])[1]:
         raise CompensationError("pilot version is not admitted by Core")
     start, end = _time(result["starts_at"]), _time(result["ends_at"])
-    if end - start != timedelta(days=7):
+    if supplement and not timedelta(0) < end - start <= timedelta(days=7):
+        raise CompensationError("supplement duration must be positive and at most seven days")
+    if not supplement and end - start != timedelta(days=7):
         raise CompensationError("pilot duration must be exactly seven days")
     result.update(starts_at=start.isoformat(), ends_at=end.isoformat())
     # Reuse the established integer/cap policy without accepting its unverified
@@ -144,8 +146,8 @@ def _member(row):
     }
 
 
-async def _members(session, ids, *, apply):
-    if not isinstance(ids, list) or not 3 <= len(ids) <= 10:
+async def _members(session, ids, *, apply, minimum=3):
+    if not isinstance(ids, list) or not minimum <= len(ids) <= 10:
         raise CompensationError("pilot requires three to ten distinct reviewed members")
     if any(not isinstance(value, str) or not re.fullmatch(r"val_[a-f0-9]{32}", value) for value in ids):
         raise CompensationError("invalid validator identifier")
@@ -163,8 +165,57 @@ async def _members(session, ids, *, apply):
     return rows, members
 
 
-async def create_campaign(request, validator_ids, *, apply=False, expected_digest=None):
-    terms = _terms(request)
+async def _supplement_parent(session, parent_id, terms, members):
+    """Reserve only the parent's mathematically unreachable budget, never earned funds.
+
+    Mutating callers hold the same advisory transaction lock as finalization.
+    Sibling budgets are counted at full face value even if their work is sparse.
+    """
+    parent = (await session.execute(sa.select(campaigns).where(campaigns.c.id == parent_id))).mappings().first()
+    if not parent or parent_id == terms["campaign_id"]:
+        raise CompensationError("existing distinct budget parent required")
+    contract = parent["contract"]
+    if _hash(contract) != parent["contract_hash"] or "budget_parent" in contract:
+        raise CompensationError("budget parent commitment invalid or nested")
+    if (
+        terms["software_version"] != contract["software_version"]
+        or _time(terms["ends_at"]) != _time(contract["ends_at"])
+        or _time(terms["starts_at"]) < _time(contract["starts_at"])
+        or int(terms["operator_cap_atomic"]) > int(contract["operator_cap_atomic"])
+        or terms["daily_unit_cap"] > contract["daily_unit_cap"]
+    ):
+        raise CompensationError("supplement must retain parent end, release and contribution limits")
+    siblings = (
+        (
+            await session.execute(
+                sa.select(campaigns).where(
+                    campaigns.c.contract["budget_parent"]["campaign_id"].as_string() == parent_id,
+                    campaigns.c.id != terms["campaign_id"],
+                ),
+            )
+        )
+        .mappings()
+        .all()
+    )
+    reserved = 0
+    prior_members = list(contract["members"])
+    for sibling in siblings:
+        body = sibling["contract"]
+        if _hash(body) != sibling["contract_hash"] or body["budget_parent"]["contract_hash"] != parent["contract_hash"]:
+            raise CompensationError("sibling budget commitment mismatch")
+        reserved += int(body["budget_atomic"])
+        prior_members.extend(body["members"])
+    for field in ("validator_id", "operator_group_id", "account_id", "signing_wallet"):
+        if {m[field] for m in members} & {m[field] for m in prior_members}:
+            raise CompensationError("supplement beneficiaries must be distinct from parent and siblings")
+    maximum = min(int(contract["budget_atomic"]), len(contract["members"]) * int(contract["operator_cap_atomic"]))
+    if maximum + reserved + int(terms["budget_atomic"]) > int(contract["budget_atomic"]):
+        raise CompensationError("supplement exceeds uncommitted parent budget")
+    return parent, {"campaign_id": parent_id, "contract_hash": parent["contract_hash"], "maximum_allocatable_atomic": str(maximum)}
+
+
+async def create_campaign(request, validator_ids, *, apply=False, expected_digest=None, parent_campaign_id=None):
+    terms = _terms(request, supplement=parent_campaign_id is not None)
     asset = asset_spec("AIPG")
     if (
         not asset
@@ -176,7 +227,7 @@ async def create_campaign(request, validator_ids, *, apply=False, expected_diges
         raise CompensationError("configured AIPG asset is invalid")
     async with await new_session() as session:
         await _transaction(session, apply)
-        rows, members = await _members(session, validator_ids, apply=apply)
+        rows, members = await _members(session, validator_ids, apply=apply, minimum=1 if parent_campaign_id is not None else 3)
         contract = {
             **terms,
             "schema": SCHEMA,
@@ -188,6 +239,14 @@ async def create_campaign(request, validator_ids, *, apply=False, expected_diges
             "receipt_grace_seconds": RECEIPT_GRACE_SECONDS,
             "members": members,
         }
+        parent = None
+        if parent_campaign_id is not None:
+            parent, link = await _supplement_parent(session, parent_campaign_id, terms, members)
+            if any(
+                contract[key] != parent["contract"][key] for key in ("asset", "chain_id", "token_address", "decimals", "scoring_policy")
+            ):
+                raise CompensationError("supplement asset and scoring policy must match parent")
+            contract["budget_parent"] = link
         digest = _hash(contract)
         if apply and expected_digest != digest:
             raise CompensationError("pilot contract changed or approval digest missing")
@@ -197,6 +256,8 @@ async def create_campaign(request, validator_ids, *, apply=False, expected_diges
                 raise CompensationError("campaign terms are immutable")
             return {"campaign_id": existing["id"], "digest": digest, "dry_run": not apply, "sendable": False}
         now, start, end = _now(), _time(terms["starts_at"]), _time(terms["ends_at"])
+        if parent is not None and parent["status"] != "open":
+            raise CompensationError("new supplements require an open parent")
         if not now < start <= now + timedelta(days=1):
             raise CompensationError("freeze the pilot before work starts, at most one day ahead")
         for row, member in zip(rows, members):
@@ -368,7 +429,13 @@ async def finalize_campaign(campaign_id, *, apply=False, expected_digest=None):
         now, end = _now(), _time(contract["ends_at"])
         if now < end + timedelta(seconds=contract["receipt_grace_seconds"]):
             raise CompensationError("pilot and late-receipt window have not ended")
-        _, members = await _members(session, [m["validator_id"] for m in contract["members"]], apply=apply)
+        if "budget_parent" in contract:
+            _, link = await _supplement_parent(session, contract["budget_parent"]["campaign_id"], contract, contract["members"])
+            if link != contract["budget_parent"]:
+                raise CompensationError("supplement budget commitment mismatch")
+        _, members = await _members(
+            session, [m["validator_id"] for m in contract["members"]], apply=apply, minimum=1 if "budget_parent" in contract else 3,
+        )
         if members != contract["members"] or any(_time(m["expires_at"]) <= now for m in members):
             raise CompensationError("member identity or review changed; review the frozen pilot")
         by_id = {m["validator_id"]: m for m in members}

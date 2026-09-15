@@ -48,6 +48,22 @@ def test_apply_requires_exact_preview_digest(tmp_path, monkeypatch):
     assert error.value.code == 2
 
 
+def test_supplement_flag_is_explicit_and_create_only(tmp_path, monkeypatch):
+    args(monkeypatch, tmp_path / "preview.json", "--parent-campaign-id", "frozen-parent")
+
+    async def run(options):
+        assert options.parent_campaign_id == "frozen-parent" and not options.apply
+        return {"dry_run": True, "sendable": False}
+
+    monkeypatch.setattr(cli, "run", run)
+    assert cli.main() == 0
+    monkeypatch.setattr(sys, "argv", ["manage_validator_compensation.py", "finalize", "--campaign-id", "child",
+                                    "--parent-campaign-id", "frozen-parent", "--output", str(tmp_path / "finalize.json")])
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+    assert error.value.code == 2
+
+
 def test_failed_operation_hides_exception_and_preserves_uncertain_commit_warning(tmp_path, monkeypatch, capsys):
     args(monkeypatch, tmp_path / "output.json")
 
