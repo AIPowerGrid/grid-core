@@ -150,10 +150,15 @@ Partial-output capture manifest SHA-256:
 The candidate generator fix uses `tool_choice=required` with exactly one exposed
 function for each new tool-call/chain stage. Scoring still requires the exact
 function, arguments and call count, without visible text. Existing persisted
-challenges, seals and verdicts are unchanged. The two new compatibility tests
+challenges, seals and verdicts are unchanged. The two compatibility regressions
 failed before the fix; all 66 challenge tests pass after it. Real native
-qualification above covers the single-call path; two-stage native chain
-qualification and production deployment remain open.
+qualification above covers the single-call path. A separate frozen follow-up
+completed two native two-stage chains (four additional worker-path calls), using
+Core's exact second-stage message construction and unchanged token budgets;
+all four stages and both combined answer commitments matched. Manifest SHA-256:
+`960082950d9677248e827d8a7d663f808681d07a53e93722a3af9e8466474b30`.
+These are local transport controls, not the public signed-assignment lifecycle.
+The broader focused suite passed 115 tests. Production deployment remains open.
 
 Still required: broader honest engine/quant controls, fidelity-method substitution
 tests, fabricated logprobs and probe-aware switching, plus backend repairs from
