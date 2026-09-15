@@ -22,9 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from grid_api import database
 from grid_api.services import validator_shadow as shadow
 from grid_api.v2.schema import accounts as accounts_t
+from grid_api.v2.schema import metadata
 from grid_api.v2.schema import validator_assignments as assignments_t
 from grid_api.v2.schema import validator_probe_groups as probe_groups_t
-from grid_api.v2.schema import metadata
 from grid_api.v2.schema import validator_shadow_observations as observations_t
 from grid_api.v2.schema import validators as validators_t
 
@@ -123,6 +123,16 @@ async def _start():
         observed_at=NOW,
     )
     await shadow.start_run(RUN_ID, started_at=NOW)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["route", "outcome", "unknown"])
+async def test_postgres_collector_rejection_precedes_ack_and_fails_report(pg, monkeypatch, kind):
+    from grid_api.services.tests.test_validator_shadow import (
+        test_collector_rejection_is_durable_before_ack_and_fails_report,
+    )
+
+    await test_collector_rejection_is_durable_before_ack_and_fails_report(None, monkeypatch, kind)
 
 
 @pytest.mark.asyncio

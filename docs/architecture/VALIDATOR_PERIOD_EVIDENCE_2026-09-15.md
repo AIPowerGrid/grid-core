@@ -111,6 +111,29 @@ relabel them as successful detection.
 
 ## September 22 Deliverables
 
+### Collector Rejection Accounting
+
+Pre-activation inspection found that malformed or contradictory outbox events
+were acknowledged and deleted after only a log warning. The aggregate report
+could still claim zero observer errors. A new regression reproduced this for
+malformed route, outcome and unknown-kind events against the actual SQL writer
+and report, before changing the collector.
+
+The candidate fix durably records `persist/invalid_outbox_event` before
+acknowledgement. If that write fails, the event stays pending for reclaim.
+Existing observation bindings take precedence for late contradictions; payload
+and Redis insertion times provide fallback attribution, never current retry
+time. Events outside any running experiment remain non-evidence. No raw event,
+identity or exception text is persisted as an error. Retries after an error
+commit may append another error; counts are rejection attempts, not unique
+events. This conservatively prevents a clean report rather than changing any
+worker verdict or production route.
+
+Local verification: 100 focused tests passed, including disposable PostgreSQL
+and a private Unix-socket Redis. Required CI and deployment of this correction
+remain separate. Observation stays disabled until this and the existing cohort,
+runtime, secret and collector gates are qualified.
+
 Candidate verification: 89 focused tests passed on local Python 3.13 and a
 disposable PostgreSQL 14 database, including concurrency/replay, v8 evidence
 selection, unfinished-assignment exclusion, read-only CLI cleanup and hostile
