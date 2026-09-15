@@ -191,7 +191,45 @@ async def process_event(fields: dict[str, str], *, now: datetime | None = None) 
         )
         return "ack"
 
-    return "discard"
+    raise ValueError("unknown shadow event kind")
+
+
+async def _record_invalid_event(message_id: str, fields: dict[str, str]) -> None:
+    """Make rejected evidence visible before removing it from the outbox."""
+    route_ref = str(fields.get("route_ref") or "")
+    if _HEX_64.fullmatch(route_ref):
+        observation = await _observation_for_route(route_ref)
+        if observation:
+            # A late contradictory outcome belongs to the original observation,
+            # even when its delivery timestamp falls past the collection window.
+            await shadow.record_error(
+                run_id=str(observation["run_id"]),
+                stage="persist",
+                error_code="invalid_outbox_event",
+                observed_at=_aware(observation["observed_at"]),
+            )
+            return
+
+    candidates = []
+    time_field = "finished_at" if fields.get("kind") == "outcome" else "observed_at"
+    try:
+        candidates.append(_parse_time(fields[time_field]))
+    except (KeyError, TypeError, ValueError, OverflowError):
+        pass
+    # XADD uses Redis-generated IDs. They provide attribution if payload time
+    # is absent, malformed, or outside a run. Never substitute the replay time.
+    inserted_at = datetime.fromtimestamp(int(message_id.split("-", 1)[0]) / 1000, UTC)
+    candidates.append(inserted_at)
+    for observed_at in candidates:
+        run = await _run_for_time(observed_at)
+        if run:
+            await shadow.record_error(
+                run_id=str(run["id"]),
+                stage="persist",
+                error_code="invalid_outbox_event",
+                observed_at=observed_at,
+            )
+            return
 
 
 async def _read_batch(*, consumer: str, block_ms: int = 1000) -> list[tuple[str, dict[str, str]]]:
@@ -223,10 +261,15 @@ async def collect_once(*, consumer: str, block_ms: int = 1000) -> dict[str, int]
         try:
             result = await process_event(fields)
         except (KeyError, TypeError, ValueError, json.JSONDecodeError, shadow.ShadowConflict) as exc:
-            logger.warning("Invalid shadow event discarded error_type=%s", error_type(exc))
+            counts["failed"] += 1
+            try:
+                await _record_invalid_event(message_id, fields)
+            except Exception as record_exc:
+                logger.warning("Shadow rejection recording failed error_type=%s", error_type(record_exc))
+                continue
+            logger.warning("Invalid shadow event recorded before discard error_type=%s", error_type(exc))
             await redis.xack(STREAM_KEY, CONSUMER_GROUP, message_id)
             await redis.xdel(STREAM_KEY, message_id)
-            counts["failed"] += 1
             counts["acked"] += 1
             continue
         except Exception as exc:

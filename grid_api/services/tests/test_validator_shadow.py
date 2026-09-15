@@ -15,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 
 from grid_api import database
 from grid_api.services import validator_shadow as shadow
+from grid_api.services import validator_shadow_collector as collector
 from grid_api.services.route_commitments import job_ref as committed_job_ref
 from grid_api.v2.schema import ledger as ledger_t
 from grid_api.v2.schema import metadata
@@ -906,6 +907,42 @@ async def test_observation_outcome_and_sample_are_exactly_idempotent_and_replaya
     assert report["routing_effect"] == "none"
     assert report["economic_effect"] == "none"
     assert report["automatic_promotion"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["route", "outcome", "unknown"])
+async def test_collector_rejection_is_durable_before_ack_and_fails_report(db, monkeypatch, kind):
+    await _running_run(monkeypatch)
+    observed_at = NOW + timedelta(minutes=2)
+    message_id = f"{int(observed_at.timestamp() * 1000)}-0"
+    # No usable payload timestamp or commitment: Redis insertion still locates the run.
+    event = {"kind": kind, "route_ref": "invalid", "observed_at": "bad-time"}
+
+    async def read_batch(**_kwargs):
+        return [(message_id, event)]
+
+    actions = []
+
+    class Redis:
+        async def xack(self, *_args):
+            report = await shadow.run_report(RUN_ID, at=observed_at)
+            assert report["gates"]["zero_observer_errors"] is False
+            actions.append("ack")
+
+        async def xdel(self, *_args):
+            actions.append("delete")
+
+    monkeypatch.setattr(collector, "_read_batch", read_batch)
+    monkeypatch.setattr(collector, "get_redis", Redis)
+    result = await collector.collect_once(consumer="test", block_ms=1)
+    assert result == {"acked": 1, "retried": 0, "failed": 1}
+    assert actions == ["ack", "delete"]
+    report = await shadow.run_report(RUN_ID, at=observed_at)
+    assert report["observer_errors"] == [
+        {"stage": "persist", "error_code": "invalid_outbox_event", "count": 1},
+    ]
+    assert report["gates"]["zero_observer_errors"] is False
+    assert report["routing_effect"] == report["economic_effect"] == "none"
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,8 @@ validation, worker incentives, and trust boundaries.
 - `VALIDATOR_PERIOD_EVIDENCE_2026-09-15.md` - frozen 33-group/165-assignment
   audit, released-scorer and signature replay, direct owned-backend controls,
   triage limits, candidate shadow integration fixes and September 22 deliverables.
+  The collector rejection follow-up binds durable error recording before Redis
+  acknowledgement; it is a candidate until separately verified and deployed.
   Not proof of completed adversarial qualification, observer activation,
   finalized allocations or transfers.
 - `VALIDATOR_FAILURE_AUDIT_2026-09-13.md` - retained failed-group diagnosis,
