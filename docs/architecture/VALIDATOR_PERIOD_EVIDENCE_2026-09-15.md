@@ -1,7 +1,7 @@
 # Validator Period: Evidence and Remaining Work
 
 Status: **interim investigation, not completed security qualification**.
-Deadline: September 22, 2026. Production now runs Core `64d38951` / Alembic
+Deadline: September 22, 2026. Production now runs Core `d1aafcf4` / Alembic
 `0042`, with routing observation, model fidelity, media validation and worker
 penalty authority disabled. Compensation campaigns are separate contracts;
 this audit changes neither their membership nor budgets or historical votes.
@@ -60,11 +60,20 @@ Private direct capture SHA-256:
 These are repeated controls on six cases, not 14 independent trials. No-stop
 controls intentionally change the task and cannot count as scored successes.
 
-The private per-group ledger labels F01 and F29 `genuine_worker_defect` based
-on representative direct API reproduction; both need backend repair and
-requalification. The other 31 are `inconclusive` at root-cause level, with
-specific retained symptoms. None is labelled model fraud. This is preliminary
-triage, not completion of the reproduction and repair requirement.
+A later original-request control reproduced F18: its streamed tool arguments
+were invalid JSON and byte-identical to the retained failed observation, while
+the non-streamed reply passed its committed answer. An independent parser
+checked raw SSE/JSON, request equality and commitments without importing Core
+or the node scorer. Private capture SHA-256:
+`74deef8d7474266219d8fca65f003a89a0128020cc0ed1ad96afbc7791e6c52b`.
+These are two additional calls on one case, not an expanded failure cohort.
+
+The preserved original private ledger and its F18 addendum now label F01, F18
+and F29 `genuine_worker_defect` based on representative direct API reproduction;
+all three need backend repair and requalification. The other 30 are
+`inconclusive` at root-cause level, with specific retained symptoms. None is
+labelled model fraud. This is preliminary triage, not completion of the
+reproduction and repair requirement.
 
 ### Case Dispositions
 
@@ -72,8 +81,7 @@ These are root-cause labels, not changes to the retained failed task verdicts.
 
 | Cases | Classification | Next proof needed |
 | --- | --- | --- |
-| F01, F29 | Genuine worker/backend API defect | Pinned serving/parser repair and full tool-chain regression |
-| F18 | Inconclusive | Its own tool-call reproduction; same model name does not establish the same cause |
+| F01, F18, F29 | Genuine worker/backend API defect | Pinned serving/parser repair and full tool-chain regression |
 | F15, F27 | Inconclusive | Reasoning-aware stop controls without excusing empty visible output |
 | F03, F07, F24, F32 | Inconclusive | Separate visible-task failure from native-token budget compliance |
 | F11 | Inconclusive | Direct owned reference for the independently verified wrong integer |
@@ -193,7 +201,7 @@ could still claim zero observer errors. A new regression reproduced this for
 malformed route, outcome and unknown-kind events against the actual SQL writer
 and report, before changing the collector.
 
-The candidate fix durably records `persist/invalid_outbox_event` before
+The deployed fix durably records `persist/invalid_outbox_event` before
 acknowledgement. If that write fails, the event stays pending for reclaim.
 Existing observation bindings take precedence for late contradictions; payload
 and Redis insertion times provide fallback attribution, never current retry
@@ -204,9 +212,12 @@ events. This conservatively prevents a clean report rather than changing any
 worker verdict or production route.
 
 Local verification: 100 focused tests passed, including disposable PostgreSQL
-and a private Unix-socket Redis. Required CI and deployment of this correction
-remain separate. Observation stays disabled until this and the existing cohort,
-runtime, secret and collector gates are qualified.
+and a private Unix-socket Redis. PR197 and exact-main CI passed: 2,114 tests,
+12 skips, a separate two-test Redis proof and one PostgreSQL/Core/Console/node
+handoff test. After a fresh production backup/restore proof, `d1aafcf4` deployed
+at 22:27:13 UTC with all nine workers returning and no environment or payout
+control changes. Observation stays disabled: deployment alone does not satisfy
+the existing cohort, runtime, secret and collector activation gates.
 
 Shadow-evidence correction: 89 focused tests passed on local Python 3.13 and a
 disposable PostgreSQL 14 database, including concurrency/replay, v8 evidence
@@ -214,7 +225,8 @@ selection, unfinished-assignment exclusion, read-only CLI cleanup and hostile
 scorer controls. The database was dropped afterward. The deployed `64d38951`
 then passed full Python 3.12/PostgreSQL 16 CI (2,103 passed, 11 skipped), a
 separate cross-repo handoff check and production restore/migration proof.
-This does not qualify the later collector correction or tool-choice proposal.
+The collector correction has its own verification above; neither release
+qualifies the held tool-choice proposal.
 
 - Close the F01-F33 ledger with reproduced causes or explicit unresolved limits,
   actual backend fixes and regression controls.
