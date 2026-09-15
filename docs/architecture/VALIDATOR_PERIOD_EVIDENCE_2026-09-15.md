@@ -1,7 +1,7 @@
 # Validator Period: Evidence and Remaining Work
 
 Status: **interim investigation, not completed security qualification**.
-Deadline: September 22, 2026. Production remains Core `bc49519c` / Alembic
+Deadline: September 22, 2026. Production now runs Core `64d38951` / Alembic
 `0042`, with routing observation, model fidelity, media validation and worker
 penalty authority disabled. Compensation campaigns are separate contracts;
 this audit changes neither their membership nor budgets or historical votes.
@@ -89,7 +89,10 @@ data with a proposed preview.20 policy found five reviewed participating
 operators and 52 finalized independently supported groups, versus zero in the
 deployed evaluator. This is **candidate evaluation**, not an active experiment.
 
-Remaining gates: required candidate CI/deployment, explicit baseline transition
+The shadow correction passed required CI and deployed at 21:38:17 UTC; see the
+[rollout record](../../deploy/VALIDATOR_PERIOD_ROLLOUT_2026_09_15.md), including
+the separately held tool-choice candidate and single-replica capacity limit.
+Remaining gates: explicit baseline transition
 with upgrade overlap removed, protected HMAC secret, collector readiness and an
 unresolved stale-candidate critical alert. Diagnostic verification booleans were
 left false pending candidate proof review. Do not delete or reject an operator
