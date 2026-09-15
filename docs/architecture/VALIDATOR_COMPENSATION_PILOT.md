@@ -18,8 +18,8 @@ It cannot activate routing, reputation penalties, bonds, or slashing.
 
 ## Approved Budget And Proposed Allocation Terms
 
-- Approved first-pilot budget: at most 4,000 AIPG total over exactly seven days.
-- At most 1,000 AIPG per reviewed independent operator across all their nodes.
+- Approved first-pilot budget: at most 100,000 AIPG total over exactly seven days.
+- At most 25,000 AIPG per reviewed independent operator across all their nodes.
 - At most 100 reviewed contributions per operator per UTC day.
 - One unit per operator and probe group, not per node, retry or heartbeat.
 - Exclude first-party, unreviewed, rejected and expired-review operators.
@@ -29,11 +29,14 @@ It cannot activate routing, reputation penalties, bonds, or slashing.
   the operator cap. Leave both rounding and capped remainders in treasury;
   do not redistribute them or automatically raise any budget.
 
-The maintainer explicitly replied "approved" to the 4,000-total / 1,000-per-operator
-seven-day proposal on September 13, 2026. This supersedes the earlier unapproved
-2,000 / 500 proposal. Record this budget decision as
-`approval:validator-pilot-budget-20260913`; it is a decision reference, not a
-credential, proof of operator independence or recipient consent.
+On September 13, 2026, after reviewing the indicative dollar value of the earlier
+budget, the maintainer accepted the revised 100,000-total / 25,000-per-operator
+seven-day proposal. Record this decision as
+`approval:validator-pilot-budget-20260913-v2`. It supersedes the earlier approved
+4,000 / 1,000 budget (`approval:validator-pilot-budget-20260913`) and unapproved
+2,000 / 500 proposal; the budgets are not additive. The reference is not a
+credential, proof of operator independence or recipient consent. The commitment
+is in AIPG, not a guaranteed dollar return or a live-price-indexed payment.
 
 These are maximum budget limits, not guaranteed individual payments. The daily
 contribution cap and allocation rules above remain the proposed implementation
@@ -43,8 +46,11 @@ approval again unless its amounts or duration change.
 Resolve separately proven payout destinations before any transfer.
 Publish the terms before earning starts. Do not retrofit this draft onto past
 unpaid participation without a separate explicit decision.
-The earlier 10,000/2,000 AIPG figures were draft safety ceilings, not an approved
-campaign. Increasing the approved budget is not implied by available treasury funds
+The candidate allocator raises the earlier 10,000/2,000 AIPG validation ceilings
+to exactly 100,000/25,000. The deployed Core still has the old ceilings until
+the reviewed code is deployed. Existing contracts retain their explicit amounts
+and digests; increasing a ceiling neither reprices them nor creates a campaign.
+Increasing the approved budget is not implied by available treasury funds
 or by an approval for the separate worker-reward pilot.
 
 A read-only production check at 17:24 UTC found nine fresh nodes, zero current

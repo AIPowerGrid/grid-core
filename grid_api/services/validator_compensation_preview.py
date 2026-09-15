@@ -51,7 +51,7 @@ def _amount(value, maximum):
         raise PreviewError("amount must be a positive decimal base-unit string")
     amount = int(value)
     if amount > maximum:
-        raise PreviewError("amount exceeds draft pilot limit")
+        raise PreviewError("amount exceeds pilot limit")
     return amount
 
 
@@ -72,8 +72,8 @@ def preview_allocation(payload, *, as_of: str):
     start, end, now = _time(terms["starts_at"]), _time(terms["ends_at"]), _time(as_of)
     if not timedelta(0) < end - start <= timedelta(days=7):
         raise PreviewError("campaign window must be positive and at most seven days")
-    budget = _amount(terms["budget_atomic"], 10_000 * ATOMIC_PER_AIPG)
-    cap = _amount(terms["operator_cap_atomic"], 2_000 * ATOMIC_PER_AIPG)
+    budget = _amount(terms["budget_atomic"], 100_000 * ATOMIC_PER_AIPG)
+    cap = _amount(terms["operator_cap_atomic"], 25_000 * ATOMIC_PER_AIPG)
     daily_cap = terms["daily_unit_cap"]
     if type(daily_cap) is not int or not 1 <= daily_cap <= 100:
         raise PreviewError("daily unit cap must be an integer from one to one hundred")
