@@ -81,8 +81,9 @@ validation, worker incentives, and trust boundaries.
   node UI, retained in .20; live wallet qualification remains required before
   transfers. Three reviewed members earn September15-22 at14:30UTC under the
   committed production campaign; no validator transfers were made at launch.
-  Candidate budget-linked supplements cover omitted reviewed operators only
-  within the original maximum liability, without rewriting parent membership.
+  Budget-linked supplements deployed as `bc49519c`; two omitted reviewed
+  operators enrolled from September 15 at 16:45 UTC within the original maximum
+  liability, without rewriting parent membership. All five keep existing IDs.
   The maintainer approved the revised 100000-total /
   25000-per-operator seven-day budget on September 13, 2026, replacing 4000/1000;
   matching ceiling changes deployed as f5211254 on September15. Preserve that
