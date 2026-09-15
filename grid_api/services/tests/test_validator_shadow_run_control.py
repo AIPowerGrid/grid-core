@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -74,6 +75,39 @@ def test_verification_file_requires_exact_boolean_contract(tmp_path):
     )
     with pytest.raises(ValueError, match="exactly the four"):
         control._verification(str(invalid))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("apply,fail", [(False, False), (False, True), (True, False)])
+async def test_operator_database_mode_and_cleanup_without_schema_bootstrap(monkeypatch, apply, fail):
+    old_factory = control.database._session_factory
+    engine = SimpleNamespace(dispose=AsyncMock())
+    calls = []
+    def make_engine(url, **kwargs):
+        calls.append(kwargs)
+        return engine
+    factory = object()
+    monkeypatch.setattr(control, "create_async_engine", make_engine)
+    monkeypatch.setattr(control, "async_sessionmaker", lambda *a, **kw: factory)
+    monkeypatch.setattr(control, "get_settings", lambda: SimpleNamespace(async_database_url="unused"))
+    async def forbidden():
+        raise AssertionError("operator command must not initialize schema")
+    monkeypatch.setattr(control.database, "init_database", forbidden)
+    async def prepare(args, at):
+        assert control.database._session_factory is factory
+        if fail:
+            raise ValueError("expected test failure")
+        return {"ok": True}
+    monkeypatch.setattr(control, "_prepare", prepare)
+    args = SimpleNamespace(command="prepare", apply=apply, at=NOW.isoformat())
+    if fail:
+        with pytest.raises(ValueError, match="expected test failure"):
+            await control._run(args)
+    else:
+        assert await control._run(args) == {"ok": True}
+    assert calls[0]["connect_args"]["server_settings"]["default_transaction_read_only"] == ("off" if apply else "on")
+    assert control.database._session_factory is old_factory
+    engine.dispose.assert_awaited_once()
 
 
 @pytest.mark.asyncio

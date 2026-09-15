@@ -4,6 +4,8 @@
 """Executable red-team contract for recognizable validator probes."""
 
 import hashlib
+from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 
@@ -110,6 +112,30 @@ def test_fresh_random_values_defeat_exact_replay_but_not_template_solving():
     assert _score(first, [cache.respond(first_request)]) == "healthy"
     assert _score(second, [cache.respond(_request(second))]) == "failed"
     assert _run(solver, second)[0] == "healthy"
+
+
+@pytest.mark.parametrize("selector", ["tool.call", "token.limit.v2", "stop.sequence"])
+def test_paired_synthetic_fault_controls_detect_contract_breakage(selector):
+    """Scorer controls only: these actors are not GPU or transport qualification."""
+    solver = RegexTemplateWorker()
+    seen = set()
+    for _ in range(20):
+        challenge = validators_svc._make_text_challenge(selector)
+        assert challenge["prompt"] not in seen
+        seen.add(challenge["prompt"])
+        request = _request(challenge)
+        correct = solver.respond(request)
+        assert _score(challenge, [correct]) == "healthy"
+        if selector == "tool.call":
+            calls = deepcopy(correct.tool_calls)
+            calls[0]["function"]["arguments"] = "{"
+            broken = replace(correct, tool_calls=calls)
+        elif selector == "token.limit.v2":
+            broken = replace(correct, text=correct.text.split()[0])
+        else:
+            broken = replace(correct, text=correct.text + request["stop"] + "EXTRA")
+        assert _score(challenge, [broken]) == "failed"
+        assert validators_svc._quality_eligible("text", challenge["capability"]) is False
 
 
 def test_public_probe_classifier_exposes_current_model_switching_attack():

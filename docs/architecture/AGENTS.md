@@ -7,6 +7,11 @@ validation, worker incentives, and trust boundaries.
 
 ## Ownership
 
+- `VALIDATOR_PERIOD_EVIDENCE_2026-09-15.md` - frozen 33-group/165-assignment
+  audit, released-scorer and signature replay, direct owned-backend controls,
+  triage limits, candidate shadow integration fixes and September 22 deliverables.
+  Not proof of completed adversarial qualification, observer activation,
+  finalized allocations or transfers.
 - `VALIDATOR_FAILURE_AUDIT_2026-09-13.md` - retained failed-group diagnosis,
   versioned token-limit partial-marker correction and remaining task failures.
   Token-limit v2 is now deployed in Core d606e4d8 and preview.20. Bounded
