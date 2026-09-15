@@ -153,7 +153,11 @@ content sanitization, and reward settlement.
   exact-instruction, arithmetic, strict-JSON, calibrated 4K/16K/32K
   context-retrieval, multistep logic, restricted-AST Python function synthesis,
   exact function-call, two-stage tool-chain, stop-sequence, and gross token-limit
-  families. The code scorer interprets only one bounded arithmetic return
+  families. New tool challenges expose exactly one function per stage and use
+  string `tool_choice=required` for LM Studio compatibility. Exact function,
+  arguments, call count and no-visible-text scoring remain unchanged. Persisted
+  challenges and sealed disclosures must never be rewritten to retrofit this.
+  The code scorer interprets only one bounded arithmetic return
   expression against assignment-only hidden inputs; it must never `exec`,
   import, call, or otherwise run worker-supplied code. Token-limit scoring uses
   Grid-side `o200k_base` counting over visible plus reasoning output, a

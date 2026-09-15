@@ -109,7 +109,16 @@ def test_tool_call_challenge_is_dynamic_and_carries_a_strict_schema():
     assert function["name"] in challenge["prompt"]
     assert function["strict"] is True
     assert function["parameters"]["additionalProperties"] is False
-    assert challenge["tool_choice"]["function"]["name"] == function["name"]
+    assert len(challenge["tools"]) == 1
+    assert challenge["tool_choice"] == "required"
+
+
+def test_tool_chain_uses_portable_required_choice_with_one_tool_per_stage():
+    challenge = validators._make_text_challenge("tool.chain")
+    assert len(challenge["steps"]) == 2
+    for step in challenge["steps"]:
+        assert len(step["tools"]) == 1
+        assert step["tool_choice"] == "required"
 
 
 def test_tool_call_scoring_requires_one_exact_call_and_no_text():

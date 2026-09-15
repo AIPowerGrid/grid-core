@@ -89,7 +89,8 @@ data with a proposed preview.20 policy found five reviewed participating
 operators and 52 finalized independently supported groups, versus zero in the
 deployed evaluator. This is **candidate evaluation**, not an active experiment.
 
-Remaining gates: required candidate CI/deployment, explicit baseline transition
+PR #194 passed required CI and merged as `64d38951`; deployment remains separate.
+Remaining gates: deployment, explicit baseline transition
 with upgrade overlap removed, protected HMAC secret, collector readiness and an
 unresolved stale-candidate critical alert. Diagnostic verification booleans were
 left false pending candidate proof review. Do not delete or reject an operator
@@ -104,10 +105,67 @@ on deterministic actors, **not real-model false-alarm rate** or end-to-end
 transport detection. Existing tests still demonstrate that a regex solver and
 probe-aware backend switch can pass public templates without a useful model.
 
-Still required: isolated actual worker/backend fault injection, honest engine/
-quant baselines, deliberate smaller-model substitution, fabricated logprobs and
-probe-aware switching. Preserve the existing negative fidelity studies; do not
-relabel them as successful detection.
+### Released Worker And Native Backend Trial
+
+An isolated loopback experiment used unchanged released worker v0.3.9
+(`1e5feb38`), the candidate Core collector (`cada63c7`), released validator
+preview.20 (`c73a284f`), real HTTP/WebSocket transport and disposable Unix-socket
+Redis. The loaded LM Studio backend was GPT-OSS-20B MXFP4. No public registration,
+production queue, signed attestation, billing, den, strike or payout was used.
+
+The original named `tool_choice` object was rejected by LM Studio with HTTP 400:
+it accepts the strings `none`, `auto`, and `required`. Two initial harness
+attempts exposed early socket closure and incorrect forwarding of the HTTP
+rejection; both were preserved. A corrected harness retained three actual HTTP
+400 observations and stopped under its predeclared unavailable-case rule.
+
+A separately frozen corrected-request trial retained the same prompts, budgets,
+and answer commitments, changing only single-tool choice to `required`. It
+completed 30 worker-path cases; two additional partial-truncation replays bring
+the total to 32. Twelve native calls covered six honest controls and six calls
+to the same 20B backend while advertised to Core as GPT-OSS-120B.
+
+| Test | Observed result |
+| --- | --- |
+| Six native controls: two tool, two echo, two stop | Six correct and scored healthy; zero false failures in these six |
+| Corrupt native tool arguments | Two rejected |
+| Remove native visible echo output | Two rejected |
+| Keep half the native echo output and finish `length` | Two rejected |
+| Inject ignored stop marker into native output | Two rejected |
+| 20B advertised as 120B, fresh inference | Six scored healthy: substitution was not detected |
+| Separate deterministic transport fixtures | Six valid accepted, six corrupt rejected |
+
+An independent parser verified the retained commitments, task answers, model
+mapping, request budgets and capture hashes without importing the scorer.
+Native fault cases replay modified captures through the actual worker, not
+additional independent native trials. Two cases per family on one engine/quant
+do not establish population detection/false-alarm rates. This tests functional
+canaries, not the separate logprob fidelity comparator or operator quorum.
+
+Native/transport capture manifest SHA-256:
+`2ebad489a0195007c28d2876f746350ac944665b73d80aaca274a3eb1f69da8c`.
+Partial-output capture manifest SHA-256:
+`7aaa12087a49b551d15e60a2e56275468595b3a617f125a90f9dc967e44da8d9`.
+
+The candidate generator fix uses `tool_choice=required` with exactly one exposed
+function for each new tool-call/chain stage. Scoring still requires the exact
+function, arguments and call count, without visible text. Existing persisted
+challenges, seals and verdicts are unchanged. The two compatibility regressions
+failed before the fix; all 66 challenge tests pass after it. Real native
+qualification above covers the single-call path. A separate frozen follow-up
+completed two native two-stage chains (four additional worker-path calls), using
+Core's exact second-stage message construction and unchanged token budgets;
+all four stages and both combined answer commitments matched. Manifest SHA-256:
+`960082950d9677248e827d8a7d663f808681d07a53e93722a3af9e8466474b30`.
+These are local transport controls, not the public signed-assignment lifecycle.
+The broader focused suite passed 115 tests. Production deployment remains open.
+
+Still required: broader honest engine/quant controls, fidelity-method substitution
+tests, fabricated logprobs and probe-aware switching, plus backend repairs from
+the frozen 33-group audit. Existing negative fidelity studies must not be
+relabelled as successful detection. The separate September 13 batch study found
+cross-model differences in three eligible batches and zero Q8/Q4 flags in three
+eligible honest batches, but copied probability distributions still evade it.
 
 ## September 22 Deliverables
 
