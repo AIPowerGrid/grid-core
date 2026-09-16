@@ -571,6 +571,41 @@ async def test_concurrent_image_validators_join_one_bonded_reference_group(pg, m
 
 
 @pytest.mark.asyncio
+async def test_concurrent_validators_rotate_families_without_extra_groups(pg, monkeypatch):
+    validators = await _seed_validators(
+        5, capabilities=["text.instruction.v1", "text.tool_call.v1"],
+    )
+    workers = _workers()
+    now = validators_svc._now()
+    monkeypatch.setattr(validators_svc, "_now", lambda: now)
+    monkeypatch.setattr(validators_svc.secrets, "choice", lambda values: values[0])
+    for index, expected in enumerate(["text.instruction.v1", "text.tool_call.v1"]):
+        results = await asyncio.wait_for(asyncio.gather(*[
+            validators_svc.issue_assignments(
+                account_id=account, validator_id=node, validator_wallet=wallet,
+                active_workers=workers, limit=1,
+            )
+            for account, node, wallet, _ in validators
+        ]), timeout=10)
+        rows = [result["assignments"][0] for result in results]
+        assert {row["capability"] for row in rows} == {expected}
+        assert len({row["probe_group_id"] for row in rows}) == 1
+        async with await database.new_session() as session:
+            assert await session.scalar(sa.select(sa.func.count()).select_from(probe_groups_t)) == index + 1
+            assert await session.scalar(sa.select(sa.func.count()).select_from(assignments_t)) == (index + 1) * 5
+            await session.execute(sa.update(assignments_t).values(
+                status="finalized", quorum_status="finalized", finalized=now,
+            ))
+            await session.execute(sa.update(probe_groups_t).values(
+                status="finalized", quorum_status="finalized", finalized=now,
+            ))
+            await session.commit()
+        now += timedelta(seconds=max(
+            300, validators_svc.get_settings().validator_text_group_min_interval_seconds,
+        ) + 1)
+
+
+@pytest.mark.asyncio
 async def test_concurrent_validators_join_one_shared_probe_group(pg):
     validators = await _seed_validators(5)
     workers = _workers()

@@ -2589,6 +2589,96 @@ async def test_text_assignment_rotates_across_every_advertised_model(db):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tie_index", [0, -1])
+@pytest.mark.parametrize("capabilities", [
+    ["text.instruction.v1", "text.tool_call.v1", "text.stop_sequence.v1"],
+    [
+        "text.instruction.v1", "text.reasoning.v1", "text.structured.v1",
+        "text.context.4k.v1", "text.context.16k.v1", "text.context.32k.v1",
+        "text.reasoning.multistep.v1", "text.code.v1", "text.tool_call.v1",
+        "text.tool_chain.v1", "text.stop_sequence.v1", "text.token_limit.v2",
+    ],
+])
+async def test_text_assignment_covers_every_eligible_family_before_repeating(
+    db, monkeypatch, tie_index, capabilities,
+):
+    account_id = uuid.uuid4()
+    validator_id = await _register(account_id, capabilities=capabilities)
+    worker = {
+        "worker_id": str(uuid.uuid4()),
+        "name": "rig-family-coverage",
+        "models": ["model-a"],
+        "job_types": ["text"],
+        "max_context_length": 65_536,
+    }
+    now = validators_svc._now()
+    monkeypatch.setattr(validators_svc, "_now", lambda: now)
+    # The worst possible random draw must not starve a supported family.
+    monkeypatch.setattr(validators_svc.secrets, "choice", lambda values: values[tie_index])
+    observed = []
+    for _ in range(2 * len(capabilities)):
+        issued = await validators_svc.issue_assignments(
+            account_id=account_id, validator_id=validator_id,
+            validator_wallet=TEST_WALLET, active_workers=[worker], limit=1,
+        )
+        assignment = issued["assignments"][0]
+        observed.append(assignment["capability"])
+        async with await database.new_session() as session:
+            # Unsuccessful/unfilled attempts still consume their family turn;
+            # otherwise a broken lane can monopolize every future probe.
+            await session.execute(sa.update(assignments_t).where(
+                assignments_t.c.id == assignment["assignment_id"],
+            ).values(status="finalized", quorum_status="finalized", finalized=now))
+            await session.execute(sa.update(probe_groups_t).where(
+                probe_groups_t.c.id == assignment["probe_group_id"],
+            ).values(
+                status="finalized", quorum_status="finalized",
+                quorum_outcome="insufficient_evidence", finalized=now,
+            ))
+            await session.commit()
+        now += timedelta(seconds=max(
+            300, validators_svc.get_settings().validator_text_group_min_interval_seconds,
+        ) + 1)
+
+    expected = capabilities if tie_index == 0 else list(reversed(capabilities))
+    assert observed[:len(capabilities)] == expected
+    assert observed[len(capabilities):] == expected
+
+
+@pytest.mark.asyncio
+async def test_text_family_coverage_is_scoped_to_each_worker_and_model(db, monkeypatch):
+    account_id = uuid.uuid4()
+    validator_id = await _register(
+        account_id, capabilities=["text.instruction.v1", "text.tool_call.v1"],
+    )
+    monkeypatch.setattr(validators_svc.secrets, "choice", lambda values: values[0])
+    workers = [
+        {"worker_id": str(uuid.uuid4()), "name": f"rig-scope-{index}",
+         "models": ["model-a", "model-b"], "job_types": ["text"]}
+        for index in range(2)
+    ]
+    seen = []
+    for worker in workers:
+        for model in worker["models"]:
+            issued = await validators_svc.issue_assignments(
+                account_id=account_id, validator_id=validator_id,
+                validator_wallet=TEST_WALLET,
+                active_workers=[{**worker, "models": [model]}], limit=1,
+            )
+            assignment = issued["assignments"][0]
+            seen.append(assignment["capability"])
+            async with await database.new_session() as session:
+                await session.execute(sa.update(assignments_t).where(
+                    assignments_t.c.id == assignment["assignment_id"],
+                ).values(status="finalized", quorum_status="finalized"))
+                await session.execute(sa.update(probe_groups_t).where(
+                    probe_groups_t.c.id == assignment["probe_group_id"],
+                ).values(status="finalized", quorum_status="finalized"))
+                await session.commit()
+    assert seen == ["text.instruction.v1"] * 4
+
+
+@pytest.mark.asyncio
 async def test_text_group_cadence_blocks_immediate_replacement(db):
     private_key = "0x" + f"{34:064x}"
     wallet = Account.from_key(private_key).address.lower()
