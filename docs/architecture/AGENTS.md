@@ -32,11 +32,12 @@ validation, worker incentives, and trust boundaries.
   Read-only midperiod payment readiness verifies135signed work reports across
   five frozen members, with no allocation/recipient/payment records. Finalization
   remains gated until September22 15:30UTC; no early amounts are promised.
-  September16 preflight qualifies the exact-release code proofs but the cohort
-  gate remains critical and the observer remains off. A seven-day run cannot
-  now finish by September22; report that without altering campaign/grace dates.
-  Not proof of completed adversarial qualification, observer activation,
-  finalized allocations or transfers.
+  September16 13:49UTC observation-only activation follows fresh passing cohort
+  gates and preserved history; see deploy/VALIDATOR_SHADOW_START_2026_09_16.md.
+  The run ends September23; September22 reporting must disclose partial
+  coverage without altering campaign/grace dates. Startup checks are not
+  proof of completed collection, adversarial qualification, finalized
+  allocations or transfers.
 - `VALIDATOR_FAILURE_AUDIT_2026-09-13.md` - retained failed-group diagnosis,
   versioned token-limit partial-marker correction and remaining task failures.
   Token-limit v2 is now deployed in Core d606e4d8 and preview.20. Bounded
