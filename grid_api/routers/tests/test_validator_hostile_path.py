@@ -21,8 +21,9 @@ import pytest
 import sqlalchemy as sa
 from eth_account import Account
 from eth_account.messages import encode_defunct
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from grid_api import database
 from grid_api.routers.tests.test_core_process_crash import (
     frame,
     snapshot,
@@ -98,6 +99,59 @@ async def respond(ws, broken):
     assert ack["den"] == 0
 
 
+async def freeze_campaign(engine, nodes, monkeypatch):
+    # Only the parent test clock/reviews are synthetic. The child Core creates
+    # real assignments and evidence after this frozen contract is committed.
+    start = datetime.now(UTC)
+    frozen = start - timedelta(seconds=1)
+    end = start + timedelta(days=7)
+    async with engine.begin() as conn:
+        for index, (_, _, node_id, _) in enumerate(nodes):
+            await conn.execute(sa.update(tables.validators).where(tables.validators.c.id == node_id).values(
+                operator_group_id=f"opg_isolated_{index}", independence_status="verified",
+                independence_review_ref="test:synthetic-control-review",
+                qualification_started_at=start - timedelta(days=5),
+                independence_reviewed_at=start - timedelta(days=1),
+                independence_expires_at=end + timedelta(days=1), last_heartbeat=frozen,
+            ))
+    monkeypatch.setattr(database, "_session_factory", async_sessionmaker(engine, expire_on_commit=False))
+    monkeypatch.setattr(compensation, "_now", lambda: frozen)
+    version = "v0.1.0-preview.20"
+    monkeypatch.setattr(compensation, "cohort_version_status", lambda value: (version, value == version))
+    terms = dict(
+        campaign_id="hostile-path-fixture", starts_at=start.isoformat(), ends_at=end.isoformat(),
+        budget_atomic="3000", operator_cap_atomic="1000", daily_unit_cap=10,
+        software_version=version, approval_ref="approval:isolated-test",
+    )
+    ids = [node[2] for node in nodes]
+    preview = await compensation.create_campaign(terms, ids)
+    assert preview["dry_run"] is True
+    await compensation.create_campaign(terms, ids, apply=True, expected_digest=preview["digest"])
+    return terms
+
+
+async def verify_allocation(engine, terms, monkeypatch, false_votes):
+    closed = datetime.fromisoformat(terms["ends_at"]) + timedelta(seconds=compensation.RECEIPT_GRACE_SECONDS + 1)
+    monkeypatch.setattr(compensation, "_now", lambda: closed)
+    campaign_id = terms["campaign_id"]
+    preview = await compensation.finalize_campaign(campaign_id)
+    units, amount = (0, 0) if false_votes else (3, 3000)
+    assert preview["reviewed_units"] == units
+    assert int(preview["allocated_atomic"]) == amount
+    assert int(preview["unallocated_atomic"]) == 3000 - amount
+    assert preview["excluded"] == ({"incorrect_task_score": 3} if false_votes else {})
+    result = await compensation.finalize_campaign(campaign_id, apply=True, expected_digest=preview["digest"])
+    assert result["status"] == "finalized" and result["sendable"] is False
+    assert await compensation.finalize_campaign(campaign_id, apply=True, expected_digest=result["digest"]) == result
+    async with engine.connect() as conn:
+        allocated = (await conn.execute(sa.select(tables.validator_compensation_allocations))).mappings().all()
+        assert len(allocated) == units
+        assert sum(int(row["amount_atomic"]) for row in allocated) == amount
+        assert await conn.scalar(sa.select(sa.func.count()).select_from(tables.validator_compensation_work)) == units
+        for table in (tables.validator_compensation_payments, tables.payouts, tables.payout_legs):
+            assert await conn.scalar(sa.select(sa.func.count()).select_from(table)) == 0
+
+
 @pytest.mark.parametrize("broken_worker", [False, True])
 @pytest.mark.parametrize("false_votes", [False, True])
 @pytest.mark.parametrize("capability", [
@@ -112,6 +166,7 @@ async def test_signed_quorum_trust_boundaries(rig, monkeypatch, broken_worker, f
     group_ids = set()
     async with httpx.AsyncClient(trust_env=False, timeout=40) as client:
         nodes = [await register(client, core, engine, capability) for _ in range(3)]
+        terms = await freeze_campaign(engine, nodes, monkeypatch)
         ws = await worker(core, worker_key, "openai-chat")
         try:
             for signer, account, node_id, headers in nodes:
@@ -189,11 +244,10 @@ async def test_signed_quorum_trust_boundaries(rig, monkeypatch, broken_worker, f
     assert group["quorum_outcome"] == submitted
     assert {row["probe_verdict"] for row in assignments} == {truthful}
     by_id = {row["id"]: row for row in assignments}
-    now = datetime.now(UTC)
     contract = {
         "scoring_policy": assignments[0]["scoring_policy_id"],
-        "starts_at": (now - timedelta(hours=1)).isoformat(),
-        "ends_at": (now + timedelta(hours=1)).isoformat(),
+        "starts_at": terms["starts_at"],
+        "ends_at": terms["ends_at"],
         "receipt_grace_seconds": 3600,
     }
     for vote in votes:
@@ -213,13 +267,9 @@ async def test_signed_quorum_trust_boundaries(rig, monkeypatch, broken_worker, f
     monkeypatch.setattr(validators, "_now", lambda: observed)
     async with AsyncSession(engine) as session:
         await validators._finalize_due_assignments(session)
-        for index, (_, _, node_id, _) in enumerate(nodes):
+        for _, _, node_id, _ in nodes:
             await session.execute(sa.update(tables.validators).where(tables.validators.c.id == node_id).values(
-                operator_group_id=f"opg_isolated_{index}", independence_status="verified",
-                independence_review_ref="test:synthetic-control-review",
-                qualification_started_at=now - timedelta(days=5),
-                independence_reviewed_at=now - timedelta(days=1),
-                independence_expires_at=observed + timedelta(days=1), last_heartbeat=observed,
+                last_heartbeat=observed,
             ))
         await session.commit()
         config = shadow.frozen_policy_config({"validator_baseline_version": "v0.1.0-preview.20"})
@@ -230,4 +280,5 @@ async def test_signed_quorum_trust_boundaries(rig, monkeypatch, broken_worker, f
         if aggregate:
             assert aggregate[0]["distinct_operator_count"] == 3
             assert aggregate[0]["outcome"] == truthful
+    await verify_allocation(engine, terms, monkeypatch, false_votes)
     assert await snapshot(engine, customer) == before

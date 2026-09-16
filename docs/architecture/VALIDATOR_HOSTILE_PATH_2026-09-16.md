@@ -33,6 +33,8 @@ Initial complete matrix passed on Python 3.13 and local PostgreSQL 14:
 | Same validator signs a contradictory second vote | HTTP 400; one vote per group retained |
 | Three false votes agreeing with one another | Stored as signed authoritative claims; raw quorum can say accepted |
 | Those false votes enter compensation work verification | All excluded as incorrect task score |
+| Those false votes enter complete frozen-campaign finalization | Zero work claims and zero allocation |
+| Truthful controls enter complete frozen-campaign finalization | Three work claims and the exact synthetic budget allocated; repeated finalization creates no duplicates |
 | Those false votes enter observation evidence selection | Zero supporting rows after finalization |
 | Truthful votes on correct or broken worker responses | Remain countable work and eligible observation support |
 
@@ -44,8 +46,12 @@ The finalization clock is accelerated only in the isolated parent test process.
 Operator review/qualification fields are synthetic fixtures so truthful controls
 can prove the observation selector is not merely rejecting everybody. This does
 not prove real operator independence, 72 hours of availability, or elapsed
-campaign qualification. Compensation is tested through its actual per-report
-verifier, not a finalized campaign allocation or a transfer. Required PostgreSQL
+campaign qualification. The isolated parent freezes a seven-day campaign before
+issuing probes, then advances its allocation clock past the receipt grace. Real
+preview/apply/finalization consumes the HTTP-created evidence and verifies
+persisted work and allocation rows. The synthetic budget is 3000 atomic units,
+with 1000 per operator; no payment rows or transfers are created. Neither the
+child Core clock nor stored assignment/vote timestamps are rewritten. Required PostgreSQL
 16 CI remains the release qualification gate; local PostgreSQL 14 is supplementary.
 
 ## Important Limitation
@@ -61,8 +67,8 @@ These tests prove defenses against specific false claims under an honest Core;
 they do not secure a malicious coordinator or establish independence through
 signatures alone. The no-model template solver passes the correct controls:
 this remains an explicit anti-cheating gap, not model-verification success.
-Copied logprobs, probe-aware model switching, real model substitution, media
-fidelity, and end-to-end compensation allocation require their separate studies.
+Copied logprobs, probe-aware model switching, real model substitution and media
+fidelity require their separate studies. Allocation proof is not transfer proof.
 
 No production policy, runtime, historical score or compensation contract changes
 are part of this study. The client GPT backend remains off-limits.

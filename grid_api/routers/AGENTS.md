@@ -367,9 +367,11 @@ expired or out-of-scope pilots return 503 without revealing membership.
   truncation, ignored stops and truthful/false-vote controls. Wrong bindings,
   missing scope, stolen assignments and premature/conflicting votes reject.
   Signed false quorums remain stored but cannot pass the real compensation work
-  verifier or observation support selector. Worker output, operator reviews and
-  accelerated finalization clock are fixtures; no GPU identity, independence,
-  campaign-allocation or payment proof is claimed.
+  verifier, frozen-campaign allocation or observation support selector. Actual
+  campaign preview/apply/finalization consumes HTTP-created evidence, excludes
+  false votes, allocates truthful controls and remains idempotent without creating
+  payments. Worker output, operator reviews and accelerated finalization clocks
+  are fixtures; no GPU identity, human independence or payment proof is claimed.
 - `tests/test_validator_anti_gaming.py` includes 20 paired randomized synthetic
   controls per malformed-tool, truncated-output and ignored-stop fault. Correct
   template replies pass and corrupted replies fail. These are scorer tests, not
