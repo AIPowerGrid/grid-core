@@ -45,9 +45,14 @@ validation, worker incentives, and trust boundaries.
   allocations or transfers.
   September 16 16:08 UTC coverage audit identifies stale tool-call groups as a
   sufficient blocker for 175 actual Qwen route observations. Candidate family
-  rotation preserves cooldown/quorum and is not deployed into the frozen run.
-  Isolated Mac 120B controls reproduce reasoning-only failures and document a
-  requested-low/rendered-medium mismatch; no client GPT service was used or changed.
+  rotation preserves cooldown/quorum; PR205 merged as b0d29b0e after full PG16
+  CI, but is not deployed into the frozen run. The 16:39UTC capture has175
+  observations/175successes and no observer errors, not detection proof.
+  Isolated Mac120B initial controls reproduce reasoning-only failures and a
+  requested-low/rendered-medium mismatch. Curated metadata plus neutral
+  repetition penalty recover F07/F27 locally; F03/F24 still refuse their tasks.
+  Alias-matched context restores128K; general worker fix is PR39, unreleased.
+  No historical verdicts were rewritten or client GPT service used/changed.
 - `VALIDATOR_FAILURE_AUDIT_2026-09-13.md` - retained failed-group diagnosis,
   versioned token-limit partial-marker correction and remaining task failures.
   Token-limit v2 is now deployed in Core d606e4d8 and preview.20. Bounded
