@@ -12,8 +12,14 @@ validation, worker incentives, and trust boundaries.
   triage limits, candidate shadow integration fixes and September 22 deliverables.
   The collector rejection follow-up binds durable error recording before Redis
   acknowledgement; it deployed as `d1aafcf4` with separate PostgreSQL/Redis CI
-  and production restore proof. F18 adds a third reproduced backend defect;
-  30 frozen cases remain root-cause inconclusive.
+  and production restore proof. F27 adds a fourth reproduced backend contract
+  defect; 29 frozen cases remain root-cause inconclusive. GPT stop repair has
+  private real-schema/native-capture replay evidence, not a production patch;
+  its empty visible answer remains separately unresolved. Active v0.3.8 already
+  forwards logprobs; the unused-checkout diagnostic attribution is withdrawn.
+  September16 preflight qualifies the exact-release code proofs but the cohort
+  gate remains critical and the observer remains off. A seven-day run cannot
+  now finish by September22; report that without altering campaign/grace dates.
   Not proof of completed adversarial qualification, observer activation,
   finalized allocations or transfers.
 - `VALIDATOR_FAILURE_AUDIT_2026-09-13.md` - retained failed-group diagnosis,
