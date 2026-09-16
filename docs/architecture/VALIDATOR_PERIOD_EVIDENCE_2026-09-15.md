@@ -223,6 +223,34 @@ has been established. Core's worker `maintenance` column gates reference/audit
 selection, not ordinary worker queue consumption; setting it is **not** a safe
 customer-job drain. Do not use health eviction/penalties as maintenance controls.
 
+#### GPT Compatibility Follow-Up
+
+An additional native-tokenizer/installed-serving study found a regression in
+the unreleased V4 candidate: six of 18 cases raised on auxiliary commentary,
+summary or confidence channels preceding the final answer, including ordinary
+requests without a stop string. The original backend returned a final answer
+for those no-stop full responses. This negative result is retained; the earlier
+50-case result did not establish universal compatibility.
+
+V5 maps analysis/final into their public response fields and leaves auxiliary
+channels unexposed, matching the installed streaming implementation. Native tool
+extraction and probability metadata are unchanged. The same 18-case oracle now
+passes, as do 72 expanded cases checking full-response reasoning with inclusion
+on/off, the original 50 serving/install cases, and six original captured-token
+replays. These are overlapping CPU studies, not new live generations.
+
+Adapter SHA-256:
+`7cac2bffbe44d7415d732127e9199e62d06804886b02aaeb7cbc35916890af05`.
+Revised hook:
+`4dbb1ce1c07798c7894a02454310a181b1fb4b2d89df952f7d76b04430e8389b`.
+The opt-in checksum-pinned launcher passed five boundary tests and an actual
+file-based preflight using the serving interpreter without initializing CUDA.
+Temporary test files were removed; the running service and its configuration
+were unchanged. **Still not deployed:** the prior maintenance approval covered
+DeepSeek, not GPT. Exact service override/rollback validation and the separately
+approved live canary remain. The original F27 visible-answer failure is still
+distinct from stop-marker exclusion, even after repair.
+
 ## Routing Experiment Defects
 
 Read-only production preflight found two integration defects:
@@ -320,6 +348,36 @@ model-possession claim, probe-aware-switching defense or economic authority
 follows from these results.
 
 ## September 22 Deliverables
+
+### Midperiod Compensation Readiness
+
+At `2026-09-16T02:54:30.337663Z`, a database-enforced read-only, repeatable-read
+snapshot checked the two existing campaigns using the exact deployed work
+verifier. All five frozen members had countable work:
+
+| Campaign | Members | Signed reports verified and countable to date |
+| --- | ---: | ---: |
+| Original | 3 | 82 |
+| Budget-linked supplement | 2 | 53 |
+
+The 135 reports passed signature, account/signer, assignment/nonce, evidence,
+target, task-score and timing checks. There were no exclusions, duplicate-work
+claims, daily-cap rejections or hard verification errors in this snapshot.
+Frozen membership and current reviews matched; the supplement's budget link
+revalidated. Both campaign commitments remained unchanged.
+
+This is **not** an allocation or a payment estimate. Correctly reporting a task
+failure can qualify as operator work, so 135 must not be described as 135 worker
+security successes. Allocation, work-claim, recipient and payment tables all
+contained zero rows at capture time. No finalization or transfer was attempted.
+Final eligibility and amounts must be recomputed after the actual campaign end
+and receipt grace, no earlier than **September 22, 2026 at 15:30 UTC**. Payment
+consent and transfer review remain separate.
+
+Private aggregate capture SHA-256:
+`daf1de15c76f8dd6b4e4986ab34b80170f2dd57a0c143d2c07e1bab4f8430863`.
+Production verifier source SHA-256:
+`469ec6512f6a8c2d37c3acae35dd988b23151192b4b4ff02a682b4440ff71660`.
 
 ### Collector Rejection Accounting
 
