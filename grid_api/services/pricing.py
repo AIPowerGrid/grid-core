@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 MICRO = 1_000_000  # micro-USD per USD (the ledger's integer unit)
-PRICE_BOOK_VERSION = "2026-08-29-a"
+PRICE_BOOK_VERSION = "2026-09-16-a"
 COMPARISON_AS_OF = "2026-08-29T00:00:00Z"
 COMPARISON_VALID_UNTIL = "2026-09-29T00:00:00Z"
 
@@ -67,6 +67,8 @@ PRICING: dict[str, ModelPrice] = {
     # Guarded launch pegs for Grid-hosted models without a stable public API
     # comparator. Re-peg from measured worker cost before the global live flip.
     "qwen3-27b":          ModelPrice(0.05, 0.15),
+    # Explicit launch peg, not a same-model competitor comparison.
+    "qwen38-flash-next-125b-nvfp4": ModelPrice(0.075, 0.30),
     "smollm-135m":        ModelPrice(0.005, 0.01),
     "deepseek-v4-pro":    half_of(0.40, 1.20),
     "minimax-2.5-fast":   half_of(0.60, 2.40),

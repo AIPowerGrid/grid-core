@@ -14,7 +14,7 @@ def test_public_catalog_exposes_exact_rates_and_narrow_current_comparisons():
     catalog = pricing.public_catalog(datetime(2026, 8, 29, 12, tzinfo=UTC))
 
     assert catalog["schema"] == "aipg.pricing.v1"
-    assert catalog["price_book"]["version"] == "2026-08-29-a"
+    assert catalog["price_book"]["version"] == "2026-09-16-a"
     assert catalog["comparison_evidence"]["status"] == "current"
     comparisons = {
         item["id"]: item for item in catalog["comparison_evidence"]["items"]
@@ -31,6 +31,16 @@ def test_public_catalog_exposes_exact_rates_and_narrow_current_comparisons():
     assert image["competitor_usd"] == 0.005
     assert image["savings_percent"] == 40.0
     assert image["source_url"].startswith("https://fal.ai/")
+
+
+def test_public_catalog_exposes_qwen_next_without_competitor_claim():
+    catalog = pricing.public_catalog(datetime(2026, 9, 16, 12, tzinfo=UTC))
+    row = next(item for item in catalog["price_book"]["models"]
+               if item["model"] == "qwen38-flash-next-125b-nvfp4")
+    assert row["rates"]["input_per_mtok_usd"] == 0.075
+    assert row["rates"]["output_per_mtok_usd"] == 0.30
+    assert all(item["model"] != row["model"]
+               for item in catalog["comparison_evidence"]["items"])
 
 
 def test_public_catalog_omits_stale_comparison_claims_but_keeps_grid_rates():

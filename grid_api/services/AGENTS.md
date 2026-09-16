@@ -642,6 +642,11 @@ content sanitization, and reward settlement.
 - Price coverage is modality-specific. A model entry with only a video rate is
   unpriced for image/text, and positive quotes round up to one micro-USD rather
   than silently becoming free.
+- Price book `2026-09-16-a` includes the explicit text-only launch peg for
+  `qwen38-flash-next-125b-nvfp4`: USD0.075 input and USD0.30 output per million
+  tokens. It is not a benchmark-backed competitor comparison or a wildcard
+  price for other Qwen models. Adding a rate does not bypass credit admission,
+  prove model availability, alter worker rewards, or update existing holds.
 - New monetary holds obey `off | allowlist | on`; an existing durable hold must
   still settle or refund after the operator disables new charging.
 - Charging allowlists select delegated/user work by canonical account. Service

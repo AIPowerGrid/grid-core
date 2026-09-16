@@ -299,6 +299,7 @@ async def test_authorize_media_wrong_modality_blocked(db, monkeypatch):
 
 def test_live_model_names_have_explicit_modality_prices():
     assert pricing.is_priced_for("deepseek-v4-flash-nvfp4", "text")
+    assert pricing.is_priced_for("qwen38-flash-next-125b-nvfp4", "text")
     assert pricing.is_priced_for("qwen3-27b", "text")
     assert pricing.is_priced_for("Smollm-135m", "text")
     assert pricing.is_priced_for("Krea 2 Turbo", "image")
@@ -311,6 +312,34 @@ def test_live_model_names_have_explicit_modality_prices():
 
 def test_positive_price_never_rounds_to_free():
     assert pricing.quote_text("Smollm-135m", 1, 0) == 1
+
+
+@pytest.mark.asyncio
+async def test_qwen_next_reserves_credits_in_live_mode(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 1_000_000, "topup", ref="qwen-seed")
+    auth = await credits.authorize_request(
+        {"account_id": aid}, "qwen38-flash-next-125b-nvfp4",
+        1_000_000, 1_000_000, "qwen-job",
+    )
+    assert auth["ok"] is True
+    assert auth["reserved"] == 375_000
+    assert await credits.get_balance(aid) == 625_000
+
+
+@pytest.mark.asyncio
+async def test_qwen_next_still_requires_sufficient_credit(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 1, "topup", ref="qwen-insufficient-seed")
+    auth = await credits.authorize_request(
+        {"account_id": aid}, "qwen38-flash-next-125b-nvfp4",
+        1_000_000, 1_000_000, "qwen-insufficient-job",
+    )
+    assert auth["ok"] is False
+    assert auth["status"] == "insufficient"
+    assert await credits.get_balance(aid) == 1
 
 
 @pytest.mark.asyncio

@@ -108,12 +108,13 @@ def _ledger_values(job_id):
 
 
 @pytest.mark.asyncio
-async def test_free_user_with_no_paid_balance_is_not_402d(db, live):
+@pytest.mark.parametrize("model", [PRICED, "qwen38-flash-next-125b-nvfp4"])
+async def test_free_user_with_no_paid_balance_is_not_402d(db, live, model):
     """THE go-live gate: free covers the whole reserve; zero paid balance; ok."""
-    cost = pricing.quote_text(PRICED, 100, 200)
+    cost = pricing.quote_text(model, 100, 200)
     fake = live(cap=cost + 10_000)
     aid, job = _aid(), str(uuid.uuid4())
-    out = await credits.authorize_request({"account_id": aid}, PRICED, 100, 200, job,
+    out = await credits.authorize_request({"account_id": aid}, model, 100, 200, job,
                                           record_reservation=True)
     assert out["ok"], out
     assert out["from_free"] == cost
