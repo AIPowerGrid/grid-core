@@ -23,6 +23,12 @@ validation, worker incentives, and trust boundaries.
   cleanup remain separate; GPT is still not deployed.
   GPT V5 repairs an additional predeployment auxiliary-channel regression and
   passes the retained protocol/native-trace studies; it is not a live canary.
+  GPT restart approval was withdrawn before installation: the client production
+  service is off-limits, unchanged, and requires isolated qualification instead.
+  September16 11:58UTC postrepair capture verifies44signed DeepSeek reports and
+  replays45assignment verdicts. New tool-call quorum finalized healthy; tool-chain
+  quorum accepted healthy, not yet finalized, with five reports each. A separate
+  stop group still failed; operator independence was not re-reviewed here.
   Read-only midperiod payment readiness verifies135signed work reports across
   five frozen members, with no allocation/recipient/payment records. Finalization
   remains gated until September22 15:30UTC; no early amounts are promised.
