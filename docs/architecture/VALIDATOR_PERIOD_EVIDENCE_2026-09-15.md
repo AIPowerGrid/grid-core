@@ -68,9 +68,11 @@ or the node scorer. Private capture SHA-256:
 `74deef8d7474266219d8fca65f003a89a0128020cc0ed1ad96afbc7791e6c52b`.
 These are two additional calls on one case, not an expanded failure cohort.
 
-The preserved original private ledger and its F18 addendum now label F01, F18
-and F29 `genuine_worker_defect` based on representative direct API reproduction;
-all three need backend repair and requalification. The other 30 are
+The preserved original private ledger and its F18/F27 addenda now label F01,
+F18, F27 and F29 `genuine_worker_defect` based on representative direct API
+reproduction. F27 has a confirmed stop-exclusion contract defect, but that does
+not fully explain its missing visible answer (see the GPT follow-up below).
+All four still need a live backend repair and requalification. The other 29 are
 `inconclusive` at root-cause level, with specific retained symptoms. None is
 labelled model fraud. This is preliminary triage, not completion of the
 reproduction and repair requirement.
@@ -82,7 +84,8 @@ These are root-cause labels, not changes to the retained failed task verdicts.
 | Cases | Classification | Next proof needed |
 | --- | --- | --- |
 | F01, F18, F29 | Genuine worker/backend API defect | Pinned serving/parser repair and full tool-chain regression |
-| F15, F27 | Inconclusive | Reasoning-aware stop controls without excusing empty visible output |
+| F27 | Genuine worker/backend stop-exclusion defect | Live stop repair; visible-answer task failure remains separately unresolved |
+| F15 | Inconclusive | Reasoning-aware stop controls without excusing empty visible output |
 | F03, F07, F24, F32 | Inconclusive | Separate visible-task failure from native-token budget compliance |
 | F11 | Inconclusive | Direct owned reference for the independently verified wrong integer |
 | F02, F04-F06, F08-F10, F12-F14, F16-F17, F19-F23, F25-F26, F28, F30-F31, F33 | Inconclusive | SmolLM reference/backend controls; malformed output is not proof of substitution |
@@ -106,6 +109,65 @@ evidence. Upstream reports describe similar
 but are not proof of the deployed parser's cause or a qualified patch.
 Actual runtime/launch access and pinned backend qualification remain necessary.
 Do not rewrite all customer requests, strip leaked markup, or weaken scoring.
+
+### GPT Backend And Active Worker Follow-Up
+
+The running bridge was identified through its actual process command and
+systemd override, not its working directory. It runs the immutable text-worker
+v0.3.8 release, which already forwards native logprobs. An initial private
+diagnostic had inspected an unused older checkout and incorrectly attributed
+missing transport to the deployed worker; that conclusion is withdrawn. Replay
+through the actual active handler preserves all 38 logprob-bearing frames in
+the retained three-backend capture. This is handler replay, not a new public
+Grid job or model-possession proof. No worker upgrade was performed for it.
+
+The owned GPT backend's active interpreter and launch flags establish vLLM
+0.10.2 with its native Harmony/OpenAI tool parser. Four original F27 controls
+(stream/full crossed with stop inclusion on/off) show the excluded marker in
+reasoning even when exclusion is requested. The engine trims its text output,
+but Harmony serving reconstructs output from untrimmed token IDs. Explicit
+stop-control capture:
+`364d2cca01b270ae4d9eaf613359e48d3900bacb1670090c70811d69337e9513`.
+
+A private, version/source-hash-pinned repair candidate now has these checks:
+
+| Evidence | Result and limit |
+| --- | --- |
+| Initial installed-generator stop fixtures | 12/24 contract checks failed before candidate integration |
+| V3 text/channel fixtures | 108 expanded cases and 24 original cases passed; synthetic engine outputs |
+| Real protocol V3 follow-up | 44/50 candidate cases passed; exposed lost echo prefixes and secondary error-stream exceptions |
+| V4 actual serving/protocol classes | 50/50 candidate cases passed, paired with 50 baseline cases; multiple choices/tools, channel transitions, echo, engine errors and cancellation |
+| Explicit in-process install/remove | Same 50 candidate cases passed; source mismatch and duplicate install rejected; original methods restored |
+| Two fresh model responses | 43/132 native tokens for stop/no-stop controls; both HTTP 200 |
+| Fresh native capture replay | 6/6 full/stream replay variants passed expected text and usage; replay chunk boundaries are synthetic |
+
+These are successive, overlapping studies, not independent sample counts to
+sum into a detection rate. The real-schema tests instantiate installed request,
+engine-output and response types without starting another engine or initializing
+CUDA. Their probability data are synthetic. The fresh response replays instead
+use genuine token IDs/probabilities captured from the owned live model.
+
+Fresh native capture:
+`a19d49fd66b22060b13f4ac9a67f1bb69898b74bd83c75eaf5cf42647fe9e3c5`.
+Full replay preserved 43/43 and 132/132 native probabilities; stream replay
+preserved the emitted native ordered subsequences, 41/43 and 125/132. Existing
+serving behavior omits some header/control tokens from streams. Do not call
+these streams lossless complete token traces or infer model identity from them.
+
+The repaired stop replay still has **zero visible answer characters**: the
+model encounters the stop during reasoning. Its no-stop control has 41 visible
+characters. Fixing marker leakage is not the same as passing the original task;
+no historical verdict has been changed or forgiven.
+
+**Not deployed.** The hook ran only in separate CPU test processes, never in
+the serving process. Its source hash is
+`5cea76717b40897c06fcf8bc59aaa851991b63bb30c4bf885b630590279b9c89`.
+The production backend was not restarted. A supervised live canary, a verified
+drain/rollback plan and remaining compatibility review precede any installation.
+The shared bridge loads backend configuration once; no per-backend hot-drain
+has been established. Core's worker `maintenance` column gates reference/audit
+selection, not ordinary worker queue consumption; setting it is **not** a safe
+customer-job drain. Do not use health eviction/penalties as maintenance controls.
 
 ## Routing Experiment Defects
 
@@ -135,9 +197,21 @@ The shadow correction passed required CI and deployed at 21:38:17 UTC; see the
 the separately held tool-choice candidate and single-replica capacity limit.
 Remaining gates: explicit baseline transition
 with upgrade overlap removed, protected HMAC secret, collector readiness and an
-unresolved stale-candidate critical alert. Diagnostic verification booleans were
-left false pending candidate proof review. Do not delete or reject an operator
-merely to clear the gate, or infer permission to activate routing.
+unresolved stale-candidate critical alert. The initial diagnostic verification
+booleans were false pending proof review; that code-proof review has since
+completed for exact deployed Core `d1aafcf4`. It does not satisfy the separate
+runtime/cohort gates. Do not delete or reject an operator merely to clear the
+gate, or infer permission to activate routing.
+
+At `2026-09-16T00:05:31.746997Z`, a fresh database-enforced read-only preflight
+still found five reviewed participating operators and 47 eligible finalized
+groups with the proposed preview.20 baseline. Migration, PostgreSQL concurrency,
+replay and no-side-effect verification booleans were true, bound to exact
+deployed code and CI evidence. The proposed start evaluation failed only
+`cohort_monitor_clear`; the cohort remained critical. Production still has
+baseline preview.13, the old upgrade overlap, observer disabled and no observer
+HMAC configured. Code proof is not runtime activation. The verification artifact
+hash is `40a18042b1b60d08494a5fc14a1f6e19f7d79adb3ab9034d753b3643ce89502e`.
 
 ## Adversarial Controls
 
@@ -237,6 +311,9 @@ qualifies the held tool-choice proposal.
   independence, recommendations and actual outcomes without changing routing.
   A later start means a later finish: report partial evidence honestly instead
   of shortening, extending silently or backdating the frozen experiment.
+  As of September 16 UTC the run has not started, so its full seven-day outcome
+  cannot be available for the September 22 report. That report must disclose
+  the shortfall; it does not move the compensation campaign's end or grace.
 - Publish coverage, corroborated findings, fixes, disagreements, evidence gaps
   and reviewed allocation results. Allocations cannot finalize before campaign
   end plus receipt grace. Consent and transfers remain separate; never call a
