@@ -39,9 +39,21 @@ through all 12 current families, per-worker/model isolation and five concurrent
 PostgreSQL pollers. Scheduling attempts does not ensure a finalized independent
 quorum; unsupported/offline operators and reference shortages remain real gaps.
 
+Merged in [PR205](https://github.com/AIPowerGrid/grid-core/pull/205) as
+`b0d29b0e`, after 2136 full-suite tests passed (12 skipped), PostgreSQL 16 CI,
+and the separate Core/Console/node compensation handoff passed. This validates
+the candidate implementation, not independent production coverage.
+
 **Not deployed.** Do not change the frozen run's implementation or widen its
 evidence window to obtain positive recommendations. Include this coverage
 shortage in the period report and qualify the fix for a subsequent run.
+
+The 16:39 UTC read-only follow-up contains 175 route observations and 175
+successful completions, with 33 of 34 expected capacity slots recorded,
+no observer errors, replay failures or mutations, and a drained transport.
+There are still no observed job failures from which to estimate detection.
+Capture SHA-256:
+`71f35de84478a79e2c3a44eb289b8c0deed326ef196f163dd08075bc9be3b77b`.
 
 ## September 16: Isolated Mac 120B Controls
 
@@ -50,8 +62,8 @@ checksum-verified GPT-OSS-120B MXFP4 GGUF in LM Studio. Loaded and advertised
 context is 131072. A 33664-token prompt passed exact random-record retrieval;
 this is not full-128K qualification. No client production GPT service was used.
 
-Twelve local controls replay F03/F07/F24/F27 across original streaming/full and
-requested-low-reasoning variants. The three short-budget tasks still exhaust
+The initial twelve local controls replayed F03/F07/F24/F27 across original
+streaming/full and requested-low-reasoning variants. The three short-budget tasks exhausted
 their budget in reasoning without a visible answer. The stop task has no visible
 answer, but correctly excludes its stop marker. Different engine/quantization
 means these are reference controls, not a reclassification of historical causes.
@@ -68,12 +80,59 @@ Responses logprobs survived an unmodified released-worker recording-socket
 relay and the actual Core reader; Chat Completions logprobs were absent. This
 is not a live validator assignment or a calibrated model-substitution detector.
 
+### Curated Configuration And Retest
+
+The same verified weights were subsequently loaded through LM Studio's curated
+model metadata, with a per-model repetition penalty of 1.0. A new marked
+capture confirms rendered `Reasoning: low` and valid lowercase tool arguments.
+Because the curated default is itself low, this is not proof that per-request
+reasoning overrides work. No global preset or client production service changed.
+
+A paired local penalty control before that reload returned invalid uppercase
+arguments at 1.1 and valid lowercase arguments at 1.0. After the curated reload,
+all five repeated controls passed, including 1.1. Template/default interaction
+matters; these observations do not isolate a universal repetition-penalty cause.
+
+All twelve frozen-case replays were retained again without changing the
+released scorer or original task budgets:
+
+| Case | Three retest variants | Interpretation on this owned backend |
+| --- | --- | --- |
+| F03, F24 | Failed; visible refusals, normal stop | Repetitive-output task refused, not proof of token-limit violation or substitution |
+| F07 | Healthy; length termination with visible output | Original local reasoning-only failure no longer reproduced |
+| F27 | Healthy; correct visible answer, no stop marker | Original local empty-answer failure no longer reproduced |
+
+These are four cases with correlated variants, not twelve independent trials.
+Two configuration factors changed; do not attribute recovery to one alone or
+rewrite the historical production classifications. The remaining refusals are
+task/model calibration evidence, not a basis for claiming a dishonest worker.
+
+An additional worker defect was reproduced: a loaded-instance API alias that
+differs from the LM Studio catalog key causes v0.3.9 to advertise its 8192
+fallback despite a 131072 loaded context. Aligning local identifiers restored
+131072 registration at 16:34 UTC without modifying the released worker.
+The general candidate fix is
+[text-worker PR39](https://github.com/AIPowerGrid/grid-text-worker/pull/39),
+with alias-aware loaded-instance detection and conservative multi-instance
+bounds. It is not a published binary or a production Core change.
+
+The post-fix smoke retained two correct arithmetic responses, four valid
+required/auto tool calls, and fourteen native Responses logprob positions
+unchanged through the worker relay and Core reader. Named object-form tool
+selection still returns HTTP 400 and Chat logprobs remain absent. This is still
+not general tool qualification, a live validator assignment or model identity.
+
 Private evidence SHA-256:
 
 - Frozen controls manifest: `02b99d9848a6a41a6ebc46b203192e4f5210d9c6ee5dda02fc9771c217cd22bf`.
 - Rendered tool request: `f57b10a8d5b7cc6dc95dd918afeae7467bc9dda95349a7e1f40515b7090d61f8`.
 - 33K retrieval: `d3fc778706dd05e5402af3cff936dda0e1652a4d4817345252851d9b5bff753a`.
 - Released-worker relay: `b4849748cec1192785ce04e12f50404fa1b9b9814dbfa926c23b4c098b850369`.
+- Curated rendered request: `56a15780f2fe73ebdc16144c5f2c06e2dca70a0059aa2d3ea07e95dab7bcac66`.
+- Original penalty-control manifest: `44b384f29808096bec363f04be9162cb0ec59ff8eee1e030e4d19ac4fb5a28a7`.
+- Curated penalty-control manifest: `511335b268484c1dcdebb986b722fe10d260395be27f86f1f2a83702b42ca2bb`.
+- Frozen-case retest manifest: `a1f8668b5a62d4c2a439d9a336374834bf87be0c23daaff6b9d5f62b7c330cf7`.
+- Post-identifier-fix smoke: `542cc2ee23deea65a68cf7becabf334e5a6462c9039b7d13e5bc6e679e9cfffb`.
 
 ## Frozen Failure Cohort
 
