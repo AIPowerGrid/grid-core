@@ -21,6 +21,11 @@ validation, worker incentives, and trust boundaries.
   and complete F29 direct stream/full checks, without changing historical scores.
   Fresh independent confirmation, live abort proof and duplicate-import warning
   cleanup remain separate; GPT is still not deployed.
+  GPT V5 repairs an additional predeployment auxiliary-channel regression and
+  passes the retained protocol/native-trace studies; it is not a live canary.
+  Read-only midperiod payment readiness verifies135signed work reports across
+  five frozen members, with no allocation/recipient/payment records. Finalization
+  remains gated until September22 15:30UTC; no early amounts are promised.
   September16 preflight qualifies the exact-release code proofs but the cohort
   gate remains critical and the observer remains off. A seven-day run cannot
   now finish by September22; report that without altering campaign/grace dates.
