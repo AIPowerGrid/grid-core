@@ -2,8 +2,11 @@
 
 Status: **interim investigation, not completed security qualification**.
 Deadline: September 22, 2026. Production now runs Core `d1aafcf4` / Alembic
-`0042`, with routing observation, model fidelity, media validation and worker
-penalty authority disabled. Compensation campaigns are separate contracts;
+`0042`. Observation-only routing analysis started September 16 at 13:49:46 UTC;
+actual routing changes, model-fidelity authority, media validation and worker
+penalty authority remain disabled. See the
+[activation record](../../deploy/VALIDATOR_SHADOW_START_2026_09_16.md).
+Compensation campaigns are separate contracts;
 this audit changes neither their membership nor budgets or historical votes.
 
 ## Frozen Failure Cohort
@@ -464,9 +467,10 @@ qualifies the held tool-choice proposal.
   independence, recommendations and actual outcomes without changing routing.
   A later start means a later finish: report partial evidence honestly instead
   of shortening, extending silently or backdating the frozen experiment.
-  As of September 16 UTC the run has not started, so its full seven-day outcome
-  cannot be available for the September 22 report. That report must disclose
-  the shortfall; it does not move the compensation campaign's end or grace.
+  The run started September 16 at 13:49:46 UTC and ends September 23 at
+  13:49:46 UTC. Its full seven-day outcome cannot be available for the
+  September 22 report. That report must disclose partial coverage; this does
+  not move the compensation campaign's end or grace.
 - Publish coverage, corroborated findings, fixes, disagreements, evidence gaps
   and reviewed allocation results. Allocations cannot finalize before campaign
   end plus receipt grace. Consent and transfers remain separate; never call a
