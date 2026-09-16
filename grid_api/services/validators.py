@@ -2481,6 +2481,7 @@ async def issue_assignments(
                     await session.execute(
                         sa.select(
                             probe_groups_t.c.model,
+                            probe_groups_t.c.capability,
                             sa.func.max(probe_groups_t.c.created).label("last_created"),
                         )
                         .where(
@@ -2488,14 +2489,20 @@ async def issue_assignments(
                             probe_groups_t.c.modality == modality,
                             probe_groups_t.c.model.in_(candidate_models),
                         )
-                        .group_by(probe_groups_t.c.model)
+                        .group_by(probe_groups_t.c.model, probe_groups_t.c.capability),
                     )
                 ).all()
-                last_created = {
-                    str(row[0]): _aware(row[1]).timestamp()
-                    for row in coverage_rows
-                    if row[1] is not None
-                }
+                last_created: dict[str, float] = {}
+                last_family_created: dict[tuple[str, str], float] = {}
+                for row in coverage_rows:
+                    if row[2] is None:
+                        continue
+                    created_at = _aware(row[2]).timestamp()
+                    row_model = str(row[0])
+                    last_created[row_model] = max(
+                        last_created.get(row_model, float("-inf")), created_at,
+                    )
+                    last_family_created[(row_model, str(row[1]))] = created_at
                 advertised_order = {name: index for index, name in enumerate(models)}
                 ordered_models = sorted(
                     candidate_models,
@@ -2518,7 +2525,18 @@ async def issue_assignments(
                     break
                 if model is None:
                     continue
-                challenge = _make_text_challenge(secrets.choice(eligible_challenge_kinds))
+                # Rotate issued attempts, not successful verdicts, so one broken
+                # lane cannot starve others. Ties and challenge values stay random.
+                family_ages = {
+                    kind: last_family_created.get(
+                        (model, _TEXT_CHALLENGE_CAPABILITIES[kind]), float("-inf"),
+                    )
+                    for kind in eligible_challenge_kinds
+                }
+                oldest = min(family_ages.values())
+                challenge = _make_text_challenge(secrets.choice(tuple(
+                    kind for kind, created_at in family_ages.items() if created_at == oldest
+                )))
                 group_id = f"prg_{uuid4().hex}"
                 batch_contract = {
                     "schema": "aipg.validator.text.batch.v1",

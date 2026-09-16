@@ -9,6 +9,72 @@ penalty authority remain disabled. See the
 Compensation campaigns are separate contracts;
 this audit changes neither their membership nor budgets or historical votes.
 
+## September 16: Actual Traffic And Coverage Gap
+
+The 15:59 UTC observer capture contains 130 actual route observations matched to
+130 successful jobs, with no observer errors or replay failures. All are
+`qwen3-27b` tool-call requests with insufficient eligible evidence, not advice
+to avoid a worker. A separate database-enforced read-only audit at 16:08 UTC
+examined 175 such observations: every one had zero fresh matching finalized
+groups and an empty frozen evidence snapshot. The latest matching group had
+finalized September 15 at 13:47 UTC, outside their frozen 24-hour window.
+
+Freshness is therefore a sufficient blocker, but this aggregate query does not
+prove that independent-review/signature gates would otherwise pass. All 130
+matched outcomes in the first capture succeeded; these observations cannot
+estimate failure detection or a routing benefit.
+
+Private evidence SHA-256:
+
+- Observer: `75afc7d34ff2e0af0cf5ad890ced788529535afa7301bc914ace77d0f3475196`.
+- Coverage audit: `7be65244f501403b3a0fd664751fd3aa1499f19b251bb6a34cf2643656f2de40`.
+
+The current allocator selects families uniformly at random behind the per-model
+cooldown; that permits repeated families while another ages out. A regression
+using an adverse deterministic random draw reproduced this starvation. The
+candidate fix rotates never-issued/least-recently-issued eligible capabilities
+within each worker/model, retaining random ties, randomized task contents,
+existing locks, cooldowns, and shared groups. Regressions exercise two cycles
+through all 12 current families, per-worker/model isolation and five concurrent
+PostgreSQL pollers. Scheduling attempts does not ensure a finalized independent
+quorum; unsupported/offline operators and reference shortages remain real gaps.
+
+**Not deployed.** Do not change the frozen run's implementation or widen its
+evidence window to obtain positive recommendations. Include this coverage
+shortage in the period report and qualify the fix for a subsequent run.
+
+## September 16: Isolated Mac 120B Controls
+
+An owned Mac now runs the official text-worker v0.3.9 source against a
+checksum-verified GPT-OSS-120B MXFP4 GGUF in LM Studio. Loaded and advertised
+context is 131072. A 33664-token prompt passed exact random-record retrieval;
+this is not full-128K qualification. No client production GPT service was used.
+
+Twelve local controls replay F03/F07/F24/F27 across original streaming/full and
+requested-low-reasoning variants. The three short-budget tasks still exhaust
+their budget in reasoning without a visible answer. The stop task has no visible
+answer, but correctly excludes its stop marker. Different engine/quantization
+means these are reference controls, not a reclassification of historical causes.
+
+A separately nonce-marked local request captured the actual rendered template:
+it contains `Reasoning: medium` despite requested `reasoning_effort=low`.
+The tool schema correctly contains lowercase `b`; the API returns uppercase
+`B` in its arguments. This rules out schema capitalization in the rendered input
+for that request, but does not separate model output from backend parser faults.
+The request for low reasoning is not evidence it was applied. Named object-form
+tool selection also returns HTTP 400. This node is not a qualified tool oracle.
+
+Responses logprobs survived an unmodified released-worker recording-socket
+relay and the actual Core reader; Chat Completions logprobs were absent. This
+is not a live validator assignment or a calibrated model-substitution detector.
+
+Private evidence SHA-256:
+
+- Frozen controls manifest: `02b99d9848a6a41a6ebc46b203192e4f5210d9c6ee5dda02fc9771c217cd22bf`.
+- Rendered tool request: `f57b10a8d5b7cc6dc95dd918afeae7467bc9dda95349a7e1f40515b7090d61f8`.
+- 33K retrieval: `d3fc778706dd05e5402af3cff936dda0e1652a4d4817345252851d9b5bff753a`.
+- Released-worker relay: `b4849748cec1192785ce04e12f50404fa1b9b9814dbfa926c23b4c098b850369`.
+
 ## Frozen Failure Cohort
 
 At `2026-09-15T20:48:06.929381Z`, a repeatable-read, read-only PostgreSQL

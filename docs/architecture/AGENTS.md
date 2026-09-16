@@ -43,6 +43,11 @@ validation, worker incentives, and trust boundaries.
   coverage without altering campaign/grace dates. Startup checks are not
   proof of completed collection, adversarial qualification, finalized
   allocations or transfers.
+  September 16 16:08 UTC coverage audit identifies stale tool-call groups as a
+  sufficient blocker for 175 actual Qwen route observations. Candidate family
+  rotation preserves cooldown/quorum and is not deployed into the frozen run.
+  Isolated Mac 120B controls reproduce reasoning-only failures and document a
+  requested-low/rendered-medium mismatch; no client GPT service was used or changed.
 - `VALIDATOR_FAILURE_AUDIT_2026-09-13.md` - retained failed-group diagnosis,
   versioned token-limit partial-marker correction and remaining task failures.
   Token-limit v2 is now deployed in Core d606e4d8 and preview.20. Bounded
