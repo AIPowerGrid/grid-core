@@ -9,7 +9,8 @@ validation, worker incentives, and trust boundaries.
 
 - `VALIDATOR_HOSTILE_PATH_2026-09-16.md` - isolated real HTTP/WS/Redis/PostgreSQL
   signed-claim attack matrix. Separates stored false quorum from compensation
-  rejection and observation-support exclusion; scripted controls and synthetic
+  rejection through frozen-campaign finalization and observation-support
+  exclusion; scripted controls and synthetic
   operator reviews do not establish model fidelity or human independence.
 - `VALIDATOR_PERIOD_EVIDENCE_2026-09-15.md` - frozen 33-group/165-assignment
   audit, released-scorer and signature replay, direct owned-backend controls,
