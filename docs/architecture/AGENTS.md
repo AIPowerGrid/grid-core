@@ -17,6 +17,10 @@ validation, worker incentives, and trust boundaries.
   private real-schema/native-capture replay evidence, not a production patch;
   its empty visible answer remains separately unresolved. Active v0.3.8 already
   forwards logprobs; the unused-checkout diagnostic attribution is withdrawn.
+  September16 approved DeepSeek-only parser deployment passes original F01/F18
+  and complete F29 direct stream/full checks, without changing historical scores.
+  Fresh independent confirmation, live abort proof and duplicate-import warning
+  cleanup remain separate; GPT is still not deployed.
   September16 preflight qualifies the exact-release code proofs but the cohort
   gate remains critical and the observer remains off. A seven-day run cannot
   now finish by September22; report that without altering campaign/grace dates.
