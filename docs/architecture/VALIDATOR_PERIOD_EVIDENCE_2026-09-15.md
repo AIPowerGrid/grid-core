@@ -164,6 +164,35 @@ Remaining limitations:
 - Without explicit returned token IDs, installed streaming buffering can omit
   logprob frames; replay proves an unchanged ordered subset, not lossless traces.
 
+#### Fresh Postrepair Validator Evidence
+
+A read-only snapshot at `2026-09-16T11:58:55.640995Z` retained nine new DeepSeek
+groups created after the repair: 45 completed assignments and 44 authoritative
+signed reports. Released preview.20 replay verified every available signature
+and signed binding, all 45 response commitments and assignment seals, and all
+45 stored verdicts. One failed stop assignment had no signed report at capture;
+it must not be counted as a verified validator submission.
+
+The new tool-call group finalized healthy with five healthy signed reports.
+The new two-stage tool-chain group was accepted healthy with five healthy
+signed reports, but was **not yet finalized**. Each group has five distinct
+validator IDs/accounts and one target worker. These are fresh production
+assignment results corroborating the repaired tool paths, beyond direct
+maintainer requests. This replay did not re-establish operator independence
+or cryptographically attest the serving backend's loaded artifact.
+
+Overall, seven groups finalized healthy, one finalized failed and one was
+accepted healthy. The failed stop-sequence group contains five empty visible
+outputs and four signed failure reports. Preserve that failure: tool repair
+does not establish stop-task correctness or an all-capability clean bill of
+health. Fresh groups do not enter the frozen F01-F33 denominator or rewrite
+its historical failures. These small synthetic-task samples are not a general
+fraud-detection rate, natural-workload reliability estimate or model identity
+proof.
+
+Private capture SHA-256:
+`e31d380d17fdb0a4c80e54199edd4d75366b461d8f8d3b8ef8c0de6a093f3b72`.
+
 ### GPT Backend And Active Worker Follow-Up
 
 The running bridge was identified through its actual process command and
@@ -213,8 +242,8 @@ model encounters the stop during reasoning. Its no-stop control has 41 visible
 characters. Fixing marker leakage is not the same as passing the original task;
 no historical verdict has been changed or forgiven.
 
-**Not deployed.** The hook ran only in separate CPU test processes, never in
-the serving process. Its source hash is
+**Not deployed.** The original hook ran only in separate CPU test processes,
+never in the serving process. Its historical source hash is
 `5cea76717b40897c06fcf8bc59aaa851991b63bb30c4bf885b630590279b9c89`.
 The production backend was not restarted. A supervised live canary, a verified
 drain/rollback plan and remaining compatibility review precede any installation.
@@ -246,10 +275,22 @@ Revised hook:
 The opt-in checksum-pinned launcher passed five boundary tests and an actual
 file-based preflight using the serving interpreter without initializing CUDA.
 Temporary test files were removed; the running service and its configuration
-were unchanged. **Still not deployed:** the prior maintenance approval covered
-DeepSeek, not GPT. Exact service override/rollback validation and the separately
-approved live canary remain. The original F27 visible-answer failure is still
-distinct from stop-marker exclusion, even after repair.
+were unchanged. A temporary systemd replica also passed original, proposed
+override and restored-configuration syntax checks, preserving every model/server
+argument. This is not a live restart or rollback proof. The original F27
+visible-answer failure remains distinct from stop-marker exclusion, even after
+repair.
+
+**Deployment prohibited on the client service.** The operator withdrew the
+subsequent GPT restart approval before any installation, identifying this as
+client production. Only an empty remote staging directory had been created;
+it was removed and SSH closed. No package transfer, privileged command, unit
+change, daemon reload, restart or live canary occurred. Final read-only
+inspection confirmed the original process start time and no service drop-ins.
+Keep this fix undeployed there. Further runtime qualification belongs on an
+isolated non-client backend; a future client-service change would require new,
+explicit authorization identifying that service and its interruption. An
+automatic goal continuation is not such authorization.
 
 ## Routing Experiment Defects
 
