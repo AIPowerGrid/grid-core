@@ -72,7 +72,9 @@ The preserved original private ledger and its F18/F27 addenda now label F01,
 F18, F27 and F29 `genuine_worker_defect` based on representative direct API
 reproduction. F27 has a confirmed stop-exclusion contract defect, but that does
 not fully explain its missing visible answer (see the GPT follow-up below).
-All four still need a live backend repair and requalification. The other 29 are
+DeepSeek's three cases now have a live parser repair and direct requalification
+(see the September 16 follow-up); fresh independent confirmation remains open.
+GPT's repair is not deployed. The other 29 are
 `inconclusive` at root-cause level, with specific retained symptoms. None is
 labelled model fraud. This is preliminary triage, not completion of the
 reproduction and repair requirement.
@@ -83,7 +85,7 @@ These are root-cause labels, not changes to the retained failed task verdicts.
 
 | Cases | Classification | Next proof needed |
 | --- | --- | --- |
-| F01, F18, F29 | Genuine worker/backend API defect | Pinned serving/parser repair and full tool-chain regression |
+| F01, F18, F29 | Genuine worker/backend API defect | Live repair and direct original-task regressions pass; fresh independent validator confirmation pending |
 | F27 | Genuine worker/backend stop-exclusion defect | Live stop repair; visible-answer task failure remains separately unresolved |
 | F15 | Inconclusive | Reasoning-aware stop controls without excusing empty visible output |
 | F03, F07, F24, F32 | Inconclusive | Separate visible-task failure from native-token budget compliance |
@@ -107,8 +109,60 @@ These mode changes are diagnostics, not retrospective repairs of named-choice
 evidence. Upstream reports describe similar
 [streaming markup leakage](https://github.com/vllm-project/vllm/issues/40801),
 but are not proof of the deployed parser's cause or a qualified patch.
-Actual runtime/launch access and pinned backend qualification remain necessary.
+The later runtime inspection and repair below supersede the access blocker.
 Do not rewrite all customer requests, strip leaked markup, or weaken scoring.
+
+### DeepSeek Live Parser Repair: September 16
+
+Inspection of the actual serving image identified two parser problems: native
+DSML tool output was routed through generic named/required JSON handling, and
+incomplete tool markup leaked into visible content. Installed serving-generator
+tests also exposed terminal-chunk corruption of complete multiple tool calls.
+A source/version-pinned plugin repairs these paths without changing request
+budgets, tool selection, model weights or expected-answer commitments. Its
+terminal handling override applies only to the selected candidate parser class.
+
+After explicit approval of a brief DeepSeek interruption, only that backend
+container was recreated at 02:19 UTC. The original image was retained; the
+reviewed configuration difference consists of parser selection, plugin flag and
+read-only plugin mount. Health returned 200 after 286.8 seconds. No shared worker
+bridge, GPT/Qwen backend, Core, scoring policy or economic control was changed.
+Private configuration backups and rollback procedure were recorded; rollback
+was not executed and is not claimed production-tested.
+
+| Qualification | Result and limit |
+| --- | --- |
+| Native parser compatibility | 38/38 synthetic text cases passed |
+| Actual serving boundary replay | Same oracle improved from 22/24 to 24/24 candidate cases; baseline 4/24 |
+| Packaged plugin | 24 boundary cases plus registration, source mismatch, selection and cleanup checks passed, CPU-only |
+| Live F18 stream/full | Both original task contracts passed; native output-token IDs and logprob IDs aligned with usage (149 and 134 tokens respectively) |
+| Live multiple tools and ordinary text | Two additional bounded calls passed |
+| Live original F01 and F29 | Single call and full two-stage chain passed in both stream/full modes, six HTTP calls, unchanged challenge commitments |
+
+These overlapping checks are not independent sample counts. The live calls used
+our configured backend directly, not public assignment/quorum or paid Grid jobs.
+They created no Grid reward/credit records and do not rewrite the frozen failed
+verdicts. New authoritative evidence must come from fresh assignments.
+
+Deployed plugin SHA-256:
+`477ccd5b8cca73839228b80432e2056aef17476a80e52039732e38bcb0020e7e`.
+Initial live capture:
+`9ae4eb2ffe32234b4d25a926fbd11099a1106f8c1ee1c5359b61c121a05be4d1`.
+Original single-call/chain follow-up:
+`b28fd01746ab7173f905dbfe21b85a1d19ed365185e87e353b48bf375e5035ca`.
+
+Remaining limitations:
+
+- The CLI loads the plugin twice; the second import logs duplicate-registration
+  rejection. Exact loader tests verified the first registration and scoped
+  terminal policy remain intact. Startup is functional, not warning-free.
+- Stream-disconnect experiments returned to idle but did not establish a
+  request-specific engine abort. Do not count idle metrics as cancellation proof.
+- Whole reasoning-plus-tools in one synthetic batch loses reasoning in both
+  baseline and candidate. That separate generic handoff behavior is not fixed;
+  its live occurrence rate is unknown. Tested live responses retained reasoning.
+- Without explicit returned token IDs, installed streaming buffering can omit
+  logprob frames; replay proves an unchanged ordered subset, not lossless traces.
 
 ### GPT Backend And Active Worker Follow-Up
 
