@@ -2,10 +2,14 @@
 
 ## Deployed State
 
-Core now selects immutable `3384c223e268e9850177f68139e35768de04c5f7`,
+The earlier September17 rollout selected immutable `3384c223e268e9850177f68139e35768de04c5f7`,
 Alembic `0042`. Public health and pricing were verified at 01:55:23 UTC,
 with healthy Redis and all nine workers reconnected. This supersedes the
 `d1aafcf4` runtime, not the frozen compensation contracts or payout controls.
+
+The later 22:25 UTC [standard text tariff rollout](DEFAULT_TEXT_PRICING_2026_09_17.md)
+supersedes this runtime and its unknown-text-model pricing posture. The canary
+and partial-observation evidence below remain historical facts, not a new run.
 
 PR #207 adds the exact text price for `qwen38-flash-next-125b-nvfp4`:
 $0.075 input / $0.30 output per million tokens. It is an explicit launch peg,

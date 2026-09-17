@@ -7,6 +7,10 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Ownership
 
+- `DEFAULT_TEXT_PRICING_2026_09_17.md` - live immutable `e3741222` standard
+  nonzero text tariff, explicit-rate precedence, frozen hold rates, additive
+  discovery metadata, backup/restore and drained rollout evidence. No reward,
+  media-pricing, compensation or observation-policy changes.
 - `CUSTOMER_PRICING_ROLLOUT_2026_09_17.md` - immutable `3384c223` Qwen pricing
   fix, real Chat billing canary, preserved cancelled/partial observation and
   replacement start blocked by stale-candidate health; no compensation changes.
@@ -73,7 +77,14 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
-- Core `3384c223` / Alembic `0042` is live as of September17 01:55 UTC.
+- Core `e3741222` / Alembic `0042` is live as of September17 22:25 UTC.
+  New concrete text names without an explicit price use the published standard
+  tariff; existing model/alias prices and held rates take precedence. Unpriced
+  media remains denied. Exact-main CI, fresh restore, drained restart, seven
+  recovered workers, public metadata and read-only reconciliation passed.
+  Charging, daily free spending, payout controls, compensation contracts and
+  zero-active-observation posture are unchanged. See the standard-tariff record.
+- Earlier Core `3384c223` / Alembic `0042` went live September17 01:55 UTC.
   Exact-main CI, production restore, drained cutover and a real paid Qwen Chat
   canary passed. Charging, daily free spending, compensation contracts and
   worker-payout controls are unchanged. The owner approved closing the previous

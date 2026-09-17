@@ -102,7 +102,8 @@ PRICING: dict[str, ModelPrice] = {
 }
 
 # Public recipe names and worker variants share the canonical model's price.
-# Aliases are explicit so an arbitrary renamed worker model still fails closed.
+# Aliases inherit reviewed rates; other text names use the standard tariff.
+# Unknown media names still require an explicit price.
 PRICE_ALIASES: dict[str, str] = {
     "deepseek-v4-flash-nvfp4": "deepseek-v4-flash",
     "ltx director 2.0": "ltx-2.3",
