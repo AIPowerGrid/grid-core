@@ -7,6 +7,9 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Ownership
 
+- `CUSTOMER_PRICING_ROLLOUT_2026_09_17.md` - immutable `3384c223` Qwen pricing
+  fix, real Chat billing canary, preserved cancelled/partial observation and
+  replacement start blocked by stale-candidate health; no compensation changes.
 - `VALIDATOR_SHADOW_START_2026_09_16.md` - actual observation-only activation
   on unchanged `d1aafcf4`, fresh start-gate/restore proof, guarded aborted
   attempts, fixed September23 end and unchanged client-backend/economic state.
@@ -70,10 +73,19 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Core `3384c223` / Alembic `0042` is live as of September17 01:55 UTC.
+  Exact-main CI, production restore, drained cutover and a real paid Qwen Chat
+  canary passed. Charging, daily free spending, compensation contracts and
+  worker-payout controls are unchanged. The owner approved closing the previous
+  observation as partial for this customer fix: it was cancelled at 01:54:42 UTC.
+  Preserve its records/HMAC. The replacement did not start: one stale candidate
+  blocks the fresh cohort gate. Do not backdate, bypass gates, extend earning
+  dates or claim a running observation. See the September17 rollout record.
 - On September16 at 13:49:46 UTC, `shadow_20260916_observation_v4` started on
   unchanged `d1aafcf4` / `0042`, with preview.20 baseline and no upgrade overlap.
   The observer flag is on; routing and economic authority remain absent.
-  Preserve the protected run HMAC and exact implementation. Scheduled end is
+  Preserve the protected run HMAC and exact implementation for its evidence.
+  The September17 closure above supersedes its active-run posture. Its original scheduled end was
   September23 13:49:46 UTC, separate from compensation's September22 end/grace.
   Client GPT backend changes/restarts/canaries are expressly out of scope.
 - Core `d1aafcf4` / Alembic `0042` was selected September 15 at 22:27:13 UTC.
