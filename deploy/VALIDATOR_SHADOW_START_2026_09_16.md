@@ -1,5 +1,15 @@
 # Validator Observation Activation: September 16, 2026
 
+## September 17 Disposition
+
+The owner approved prioritizing the Qwen customer pricing fix. This run was
+closed as cancelled/partial at `2026-09-17T01:54:42.299344+00:00`, not completed.
+Core now runs `3384c223`; original evidence and the protected run HMAC remain
+preserved. Its replacement has not started because a stale candidate blocks
+the fresh cohort gate. Compensation dates and budgets are unchanged. See the
+[September17 rollout record](CUSTOMER_PRICING_ROLLOUT_2026_09_17.md).
+The remaining sections document the historical activation, not current status.
+
 ## Actual State
 
 - Run: `shadow_20260916_observation_v4`.
