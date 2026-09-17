@@ -231,6 +231,16 @@ workers rotate toward the least recently covered model instead of `models[0]`;
 a node already occupying an unfilled group may cover another advertised model
 without opening a duplicate group for the blocked model.
 
+The capability-coverage follow-up selects never-issued eligible families first,
+then the least recently issued family for that exact worker/model. Ties remain
+cryptographically random, as do concrete challenge values. It counts attempted
+groups regardless of outcome, not only successful/finalized evidence; otherwise
+a broken or unfilled lane could consume every turn. Retention pruning resets
+old scheduling history. This preserves scorer/context eligibility, group reuse,
+cooldown and advisory locking. It does not guarantee independent quorum or fresh
+evidence within any wall-clock deadline, and it does not hide public templates.
+This change is not deployed into the frozen September 16 observation run.
+
 Core hard-targets the job internally but sends the worker an ordinary opaque
 UUID and a payload with all validator assignment/group/nonce markers removed.
 Those fields are restored only into the Core-to-validator evidence response
