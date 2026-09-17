@@ -391,6 +391,11 @@ async def status_models():
     except Exception as e:
         logger.warning("Could not expand recipe-backed model status: %s", e)
     out.sort(key=lambda item: (-item["count"], item["name"].lower()))
+    from ..services import pricing
+
+    for item in out:
+        if item["type"] == "text":
+            item["pricing"] = pricing.public_text_price(item["name"])
     return out
 
 

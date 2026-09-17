@@ -21,6 +21,11 @@ transport, accounts, stats, health/metrics.
 - `pricing.py` - public, unauthenticated `GET /v1/pricing`; exposes the exact
   versioned USD price book plus only fresh, source-linked same-model comparison
   workloads. Expired comparison evidence is omitted rather than repeated.
+- Text model discovery and status include additive `pricing` with USD input/
+  output rates per million tokens, source (`model` or `default`) and book
+  version. Unknown text models use the published standard tariff, not free
+  inference; explicit media/zero-rate entries and unresolved auto do not.
+  This is customer pricing only, never model verification or reward approval.
 - `_passthrough.py` - shared raw passthrough submit/stream/collect and deep
   secret sanitization helpers.
 - `images.py` - `POST /v1/images/generations` native image jobs.

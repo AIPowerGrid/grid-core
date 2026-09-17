@@ -108,6 +108,14 @@ class ChatCompletionChunk(BaseModel):
     choices: list[StreamChoice]
 
 
+class TextModelPricing(BaseModel):
+    currency: str = "USD"
+    input_per_mtok_usd: float
+    output_per_mtok_usd: float
+    source: str
+    version: str
+
+
 class ModelInfo(BaseModel):
     id: str
     object: str = "model"
@@ -117,6 +125,7 @@ class ModelInfo(BaseModel):
     # "image", "video"). Standard OpenAI clients ignore the extra field; the chat
     # UI reads it to enable image upload for vision models. Defaults to text-only.
     input_modalities: list[str] = ["text"]
+    pricing: TextModelPricing | None = None
 
 
 class ModelListResponse(BaseModel):
