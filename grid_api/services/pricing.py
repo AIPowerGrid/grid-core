@@ -1,6 +1,5 @@
-# WIRED-DARK: the request path always quotes against this book, but
-# GRID_CHARGING_MODE=off only logs the quote. Re-peg and review prices before
-# expanding beyond an allowlisted canary.
+# The request path always quotes against this book. GRID_CHARGING_MODE controls
+# whether new work is billed; the price book itself never changes that policy.
 
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
@@ -30,7 +29,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 MICRO = 1_000_000  # micro-USD per USD (the ledger's integer unit)
-PRICE_BOOK_VERSION = "2026-09-16-a"
+PRICE_BOOK_VERSION = "2026-09-17-a"
 COMPARISON_AS_OF = "2026-08-29T00:00:00Z"
 COMPARISON_VALID_UNTIL = "2026-09-29T00:00:00Z"
 
@@ -43,6 +42,10 @@ class ModelPrice:
     video_per_second: float = 0.0  # USD per second of video
     audio_per_second: float = 0.0  # USD per second of generated audio
     mesh_per_generation: float = 0.0  # USD per completed 3D generation
+
+
+# Customer tariff only: never registers a model or changes its reward weight.
+DEFAULT_TEXT_PRICE = ModelPrice(0.075, 0.30)
 
 
 def half_of(usd_input: float, usd_output: float, **media) -> ModelPrice:
@@ -148,6 +151,31 @@ def get_price(model: str) -> ModelPrice | None:
     return PRICING.get(PRICE_ALIASES.get(key, key))
 
 
+def get_text_price(model: str) -> ModelPrice | None:
+    """Resolve explicit rates first; unknown text names use the standard tariff.
+
+    Blank/unresolved routing names and explicit media/zero-rate entries never
+    acquire a text price through fallback. Availability is checked by dispatch.
+    """
+    key = (model or "").lower().strip()
+    if not key or key in {"auto", "auto:fast", "auto:quality"}:
+        return None
+    return get_price(key) or DEFAULT_TEXT_PRICE
+
+
+def public_text_price(model: str) -> dict | None:
+    price = get_text_price(model)
+    if not price or not (price.input_per_mtok > 0 or price.output_per_mtok > 0):
+        return None
+    return {
+        "currency": "USD",
+        "input_per_mtok_usd": price.input_per_mtok,
+        "output_per_mtok_usd": price.output_per_mtok,
+        "source": "model" if get_price(model) is not None else "default",
+        "version": PRICE_BOOK_VERSION,
+    }
+
+
 def is_priced(model: str) -> bool:
     """Compatibility check for callers that do not yet know the modality."""
     return get_price(model) is not None
@@ -160,7 +188,7 @@ def is_priced_for(model: str, job_type: str) -> bool:
     boundary that prevents, for example, an LTX video rate from making an image
     request look intentionally free.
     """
-    p = get_price(model)
+    p = get_text_price(model) if (job_type or "").lower() == "text" else get_price(model)
     if not p:
         return False
     rates = {
@@ -183,8 +211,8 @@ def _micro_usd(usd: float) -> int:
 
 
 def quote_text(model: str, prompt_tokens: int, completion_tokens: int) -> int:
-    """Cost of a text completion, in integer micro-USD. 0 if unpriced."""
-    p = get_price(model)
+    """Text cost using the explicit or standard tariff, in integer micro-USD."""
+    p = get_text_price(model)
     if not p:
         return 0
     usd = (prompt_tokens * p.input_per_mtok + completion_tokens * p.output_per_mtok) / 1_000_000.0
@@ -282,6 +310,13 @@ def public_catalog(now: datetime | None = None) -> dict:
         "ledger_unit": "micro_usd",
         "price_book": {
             "version": PRICE_BOOK_VERSION,
+            "default_text": {
+                "currency": "USD",
+                "input_per_mtok_usd": DEFAULT_TEXT_PRICE.input_per_mtok,
+                "output_per_mtok_usd": DEFAULT_TEXT_PRICE.output_per_mtok,
+                "source": "default",
+                "version": PRICE_BOOK_VERSION,
+            },
             "availability": (
                 "Configured rates do not assert that a model is online; use /v1/status/models."
             ),

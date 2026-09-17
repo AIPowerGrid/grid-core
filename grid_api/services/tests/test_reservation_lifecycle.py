@@ -213,6 +213,31 @@ async def test_release_full_refund(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", ["settle", "release"])
+async def test_default_text_reservation_snapshots_and_reconciles_once(db, monkeypatch, terminal):
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "on")
+    aid = uuid.uuid4()
+    await credits.credit(aid, 10_000, "topup", ref="new-model-funding")
+    model = "brand-new-model"
+    auth = await credits.authorize_request(
+        {"account_id": aid}, model, 1000, 1000, "default-job", record_reservation=True,
+    )
+    assert auth["ok"] and auth["reserved"] == 375
+    row = await _reservation("default-job")
+    assert row["input_per_mtok_micro"] == 75_000
+    assert row["output_per_mtok_micro"] == 300_000
+    assert await credits.get_balance(aid) == 9625
+    # New override after dispatch must not reprice this held job.
+    monkeypatch.setitem(pricing.PRICING, model, pricing.ModelPrice(3, 8))
+    for _ in range(2):
+        if terminal == "settle":
+            await credits.settle_job("default-job", 100)
+        else:
+            await credits.release_job("default-job")
+    assert await credits.get_balance(aid) == (9895 if terminal == "settle" else 10_000)
+
+
+@pytest.mark.asyncio
 async def test_failed_refund_leaves_reservation_held_for_retry(db, monkeypatch):
     monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
     aid = uuid.uuid4()

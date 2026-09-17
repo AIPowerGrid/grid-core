@@ -776,6 +776,7 @@ async def list_models():
             id=m,
             owned_by="aipowergrid",
             input_modalities=modalities.get(m, ["text"]),
+            pricing=pricing.public_text_price(m),
         )
         for m in models
     ]
@@ -794,7 +795,7 @@ async def get_model(model_id: str):
     models = await get_available_models(job_type="text")
     if model_id not in models:
         raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
-    return ModelInfo(id=model_id, owned_by="aipowergrid")
+    return ModelInfo(id=model_id, owned_by="aipowergrid", pricing=pricing.public_text_price(model_id))
 
 
 def _text_param_schema(model_id: str) -> dict:
