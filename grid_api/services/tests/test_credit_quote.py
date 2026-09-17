@@ -260,6 +260,24 @@ async def test_unpriced_quote_is_not_reported_as_free(db, monkeypatch):
     assert result["estimate"]["balance_sufficient"] is False
 
 
+@pytest.mark.asyncio
+async def test_unknown_text_quote_matches_nonzero_reservation(db, monkeypatch):
+    monkeypatch.setattr("grid_api.services.promotions.available_micro", _zero)
+    monkeypatch.setattr("grid_api.services.free_credits.daily_cap_micro", _zero)
+    monkeypatch.setattr("grid_api.services.free_credits.available_micro", _zero)
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "on")
+    account, _key = await accounts.create_account(username="Default tariff", issue_initial_key=True)
+    aid = UUID(account["id"])
+    await credits.credit(aid, 10000, "test_funding", "default-quote-funding")
+    user = {"account_id": aid}
+    quote = await credits.quote_for_account(user, model="new-text-model", modality="text", prompt_tokens=1000, max_tokens=1000)
+    assert quote["estimate"]["priced"]
+    assert quote["estimate"]["cost_micro"] == 375
+    assert await credits.get_balance(aid) == 10000
+    auth = await credits.authorize_request(user, "new-text-model", 1000, 1000, "default-quote-job", record_reservation=True)
+    assert auth["reserved"] == quote["estimate"]["cost_micro"]
+
+
 def test_quote_request_is_strict_and_bounded():
     with pytest.raises(ValidationError):
         accounts_router.CreditQuoteForm(model="ltx-2.3", modality="video")

@@ -219,7 +219,7 @@ async def holder_discount_bps(*, wallet: str | None = None, account_id=None) -> 
 
 
 def _snapshot_rates(model: str) -> tuple[int, int]:
-    price = pricing.get_price(model)
+    price = pricing.get_text_price(model)
     if not price:
         return 0, 0
     return (

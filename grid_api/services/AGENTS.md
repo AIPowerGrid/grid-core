@@ -645,11 +645,21 @@ content sanitization, and reward settlement.
   delegated users and ordinary cohorts retain the model restriction. Global
   `off` still wins. The authenticated credit summary exposes a versioned
   `service_budget` with actual caps and `all_models_charged`; this reports
-  policy, not remaining capacity. Unpriced requests still reject before dispatch.
+  policy, not remaining capacity. Requests without an applicable effective rate
+  still reject before dispatch.
 - Price coverage is modality-specific. A model entry with only a video rate is
   unpriced for image/text, and positive quotes round up to one micro-USD rather
   than silently becoming free.
-- Price book `2026-09-16-a` includes the explicit text-only launch peg for
+- Price book `2026-09-17-a` supplies unknown nonempty text model names with a
+  standard USD0.075 input/USD0.30 output per million tokens. Explicit entries
+  and aliases win, including zero-rate/media entries that remain denied for
+  text. Unresolved auto selectors have no quote. `get_price` remains an explicit
+  lookup; text quotes and reservation snapshots use `get_text_price` together.
+  `/v1/pricing` publishes `price_book.default_text`; model discovery/status
+  exposes effective rates and `source=model|default`. No availability,
+  registration, verified model identity, reward multiplier or payout authority
+  is granted by this customer tariff. Existing held rates never change.
+- The book retains the explicit text-only launch peg for
   `qwen38-flash-next-125b-nvfp4`: USD0.075 input and USD0.30 output per million
   tokens. It is not a benchmark-backed competitor comparison or a wildcard
   price for other Qwen models. Adding a rate does not bypass credit admission,
