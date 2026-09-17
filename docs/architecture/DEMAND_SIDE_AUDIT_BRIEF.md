@@ -136,10 +136,15 @@ on). These are hard gates, not suggestions:
   **Remaining before flip:** approve the provisional Qwen/SmolLM/media pegs from
   measured worker economics; the per-format flatten is a tiktoken proxy
   (o200k_base), not each backend's native tokenizer, so counts are approximate.
-- [x] **B5 (DONE, b8d4ca2 + launch-hardening follow-up) — Default-deny unpriced
-  model/modality pairs in enforce mode.** A renamed model or a model priced only
-  for another modality cannot become free. Positive sub-micro quotes round up to
-  one ledger unit.
+- [x] **B5 (DONE, with September 17 standard text tariff) — No implicitly free
+  model/modality pairs in enforce mode.** Unknown text names use the published
+  USD0.075 input/USD0.30 output per million tokens tariff; explicit rates and
+  aliases take precedence. Media still requires an explicit modality price.
+  A known media-only/zero-rate entry cannot acquire a text fallback. Quotes,
+  admission and durable reservation snapshots use the same resolver; settlement
+  retains the rate captured at reservation time. Positive sub-micro quotes round
+  up to one ledger unit. Pricing grants no model verification or higher reward
+  multiplier. Source implementation is not evidence of production deployment.
 - [x] **B6 (code-guard DONE, b8d4ca2; hard DB constraint → B7) — Idempotency is structural, not caller-discipline.** `ref` **non-null
   required** for value-moving ledger rows (Postgres allows multiple NULLs through
   the unique index); validate in code; tests.

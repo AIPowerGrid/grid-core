@@ -7,7 +7,7 @@ These exercise the no-DB branches of `charge_request` — the only ones the live
 request path hits while GRID_CHARGING_MODE=off — so they need no Postgres:
 
 * dry-run (charging disabled): reports `would_charge`, never debits.
-* free (unpriced model): 0, no account lookup.
+* unknown text model: default tariff, never implicitly free.
 * legacy (no account_id): 0, not chargeable.
 
 The DB-backed credit/debit/balance paths are integration-tested separately
@@ -72,7 +72,8 @@ async def test_all_model_service_reaches_ceiling_before_dispatch(homepage_servic
     assert limit.call_args.args[1] > 0
     assert limit.call_args.args[2] == "budget-test"
     result = await credits.authorize_request(homepage_service, "unpriced-model", 1, 1, "unpriced-test")
-    assert result["ok"] is False and result["status"] == "unpriced"
+    assert result["ok"] is False and result["status"] == "service_limit"
+    assert limit.call_args.args[1] > 0
 
 
 def test_charging_policy_modes(monkeypatch):
@@ -187,10 +188,13 @@ async def test_dry_run_reports_would_charge_without_debiting():
 
 
 @pytest.mark.asyncio
-async def test_free_when_unpriced_model():
+async def test_unknown_text_has_a_nonzero_dry_run_quote(monkeypatch):
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "off")
     user = {"account_id": "00000000-0000-0000-0000-000000000001"}
     out = await credits.charge_request(user, "no-such-model-xyz", 1000, 2000, "job-free-1")
-    assert out == {"status": "free", "charged": 0}
+    assert out["status"] == "dry_run"
+    assert out["charged"] == 0
+    assert out["would_charge"] == 675
 
 
 @pytest.mark.asyncio

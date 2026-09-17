@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from grid_api.models.openai import ChatCompletionRequest
 from grid_api.routers import openai as o, stats
-from grid_api.services import credits, router as r
+from grid_api.services import credits, pricing, router as r
 
 
 class ReachedQuota(Exception):
@@ -20,6 +20,8 @@ class ReachedQuota(Exception):
 
 @pytest.fixture
 def setup(monkeypatch):
+    # Explicitly disabled text prices remain ineligible; absence now has a tariff.
+    monkeypatch.setitem(pricing.PRICING, "gpt-oss-20b", pricing.ModelPrice(0, 0))
     monkeypatch.delenv("GRID_ROUTING_PIN", raising=False)
     monkeypatch.delenv("GRID_ROUTING_CONFIG", raising=False)
     monkeypatch.setattr(o, "_detect_media_model", AsyncMock(return_value=None))
@@ -62,6 +64,29 @@ async def test_explicit_model_not_silently_replaced(monkeypatch, setup):
     with pytest.raises(ReachedQuota):
         await o._handle_chat_completions_for_user(request, {})
     assert request.model == "gpt-oss-20b"
+
+
+@pytest.mark.asyncio
+async def test_new_default_priced_model_reaches_admission(monkeypatch, setup):
+    monkeypatch.delitem(pricing.PRICING, "gpt-oss-20b")
+    monkeypatch.setenv("GRID_ROUTING_PIN", "gpt-oss-20b")
+    monkeypatch.setattr(o, "get_available_models", AsyncMock(return_value=["gpt-oss-20b"]))
+    request = ChatCompletionRequest(model="auto", messages=[{"role": "user", "content": "hello"}])
+    with pytest.raises(ReachedQuota):
+        await o._handle_chat_completions_for_user(request, {})
+    assert request.model == "gpt-oss-20b"
+
+
+@pytest.mark.asyncio
+async def test_models_expose_effective_default_and_explicit_prices(monkeypatch):
+    monkeypatch.setattr(o, "get_available_models", AsyncMock(return_value=["new-model", "smollm-135m"]))
+    monkeypatch.setattr(o, "get_model_modalities", AsyncMock(return_value={}))
+    models = {model.id: model for model in (await o.list_models()).data}
+    assert models["auto"].pricing is None
+    assert models["new-model"].pricing.source == "default"
+    assert models["new-model"].pricing.output_per_mtok_usd == 0.30
+    assert models["smollm-135m"].pricing.source == "model"
+    assert (await o.get_model("new-model")).pricing == models["new-model"].pricing
 
 
 @pytest.mark.asyncio

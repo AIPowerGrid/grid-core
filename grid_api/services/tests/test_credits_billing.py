@@ -11,7 +11,7 @@ invariants the audit demanded:
   * credit/debit idempotent on `ref`
   * debit is overdraft-safe (conditional UPDATE refuses the overdraft)
   * authorize_request blocks insufficient balance (→ caller 402 before dispatch)
-  * unpriced model blocked in enforce mode
+  * unknown text models charged at the default tariff in enforce mode
   * reserve-then-refund settles to actual usage
   * dry-run authorize is a no-op
 
@@ -201,13 +201,13 @@ async def test_insufficient_credit_releases_service_exposure(db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_authorize_unpriced_blocked_in_enforce(db, monkeypatch):
+async def test_authorize_unknown_text_requires_funds_in_enforce(db, monkeypatch):
     monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
     auth = await credits.authorize_request(
         {"account_id": uuid.uuid4()}, "totally-unknown-model-xyz", 10, 10, "job2"
     )
     assert auth["ok"] is False
-    assert auth["status"] == "unpriced"
+    assert auth["status"] == "insufficient"
 
 
 @pytest.mark.asyncio

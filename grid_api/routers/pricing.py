@@ -9,6 +9,7 @@ from fastapi import APIRouter, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..services import pricing as pricing_service
+from ..models.openai import TextModelPricing
 
 router = APIRouter()
 
@@ -32,6 +33,7 @@ class PublicPriceBook(BaseModel):
     availability: str
     models: list[PublicModelPrice]
     aliases: dict[str, str]
+    default_text: TextModelPricing
 
 
 class PublicPriceComparison(BaseModel):
