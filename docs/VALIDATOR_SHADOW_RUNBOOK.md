@@ -2,15 +2,19 @@
 
 ## Status
 
-September 15 production: Core `64d38951` / Alembic `0042`; observer disabled,
-no shadow runs. The v8 per-assignment evidence and policy-default fixes are now
-deployed. Five reviewed public operators run preview.20; an explicit baseline
-transition, stale-candidate incident resolution, protected HMAC and collector
-proof still precede activation. See the [deployment record](../deploy/VALIDATOR_PERIOD_ROLLOUT_2026_09_15.md).
-All 13 advertised models currently have one worker, limiting same-model replica
-comparison. Do not describe collection with no alternatives as a routing win.
+September 16 production: Core `d1aafcf4` / Alembic `0042`; observation-only run
+`shadow_20260916_observation_v4` started at 13:49:46 UTC and is scheduled to end
+September 23 at 13:49:46 UTC. Five reviewed participating operators and 41
+eligible finalized groups passed the start gate. Baseline is now preview.20,
+with both upgrade-overlap settings cleared. See the
+[activation record](../deploy/VALIDATOR_SHADOW_START_2026_09_16.md).
+Startup health and collector lease are verified; these are not proof of
+successful traffic collection or a completed experiment. Limited same-model
+replication still restricts useful comparisons. Do not describe collection with
+no alternatives as a routing win.
 
-Prepared procedure only. Do not execute it while Core reports fewer than three
+The procedure below is not an instruction to start a second run. Do not execute
+it while Core reports fewer than three
 recently participating, independently reviewed validator operator groups. Shadow
 collection has no routing, reward, strike, bond, payout, or slashing authority.
 
@@ -21,9 +25,9 @@ empty and no route-event stream existed. A 2026-09-01 read-only gate run failed
 only the three expected cohort checks. This does not authorize enabling the
 collector.
 
-The configured baseline is preview.13 with reviewed upgrades through .20.
-Starting the new experiment requires deliberately freezing .20 and removing
-version overlap through the normal rollout. No new node release is needed.
+The previous baseline was preview.13 with reviewed upgrades through .20.
+The September 16 activation froze .20 without resetting qualification history.
+No new node release was required.
 
 ## Safety contract
 

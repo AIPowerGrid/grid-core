@@ -7,8 +7,12 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Ownership
 
-- `VALIDATOR_PERIOD_ROLLOUT_2026_09_15.md` - immutable `64d38951` / `0042`
-  backup/restore and drained shadow-evidence-fix deployment, unchanged live
+- `VALIDATOR_SHADOW_START_2026_09_16.md` - actual observation-only activation
+  on unchanged `d1aafcf4`, fresh start-gate/restore proof, guarded aborted
+  attempts, fixed September23 end and unchanged client-backend/economic state.
+- `VALIDATOR_PERIOD_ROLLOUT_2026_09_15.md` - immutable `64d38951`, then
+  `d1aafcf4` / `0042` backup/restore and drained shadow-evidence/collector-error
+  deployments, unchanged live
   controls, remaining observer/cohort gates and single-replica capacity limit.
   The broader tool-choice candidate PR #195 remains draft and undeployed.
 - `VALIDATOR_BUDGET_DEPLOYMENT_2026_09_15.md` - immutable `f5211254` / `0042`
@@ -66,6 +70,18 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- On September16 at 13:49:46 UTC, `shadow_20260916_observation_v4` started on
+  unchanged `d1aafcf4` / `0042`, with preview.20 baseline and no upgrade overlap.
+  The observer flag is on; routing and economic authority remain absent.
+  Preserve the protected run HMAC and exact implementation. Scheduled end is
+  September23 13:49:46 UTC, separate from compensation's September22 end/grace.
+  Client GPT backend changes/restarts/canaries are expressly out of scope.
+- Core `d1aafcf4` / Alembic `0042` was selected September 15 at 22:27:13 UTC.
+  It supersedes `64d38951`, recording rejected observer events durably before
+  acknowledgement. Exact-main CI, production restore and drained cutover
+  passed; all nine workers returned. Environment, payout controls, campaigns
+  and observer-off state were unchanged at that deployment. The separate
+  September16 activation above supersedes only the observer/cohort posture.
 - Core `64d38951` / Alembic `0042` was selected September 15 at 21:38:17 UTC.
   This supersedes `bc49519c` while preserving environment, charging, worker
   payout controls, qualification and compensation contracts. Shadow observation

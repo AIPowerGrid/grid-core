@@ -7,13 +7,52 @@ validation, worker incentives, and trust boundaries.
 
 ## Ownership
 
+- `VALIDATOR_HOSTILE_PATH_2026-09-16.md` - isolated real HTTP/WS/Redis/PostgreSQL
+  signed-claim attack matrix. Separates stored false quorum from compensation
+  rejection through frozen-campaign finalization and observation-support
+  exclusion; scripted controls and synthetic
+  operator reviews do not establish model fidelity or human independence.
 - `VALIDATOR_PERIOD_EVIDENCE_2026-09-15.md` - frozen 33-group/165-assignment
   audit, released-scorer and signature replay, direct owned-backend controls,
   triage limits, candidate shadow integration fixes and September 22 deliverables.
   The collector rejection follow-up binds durable error recording before Redis
-  acknowledgement; it is a candidate until separately verified and deployed.
-  Not proof of completed adversarial qualification, observer activation,
-  finalized allocations or transfers.
+  acknowledgement; it deployed as `d1aafcf4` with separate PostgreSQL/Redis CI
+  and production restore proof. F27 adds a fourth reproduced backend contract
+  defect; 29 frozen cases remain root-cause inconclusive. GPT stop repair has
+  private real-schema/native-capture replay evidence, not a production patch;
+  its empty visible answer remains separately unresolved. Active v0.3.8 already
+  forwards logprobs; the unused-checkout diagnostic attribution is withdrawn.
+  September16 approved DeepSeek-only parser deployment passes original F01/F18
+  and complete F29 direct stream/full checks, without changing historical scores.
+  Fresh independent confirmation, live abort proof and duplicate-import warning
+  cleanup remain separate; GPT is still not deployed.
+  GPT V5 repairs an additional predeployment auxiliary-channel regression and
+  passes the retained protocol/native-trace studies; it is not a live canary.
+  GPT restart approval was withdrawn before installation: the client production
+  service is off-limits, unchanged, and requires isolated qualification instead.
+  September16 11:58UTC postrepair capture verifies44signed DeepSeek reports and
+  replays45assignment verdicts. New tool-call quorum finalized healthy; tool-chain
+  quorum accepted healthy, not yet finalized, with five reports each. A separate
+  stop group still failed; operator independence was not re-reviewed here.
+  Read-only midperiod payment readiness verifies135signed work reports across
+  five frozen members, with no allocation/recipient/payment records. Finalization
+  remains gated until September22 15:30UTC; no early amounts are promised.
+  September16 13:49UTC observation-only activation follows fresh passing cohort
+  gates and preserved history; see deploy/VALIDATOR_SHADOW_START_2026_09_16.md.
+  The run ends September23; September22 reporting must disclose partial
+  coverage without altering campaign/grace dates. Startup checks are not
+  proof of completed collection, adversarial qualification, finalized
+  allocations or transfers.
+  September 16 16:08 UTC coverage audit identifies stale tool-call groups as a
+  sufficient blocker for 175 actual Qwen route observations. Candidate family
+  rotation preserves cooldown/quorum; PR205 merged as b0d29b0e after full PG16
+  CI, but is not deployed into the frozen run. The 16:39UTC capture has175
+  observations/175successes and no observer errors, not detection proof.
+  Isolated Mac120B initial controls reproduce reasoning-only failures and a
+  requested-low/rendered-medium mismatch. Curated metadata plus neutral
+  repetition penalty recover F07/F27 locally; F03/F24 still refuse their tasks.
+  Alias-matched context restores128K; general worker fix is PR39, unreleased.
+  No historical verdicts were rewritten or client GPT service used/changed.
 - `VALIDATOR_FAILURE_AUDIT_2026-09-13.md` - retained failed-group diagnosis,
   versioned token-limit partial-marker correction and remaining task failures.
   Token-limit v2 is now deployed in Core d606e4d8 and preview.20. Bounded

@@ -165,7 +165,14 @@ content sanitization, and reward settlement.
   assignments. New work prefers v2 only when explicitly advertised, without
   doubling the token-limit lane; v1 capability remains usable for old groups.
   Worker order must not determine the family. Multi-model workers rotate toward
-  the least recently covered advertised model; a validator already assigned to
+  the least recently covered advertised model. Within that model, new groups
+  select an eligible capability never issued before, then the least recently
+  issued capability, with cryptographically random ties. Count attempts of every
+  outcome so a failing or unfilled lane cannot monopolize the budget. This is
+  worker/model-scoped retained-history scheduling, not proof of fresh finalized
+  independent evidence or hidden-template security; pruning resets old coverage.
+  Keep the existing context/scorer gates, open-group reuse, per-model cooldown,
+  and PostgreSQL worker lock. A validator already assigned to
   an unfilled group for one model may cover another model, but cannot create a
   second group for the blocked model. New `text.generated.v8` batches
   fix one capability/canary lane but issue and persist a distinct randomized
