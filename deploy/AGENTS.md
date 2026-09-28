@@ -78,8 +78,11 @@ executes an immutable release selected through `/home/aipg/current`.
   reduced-account response checks passed; all six workers returned. Billing,
   generation admission, payout controls and worker runtimes were unchanged.
   See `docs/MEDIA_ONBOARDING_FOLLOWUP.md`. The pre-existing missing reward-policy
-  payout failure is not fixed by this release. Image editing/batch canaries
-  and worker upgrades remain unexecuted; do not infer activation from merging.
+  payout failure is not fixed by this release. The later September28 22:36 UTC
+  configuration-only cutover admitted image editing/batches after real staged
+  billing qualification. Six paid production canaries passed; image-worker
+  `50476b9` and Gallery PR #39 are live. Other controls are unchanged and
+  timeline/3D remain closed. See the same follow-up for exact receipts/rollback.
 - Core `3384c223` / Alembic `0042` is live as of September17 01:55 UTC.
   Exact-main CI, production restore, drained cutover and a real paid Qwen Chat
   canary passed. Charging, daily free spending, compensation contracts and
