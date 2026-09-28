@@ -3,8 +3,8 @@
 ## September 28 Review
 
 Worker PRs #26 and #27 are merged. They do not deploy a worker or enable a
-generation path. The Core changes in this follow-up are candidates until an
-exact release passes CI and the deployment procedure.
+generation path. Core PR #211 was deployed as recorded below; advanced media
+canaries and worker upgrades remain separate work.
 
 - Fix the omitted-model image default to `FLUX.2 Klein 4B FP8`, matching the
   dispatch name, curated recipe, and price. Explicit selections still win;
@@ -25,6 +25,45 @@ Read-only production inspection found release `e3741222`, charging `on`, and
 the explicit admission list: chat, Responses, Anthropic, single image, video,
 image-to-video, and audio. Image-to-image, image batches, video timelines, and
 3D were not admitted. No controls were changed by this inspection.
+
+## Core Deployment: September 28
+
+At `2026-09-28T19:00:18Z`, production selected immutable
+`ca1f2a127a878ed264589adba177181151da3c5c`, replacing `e3741222`.
+
+- [PR CI](https://github.com/AIPowerGrid/grid-core/actions/runs/36461280688)
+  passed 2,168 tests with 12 skips, plus the Redis proof and real PostgreSQL
+  Core/Console/node handoff. The
+  [exact-main run](https://github.com/AIPowerGrid/grid-core/actions/runs/36462851995)
+  passed before deployment.
+- Hash-locked binary dependencies installed and passed `pip check`. A fresh
+  production backup restored into a generated scratch database and passed
+  candidate schema parity at Alembic `0042`; no production migration was needed.
+- Preflight confirmed zero running pinned shadow observations. New generation
+  and probe ingress was briefly gated, MCP stopped, and work drained before
+  Core stopped. Two quiet checks plus the stopped-Core check found no held
+  reservations, pending jobs or undelivered stream entries. The historical
+  text lag counter was not reset.
+- All six workers reconnected before ingress reopened. Public health and
+  network status reported the exact release, Redis healthy and the prior
+  model set restored. Core and MCP were active with zero automatic restarts.
+- A real owned worker credential read `/v1/account` through the public API:
+  HTTP 200, `Cache-Control: no-store`, generic linked-identity hints and no
+  sibling key metadata. Unauthenticated validator assignments remained 401;
+  the retired heartbeat remained 410. No live image was generated in this pass.
+- The environment and payout drop-in were byte-for-byte unchanged. Payout and
+  backup timer states were preserved. Charging stays on; the same seven paths
+  are admitted. No compensation, wallet, model recipe, GPU backend or worker
+  runtime was changed.
+
+The payout service had already failed before cutover because the current hour
+lacked a reviewed demand reward policy. No transfer retry or policy extension
+was authorized or performed by this deployment. This is an outstanding payout
+operations issue, not evidence that the media fixes restored payments.
+
+Gorgadon access was verified, but its live workers serve LTX/audio. The image
+worker login could not be verified. Klein file verification and the canaries
+below remain unexecuted. Worker PRs #26/#27 are merged, not fleet-deployed.
 
 ## Klein Recipe Prerequisite
 

@@ -73,6 +73,13 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Core `ca1f2a12` / Alembic `0042` was selected September28 at 19:00:18 UTC.
+  PR/main CI, production backup/restore, drained cutover and authenticated
+  reduced-account response checks passed; all six workers returned. Billing,
+  generation admission, payout controls and worker runtimes were unchanged.
+  See `docs/MEDIA_ONBOARDING_FOLLOWUP.md`. The pre-existing missing reward-policy
+  payout failure is not fixed by this release. Image editing/batch canaries
+  and worker upgrades remain unexecuted; do not infer activation from merging.
 - Core `3384c223` / Alembic `0042` is live as of September17 01:55 UTC.
   Exact-main CI, production restore, drained cutover and a real paid Qwen Chat
   canary passed. Charging, daily free spending, compensation contracts and
