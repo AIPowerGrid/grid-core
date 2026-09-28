@@ -63,7 +63,8 @@ operations issue, not evidence that the media fixes restored payments.
 
 Gorgadon access was verified, but its live workers serve LTX/audio. Image-worker
 access was subsequently verified and the isolated GPU checks below executed.
-Worker PRs #26/#27 remain merged, not fleet-deployed.
+The image host was subsequently upgraded as recorded below; this is not a
+fleet-wide upgrade of the separate LTX/audio workers.
 
 ## Isolated Image-Worker Evidence: September 28
 
@@ -96,12 +97,56 @@ the candidate instead renders each recipe-backed image independently with its
 assigned seed and a unique output prefix. This does not promise identical
 results across different GPUs, model files, or ComfyUI versions.
 
-The old live image-worker checkout has uncommitted LoRA injection/download and
-PNG-to-presigned-format conversion that the clean worker release does not
-implement. Do not replace the checkout or assume a clean upgrade preserves
-these behaviors. Preserve it as rollback and reconcile/test both paths before
-switching the production service. Its legacy `GRID_THREADS=2` must also be
-explicitly reconciled with the supported one-slot worker contract.
+The historical image-worker checkout has uncommitted LoRA injection/download
+and PNG-to-presigned-format conversion. These were reconciled in PR #30 and
+tested before the clean release below replaced the running service. The old
+checkout remains intact for rollback; do not reset it or deploy from it.
+
+## Image Worker Deployment: September 28
+
+[PR #30](https://github.com/AIPowerGrid/grid-media-worker/pull/30) merged as
+`50476b943dfa1e55ceac5536ccad1e6a4bf17a00`. That exact main commit was selected
+on the owned image host at `2026-09-28T22:06:29Z`.
+
+- PR and exact-main CI passed, including dependency/secret checks and manager
+  builds. A separate hash-locked Python 3.13 environment on the actual host
+  passed 243 tests with two skips; the ComfyUI environment was not changed.
+- The loopback GPU harness passed seven cases with the candidate and again
+  with its locked runtime: a two-image Klein batch, separate seed-42/43
+  replays, source-conditioned edits with each installed precision, Z-image
+  baseline, and Z-image with a locally installed LoRA. Batch replays matched
+  decoded pixels and uploaded WebP bytes. Every uploaded object was valid
+  WebP with the matching receipt SHA-256. The LoRA changed the output; this
+  does not certify an adapter's claimed identity or quality.
+- The release implements actual image encoding for PNG/WebP/JPEG slots and
+  fail-closed recipe-based LoRA injection. Remote adapter downloads require
+  operator opt-in, bounded HTTPS downloads, a provider hash and safetensors
+  validation. Bearer credentials are restricted to the metadata/download
+  origin and are not forwarded to CDN redirects or placed in query strings.
+- The service uses a clean detached source tree under
+  `/home/aipg/releases/grid-media-worker-50476b943dfa1e55ceac5536ccad1e6a4bf17a00`
+  with its own venv. Existing credentials were copied to a mode-0600 private
+  config file, not added to the source or unit. Only the image bridge was
+  stopped after ComfyUI became idle. ComfyUI's PID did not change.
+- Startup fetched and actually rendered the three Core recipes before
+  advertising `z-image-turbo`, `FLUX.2 Klein 4B FP8`, and `Krea 2 Turbo`.
+  Public Core presence and local status confirmed all three, one image slot,
+  no startup error and zero automatic service restarts. Video is no longer
+  incorrectly advertised by this image-only host. Other workers were untouched.
+- The first cutover was rolled back because the verifier's Python HTTP client
+  received a public API 403. The checker now uses the working curl transport;
+  the second cutover passed. Removing only
+  `30-reviewed-release.conf` from the bridge's systemd drop-in directory,
+  reloading systemd and restarting the bridge restored the previous service
+  during that rollback. The old source, environment and model files remain.
+- Shutdown exposed a non-blocking uncollected WebSocket `ConnectionClosedOK`
+  exception in a receive task. Systemd stopped cleanly; record a scoped task
+  cleanup regression rather than treating this as a generation failure.
+
+This deployment did not change Core, recipes, model files, charging mode or
+public admission. These GPU tests use synthetic dispatch/local upload slots,
+not real credit/reward ledgers or R2. Paid end-to-end checks below are still
+required before public image-to-image or batch activation.
 
 ## Klein Recipe Prerequisite
 
