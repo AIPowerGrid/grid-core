@@ -27,8 +27,9 @@ for humans and agents.
 - `MEDIA_ONBOARDING_FOLLOWUP.md` - September28 Core `ca1f2a12` deployment proof,
   isolated Klein GPU execution/seed-replay evidence, verified BF16/FP8 file
   distinction, image-worker `50476b9` deployment/rollback and locked-runtime
-  seven-case GPU proof, and remaining billed media-canary acceptance criteria.
-  Worker upgrades and advanced-path activation remain separate gates.
+  seven-case GPU proof, followed by nine real staged billing cases, failure/
+  recovery proofs and six paid production API canaries. Image edits/batches
+  are admitted; Gallery PR #39 is deployed. Timeline/3D remain closed.
 - `architecture/DECENTRALIZATION_ROADMAP.md` - accepted post-preview Base
   validator and trusted-partner Core federation phases, event contract, and
   go-live gates.

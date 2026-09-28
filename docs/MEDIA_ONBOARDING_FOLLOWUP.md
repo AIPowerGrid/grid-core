@@ -2,9 +2,89 @@
 
 ## September 28 Review
 
-Worker PRs #26 and #27 are merged. They do not deploy a worker or enable a
-generation path. Core PR #211 was deployed as recorded below; advanced media
-canaries and worker upgrades remain separate work.
+Worker PRs #26 and #27 are merged. Subsequent image-worker PR #30, real billing
+qualification, Core image-path activation and Gallery PR #39 are deployed as
+recorded below. Timeline/3D and the separate LTX/audio fleet are not covered.
+
+## Image Billing Qualification and Activation: September 28
+
+Core remains `ca1f2a127a878ed264589adba177181151da3c5c` / Alembic `0042`;
+the image worker remains `50476b943dfa1e55ceac5536ccad1e6a4bf17a00`.
+At `2026-09-28T22:36:36Z`, the owner-approved configuration-only cutover added
+`image-to-image` and `image-batch` to the seven existing generation paths.
+Charging stays `on`. No price, schema, recipe, payout, validator policy or
+model/backend configuration changed. Timeline and 3D remain disabled.
+
+Qualification before opening the global switches used that exact Core release,
+a separate PostgreSQL database/role, separate Redis process, real R2 storage,
+and the owned image GPU. Only synthetic scratch balances were used. The bridge
+was borrowed after ComfyUI was idle and restored afterward; ComfyUI and the
+other production workers were not restarted.
+
+- Nine successful cases: four-image batches for Klein/Krea/Z-image, source
+  edits for all three, a second Klein edit, and Klein PNG/JPEG encoding.
+  Each proved a hold before dispatch, exact price, one settled reservation,
+  one completion ledger row, complete output count, distinct batch hashes,
+  assigned seeds, decodable stored bytes and matching R2 receipt hashes.
+- Read-only result recovery returned every output. Replayed committed
+  terminals returned `duplicate`; late releases could not refund completion.
+- Empty-account 402 and invalid-source 400 created no reservation or payout.
+  Incomplete batches, missing R2 objects and explicit worker errors returned
+  502, refunded once and created no completion payout. Repeated release was inert.
+- A real client timeout while held recovered through the read-only result API:
+  one generation, one charge, no replacement POST and no premature refund.
+- All 61 exact-release PostgreSQL billing/output regressions passed, including
+  concurrent debits, settlement/refund races and killed-refund recovery. Queue,
+  auth and storage mocks in those regression tests are distinct from the real
+  GPU/Redis/R2 qualification above.
+- Test harness corrections were needed: the worker handshake is `ready`,
+  invalid-source returns 400, and subprocess tests needed an importable source
+  path. A synthetic test balance exhausted correctly with 402 before a second
+  idempotent scratch grant. No production credit was granted or test waived.
+
+Activation gated new generation/probes, stopped MCP, observed empty held/queue
+state twice and once with Core stopped, edited only `GENERATION_ENABLED_PATHS`,
+then restarted the same release. All six workers returned before ingress
+reopened. Payout/backup timer states and the payout drop-in were preserved;
+the pre-existing reward-policy payout failure remains a separate issue.
+
+After activation, six public production API canaries used the owner's existing
+balance through an inference-only, 15-minute key. Each model passed a four-image
+batch and a single source edit. Total usage was USD 0.09: USD 0.01 daily credit
+plus USD 0.08 purchased credit. Every job has one completion, a settled hold,
+matching stored output hashes and successful durable recovery. Global credit
+reconciliation passed: zero negative balances, mismatches, stale holds or
+invalid splits. The temporary key was revoked and then rejected with 401.
+No test output was published in Gallery and no payout transfer was sent.
+
+| Model | Four-image batch receipt | Source-edit receipt |
+| --- | --- | --- |
+| Klein | `c24bce71-b09b-4772-81fb-621f227a6155` | `3de48482-7642-48f8-9115-8cb443e5feb8` |
+| Krea | `fb5b67c5-b08d-40a7-97f6-5ae1c512f031` | `2ff2820e-0a47-43c1-914e-40eff8215e96` |
+| Z-image | `34fa8654-65df-4fdb-8f88-58745a334988` | `c827b1f1-3fa2-4dfd-9a52-907ed30cd3ef` |
+
+Gallery PR #39 merged as `823edfdd`; its tree-identical tested head `29f472d5`
+was selected at 22:38:10 UTC. PR/main CI, 125 Jest tests, 18 production-build
+browser tests, host build/audits and restored-backup race suite passed.
+Desktop/mobile tests verify four decoded images, one POST and source-upload
+batch reset. The signed-in live browser was locked, so a fresh Gallery UI
+submission is not claimed; production API and mocked browser evidence are
+explicitly separate. The rollout preserves source-image single-output limits.
+
+Protected Core activation/config backup and paid receipt evidence:
+`/var/lib/aipg-release-proof/image-activation-20260928/`.
+Gallery proof: `/var/lib/aipg-release-proof/gallery-29f472d5/`.
+Rollback removes only the two new generation paths using the same drained
+restart procedure and selects Gallery `0f3d3948`; do not disable billing,
+discard receipts or rewrite ledger history. Isolated qualification data is
+retained privately as evidence; its services and credentials are not public.
+
+These tests establish execution/delivery/accounting, not identical visual
+quality across models. Z-image's latent-blend edit retained the blue body on
+the red-car prompt; it is not equivalent to instruction-following reference
+editing. The Klein BF16/FP8 labeling discrepancy below is still open.
+
+## Original Review Findings
 
 - Fix the omitted-model image default to `FLUX.2 Klein 4B FP8`, matching the
   dispatch name, curated recipe, and price. Explicit selections still win;
@@ -145,8 +225,8 @@ on the owned image host at `2026-09-28T22:06:29Z`.
 
 This deployment did not change Core, recipes, model files, charging mode or
 public admission. These GPU tests use synthetic dispatch/local upload slots,
-not real credit/reward ledgers or R2. Paid end-to-end checks below are still
-required before public image-to-image or batch activation.
+not real credit/reward ledgers or R2. The later billed qualification and
+activation above supersede this historical GPU-only evidence.
 
 ## Klein Recipe Prerequisite
 
@@ -173,8 +253,8 @@ version; a local edit must not bypass a governed commitment or revocation.
 
 ## Canary Acceptance
 
-These remain paid end-to-end acceptance requirements; the isolated GPU checks
-above do not fulfill them. Use an isolated staging
+These are the acceptance requirements used for the qualification above. The
+earlier synthetic-coordinator GPU checks alone did not fulfill them. Use an isolated staging
 coordinator with disposable database/queue state and an explicitly assigned
 owned worker, or first implement and review an account-bound, expiring public
 path pilot. The existing generation allowlist is global: temporarily adding a
