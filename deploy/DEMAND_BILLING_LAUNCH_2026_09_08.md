@@ -4,9 +4,14 @@
 
 GLOBAL DEMAND CHARGING ACTIVE; admitted-path frontend canaries passed and
 prospective hourly worker payouts resumed after a supervised send and replay.
-The current runtime is `793fe904` / Alembic `0041`. Director timeline rendering
-remains disabled; Gallery's rejected-request spinner was repaired and verified
-on release `24a0fbf0` at 14:35 UTC. No additional paths were enabled.
+Current runtime is `ca1f2a12` / Alembic `0042`. On September28, image editing
+and image batches were admitted after real billing qualification; six paid
+production API jobs passed, costing USD 0.09 (USD 0.08 purchased plus USD 0.01
+daily credit). Gallery `29f472d5` exposes qualified four-image batches.
+See `../docs/MEDIA_ONBOARDING_FOLLOWUP.md` for receipts, isolated failure/refund
+proof and rollback. Timeline/3D remain disabled. The pre-existing missing
+reward-policy payout failure is not repaired by this image rollout; the
+September10 payout observations below are historical, not current proof.
 The goal covers every public generation path and all first-party frontends.
 Unverified paths must be disabled or fail closed before public charging launch.
 Historical accrual and disputed payments are outside this rollout.
