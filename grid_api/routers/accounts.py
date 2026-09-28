@@ -1201,24 +1201,32 @@ async def get_account(
     authorization: Optional[str] = Header(None),
 ):
     user = await _require_v2(apikey, authorization)
-    async with await new_session() as session:
-        keys = (
-            (
-                await session.execute(
-                    sa.select(
-                        api_keys_table.c.hash,
-                        api_keys_table.c.label,
-                        api_keys_table.c.created,
-                        api_keys_table.c.last_used,
-                        api_keys_table.c.revoked,
-                    ).where(api_keys_table.c.account_id == user["account_id"]),
+    # Read/inference credentials need account context, not other credentials
+    # or login identifiers. Keep the console's interactive management view.
+    management_view = "account.manage" in set(user.get("scopes") or []) and (
+        user.get("key_kind") in {"user_token", "delegated_user"}
+        or user.get("is_session", False)
+    )
+    keys = []
+    if management_view:
+        async with await new_session() as session:
+            keys = (
+                (
+                    await session.execute(
+                        sa.select(
+                            api_keys_table.c.hash,
+                            api_keys_table.c.label,
+                            api_keys_table.c.created,
+                            api_keys_table.c.last_used,
+                            api_keys_table.c.revoked,
+                        ).where(api_keys_table.c.account_id == user["account_id"]),
+                    )
                 )
+                .mappings()
+                .all()
             )
-            .mappings()
-            .all()
-        )
     linked_identities = await identities_svc.list_identities(user["account_id"])
-    return {
+    return JSONResponse({
         "account_id": str(user["account_id"]),
         "username": user["username"],
         "wallet": user["wallet"],
@@ -1226,7 +1234,7 @@ async def get_account(
         "identities": [
             {
                 "kind": identity["kind"],
-                "display_hint": identity["display_hint"],
+                "display_hint": identity["display_hint"] if management_view else "Linked account",
                 "primary": identity["is_primary"],
                 "verified": identity["verified_at"] is not None,
             }
@@ -1258,7 +1266,7 @@ async def get_account(
             }
             for k in keys
         ],
-    }
+    }, headers={"Cache-Control": "no-store"})
 
 
 class PayoutWalletForm(BaseModel):
