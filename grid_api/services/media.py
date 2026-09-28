@@ -30,7 +30,7 @@ from . import generation_admission
 
 logger = logging.getLogger("grid_api.media")
 
-DEFAULT_IMAGE_MODEL = "FLUX.2 [klein]"
+DEFAULT_IMAGE_MODEL = "FLUX.2 Klein 4B FP8"
 DEFAULT_VIDEO_MODEL = "LTX-2.3"
 DEFAULT_3D_MODEL = "TRELLIS2"
 

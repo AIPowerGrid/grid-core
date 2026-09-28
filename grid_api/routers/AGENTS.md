@@ -176,6 +176,16 @@ transport, accounts, stats, health/metrics.
 
 ## Local Contracts
 
+- `GET /v1/account` remains `account.read` gated and returns `no-store`.
+  Raw linked-identity display hints and sibling API-key metadata require both
+  `account.manage` and an interactive native/delegated user or session
+  principal. Inference, service, and read-only OAuth credentials receive
+  generic identity hints and an empty `keys` array; do not query sibling keys
+  for that view. Mutation routes retain their separate fresh-proof checks.
+- An omitted image model selects the exact advertised `FLUX.2 Klein 4B FP8`
+  name. An explicit model or a style's model still takes precedence. Missing
+  default capacity must fail before quota/dispatch, never silently switch models.
+
 - `GET /v1/account/ownership` is private, read-only, `account.read` gated,
   rate-limited and `no-store`. Service keys must delegate a user. It accepts no
   target account and returns only the authenticated canonical account plus

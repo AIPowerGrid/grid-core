@@ -445,6 +445,10 @@ content sanitization, and reward settlement.
 
 ## Local Contracts
 
+- `media.DEFAULT_IMAGE_MODEL` is the exact dispatch name `FLUX.2 Klein 4B FP8`,
+  matching the curated text-to-image recipe and its positive price. This is not
+  a fallback selector or permission to bypass generation-path admission.
+
 - `identities.account_ownership` reads only canonical/retired IDs from proved
   account merges, bounds the family to 128 and rejects a root changed during
   the read. It never moves money or changes ownership. Historical ledger IDs
