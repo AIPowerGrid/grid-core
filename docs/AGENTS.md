@@ -24,9 +24,10 @@ for humans and agents.
   budgeted audit work. Probe verdicts and execution economics are distinct.
 - `WORKER_SETUP_DEPLOYMENT.md` - deployed worker self-status/canary evidence,
   credential revocation checks, and the reasoning-budget release follow-up.
-- `MEDIA_ONBOARDING_FOLLOWUP.md` - September28 Core onboarding fixes, verified
-  public-gate posture, image-worker prerequisites, and unexecuted media-canary
-  acceptance criteria. Not deployment or activation proof.
+- `MEDIA_ONBOARDING_FOLLOWUP.md` - September28 Core `ca1f2a12` deployment proof,
+  preserved public-gate posture, image-worker prerequisites, and unexecuted
+  media-canary acceptance criteria. Worker upgrades and advanced-path
+  activation remain separate gates.
 - `architecture/DECENTRALIZATION_ROADMAP.md` - accepted post-preview Base
   validator and trusted-partner Core federation phases, event contract, and
   go-live gates.
