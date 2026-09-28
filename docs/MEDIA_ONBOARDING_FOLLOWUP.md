@@ -61,9 +61,47 @@ lacked a reviewed demand reward policy. No transfer retry or policy extension
 was authorized or performed by this deployment. This is an outstanding payout
 operations issue, not evidence that the media fixes restored payments.
 
-Gorgadon access was verified, but its live workers serve LTX/audio. The image
-worker login could not be verified. Klein file verification and the canaries
-below remain unexecuted. Worker PRs #26/#27 are merged, not fleet-deployed.
+Gorgadon access was verified, but its live workers serve LTX/audio. Image-worker
+access was subsequently verified and the isolated GPU checks below executed.
+Worker PRs #26/#27 remain merged, not fleet-deployed.
+
+## Isolated Image-Worker Evidence: September 28
+
+The owned RTX 5090 image host ran media-worker candidate `cd28ecc` from a
+separate staging directory. Its production bridge was stopped only after
+ComfyUI was idle and automatically restored afterward; ComfyUI itself was not
+restarted. Both services returned active and Core again reported six workers.
+
+The harness exercised the real worker WebSocket registration/job/done/ack
+transport against a loopback synthetic coordinator, real ComfyUI, and local
+HTTP upload slots. It used no real Grid credential, production credit or reward
+ledger, or R2 storage. This is execution evidence, not the billed Grid canary
+required below.
+
+- Two-image Klein text-to-image: two distinct 512x512 outputs, approximately
+  2.21 seconds warm. Each output's decoded pixels exactly matched a separate
+  single-image replay of its declared seed (42 and 43).
+- Source-conditioned Klein edit: both installed FP8 and BF16 variants changed
+  the red car to blue while retaining the composition, returning 1024x1024
+  images in approximately 4.07 and 5.07 seconds respectively. These timings
+  are observations on one host, not a fleet guarantee.
+- Worker regressions: 215 passed, two skipped. Tests cover independent
+  nonconsecutive seeds, exact output/upload counts, unsupported seed layouts,
+  and a second-render failure with no uploads. Public gates stayed unchanged.
+
+Two bugs were fixed in [media-worker PR #29](https://github.com/AIPowerGrid/grid-media-worker/pull/29):
+the omitted `EmptyFlux2LatentImage` batch binding, and misleading per-image
+seeds on native ComfyUI batches. Native batches consume a single RNG stream;
+the candidate instead renders each recipe-backed image independently with its
+assigned seed and a unique output prefix. This does not promise identical
+results across different GPUs, model files, or ComfyUI versions.
+
+The old live image-worker checkout has uncommitted LoRA injection/download and
+PNG-to-presigned-format conversion that the clean worker release does not
+implement. Do not replace the checkout or assume a clean upgrade preserves
+these behaviors. Preserve it as rollback and reconcile/test both paths before
+switching the production service. Its legacy `GRID_THREADS=2` must also be
+explicitly reconciled with the supported one-slot worker contract.
 
 ## Klein Recipe Prerequisite
 
@@ -71,8 +109,18 @@ The curated text-to-image recipe references
 `flux-2-klein-4b.safetensors`; the edit recipe references
 `flux-2-klein-4b-fp8-backup.safetensors`. A filename difference is not proof of
 identical contents or precision. Inspect the actual image worker inventory and
-weight digests before selecting the canonical file. Do not rename the recipe
-blindly or claim the edit graph works because text-to-image works.
+weight digests before selecting the canonical file. Inspection established
+that the installed files are NOT equivalent:
+
+| File | Tensor types | SHA-256 |
+| --- | --- | --- |
+| `flux-2-klein-4b.safetensors` | 149 BF16 tensors | `ec3d4e733a771f61c052fb4856c48b336c55eaf2c65487c2a1faeb9bbda7a343` |
+| `flux-2-klein-4b-fp8-backup.safetensors` | 80 F8_E4M3, 69 BF16, 160 F32 tensors | `97ed34fe0567e436200f2faee3939b88f2b5d99f8af2a4dc16532c4245c0ccb6` |
+
+The text-to-image model label says FP8 but its current recipe selects the BF16
+file. No model label, recipe, or weight was changed by the isolated tests.
+Choose and document the intended precision before changing the canonical
+filename; do not treat this as a cosmetic rename.
 
 Update the reviewed recipe and its content commitment together where applicable.
 Confirm whether the live resolver uses the local recipe or a chain-governed
@@ -80,7 +128,8 @@ version; a local edit must not bypass a governed commitment or revocation.
 
 ## Canary Acceptance
 
-These are requirements, not executed test results. Use an isolated staging
+These remain paid end-to-end acceptance requirements; the isolated GPU checks
+above do not fulfill them. Use an isolated staging
 coordinator with disposable database/queue state and an explicitly assigned
 owned worker, or first implement and review an account-bound, expiring public
 path pilot. The existing generation allowlist is global: temporarily adding a
