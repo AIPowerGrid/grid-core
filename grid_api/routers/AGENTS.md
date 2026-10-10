@@ -190,6 +190,13 @@ transport, accounts, stats, health/metrics.
 - An omitted image model selects the exact advertised `FLUX.2 Klein 4B FP8`
   name. An explicit model or a style's model still takes precedence. Missing
   default capacity must fail before quota/dispatch, never silently switch models.
+- Image generation accepts an optional strict integer `max_cost_micro_usd`
+  (0..2^63-1). It limits the total discounted reservation across all credit
+  pockets, not just purchased spend. A price above it returns 402 before funds
+  or service exposure are reserved and before dispatch. Omission preserves
+  existing callers. `/health.features` advertises `image-max-cost-micro-usd-v1`
+  so agents do not mistake an older server's ignored extra field for protection.
+  This is a per-request ceiling, not project budgeting or dispatch idempotency.
 
 - `GET /v1/account/ownership` is private, read-only, `account.read` gated,
   rate-limited and `no-store`. Service keys must delegate a user. It accepts no

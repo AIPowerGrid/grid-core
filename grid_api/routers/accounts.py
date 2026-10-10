@@ -203,7 +203,7 @@ class CreditQuoteForm(BaseModel):
     max_tokens: int = Field(default=0, ge=0, le=1_000_000)
     n: int = Field(default=1, ge=1, le=16)
     seconds: Optional[float] = Field(default=None, gt=0, le=3_600, allow_inf_nan=False)
-    frames: Optional[int] = Field(default=None, ge=9, le=297, strict=True)
+    frames: Optional[int] = Field(default=None, ge=9, le=337, strict=True)
 
     @model_validator(mode="after")
     def require_modality_inputs(self):

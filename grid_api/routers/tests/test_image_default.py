@@ -50,3 +50,26 @@ async def test_default_routes_without_overriding_explicit_model(monkeypatch, sel
     else:
         quota.assert_not_awaited()
         submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cap,status", [(0, 200), (2500, 200), (-1, 422), (True, 422), (1.5, 422), ("5", 422), (2**63, 422)])
+async def test_image_cost_limit_is_typed_and_forwarded_separately(monkeypatch, cap, status):
+    monkeypatch.setattr(images.limiter, "enabled", False)
+    monkeypatch.setattr(images.accounts_svc, "authenticate", AsyncMock(return_value={"account_id": "test"}))
+    monkeypatch.setattr(images, "get_available_models", AsyncMock(return_value=[media.DEFAULT_IMAGE_MODEL]))
+    monkeypatch.setattr(images.quota, "check_and_consume", AsyncMock())
+    monkeypatch.setattr(images.loras_svc, "prepare_loras", lambda *_args: [])
+    submit = AsyncMock(return_value=([{"url": "https://media.invalid/test.png"}], {}))
+    monkeypatch.setattr(images.media, "submit_and_wait", submit)
+    app = FastAPI()
+    app.include_router(images.router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/v1/images/generations", json={"prompt": "a lighthouse", "max_cost_micro_usd": cap}, headers={"apikey": "test-key"})
+    assert response.status_code == status
+    if status == 200:
+        assert submit.call_args.kwargs["max_cost_micro_usd"] == cap
+        assert "max_cost_micro_usd" not in submit.call_args.args[2]
+        assert "max_cost_micro_usd" not in submit.call_args.args[2]["recipe_inputs"]
+    else:
+        submit.assert_not_awaited()

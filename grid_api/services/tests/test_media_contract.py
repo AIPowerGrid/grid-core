@@ -64,6 +64,24 @@ async def test_uncertified_batch_rejects_before_billing(monkeypatch):
     assert exc.value.status_code == 422
 
 
+@pytest.mark.asyncio
+async def test_cost_limit_denial_is_402_before_queue_submission(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    authorize = AsyncMock(return_value={"ok": False, "reason": "media cost exceeds max_cost_micro_usd"})
+    submit = AsyncMock()
+    monkeypatch.setattr(credits, "authorize_media", authorize)
+    monkeypatch.setattr(media, "_submit_and_wait_inner", submit)
+    with pytest.raises(HTTPException) as exc:
+        await media.submit_and_wait(
+            "z-image-turbo", "image", {"n": 1}, 1,
+            account_id="test", max_cost_micro_usd=1,
+        )
+    assert exc.value.status_code == 402
+    assert authorize.call_args.kwargs["max_cost_micro_usd"] == 1
+    submit.assert_not_awaited()
+
+
 def test_recipe_resolver_preserves_explicit_zero_seed():
     recipes.register_recipe("0xseedzero", "seed-zero-test", {
         "_grid": {"vars": {"seed": "3.inputs.seed"}, "modelName": "seed-zero-test"},

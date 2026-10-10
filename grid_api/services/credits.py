@@ -1085,7 +1085,8 @@ async def reconcile(user: dict, model: str, prompt_tokens: int, completion_token
 
 async def authorize_media(account_id, model: str, job_type: str, n: int, seconds, job_id,
                           *, record_reservation: bool = False, user: dict | None = None,
-                          client_ref: str | None = None) -> dict:
+                          client_ref: str | None = None,
+                          max_cost_micro_usd: int | None = None) -> dict:
     """Pre-dispatch billing gate for media (image/video). Unlike text, media cost
     is deterministic from the request (n images / video seconds), so we reserve
     the EXACT cost up front; on success it stands (settle_exact), on failure it's
@@ -1095,6 +1096,9 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
     When `record_reservation=True`, the debit and `grid_reservations` row commit
     in one transaction — the durable worker-WS lifecycle (prompt_toks=0 since media
     isn't token-priced; settle_exact ignores it)."""
+    if max_cost_micro_usd is not None and (type(max_cost_micro_usd) is not int
+                                         or not 0 <= max_cost_micro_usd <= 2**63 - 1):
+        raise ValueError("invalid maximum media cost")
     billing_user = user or {"account_id": account_id}
     if not charging_enabled_for(billing_user, model):
         return {"ok": True, "reserved": 0, "status": "dry_run"}
@@ -1124,6 +1128,9 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
         return {"ok": False, "reserved": 0, "status": "no_account",
                 "reason": "billing requires a v2 account"}
     cost = await apply_holder_discount(cost, account_id=account_id)
+    if max_cost_micro_usd is not None and cost > max_cost_micro_usd:
+        return {"ok": False, "reserved": 0, "status": "cost_limit",
+                "reason": "media cost exceeds max_cost_micro_usd"}
     service_ok, service_reason = await service_limits.authorize(
         user or {"account_id": account_id}, cost, str(job_id),
     )

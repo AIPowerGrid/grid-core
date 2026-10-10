@@ -21,19 +21,79 @@ that belongs in an integration test against Postgres.
 """
 
 import uuid
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from grid_api import database
 from grid_api.services import credits, pricing
 from grid_api.v2.schema import metadata as v2_metadata
+from grid_api.v2.schema import reservations
 
 PRICED = "gpt-oss-120b"  # text, in the price book
 IMG = "z-image-turbo"    # image, priced
 VID = "ltx-2.3"          # video, priced per second
+
+
+@pytest.mark.asyncio
+async def test_media_cost_limit_blocks_before_any_credit_pocket_or_service_exposure(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    account = uuid.uuid4()
+    await credits.credit(account, 1_000_000, "topup", ref="cost-limit-seed")
+    service, promo, free = AsyncMock(), AsyncMock(), AsyncMock()
+    monkeypatch.setattr(credits.service_limits, "authorize", service)
+    monkeypatch.setattr(credits, "_promo_first", promo)
+    monkeypatch.setattr(credits, "_free_first", free)
+    job = uuid.uuid4()
+    cost = pricing.quote_image(IMG, 2)
+    result = await credits.authorize_media(
+        account, IMG, "image", 2, None, job,
+        record_reservation=True, max_cost_micro_usd=cost - 1,
+    )
+    assert result["status"] == "cost_limit" and result["ok"] is False
+    service.assert_not_awaited()
+    promo.assert_not_awaited()
+    free.assert_not_awaited()
+    assert await credits.get_balance(account) == 1_000_000
+    async with await database.new_session() as session:
+        assert await session.scalar(sa.select(sa.func.count()).select_from(reservations)) == 0
+
+
+@pytest.mark.asyncio
+async def test_media_cost_limit_uses_discounted_total_and_accepts_exact_boundary(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    account, job = uuid.uuid4(), uuid.uuid4()
+    await credits.credit(account, 1_000_000, "topup", ref="discount-limit-seed")
+    discounted = pricing.quote_image(IMG, 1) // 2
+    monkeypatch.setattr(credits, "apply_holder_discount", AsyncMock(return_value=discounted))
+    result = await credits.authorize_media(
+        account, IMG, "image", 1, None, job,
+        record_reservation=True, max_cost_micro_usd=discounted,
+    )
+    assert result["ok"] is True and result["reserved"] == discounted
+    assert await credits.get_balance(account) == 1_000_000 - discounted
+    async with await database.new_session() as session:
+        held = await session.scalar(sa.select(reservations.c.reserved_micro))
+        assert held == discounted
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cap", [-1, True, 1.5, "100", 2**63])
+async def test_media_cost_limit_rejects_malformed_values_even_in_preview(monkeypatch, cap):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", False)
+    with pytest.raises(ValueError, match="maximum media cost"):
+        await credits.authorize_media(uuid.uuid4(), IMG, "image", 1, None, "test", max_cost_micro_usd=cap)
+
+
+@pytest.mark.asyncio
+async def test_media_cost_limit_does_not_activate_preview_charging(monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", False)
+    result = await credits.authorize_media(uuid.uuid4(), IMG, "image", 1, None, "test", max_cost_micro_usd=0)
+    assert result == {"ok": True, "reserved": 0, "status": "dry_run"}
 
 
 @pytest_asyncio.fixture

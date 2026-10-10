@@ -564,6 +564,11 @@ content sanitization, and reward settlement.
 - Media billing reserves exact deterministic cost before dispatch and refunds on
   non-running paths; text billing reserves max cost and reconciles against trusted
   usage.
+- `authorize_media` checks an optional strict `max_cost_micro_usd` against the
+  discounted total before service exposure, promotional/daily allowance or SQL
+  debits. It rejects over-budget work as `cost_limit`; the image route exposes
+  this as a 402 before dispatch. Dry-run remains zero-charge without activating
+  billing. A quote is an estimate, never the ceiling's enforcement authority.
 - Batch is accepted only for workflows with a verified batch strategy. Until
   recipe metadata carries that contract, video and source-image jobs are
   single-output and must reject larger `n` before quota, upload, reservation,
@@ -811,6 +816,9 @@ content sanitization, and reward settlement.
   PostgreSQL additionally observes real competing terminal locks and reserve
   overdraft races. Prices/storage/transport/free pockets are synthetic, not a
   live funding, R2, GPU, wallet or price-activation proof.
+  The shot-image cases additionally pin an increased reserve-time price against
+  the caller ceiling (no dispatch or money movement), plus a successful exact
+  ceiling hold with one charge and recoverable result under duplicate completion.
 - `tests/test_billing_monitor.py` exercises the actual background loop with
   synthetic health and delivery dependencies: drift and aging are distinct,
   failures are redacted without skipping treasury/reward checks, the next

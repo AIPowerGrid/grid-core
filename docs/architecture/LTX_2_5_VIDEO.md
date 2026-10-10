@@ -84,6 +84,37 @@ funded-worker reward policy. A dev rate cannot silently inherit the distilled
 rate. Do not activate either candidate until pricing and real durable lifecycle
 canaries pass. Changing new-request charging cannot reprice existing holds.
 
+### Generating Shot References Through Grid
+
+Shot images use the existing `/v1/images/generations` endpoint and image workers,
+not a hosted-provider fallback or a new graph-execution API. The local Director
+CLI candidate can request a single PNG, recover its billed result by job/client
+reference and save a committed-hash-checked asset as a relative LTX timed pin.
+Model selection and any source-image edit remain governed by image recipes and
+generation admission. This does not open video-timeline admission.
+
+The companion image request adds optional strict `max_cost_micro_usd`
+(0..2^63-1). In live charging, `authorize_media` compares the discounted total
+with it before service exposure or promotional/free/purchased holds. Exceeding
+it returns 402 before dispatch. Omission preserves existing callers; preview
+remains zero-charge. `/health.features` advertises
+`image-max-cost-micro-usd-v1`, because older image schemas accept unknown fields
+without enforcing them. Clients must not infer safety from a quote alone.
+
+This ceiling bounds one image request, including any batch's total, not the
+entire film. A progress/client reference is not a dispatch idempotency key;
+recovery must never automatically resubmit an uncertain request. CLI receipts
+and tests are implemented locally, but live Grid-image-to-LTX qualification,
+project budgets, release and video x402 remain outstanding.
+
+Focused image-cost/quote tests passed 68 cases locally. The four additional
+shot-image tests passed on SQLite and disposable PostgreSQL 14: increased-price
+denial leaves funds/dispatch untouched, and exact-ceiling success persists one
+charge and result under duplicate terminals. The full collected local Core
+suite passed 2057 tests / 275 skipped; those four added cases ran separately
+after collection. Prior snapshot `39d1f552` passed required PostgreSQL 16,
+Redis and cross-repo CI. The image-cost follow-up requires fresh CI before release.
+
 ## Evidence And Limits
 
 Owned-rig local tests on October 10, 2026:
@@ -120,6 +151,14 @@ in the ignored private operator evidence, not in public fixtures. Maximum
 workload settings are conservative admission ceilings, not an exhaustive
 resolution/frame/hardware qualification. Broader dev text/first-image quality,
 cross-GPU warm/cold recovery and the full Grid WS/R2 path remain unqualified.
+
+Sixteen-pin capacity stress tests completed at 960x544: distilled / 337 frames
+in 137.5 seconds and dev / 81 frames in 202.4 seconds. Exact frame count and
+synchronized stereo audio passed. Unrelated references were densely mixed;
+distilled showed scene blending and dev showed severe block/noise artifacts in
+sampled frames. The dev stress case fails visual quality despite structural
+success; it is not evidence for public dense-guide qualification. The separately
+successful handoff two-pin dev action remains the relevant film baseline.
 
 Candidate-specific money tests run real SQL holds and the ordinary worker
 terminal with synthetic rates, transport, storage and free pockets. Disposable
