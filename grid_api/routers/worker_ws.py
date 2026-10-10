@@ -45,6 +45,7 @@ from ..services import (
     token_stream,
     validator_responses,
     validator_text_fidelity,
+    video_output,
 )
 from ..services import ledger as ledger_svc
 from ..services import worker_identity as worker_identity_svc
@@ -1892,14 +1893,28 @@ async def _dispatch_media_job(ws: WebSocket, job: dict, selected_model: str, wor
                 if job_type == "audio"
                 else {"min_bytes": 1}
             )
+            frozen_output = None
             try:
-                uploaded = await asyncio.to_thread(
-                    storage.uploaded_outputs_present,
-                    upload_slots,
-                    **storage_bounds,
-                )
+                if job_type == "video" and job.get("_media_execution_token"):
+                    if n != 1:
+                        raise ValueError("Async video requires one output slot")
+                    frozen_output = await asyncio.to_thread(
+                        video_output.freeze,
+                        upload_slots[0],
+                        job_id=job_id,
+                        expected_sha256=reported[0]["sha256"],
+                    )
+                    uploaded = True
+                else:
+                    uploaded = await asyncio.to_thread(
+                        storage.uploaded_outputs_present,
+                        upload_slots,
+                        **storage_bounds,
+                    )
+            except video_output.InvalidVideoOutput:
+                uploaded = False
             except Exception as exc:
-                logger.error("Media storage verification unavailable for job %s: %s", job_id, exc)
+                logger.error("Media storage verification unavailable for job %s: %s", job_id, type(exc).__name__)
                 await token_stream.publish_error(job_id, "Output verification unavailable; please retry.")
                 route_events.capture_outcome(
                     job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
@@ -1919,10 +1934,10 @@ async def _dispatch_media_job(ws: WebSocket, job: dict, selected_model: str, wor
                 rep = reported.get(i, {})
                 outputs.append(
                     {
-                        "url": slot["public_url"],
-                        "key": slot["key"],
+                        "url": frozen_output["url"] if frozen_output else slot["public_url"],
+                        "key": frozen_output["key"] if frozen_output else slot["key"],
                         "seed": rep.get("seed"),
-                        "sha256": rep.get("sha256"),
+                        "sha256": frozen_output["sha256"] if frozen_output else rep.get("sha256"),
                     },
                 )
 
@@ -1936,13 +1951,9 @@ async def _dispatch_media_job(ws: WebSocket, job: dict, selected_model: str, wor
                 seconds=float(payload.get("seconds", 0) or 0),
             )
 
-            # Result hash: digest over the worker-reported per-output sha256s.
-            # ⚠️ UNATTESTED: the worker uploads to R2 directly and self-reports the
-            # sha256 — the grid never fetches the bytes, so a malicious/lazy worker can
-            # report an arbitrary hash for arbitrary content and still earn den (audit H4).
-            # This hash is integrity bookkeeping, NOT proof-of-output. Real attestation
-            # comes from the validator scan path (re-fetch + recompute, or sampled re-exec);
-            # do not treat media result_hash as authoritative at settlement until then.
+            # Candidate async video commits Core-hashed, worker-unwritable bytes.
+            # Legacy media still commits self-reported hashes after HEAD checks.
+            # Neither path proves model fidelity or the video's creative quality.
             result_commitment = _media_result_commitment(job_type, payload, outputs)
             result_hash = ledger_svc.canonical_hash(result_commitment)
             verified_sig = signing.verify_worker_sig(

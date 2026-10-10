@@ -70,6 +70,12 @@ transport, accounts, stats, health/metrics.
   budget. Success and failure validate the private lease in the money transaction;
   superseded sessions publish no DONE/error/ACK, DEN or success metrics. Frame
   job IDs must match. Core never sends its private lease token to the worker.
+  Before a candidate async video's paid terminal, Core source-conditionally
+  copies its bounded upload to a unique key the worker cannot write and hashes
+  the frozen bytes. The committed result uses that copy. Invalid bytes refund
+  only under the current lease; storage uncertainty keeps the hold and sends
+  no success/ACK. This is byte integrity, not model fidelity or codec quality;
+  legacy media retains its existing HEAD/self-reported-hash path.
   The worker must refuse a missing local journal instead of starting a render.
   Durable media recovery retains Core's dispatched recipe root for image and
   video as well as audio. Never replace it with the worker's reported root.

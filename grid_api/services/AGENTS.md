@@ -53,6 +53,18 @@ content sanitization, and reward settlement.
   Public enablement, joint worker/GPU/R2 crash canaries, retained inputs/results
   and bounded private cache retention remain release gates. Old workers must not advertise
   `async-video-resume-v1`. See `LTX_2_5_VIDEO.md`.
+- `video_output.py` owns candidate async video byte verification only. It accepts
+  one exact Core-issued attempt slot, bounds the MP4 to 256 MiB, and copies it
+  under a unique Core-only final key with the observed source ETag condition.
+  Core streams/hashes that copy directly through S3 before the money terminal.
+  Two active verifications per process, bounded reads/retries and a 120-second
+  verification budget constrain resource use. Invalid bytes release only the
+  current lease's hold; storage/conditional-copy uncertainty retains the hold
+  without payment or ACK. The paid result and receipt use the verified copy,
+  never a worker-writable PUT slot. This does not prove codec/timing, creative
+  quality, model fidelity, production R2 behavior or retention. Ambiguous
+  copies may orphan unique objects; private cleanup/lifecycle is a release gate.
+  Legacy synchronous image/audio/video and validator storage are unchanged.
 - `media.prepare_dispatch` freezes the same governed graph/execution units for
   HTTP waiting and async ingress; `bind_dispatch_recipe` attaches that exact
   snapshot without another recipe resolution. Native source validation,
@@ -844,6 +856,15 @@ content sanitization, and reward settlement.
   over a newer cached block.
 
 ## Verification
+
+- `tests/test_video_output.py` uses synthetic S3/body fixtures to prove
+  source-conditional copy, post-copy worker overwrite isolation, streaming
+  bounds/closure, digest/header rejection, private-key cleanup, deadlines,
+  capacity and uncertain transport. `test_media_job_journal.py` adds SQLite/PG
+  terminal controls for canonical result recovery, invalid refund, uncertain
+  held state and a stale connection's no-payout/no-publication behavior.
+  The process-crash fixture stubs frozen storage explicitly. None of these
+  tests is the joint native-worker/GPU/R2 canary or a video-fidelity verdict.
 
 - `tests/test_media_job_journal.py` additionally exercises original-worker/model/
   feature binding, private lease fencing, 25 competing PostgreSQL resumptions,

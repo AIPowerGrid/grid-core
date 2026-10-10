@@ -93,6 +93,13 @@ def slots(job_id, n, ext, **kwargs):
             for i in range(n)]
 storage.presign_outputs = slots
 storage.uploaded_outputs_present = lambda *args, **kwargs: True
+if os.environ.get("TEST_ASYNC_VIDEO") == "1":
+    from grid_api.services import video_output
+    def synthetic_frozen(slot, *, job_id, expected_sha256):
+        key = f"video/{job_id}/final-fixture.mp4"
+        return {"key": key, "url": f"https://fixture.invalid/{key}",
+                "sha256": expected_sha256, "bytes": 36, "content_type": "video/mp4"}
+    video_output.freeze = synthetic_frozen
 async def barrier():
     Path(os.environ["TEST_BARRIER"]).touch()
     await asyncio.Event().wait()

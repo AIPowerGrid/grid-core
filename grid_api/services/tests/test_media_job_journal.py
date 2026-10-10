@@ -44,6 +44,11 @@ OPENING = 1_000_000
 INTENT_HASH = hashlib.sha256(b"synthetic normalized client intent").hexdigest()
 
 
+def frozen_video_fixture(_slot, *, job_id, expected_sha256):
+    return {"key": f"video/{job_id}/final-fixture.mp4", "url": f"https://assets.example/video/{job_id}/final-fixture.mp4",
+            "sha256": expected_sha256, "bytes": 36, "content_type": "video/mp4"}
+
+
 @pytest.fixture(autouse=True)
 def synthetic_dependencies(monkeypatch):
     for name in ("_BY_ROOT", "_BY_NAME", "_BY_ID", "_BY_MODEL", "_LOCAL_RECIPES", "_ONCHAIN_RECIPES"):
@@ -358,6 +363,7 @@ async def test_real_worker_terminal_commits_result_before_done_and_never_rerende
         "public_url": "https://assets.example/video.mp4", "key": "video.mp4",
         "put_url": "https://upload.example/slot", "content_type": "video/mp4"}])
     monkeypatch.setattr(worker_ws.storage, "uploaded_outputs_present", lambda *_a, **_k: True)
+    monkeypatch.setattr(worker_ws.video_output, "freeze", frozen_video_fixture)
     monkeypatch.setattr(worker_ws.token_stream, "publish_done", committed_done)
     monkeypatch.setattr(worker_ws.route_events, "capture_route", lambda **_k: None)
     monkeypatch.setattr(worker_ws.route_events, "capture_outcome", lambda **_k: None)
@@ -368,6 +374,61 @@ async def test_real_worker_terminal_commits_result_before_done_and_never_rerende
     assert await worker_ws._handle_media_job(Socket(), queued, job.route_models[0], str(uuid4()), {}) is True
     assert messages == ["job", "done", "ack"]
     assert await counts() == (1, 1, 1)
+    result = (await jobs.recover(job.account_id, job.job_id))["result"]
+    assert result["media"][0]["key"] == f"video/{job.job_id}/final-fixture.mp4"
+    assert result["media"][0]["url"].endswith("final-fixture.mp4")
+    async with await database.new_session() as session:
+        row = (await session.execute(sa.select(ledger).where(ledger.c.job_id == worker_ws.ledger_svc.as_uuid(job.job_id)))).mappings().one()
+    assert row["result_hash"] == worker_ws.ledger_svc.canonical_hash(
+        worker_ws._media_result_commitment("video", job.payload, result["media"]))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["invalid", "uncertain", "superseded"])
+async def test_video_freezing_failure_never_pays_or_publishes_success(db, monkeypatch, outcome):
+    job, worker = prepared(await owner()), uuid4()
+    await jobs.reserve(job)
+    socket = AsyncMock()
+    socket.receive_json.return_value = {"type": "done", "id": job.job_id,
+                                      "results": [{"index": 0, "sha256": "a" * 64, "seed": 0}]}
+    monkeypatch.setattr(worker_ws.storage, "presign_outputs", lambda *_a, **_k: [{
+        "key": "fixture-only-put-slot", "public_url": "https://assets.example/mutable.mp4",
+        "put_url": "https://upload.example/slot", "content_type": "video/mp4"}])
+    monkeypatch.setattr(worker_ws.token_stream, "publish_done", AsyncMock())
+    monkeypatch.setattr(worker_ws.token_stream, "publish_error", AsyncMock())
+    monkeypatch.setattr(worker_ws.route_events, "capture_route", lambda **_k: None)
+    monkeypatch.setattr(worker_ws.route_events, "capture_outcome", lambda **_k: None)
+    monkeypatch.setattr(worker_ws, "record_job_complete", AsyncMock())
+    if outcome == "superseded":
+        assert await claim(job, worker_id=worker) == "claimed"
+        old_token = (await snapshot(job))[0]["execution_token"]
+        await expire_execution(job.job_id)
+        assert await resume(worker) is not None
+        current_token = (await snapshot(job))[0]["execution_token"]
+        queued = {"job_id": job.job_id, "job_type": "video", "payload": job.payload,
+                  "_media_execution_token": old_token}
+        monkeypatch.setattr(worker_ws.video_output, "freeze", frozen_video_fixture)
+        assert await worker_ws._dispatch_media_job(socket, queued, MODEL, str(worker), {}) is False
+        assert (await snapshot(job))[0]["execution_token"] == current_token
+        worker_ws.token_stream.publish_error.assert_not_awaited()
+    else:
+        def fail(*_args, **_kwargs):
+            if outcome == "invalid":
+                raise worker_ws.video_output.InvalidVideoOutput("synthetic hash mismatch")
+            raise TimeoutError("synthetic R2 outage")
+        monkeypatch.setattr(worker_ws.video_output, "freeze", fail)
+        queued = {"job_id": job.job_id, "job_type": "video", "payload": job.payload, "models": job.route_models}
+        assert await worker_ws._handle_media_job(socket, queued, MODEL, str(worker), {}) is (outcome == "invalid")
+        worker_ws.token_stream.publish_error.assert_awaited_once()
+    worker_ws.token_stream.publish_done.assert_not_awaited()
+    worker_ws.record_job_complete.assert_not_called()
+    assert [message.args[0]["type"] for message in socket.send_json.await_args_list] == ["job"]
+    assert await counts() == (1, 1, 0)
+    row = (await snapshot(job))[1]
+    assert row["status"] == ("settled" if outcome == "invalid" else "held")
+    assert row["media_result"] is None
+    balance = await credits.get_balance(job.account_id)
+    assert balance == (OPENING if outcome == "invalid" else OPENING - row["reserved_micro"])
 
 
 @pytest.mark.asyncio
@@ -951,6 +1012,7 @@ async def test_actual_media_dispatch_recovers_original_job_with_fresh_presign(db
 
     monkeypatch.setattr(worker_ws.storage, "presign_outputs", presign)
     monkeypatch.setattr(worker_ws.storage, "uploaded_outputs_present", lambda *_a, **_k: True)
+    monkeypatch.setattr(worker_ws.video_output, "freeze", frozen_video_fixture)
     monkeypatch.setattr(worker_ws.token_stream, "publish_done", AsyncMock())
     monkeypatch.setattr(worker_ws.route_events, "capture_route", lambda **_k: None)
     monkeypatch.setattr(worker_ws.route_events, "capture_outcome", lambda **_k: None)
