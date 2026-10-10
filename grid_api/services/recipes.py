@@ -34,6 +34,7 @@ from typing import Any, Optional
 
 from ..config import get_settings
 from ..safe_logging import error_type
+from . import video_contract as video_contract_svc
 
 logger = logging.getLogger("grid_api.recipes")
 
@@ -58,6 +59,7 @@ class Recipe:
     model_name: str = ""             # advertised model this recipe serves (≥1 recipe/model)
     lora_inject: Optional[dict] = None  # if set, recipe supports LoRAs (worker splices loaders here)
     seed_max: int = 2**53 - 1        # cap the seed to the model's range (e.g. TRELLIS = 2**31-1)
+    video_contract: Optional[video_contract_svc.LtxVideoContract] = None
 
 
 # recipe_root (lower hex) -> Recipe ; plus id + name indexes for convenience refs.
@@ -103,6 +105,8 @@ def _recipe_from_workflow(
         model_name=str(meta.get("modelName") or name),
         lora_inject=(meta.get("loraInject") or None),
         seed_max=int(meta.get("seedMax") or (2**53 - 1)),
+        video_contract=(video_contract_svc.LtxVideoContract.model_validate(meta["videoContract"])
+                        if "videoContract" in meta else None),
     )
 
 
@@ -348,7 +352,7 @@ def param_schema(ref: str | int) -> Optional[dict]:
                 params[name] = {"type": "integer", "minimum": 0, "maximum": 2**53 - 1}
             else:
                 params[name] = {"type": "number"}
-    return {
+    schema = {
         "model": cands[0].model_name,
         "job_type": cands[0].job_type,
         "capabilities": {
@@ -358,6 +362,31 @@ def param_schema(ref: str | int) -> Optional[dict]:
         },
         "params": params,
     }
+    contract = cands[0].video_contract
+    if contract is not None:
+        params.update({
+            "size": {"type": "size", "minimum": 256, "maximum": 960, "multiple_of": 32,
+                     "max_pixels": contract.max_pixels, "default": "960x544"},
+            "frames": {"type": "integer", "minimum": 9, "maximum": contract.max_frames,
+                       "multiple_of": 8, "offset": 1, "default": 81},
+            "seconds": {"type": "number", "minimum": 9 / 24, "maximum": contract.max_frames / 24,
+                        "description": "Nearest 8n+1 frame count; grid.execution returns the effective duration"},
+            "fps": {"type": "enum", "options": [24]},
+            "steps": {"type": "integer", "minimum": 8 if contract.variant == "distilled" else 4,
+                      "maximum": 8 if contract.variant == "distilled" else 40,
+                      "default": 8 if contract.variant == "distilled" else 40},
+            "cfg_scale": {"type": "number", "minimum": 1,
+                          "maximum": 1 if contract.variant == "distilled" else 5,
+                          "default": 1 if contract.variant == "distilled" else 2},
+            "audio": {"type": "enum", "options": [True]},
+        })
+        if any("image" in recipe.vars for recipe in cands):
+            params["keyframes"] = {
+                "type": "array", "max_items": 1,
+                "description": "One inline image at frame 0, strength 1; cannot be combined with image",
+            }
+        schema["video_contract"] = contract.model_dump(by_alias=True)
+    return schema
 
 
 def load_local_recipes(dir_path: str) -> int:
@@ -474,6 +503,16 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
     if r is None:
         raise RecipeError(f"recipe '{ref}' is not approved / not in the vault")
 
+    execution = None
+    if r.video_contract is not None:
+        try:
+            inputs = video_contract_svc.normalize(r.video_contract, inputs)
+        except ValueError:
+            # Do not reflect private prompts, upload names or the Pydantic input
+            # values into public/logged validation errors.
+            raise RecipeError("Invalid LTX-2.5 inputs; consult the model parameter contract") from None
+        execution = {key: inputs[key] for key in ("width", "height", "frames", "fps", "seconds", "steps", "cfg", "sampler", "audio")}
+
     spec = copy.deepcopy(r.spec)
 
     # Seed: first-class. Default to a fresh one; always echo back (for NFT repro).
@@ -523,6 +562,7 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
         "lora_inject": r.lora_inject,   # worker splices LoraLoader nodes here (if loras requested)
         "image_paths": r.vars.get("image"),  # path(s) the worker binds a source image to (image slot is NOT pre-injected)
         "spec": spec,
+        **({"execution": execution} if execution is not None else {}),
     }
 
 
@@ -547,9 +587,12 @@ def _recipe_for_model(model: str, inputs: dict | None = None, *,
             return False
         return True
 
-    return (next((r for r in cands if _matches(r)), None)
-            or next((r for r in cands if ("image" in r.vars) == has_source), None)
-            or cands[0])
+    chosen = (next((r for r in cands if _matches(r)), None)
+              or next((r for r in cands if ("image" in r.vars) == has_source), None)
+              or cands[0])
+    if chosen.video_contract is not None and ("image" in chosen.vars) != has_source:
+        raise RecipeError("No LTX-2.5 recipe supports this source-image mode")
+    return chosen
 
 
 def baked_default_for_model(model: str, input_name: str, inputs: dict | None = None, *,
@@ -567,6 +610,12 @@ def baked_default_for_model(model: str, input_name: str, inputs: dict | None = N
         return None
     first_path = path[0] if isinstance(path, list) else path
     return _get_path(chosen.spec, first_path)
+
+
+def video_contract_for_model(model: str, *, has_source: bool = False) -> Optional[video_contract_svc.LtxVideoContract]:
+    cands = recipes_for_model(model)
+    chosen = next((r for r in cands if ("image" in r.vars) == has_source), cands[0] if cands else None)
+    return chosen.video_contract if chosen else None
 
 
 def resolve_for_model(model: str, inputs: dict | None = None, *, has_source: bool = False) -> Optional[dict]:

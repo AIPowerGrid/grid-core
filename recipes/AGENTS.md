@@ -41,4 +41,5 @@ knobs → validate → drop here).
 
 ## Child DOX Index
 
-- None - leaf.
+- [qualification/AGENTS.md](qualification/AGENTS.md) - non-serving LTX-2.5
+  candidate recipes and promotion gates. Startup loading must stay nonrecursive.

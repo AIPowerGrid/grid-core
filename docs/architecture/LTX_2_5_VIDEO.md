@@ -1,0 +1,168 @@
+<!-- SPDX-FileCopyrightText: 2026 AI Power Grid -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+
+# LTX-2.5 Video Integration
+
+## Status
+
+Candidate implementation, not a production release. Four versioned BF16 graphs
+live in `recipes/qualification/`, which startup does not load. The default is
+still `LTX-2.3`; no public model advertisement, price, worker enrollment,
+generation gate or charging setting is changed by this candidate.
+
+Two matching native GPU-pinned ComfyUI instances have completed concurrent
+local distilled renders on the owned dual-Blackwell rig. ComfyUI remains
+loopback-only, and each GPU has separate writable state. The stopped VLO
+container and prior services are preserved for rollback. Local qualification
+does not establish Grid billing, x402, execution attestation or independent
+validator evidence.
+
+## Governed Contract
+
+The prospective model IDs are `LTX-2.5 Distilled BF16` and `LTX-2.5 Dev BF16`.
+Each has a separate text-to-video and first-image recipe. `_grid.videoContract`
+selects the strict `aipg.ltx-video.v1` contract; clients never submit graphs or
+choose checkpoint filenames. Graphs use the installed LTX-2.5 BF16 transformer,
+Gemma4-12B projection encoder and LTX-2.5 video/audio VAEs.
+
+| Input | Distilled | Dev Candidate |
+| --- | --- | --- |
+| Default size | 960x544 | 960x544 |
+| Size band | 256..960 per axis, multiples of 32, at most 522240 pixels | Same |
+| Frames | 9..297, exactly 8n+1; default 81 | 9..81, exactly 8n+1; default 81 |
+| FPS | 24 only | 24 only |
+| Steps | 8 only, fixed sigma schedule | 4..40; default 40 |
+| CFG | 1 only | 1..5; default 2 |
+| Sampler | euler_ancestral_cfg_pp | Same |
+| Audio | Generated synchronized audio, always on | Same |
+| First image | Inline PNG/JPEG/WebP, existing private source upload | Same |
+
+Explicit `frames` are never adjusted. `seconds` alone selects the nearest
+8n+1 frame count; effective duration is `frames / fps`. Four requested seconds
+become 97 frames / 24 fps, or approximately 4.041667 seconds. If both fields
+are supplied, they must already describe the same duration. Cost estimates,
+reservation units, worker payload, graph and `grid.execution` use that effective
+duration. Omitted seed randomizes once; explicit seed zero is preserved.
+Chat media uses the same 81-frame recipe default when no timing control is
+available, rather than imposing the legacy four-second default on dev.
+
+The first-image form accepts either `image` or a typed
+`keyframes: [{image, frame: 0, strength: 1}]`, never both. Multiple/nonzero guide
+positions reject before quota, upload or dispatch. The local CLI can test them,
+but frozen sections/ghosting in both dev and distilled multi-guide tests block
+public admission. LoRAs, timeline strings, unsupported samplers/schedulers,
+precision changes and disabling generated audio also reject instead of being
+ignored. Incoming source aspect is fitted under the same pixel ceiling when
+size is omitted; an explicit size remains authoritative.
+
+The legacy video model keeps its 1..10 second, maximum-240-frame contract and
+four-second HTTP default. It does not acquire LTX-2.5 frame/keyframe authority.
+
+## Economic Invariants
+
+1. Before a monetary hold, Core resolves one approved graph and freezes its
+   execution units. It does not re-resolve that graph after reserving funds.
+2. Steps and frame count in the ordinary worker reward payload agree with the
+   graph, rather than generic diffusion defaults. A recipe still does not prove
+   what an untrusted worker executed.
+3. Normal media reserve/terminal settlement/release remains authoritative.
+   HTTP timeout or disconnect is not cancellation. This change does not alter
+   SQL money guards or introduce an HTTP collector as a second settler.
+4. `/v1/account/credits/quote` accepts frames for contract-backed video and
+   reports effective frames/FPS/duration. Unknown media rates remain unpriced,
+   not a free-job exception. These model IDs have no price yet.
+
+The public rate still needs review against measured execution cost and the
+funded-worker reward policy. A dev rate cannot silently inherit the distilled
+rate. Do not activate either candidate until pricing and real durable lifecycle
+canaries pass. Changing new-request charging cannot reprice existing holds.
+
+## Evidence And Limits
+
+Owned-rig local tests on October 10, 2026:
+
+- Concurrent distilled 960x544 / 81-frame renders decoded correctly as H.264,
+  24 fps, 3.375 seconds, with 3.33 seconds of stereo audio. One cold run took
+  55.2 seconds and one warm run 18.4 seconds; these are not throughput guarantees.
+- A first-image distilled render completed in 22.5 seconds and passed structural
+  checks. Broader image/aspect quality coverage remains required.
+- Distilled 960x544 / 297 frames completed in 83.1 seconds, with 12.375 seconds
+  of video and 12.33 seconds of audio. Sampled frames showed coherent movement.
+- Three-guide dev and distilled tests completed but produced frozen sections;
+  structural output success did not qualify guide quality.
+- Core-resolved dev text-to-video completed in 88.1 seconds and dev first-image
+  in 82.2 seconds, both 960x544 / 81 frames / 24 fps, with 3.33 seconds of stereo
+  audio. No one-second freeze was found by the configured diagnostic. Both used
+  the real worker graph adapter; first-image also used its real source download
+  and ComfyUI upload. The output namespace alone was changed for private QC.
+  The first-image result blended the reference scene with the prompted new
+  subject, so this does not qualify reliable character replacement.
+
+Raw inventory, model hashes, exact graphs, prompt IDs and generated media remain
+in the ignored private operator evidence, not in public fixtures. Maximum
+workload settings are conservative admission ceilings, not an exhaustive
+resolution/frame/hardware qualification. Broader dev text/first-image quality,
+cross-GPU warm/cold recovery and the full Grid WS/R2 path remain unqualified.
+
+Candidate-specific money tests run real SQL holds and the ordinary worker
+terminal with synthetic rates, transport, storage and free pockets. Disposable
+local PostgreSQL 14 tests pass successful/insufficient/unpriced paths, duplicate
+terminals, late success after refund, result-write rollback, HTTP timeout/result
+recovery, 20 competing completions and reserve overdraft races. This is not a
+real payment or GPU/storage canary; required PostgreSQL 16 CI remains separate.
+
+## Reference-Film Editing Benchmark
+
+The maintainer identified the [reference-film recreation example](https://www.reddit.com/r/StableDiffusion/comments/1x168pn/minimax_h3_viral_zombie_short_film/)
+as the product inspiration. Its published graph uses character/background images
+and timed shot descriptions, not source-video conditioning. The soundtrack
+script reuses source audio with segmented tempo changes. Those model-specific
+results do not establish LTX-2.5 feature parity.
+
+The Director acceptance path is:
+
+```text
+operator-provided source film -> cut/frame analysis -> reviewed shot manifest
+replacement references -> scene/shot generation -> take selection -> picture edit
+original audio + explicit timing map -> final export + recovery receipts
+```
+
+Distinguish `preserve` (unchanged timing; stream-copy compatible audio) from
+`retime` (explicit tempo mapping; decoded/re-encoded audio) and `generate`.
+Never label retimed audio bit-identical. Reference-video motion transfer,
+multiple-character references and native timestamped cuts need independent
+LTX qualification. Local FFmpeg assembly must not imply those capabilities.
+
+Before old-path retirement, retain a reproducible scene-recreation comparison:
+character consistency, cut accuracy, useful motion, audio alignment, render
+cost, failed-take budget and interrupted-request recovery. Use authorized source
+media and private evidence; do not publish the example's media as fixtures.
+
+## Remaining Release Gates
+
+- Compare and execute the Core-resolved graphs through two enrolled one-job
+  media-worker identities. Verify per-GPU state, result storage and exact units.
+- Choose separate explicit rates and test sufficient/insufficient credit,
+  failed-job release, duplicate terminal, late success and restart recovery on
+  disposable PostgreSQL before a bounded real canary.
+- Add durable asynchronous submit/status/results and request identity.
+  Existing synchronous recovery is not an async submission contract.
+- Add request-bound Base USDC x402 payment-before-dispatch and refunds. The
+  existing text-only x402 route is not video support.
+- Build film manifests, take selection, local editing and agent budgets; update
+  Gallery, SDKs and the portable agent skill against the released contract.
+- After reviewed merge/deploy and canaries, promote only approved recipes,
+  change the default, drain old jobs and retire unused MiniMax H3 paths. Never
+  delete model files based only on names or an advertised replacement.
+
+## Verification
+
+The candidate has HTTP, resolver, quoting and dispatch tests with synthetic
+dependencies. They assert one graph snapshot, effective duration, correct
+distilled reward units, strict settings, seed zero, source fitting and rejection
+before quota/upload/reserve/dispatch. The isolated billing tests described above
+add actual SQL/worker-terminal lifecycle evidence, not live financial/GPU proof.
+
+Run the focused tests named in `recipes/qualification/AGENTS.md`, plus the full
+Grid suite. PostgreSQL/Redis/cross-repo CI remains a release gate; skipped
+integration tests must never be counted as passing evidence.

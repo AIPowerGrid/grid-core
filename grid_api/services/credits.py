@@ -308,9 +308,30 @@ async def quote_for_account(
     max_tokens: int = 0,
     n: int = 1,
     seconds: float = 0.0,
+    frames: int | None = None,
 ) -> dict:
     """Return a non-mutating quote that mirrors reservation-time pricing."""
     modality = (modality or "").lower()
+    from fastapi import HTTPException
+    from . import recipes, video_contract
+
+    effective_frames = None
+    contract = recipes.video_contract_for_model(model) if modality == "video" else None
+    if contract:
+        values = {}
+        if seconds:
+            values["seconds"] = seconds
+        if frames is not None:
+            values["frames"] = frames
+        try:
+            execution = video_contract.normalize(contract, values)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid LTX-2.5 timing; consult the model parameter contract") from None
+        if n != 1:
+            raise HTTPException(status_code=422, detail="LTX-2.5 supports one output per job")
+        seconds, effective_frames = execution["seconds"], execution["frames"]
+    elif frames is not None:
+        raise HTTPException(status_code=422, detail="This model has no typed frame contract")
     summary = await account_credit_summary(user)
     priced = pricing.is_priced_for(model, modality)
     request_shape = {
@@ -318,6 +339,7 @@ async def quote_for_account(
         "max_tokens": max_tokens if modality == "text" else None,
         "n": n if modality in {"image", "3d"} else None,
         "seconds": seconds if modality in {"video", "audio"} else None,
+        **({"frames": effective_frames, "fps": 24} if effective_frames is not None else {}),
     }
     if not priced:
         summary["charging_enabled"] = charging_enabled_for(user, model)

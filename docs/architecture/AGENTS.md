@@ -84,6 +84,11 @@ validation, worker incentives, and trust boundaries.
 - `RECIPE_DISPATCH.md` - how to add a media workflow: recipe = governed ComfyUI
   graph (`_grid` node map), the importer CLI, authoring steps, dispatch flow, and
   the coordinator/worker split. Start here to add an image/video model.
+- `LTX_2_5_VIDEO.md` - non-serving BF16 distilled/dev candidates, typed frame
+  and first-image contract, exact execution/quote/reward units, owned-rig
+  observations, reference-film recreation/audio-preservation benchmark and
+  outstanding financial/async/x402/promotion gates. Native multi-shot and
+  character-reference parity are measured gates, not inferred from a model swap.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only
