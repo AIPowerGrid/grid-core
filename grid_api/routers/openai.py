@@ -266,7 +266,15 @@ async def _chat_media(request: ChatCompletionRequest, kind: str, account_id=None
     seeds = media.seeds_for_outputs(seed, 1)
     if kind == "video":
         width, height = int(recipe_inputs.get("width", 768)), int(recipe_inputs.get("height", 512))
-        frames, effective_seconds = media.normalize_video_timing(4.0, 24)
+        contract = recipes.video_contract_for_model(model, has_source=bool(source_image_url))
+        if contract:
+            from ..services import video_contract
+            values = video_contract.normalize(contract, recipe_inputs)
+            width, height, frames = values["width"], values["height"], values["frames"]
+            effective_seconds = values["seconds"]
+            steps, cfg_scale, sampler = values["steps"], values["cfg"], values["sampler"]
+        else:
+            frames, effective_seconds = media.normalize_video_timing(4.0, 24)
         recipe_inputs.update({"width": width, "height": height, "seconds": effective_seconds, "fps": 24, "frames": frames})
         payload = {
             "prompt": prompt, "n": 1, "width": width, "height": height,
@@ -883,7 +891,8 @@ async def get_model_params(model_id: str):
         p.setdefault("size", {"type": "size", "minimum": media.MIN_DIM, "maximum": media.MAX_DIM,
                               "multiple_of": 64,
                               "description": "WIDTHxHEIGHT; img2img auto-matches the source if omitted"})
-        p["n"] = {"type": "integer", "minimum": 1, "maximum": 2 if jt == "video" else 4}
+        p["n"] = {"type": "integer", "minimum": 1,
+                  "maximum": 1 if sch.get("video_contract") else 2 if jt == "video" else 4}
         if jt == "video":
             p.setdefault("seconds", {"type": "number", "minimum": 1, "maximum": 10})
             p.setdefault("fps", {"type": "integer", "minimum": 8, "maximum": 30})

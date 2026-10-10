@@ -20,13 +20,21 @@ from ..auth import extract_api_key
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
 from ..services import loras as loras_svc
-from ..services import media, quota, recipes
+from ..services import media, quota, recipes, video_contract
 from ..services import styles as styles_svc
 from .worker_ws import get_available_models
 
 logger = logging.getLogger("grid_api.videos")
 
 router = APIRouter()
+
+
+class VideoKeyframe(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+    image: str = Field(min_length=1, max_length=17_000_000)
+    frame: int = Field(ge=0, le=296)
+    strength: float = Field(default=1.0, ge=0, le=1)
 
 
 class VideoRequest(BaseModel):
@@ -36,9 +44,11 @@ class VideoRequest(BaseModel):
     model: Optional[str] = None
     n: int = Field(default=1, ge=1, le=2)
     size: str = "768x512"
-    seconds: float = Field(default=4.0, ge=1, le=10)
-    fps: int = Field(default=24, ge=8, le=30)
+    seconds: float | None = Field(default=None, gt=0, le=297 / 24, allow_inf_nan=False)
+    frames: int | None = Field(default=None, ge=9, le=297, strict=True)
+    fps: int = Field(default=24, ge=8, le=30, strict=True)
     image: Optional[str] = None  # img2video start frame: inline base64 / data: URI
+    keyframes: list[VideoKeyframe] = Field(default_factory=list, max_length=16)
     loras: Optional[list] = None  # gated via loras service (rejected unless model supports them)
     response_format: Optional[str] = "url"  # "url" | "b64_json"
     worker: Optional[str] = None  # soft-affinity: prefer this worker (must be owned by the account)
@@ -68,7 +78,7 @@ async def create_video(
             await accounts_svc.assert_owns_worker(user, body.worker)
 
         extra = body.model_dump(exclude={"prompt", "model", "n", "size", "seconds", "fps", "image",
-                                         "loras", "response_format", "worker", "style", "progress_token"})
+                                         "frames", "keyframes", "loras", "response_format", "worker", "style", "progress_token"})
         prompt = body.prompt
         style_model = None
         style_loras: list = []
@@ -86,6 +96,16 @@ async def create_video(
             style_loras = eff.get("loras") or []
 
         model = body.model or style_model or media.DEFAULT_VIDEO_MODEL
+        if body.image and body.keyframes:
+            raise HTTPException(status_code=422, detail="Use image or keyframes, not both")
+        source_image = body.image
+        if body.keyframes:
+            if len(body.keyframes) != 1 or body.keyframes[0].frame != 0 or body.keyframes[0].strength != 1:
+                raise HTTPException(status_code=422, detail="Only one first-frame keyframe at frame 0 with strength 1 is qualified")
+            source_image = body.keyframes[0].image
+        contract = recipes.video_contract_for_model(model, has_source=bool(source_image))
+        if contract is None and (body.frames is not None or body.keyframes):
+            raise HTTPException(status_code=422, detail="This model has no typed frame/keyframe contract")
 
         available = await get_available_models(job_type="video")
         if not available:
@@ -105,16 +125,45 @@ async def create_video(
                 detail=f"model '{model}' does not support strength/denoise",
             )
 
-        media.validate_batch_request("video", body.n, has_source=bool(body.image))
-
-        await quota.check_and_consume(dict(user))
+        media.validate_batch_request("video", body.n, has_source=bool(source_image))
 
         set_fields = body.model_fields_set
-        width, height = media.parse_size(body.size, default=(768, 512), strict=("size" in set_fields))
-        frames, effective_seconds = media.normalize_video_timing(body.seconds, body.fps)
-        steps, cfg_scale, sampler = media.diffusion_params(model, extra)
+        if contract:
+            if body.loras or style_loras:
+                raise HTTPException(status_code=422, detail="LTX-2.5 LoRAs are not qualified")
+            if body.response_format not in ("url", "b64_json"):
+                raise HTTPException(status_code=422, detail="response_format must be url or b64_json")
+            unsupported = set(extra) - {"negative_prompt", "seed", "steps", "cfg_scale", "sampler", "audio"}
+            if unsupported:
+                raise HTTPException(status_code=422, detail="Unsupported LTX-2.5 parameter; consult the model parameter contract")
+            values = {"prompt": prompt, "fps": body.fps, **media.advanced_knob_inputs(extra)}
+            for key in ("negative_prompt", "seed", "audio"):
+                if key in extra:
+                    values[key] = extra[key]
+            try:
+                if "size" in set_fields:
+                    values["width"], values["height"] = video_contract.parse_size(body.size)
+                if body.seconds is not None:
+                    values["seconds"] = body.seconds
+                if body.frames is not None:
+                    values["frames"] = body.frames
+                values = video_contract.normalize(contract, values)
+            except ValueError:
+                raise HTTPException(status_code=422, detail="Invalid LTX-2.5 inputs; consult the model parameter contract") from None
+            width, height, frames = values["width"], values["height"], values["frames"]
+            effective_seconds = values["seconds"]
+            steps, cfg_scale, sampler = values["steps"], values["cfg"], values["sampler"]
+        else:
+            seconds = 4.0 if body.seconds is None else body.seconds
+            if not 1 <= seconds <= 10:
+                raise HTTPException(status_code=422, detail="seconds must be between 1 and 10 for this model")
+            width, height = media.parse_size(body.size, default=(768, 512), strict=("size" in set_fields))
+            frames, effective_seconds = media.normalize_video_timing(seconds, body.fps)
+            steps, cfg_scale, sampler = media.diffusion_params(model, extra)
         seed = media.normalize_seed(extra.get("seed"))
         seeds = media.seeds_for_outputs(seed, body.n)
+
+        await quota.check_and_consume(dict(user))
 
         # Recipe knobs: pass effective dimensions/timing every time so the recipe,
         # legacy payload, ledger reward, and billing all agree on what ran.
@@ -125,9 +174,9 @@ async def create_video(
         # img2video: decode the inline start frame, AUTO-MATCH output size to it
         # (unless the caller pinned `size`), upload it, and let the worker load it.
         source_image_url = None
-        if body.image:
+        if source_image:
             dims, source_image_url = await media.prepare_source_image(
-                model, body.image, size_was_set=("size" in set_fields))
+                model, source_image, size_was_set=("size" in set_fields))
             recipe_inputs.update(dims)
             if dims:
                 width, height = int(dims["width"]), int(dims["height"])
@@ -137,6 +186,8 @@ async def create_video(
         recipe_inputs["fps"] = body.fps
         recipe_inputs["frames"] = frames
         recipe_inputs.update(media.advanced_knob_inputs(extra))  # steps/cfg/sampler/scheduler
+        if contract:
+            recipe_inputs.update(steps=steps, cfg=cfg_scale, sampler=sampler, audio=True)
         # Director/timeline recipes (e.g. LTX Director 2.0): forward the recipe's
         # string knobs. The resolver applies them ONLY if the recipe declares the
         # var (unknown inputs are ignored), so plain video recipes are unaffected.

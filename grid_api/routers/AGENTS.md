@@ -30,6 +30,9 @@ transport, accounts, stats, health/metrics.
   secret sanitization helpers.
 - `images.py` - `POST /v1/images/generations` native image jobs.
 - `videos.py` - `POST /v1/videos/generations` native video jobs.
+  Contract-backed LTX-2.5 candidates support exact 8n+1 frames and one typed
+  first-frame keyframe. Unsupported settings reject before quota/upload; the
+  candidates are not loaded or deployed. See `LTX_2_5_VIDEO.md` for gates.
 - `audio.py` - `POST /v1/audio/generations` governed local ACE-Step jobs.
 - `worker_enrollment.py` - dark device-style manager pairing. Public create,
   intent, poll, and ACK endpoints are capability-bound by a high-entropy

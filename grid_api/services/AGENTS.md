@@ -7,6 +7,11 @@ content sanitization, and reward settlement.
 
 ## Ownership
 
+- `video_contract.py` owns the candidate strict LTX-2.5 execution/timing
+  contract. Only recipes declaring `_grid.videoContract` use it. Qualified
+  graphs are snapshotted before reserve; steps/frames/duration and quote units
+  must match dispatch. `recipes/qualification/` is not loaded at startup.
+
 - **Dispatch:** `job_queue.py` (Redis streams - the ONE live queue), `token_stream.py`
   (worker->client token relay), `media.py` (image/video job abstraction), `storage.py`
   (presigned R2 upload), `enforcement.py` (worker strike/evict).
@@ -791,6 +796,13 @@ content sanitization, and reward settlement.
 
 ## Verification
 
+- `tests/test_ltx25_billing.py` verifies candidate video duration/graph holds
+  before dispatch and the ordinary worker terminal's commit-before-DONE/ACK.
+  SQLite and isolated PostgreSQL schemas cover exact settlement, result-write
+  rollback, timeout recovery, duplicate protection and no payout after release;
+  PostgreSQL additionally observes real competing terminal locks and reserve
+  overdraft races. Prices/storage/transport/free pockets are synthetic, not a
+  live funding, R2, GPU, wallet or price-activation proof.
 - `tests/test_billing_monitor.py` exercises the actual background loop with
   synthetic health and delivery dependencies: drift and aging are distinct,
   failures are redacted without skipping treasury/reward checks, the next

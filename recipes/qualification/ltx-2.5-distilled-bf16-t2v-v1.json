@@ -1,0 +1,305 @@
+{
+  "_grid": {
+    "name": "LTX-2.5 Distilled BF16 t2v v1",
+    "modelName": "LTX-2.5 Distilled BF16",
+    "engine": "comfyui",
+    "jobType": "video",
+    "deterministic": false,
+    "requiredModels": [
+      "LTX-2.5 Distilled BF16"
+    ],
+    "vars": {
+      "prompt": "positive.inputs.text",
+      "negative_prompt": "negative.inputs.text",
+      "seed": "noise.inputs.noise_seed",
+      "width": [
+        "latent_video.inputs.width"
+      ],
+      "height": [
+        "latent_video.inputs.height"
+      ],
+      "frames": [
+        "latent_video.inputs.length",
+        "latent_audio.inputs.frames_number"
+      ],
+      "fps": [
+        "conditioning.inputs.frame_rate",
+        "latent_audio.inputs.frame_rate",
+        "video.inputs.fps"
+      ],
+      "cfg": "guider.inputs.cfg",
+      "sampler": "sampler.inputs.sampler_name"
+    },
+    "clamps": {
+      "width": [
+        256,
+        960
+      ],
+      "height": [
+        256,
+        960
+      ],
+      "frames": [
+        9,
+        297
+      ],
+      "cfg": [
+        1,
+        1
+      ],
+      "fps": [
+        24,
+        24
+      ]
+    },
+    "enums": {
+      "sampler": [
+        "euler_ancestral_cfg_pp"
+      ]
+    },
+    "videoContract": {
+      "schema": "aipg.ltx-video.v1",
+      "variant": "distilled",
+      "max_frames": 297,
+      "max_pixels": 522240
+    }
+  },
+  "model": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "ltx-2.5-22b-distilled-transformer-bf16.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "encoder": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "gemma4-12b-with-proj-ltx-2.5-bf16.safetensors",
+      "type": "ltxv",
+      "device": "default"
+    }
+  },
+  "video_vae": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ltx-2.5-video-vae-bf16.safetensors"
+    }
+  },
+  "audio_vae": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ltx-2.5-audio-vae-bf16.safetensors"
+    }
+  },
+  "positive": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "encoder",
+        0
+      ],
+      "text": "A steady camera follows a red ball rolling across a bright tiled floor. Soft natural room ambience."
+    }
+  },
+  "negative": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "encoder",
+        0
+      ],
+      "text": ""
+    }
+  },
+  "conditioning": {
+    "class_type": "LTXVConditioning",
+    "inputs": {
+      "positive": [
+        "positive",
+        0
+      ],
+      "negative": [
+        "negative",
+        0
+      ],
+      "frame_rate": 24
+    }
+  },
+  "latent_video": {
+    "class_type": "EmptyLTXVLatentVideo",
+    "inputs": {
+      "width": 960,
+      "height": 544,
+      "length": 81,
+      "batch_size": 1
+    }
+  },
+  "latent_audio": {
+    "class_type": "LTXVEmptyLatentAudio",
+    "inputs": {
+      "frames_number": 81,
+      "frame_rate": 24,
+      "batch_size": 1,
+      "audio_vae": [
+        "audio_vae",
+        0
+      ]
+    }
+  },
+  "av_latent": {
+    "class_type": "LTXVConcatAVLatent",
+    "inputs": {
+      "video_latent": [
+        "latent_video",
+        0
+      ],
+      "audio_latent": [
+        "latent_audio",
+        0
+      ]
+    }
+  },
+  "guider": {
+    "class_type": "CFGGuider",
+    "inputs": {
+      "model": [
+        "model",
+        0
+      ],
+      "positive": [
+        "conditioning",
+        0
+      ],
+      "negative": [
+        "conditioning",
+        1
+      ],
+      "cfg": 1
+    }
+  },
+  "sampler": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler_ancestral_cfg_pp"
+    }
+  },
+  "sigmas": {
+    "class_type": "ManualSigmas",
+    "inputs": {
+      "sigmas": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
+    }
+  },
+  "noise": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 31337
+    }
+  },
+  "sample": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "noise",
+        0
+      ],
+      "guider": [
+        "guider",
+        0
+      ],
+      "sampler": [
+        "sampler",
+        0
+      ],
+      "sigmas": [
+        "sigmas",
+        0
+      ],
+      "latent_image": [
+        "av_latent",
+        0
+      ]
+    }
+  },
+  "separate": {
+    "class_type": "LTXVSeparateAVLatent",
+    "inputs": {
+      "av_latent": [
+        "sample",
+        0
+      ]
+    }
+  },
+  "crop": {
+    "class_type": "LTXVCropGuides",
+    "inputs": {
+      "positive": [
+        "conditioning",
+        0
+      ],
+      "negative": [
+        "conditioning",
+        1
+      ],
+      "latent": [
+        "separate",
+        0
+      ]
+    }
+  },
+  "decode_video": {
+    "class_type": "VAEDecodeTiled",
+    "inputs": {
+      "samples": [
+        "crop",
+        2
+      ],
+      "vae": [
+        "video_vae",
+        0
+      ],
+      "tile_size": 512,
+      "overlap": 64,
+      "temporal_size": 128,
+      "temporal_overlap": 32
+    }
+  },
+  "decode_audio": {
+    "class_type": "LTXVAudioVAEDecode",
+    "inputs": {
+      "samples": [
+        "separate",
+        1
+      ],
+      "audio_vae": [
+        "audio_vae",
+        0
+      ]
+    }
+  },
+  "video": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "decode_video",
+        0
+      ],
+      "fps": 24,
+      "audio": [
+        "decode_audio",
+        0
+      ]
+    }
+  },
+  "save": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "video",
+        0
+      ],
+      "filename_prefix": "avd/grid",
+      "format": "mp4",
+      "codec": "h264"
+    }
+  }
+}

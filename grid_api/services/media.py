@@ -26,7 +26,7 @@ from fastapi import HTTPException
 from PIL import Image
 
 from . import job_queue, token_stream, recipes, storage, credits
-from . import generation_admission
+from . import generation_admission, video_contract
 
 logger = logging.getLogger("grid_api.media")
 
@@ -282,7 +282,8 @@ async def prepare_source_image(model: str, image_value: str, *, size_was_set: bo
     raw, ext, sw, sh = decode_source_image(image_value)
     dims: dict = {}
     if not size_was_set:
-        w, h = smart_size(sw, sh)
+        contract = recipes.video_contract_for_model(model, has_source=True)
+        w, h = video_contract.source_size(contract, sw, sh) if contract else smart_size(sw, sh)
         dims = {"width": w, "height": h}
     url = await asyncio.to_thread(storage.upload_source, raw, ext)
     return dims, url
@@ -342,13 +343,33 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
         n,
         has_source=bool(payload.get("source_image_url")),
     )
+    resolved_recipe = None
+    if job_type == "video" and recipes.video_contract_for_model(model, has_source=bool(payload.get("source_image_url"))):
+        try:
+            resolved_recipe = recipes.resolve_for_model(model, {
+                "prompt": payload.get("prompt", ""),
+                "negative_prompt": payload.get("negative_prompt", ""),
+                "seed": payload.get("seed"),
+                **(payload.get("recipe_inputs") or {}),
+            }, has_source=bool(payload.get("source_image_url")))
+        except recipes.RecipeError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        if not resolved_recipe or not resolved_recipe.get("execution"):
+            raise HTTPException(status_code=503, detail="Qualified video recipe is unavailable")
+        execution = resolved_recipe["execution"]
+        # Snapshot one validated graph before money moves. Every ingress,
+        # including chat, gets its billing/reward units from that same graph.
+        payload = {**payload, **{key: execution[key] for key in ("width", "height", "frames", "fps", "seconds", "steps")},
+                   "cfg_scale": execution["cfg"], "sampler_name": execution["sampler"],
+                   "length": execution["frames"], "video_length": execution["frames"],
+                   "seed": resolved_recipe["seed"], "seeds": [resolved_recipe["seed"]]}
     job_id = str(uuid4())
 
     # Billing gate: media cost is deterministic from the request (n images /
     # video seconds), so RESERVE the exact cost before dispatch in live mode and
-    # fail CLOSED with 402 if funds can't be held. Refund on every non-running
-    # path (429 / fault / timeout) so a job that didn't produce output is never
-    # charged. No-op in dry-run. Same enforce policy as text (unpriced/no-acct).
+    # fail CLOSED with 402 if funds can't be held. Pre-dispatch failures release
+    # here; after a submission attempt, the durable terminal/sweeper owns the
+    # hold, not the HTTP wait timeout. No-op in dry-run; unpriced/no-account deny.
     # Reserve the EXACT cost + write the durable reservation row in one
     # transaction (record_reservation), so the worker-WS handler is the sole
     # settler (settle_exact on success / release_job on failure) and a crash can't
@@ -380,7 +401,8 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
         return await _submit_and_wait_inner(model, job_type, payload, timeout, job_id,
                                             preferred_worker=preferred_worker,
                                             progress_token=progress_token,
-                                            dispatch_state=dispatch_state)
+                                            dispatch_state=dispatch_state,
+                                            resolved_recipe=resolved_recipe)
     except Exception:
         # Before a queue submission attempt, this request is the only lifecycle
         # authority and must release its hold. After dispatch, worker_ws is the
@@ -398,7 +420,8 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
 
 async def _submit_and_wait_inner(model: str, job_type: str, payload: dict, timeout: int,
                                  job_id: str, preferred_worker: str = "", progress_token: str = "",
-                                 dispatch_state: dict | None = None) -> tuple[list[dict], dict]:
+                                 dispatch_state: dict | None = None,
+                                 resolved_recipe: dict | None = None) -> tuple[list[dict], dict]:
 
     # Recipe-governed path: if `model` selects an approved RecipeVault recipe,
     # resolve it to a concrete ComfyUI graph and ride it in the payload — the
@@ -421,7 +444,7 @@ async def _submit_and_wait_inner(model: str, job_type: str, payload: dict, timeo
             "seed": payload.get("seed"),
             **(payload.get("recipe_inputs") or {}),
         }
-        spec = recipes.resolve_for_model(
+        spec = resolved_recipe if resolved_recipe is not None else recipes.resolve_for_model(
             model, inputs, has_source=bool(payload.get("source_image_url")))
     except recipes.RecipeError as e:
         # Out-of-range / invalid knob → reject so the caller learns, not silently altered.
@@ -480,6 +503,8 @@ async def _submit_and_wait_inner(model: str, job_type: str, payload: dict, timeo
             "model": result.get("model", model),
             "recipe_root": result.get("recipe_root"),
         }
+        if spec and spec.get("execution"):
+            meta["execution"] = spec["execution"]
         return media, meta
 
     raise HTTPException(status_code=504, detail=f"{job_type} generation timed out")
