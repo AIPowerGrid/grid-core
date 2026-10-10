@@ -133,15 +133,51 @@ Never label retimed audio bit-identical. Reference-video motion transfer,
 multiple-character references and native timestamped cuts need independent
 LTX qualification. Local FFmpeg assembly must not imply those capabilities.
 
-Before old-path retirement, retain a reproducible scene-recreation comparison:
-character consistency, cut accuracy, useful motion, audio alignment, render
-cost, failed-take budget and interrupted-request recovery. Use authorized source
-media and private evidence; do not publish the example's media as fixtures.
+### Existing LTX Film Baseline
+
+The maintainer's handoff already contains a completed LTX-2.5 production, not
+just the H3 inspiration: a film manifest, prompts, keyframes, three dumped
+workflows, editing/soundtrack scripts and a reference picture cut. Its selected
+takes and finished soundtrack export are still present on the owned rig.
+Read-only decoded-frame checks on October 10 confirmed a 960x544 / 24 fps final
+with 622 frames (25.916667 seconds), plus the selected 297-frame cabin,
+337-frame meadow, 33-frame dev action and 81-frame opener takes with audio.
+
+That working production is the integration baseline. The cabin uses ten image
+pins, the meadow seven, the action first/last pins with dev CFG 3, and the opener
+a softened middle pin. The current first-image-only Grid candidate does not
+support these jobs; its distilled ceiling of 297 frames also excludes the
+337-frame meadow. Generic three-guide test failures describe those particular
+tests, not an inability of LTX to produce the maintainer's successful film.
+Preserve and port the known workflow rather than substituting the simpler
+qualification graph and claiming equivalent functionality.
+
+The local builder's inference dependency graph matches all three supplied
+workflow dumps after normalizing node IDs and input-upload names. Output prefix
+and explicit MP4/H.264 encoding replace the prototype's output-auto settings.
+This structural comparison is not a rerender or a complete film/export proof.
+
+Reconcile the handoff's nominal 25.958-second acceptance target with the
+622-frame final before encoding a frame-exact export test. The prototype also
+contains hardcoded source paths and editing details that must become validated
+manifest data, not executable client input. Original soundtrack preservation
+is already represented by its fixed-length shot splice; segmented tempo
+mapping is the separate retimed-export path.
+
+Before old-path retirement, reproduce this LTX baseline through the intended
+CLI and Grid path: character consistency, cut accuracy, useful motion, audio
+alignment, render cost, failed-take budget and interrupted-request recovery.
+Use authorized source media and private evidence; do not publish the handoff's
+private prompts or media as test fixtures. H3 is an inspiration/comparison, not
+a required fallback or evidence that the working LTX approach must be replaced.
 
 ## Remaining Release Gates
 
 - Compare and execute the Core-resolved graphs through two enrolled one-job
   media-worker identities. Verify per-GPU state, result storage and exact units.
+- Port and reproduce the handoff's multi-pin/337-frame jobs before describing
+  this first-image candidate as the full Director contract. Promote bounded
+  settings from the working baseline with separate money/storage proofs.
 - Choose separate explicit rates and test sufficient/insufficient credit,
   failed-job release, duplicate terminal, late success and restart recovery on
   disposable PostgreSQL before a bounded real canary.
