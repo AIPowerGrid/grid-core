@@ -36,6 +36,7 @@ def setup(monkeypatch):
     submit = AsyncMock(return_value=([{"url": "https://media.invalid/video.mp4", "seed": 0}], {"job_id": "test"}))
     monkeypatch.setattr(media, "submit_and_wait", submit)
     monkeypatch.setattr(videos.loras_svc, "prepare_loras", lambda *_args: [])
+    monkeypatch.setattr(videos.generation_admission, "require_media", lambda *_args: None)
     app = FastAPI()
     app.include_router(videos.router)
     return app, submit, quota
@@ -70,8 +71,8 @@ async def test_http_contract_preserves_execution_defaults(setup, overrides, expe
     {"loras": [{"name": "not-qualified"}]}, {"response_format": "unknown"},
     {"keyframes": [{"image": "secret-private-image", "frame": 80}]},
     {"image": "source", "keyframes": [{"image": "other", "frame": 0}]},
-    {"keyframes": [{"image": "first", "frame": 0}, {"image": "last", "frame": 80}]},
-    {"keyframes": [{"image": "first", "frame": 0, "strength": 0.5}]},
+    {"keyframes": [{"image": "first", "frame": 0}, {"image": "last", "frame": 81}]},
+    {"keyframes": [{"image": "first", "frame": 0, "strength": 1.5}]},
     {"model": "LTX-2.3", "frames": 81}, {"model": "LTX-2.3", "seconds": 12},
 ])
 async def test_http_rejects_before_quota_upload_or_dispatch(setup, monkeypatch, payload):
@@ -107,6 +108,40 @@ async def test_typed_first_frame_uses_existing_private_upload_path(setup, monkey
     assert payload["width"] * payload["height"] <= 960 * 544
     assert uploads == [(stream.getvalue(), "png")]
     assert "keyframes" not in payload  # No client-controlled graph or paths.
+
+
+@pytest.mark.asyncio
+async def test_timed_pins_are_uploaded_once_and_keep_their_positions(setup, monkeypatch):
+    app, submit, _quota = setup
+    stream = io.BytesIO()
+    Image.new("RGB", (960, 544), "white").save(stream, "PNG")
+    image = base64.b64encode(stream.getvalue()).decode()
+    upload = lambda *_args: "https://upload.invalid/reference.png"
+    monkeypatch.setattr(storage, "upload_source", upload)
+    response = await post(app, {"frames": 337, "keyframes": [
+        {"image": image, "frame": 0}, {"image": image, "frame": 281, "strength": 0.5}]})
+    assert response.status_code == 200, response.text
+    payload = submit.call_args.args[2]
+    assert payload["source_image_urls"] == ["https://upload.invalid/reference.png"] * 2
+    assert payload["recipe_inputs"]["keyframes"] == [{"frame": 0, "strength": 1.0}, {"frame": 281, "strength": 0.5}]
+    assert payload["frames"] == 337
+    assert image not in str(payload)
+    videos.get_available_models.assert_awaited_once_with(job_type="video", media_feature="recipe-image-bindings-v1")
+
+
+@pytest.mark.asyncio
+async def test_bad_later_image_rejects_before_quota_or_any_upload(setup, monkeypatch):
+    app, submit, quota = setup
+    stream = io.BytesIO()
+    Image.new("RGB", (32, 32), "white").save(stream, "PNG")
+    image = base64.b64encode(stream.getvalue()).decode()
+    upload = AsyncMock()
+    monkeypatch.setattr(media, "upload_video_keyframes", upload)
+    response = await post(app, {"keyframes": [{"image": image, "frame": 0}, {"image": "invalid", "frame": 80}]})
+    assert response.status_code == 400, response.text
+    quota.assert_not_awaited()
+    upload.assert_not_awaited()
+    submit.assert_not_awaited()
 
 
 @pytest.mark.asyncio

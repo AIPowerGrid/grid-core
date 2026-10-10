@@ -8,7 +8,7 @@ make it recursive: placing a workflow here must not activate it.
 
 ## Ownership
 
-- `ltx-2.5-*-v1.json` owns the single-stage BF16 distilled/dev, text/first-image
+- `ltx-2.5-*-v1.json` owns the single-stage BF16 distilled/dev, text/image-pin
   qualification graphs. They mirror the locally rendered native workflows.
 - `docs/architecture/LTX_2_5_VIDEO.md` owns evidence and promotion gates.
 
@@ -16,7 +16,12 @@ make it recursive: placing a workflow here must not activate it.
 
 - Keep customer model IDs distinct from LTX-2.3 and between dev/distilled.
 - No arbitrary executable nodes, filename selectors, precision switches,
-  LoRAs, audio input, timeline JSON or multi-guide authority from clients.
+  LoRAs, audio input or timeline JSON from clients. Typed image pins may expand
+  only the Core-owned first-image scaffold; images bind through declared slots.
+- Distilled ceiling is 337 frames; dev remains 81. Text-only graphs accept no
+  pins; image graphs permit up to sixteen strictly increasing pins starting at
+  zero, within the clip, with finite strengths in 0..1. These ceilings describe
+  the bounded candidate, not exhaustive quality qualification.
 - Preserve the exact 8-step distilled sigma schedule and CFG 1.
 - Graph frame count, audio frame count and all three FPS slots must agree.
 - `_grid.videoContract` must match graph vars, clamps, defaults and components.

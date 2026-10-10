@@ -85,13 +85,14 @@ validation, worker incentives, and trust boundaries.
   graph (`_grid` node map), the importer CLI, authoring steps, dispatch flow, and
   the coordinator/worker split. Start here to add an image/video model.
 - `LTX_2_5_VIDEO.md` - non-serving BF16 distilled/dev candidates, typed frame
-  and first-image contract, exact execution/quote/reward units, owned-rig
+  and bounded image-pin contract, exact execution/quote/reward units, owned-rig
   observations, reference-film recreation/audio-preservation benchmark and
   outstanding financial/async/x402/promotion gates. Native multi-shot and
   character-reference parity are measured gates, not inferred from a model swap.
   The maintainer's completed LTX handoff and retained rig takes are the film
   baseline; synthetic guide-test failures do not invalidate that production.
-  The first-image/297-frame candidate is explicitly an incomplete subset.
+  The dark candidate now carries sixteen timed pins and the 337-frame distilled
+  ceiling; network storage, money and full film/export parity remain separate gates.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only
