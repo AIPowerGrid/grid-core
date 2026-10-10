@@ -96,7 +96,9 @@ validation, worker incentives, and trust boundaries.
   Default-off async submit/status and the bounded SQL/Redis outbox are candidate
   code. Original-worker leased resumption has isolated PostgreSQL/Core crash
   coverage; joint native-worker/GPU/storage recovery and private retention
-  remain promotion gates. Apply migrations through `0044` even with admission off.
+  remain promotion gates. Candidate async outputs are source-conditionally copied
+  and Core-hashed before settlement; fixture tests are not live R2/video quality
+  qualification. Apply migrations through `0044` even with admission off.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only

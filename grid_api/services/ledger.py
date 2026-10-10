@@ -12,9 +12,11 @@ Hash semantics (v1 of receipts):
   prompt_hash  — sha256 of the canonicalized request payload, computed
                  server-side (we saw the request).
   result_hash  — text: sha256 of the full output, computed server-side.
-                 media: worker-reported sha256 of the uploaded bytes (the
-                 server never touches media bytes — uploads go direct to R2).
-                 Verifiable after the fact by fetching the object.
+                 media: commitment over per-output hashes. Legacy media uses
+                 worker-reported digests after storage HEAD checks. Candidate
+                 async video first copies to a worker-unwritable key and
+                 verifies those byte digests through Core. Neither proves
+                 the claimed model ran or the video's creative quality.
 """
 
 import hashlib

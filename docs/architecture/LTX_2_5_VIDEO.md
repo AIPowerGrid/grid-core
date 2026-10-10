@@ -330,9 +330,52 @@ instead of submitting another Comfy prompt. Successful worker messages must
 carry that same job ID. Admission-off and Redis loss do not block SQL recovery.
 No current public worker release advertises this capability. The candidate
 worker journal passed a separate native Comfy process-crash proof, not yet
-this combined Core/worker/GPU/R2 lifecycle. Worker cache retention and immutable,
-Core-hashed output verification remain separate promotion gates; ordinary HEAD
-checks and worker-reported hashes are not proof of video content or fidelity.
+this combined Core/worker/GPU/R2 lifecycle. Worker cache retention and live
+storage verification remain separate promotion gates; ordinary HEAD checks
+and worker-reported hashes are not proof of video content or fidelity.
+
+Candidate async video now freezes every paid output before its SQL terminal.
+Only a canonical Core-issued attempt key and one bounded 256-MiB MP4 are
+accepted. Core binds the server-side copy to the source ETag, chooses a unique
+final key for which no worker PUT URL exists, and streams the copied bytes
+directly through S3 in at-most-1-MiB chunks. The Core-computed digest must match
+the worker's terminal digest. The result/ledger commitment uses the verified
+copy, not the still-mutable worker upload. A stale Core session may create an
+unused unique copy but cannot replace the winner's bytes or pass lease-guarded
+financial settlement. Legacy synchronous media and validator storage are not
+changed by this candidate.
+
+Two active verifications per Core process, five-second capacity waits,
+five-/ten-second connect/read limits, at most two SDK attempts, and a
+120-second checked verification deadline bound normal storage work. A proved
+digest, header, type or length violation releases only the current execution
+hold and cannot mint a worker completion. Conditional-copy failures, timeouts
+and other storage ambiguity preserve the hold and original-worker recovery,
+without success or ACK. Invalid copies are best-effort removed by their exact
+unique key; uncertain/uncommitted copies can remain orphaned, so result/input/
+attempt cleanup and retention remain release gates. This is byte-integrity
+verification with a minimal `ftyp` header check, not a codec, frame-count,
+audio-synchronization, quality or model-fidelity verdict.
+
+Cloudflare documents source-conditional copy support in its
+[S3 API extensions](https://developers.cloudflare.com/r2/api/s3/extensions/).
+Verification reads the copied object via S3, not public CDN URLs: public
+domain caching has separate behavior from
+[R2's direct consistency guarantees](https://developers.cloudflare.com/r2/reference/consistency/).
+Actual configured-bucket permissions/conditional-copy support and retained
+public-result playback still require the joint native-worker/GPU/R2 canary.
+Synthetic S3 tests prove overwrite isolation, chunk/size/deadline bounds,
+digest/header rejection and uncertainty behavior; real SQL terminal controls
+exercise canonical recovery, refund and stale-session fencing. Process-crash
+tests stub this storage step and must not be reported as live R2 verification.
+
+The frozen-output follow-up passed 2467 local Core tests / 24 skipped with all
+four disposable PostgreSQL test URLs supplied. Its 24 hermetic storage tests
+and real SQL terminal controls do not replace native GPU/R2 qualification.
+The new verifier/tests pass Ruff lint/format, and the verifier passes isolated
+strict mypy with imported modules skipped. Touched legacy lint findings remain
+unchanged. Fresh PostgreSQL 16/cross-repo/security CI is required for this new
+revision; the prior recovery revision's green CI cannot qualify it.
 
 Synthetic-worker tests cover atomic hold/journal writes, account privacy and
 alias ambiguity, changed-intent conflicts, output recovery, refund/late-success,
@@ -362,7 +405,9 @@ canary, storage-integrity proof, price activation or a production rollout.
 
 The leased-recovery follow-up passed 2437 local Core tests / 24 skipped with
 all four disposable PostgreSQL test URLs supplied. Local PostgreSQL is 14;
-fresh PostgreSQL 16/Redis/cross-repo CI remains required for this revision.
+recovery commit `4efd0633` also passed required PostgreSQL 16/Redis/cross-repo
+CI in run `38094944413`, plus fresh CodeQL and source/history gates. That
+qualifies the recovery revision only, not this later frozen-output change.
 The new lease service/tests and migration pass Ruff; the service also passes
 isolated mypy with imported modules skipped. Legacy money/transport lint
 findings are unchanged, not a clean whole-repo lint or strict-type claim.
@@ -372,7 +417,7 @@ Apply through `0044` before starting the candidate even with admission disabled,
 because the outbox and financial/worker paths read these columns. Preserve the
 journal, execution fence and lease-aware writers on rollback. Remaining async
 work is joint native-worker/GPU/R2 crash canaries, retained input/result and
-bounded cache lifecycle, immutable verified outputs and operational alerting.
+bounded cache lifecycle, live frozen-output verification and operational alerting.
 Do not enable public admission until those gates pass.
 
 ## Remaining Release Gates
