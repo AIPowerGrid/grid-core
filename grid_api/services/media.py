@@ -289,6 +289,26 @@ async def prepare_source_image(model: str, image_value: str, *, size_was_set: bo
     return dims, url
 
 
+def decode_video_keyframes(values: list[str]) -> list[tuple[bytes, str, int, int]]:
+    if not 1 <= len(values) <= 16 or sum(len(value) for value in values) > 32 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="keyframes exceed the 32 MB encoded input limit")
+    decoded = [decode_source_image(value) for value in values]
+    if sum(len(item[0]) for item in decoded) > 24 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="keyframes exceed the 24 MB decoded input limit")
+    return decoded
+
+
+async def upload_video_keyframes(decoded: list[tuple[bytes, str, int, int]]) -> list[str]:
+    # Reused reference images share an object, but retain distinct timed pins.
+    uploaded: dict[bytes, str] = {}
+    urls = []
+    for raw, ext, _width, _height in decoded:
+        if raw not in uploaded:
+            uploaded[raw] = await asyncio.to_thread(storage.upload_source, raw, ext)
+        urls.append(uploaded[raw])
+    return urls
+
+
 _INFLIGHT_PREFIX = "grid:inflight:"
 _INFLIGHT_TTL = 1800  # safety: self-heal a leaked counter (job longer than this is dead anyway)
 
@@ -334,6 +354,12 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
     `preferred_worker` (a worker NAME the caller has verified the account owns)
     expresses soft affinity — the grid prefers that worker but won't stall if it's
     offline or busy."""
+    sources = payload.get("source_image_urls")
+    if sources is not None and (job_type != "video" or not isinstance(sources, list)
+                               or not 1 <= len(sources) <= 16
+                               or not all(isinstance(url, str) and 0 < len(url) <= 4096 for url in sources)
+                               or sources[0] != payload.get("source_image_url")):
+        raise HTTPException(status_code=422, detail="Invalid video keyframe source list")
     generation_admission.require_media(job_type, payload)
     if progress_token and (not isinstance(progress_token, str) or len(progress_token) > 128):
         raise HTTPException(status_code=422, detail="progress_token must be at most 128 characters")
@@ -344,7 +370,10 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
         has_source=bool(payload.get("source_image_url")),
     )
     resolved_recipe = None
-    if job_type == "video" and recipes.video_contract_for_model(model, has_source=bool(payload.get("source_image_url"))):
+    contract = recipes.video_contract_for_model(model, has_source=bool(payload.get("source_image_url"))) if job_type == "video" else None
+    if sources is not None and (contract is None or not (payload.get("recipe_inputs") or {}).get("keyframes")):
+        raise HTTPException(status_code=422, detail="Video keyframe sources require a typed keyframe contract")
+    if contract:
         try:
             resolved_recipe = recipes.resolve_for_model(model, {
                 "prompt": payload.get("prompt", ""),
@@ -356,6 +385,17 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
             raise HTTPException(status_code=422, detail=str(exc)) from None
         if not resolved_recipe or not resolved_recipe.get("execution"):
             raise HTTPException(status_code=503, detail="Qualified video recipe is unavailable")
+        bindings = resolved_recipe.get("image_bindings")
+        if bindings:
+            urls = sources if sources is not None else [payload.get("source_image_url")]
+            if len(urls) != len(bindings) or not all(isinstance(url, str) and url for url in urls):
+                raise HTTPException(status_code=422, detail="Video keyframe sources do not match the execution contract")
+            if len(bindings) > 1:
+                from ..routers.worker_ws import get_available_models
+                available = await get_available_models(job_type="video", media_feature="recipe-image-bindings-v1")
+                if model not in available:
+                    raise HTTPException(status_code=503, detail="No compatible video keyframe worker is available")
+                payload = {**payload, "required_media_feature": "recipe-image-bindings-v1"}
         execution = resolved_recipe["execution"]
         # Snapshot one validated graph before money moves. Every ingress,
         # including chat, gets its billing/reward units from that same graph.
@@ -462,6 +502,8 @@ async def _submit_and_wait_inner(model: str, job_type: str, payload: dict, timeo
         # uploaded source image to, so it can point the recipe's LoadImage at it.
         if payload.get("source_image_url") and spec.get("image_paths"):
             payload["recipe_image_inputs"] = spec["image_paths"]
+        if spec.get("image_bindings"):
+            payload["recipe_image_bindings"] = spec["image_bindings"]
         logger.info(f"{job_type} job {job_id} resolved recipe {spec['recipe_root']} "
                     f"({spec['name']}, engine={spec['engine']})"
                     + (f" +{len(payload['loras'])} lora(s)" if payload.get('loras') else ""))

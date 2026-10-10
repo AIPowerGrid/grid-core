@@ -99,6 +99,7 @@ def test_explicitly_selected_path_allowed(monkeypatch, path):
     ("video", {"n": 1}, ["image"]),
     ("video", {"source_image_url": "https://example.test/source"}, ["video"]),
     ("video", {"recipe_inputs": {"timeline": "[]"}}, ["video"]),
+    ("video", {"source_image_url": "source", "recipe_inputs": {"keyframes": [{"frame": 0}, {"frame": 80}]}}, ["video", "image-to-video"]),
     ("audio", {}, ["image"]),
     ("3d", {}, ["image"]),
 ])
@@ -165,6 +166,7 @@ async def test_passthrough_rejected_before_token_count_or_reserve(monkeypatch, a
     ("image", {"source_image_url": "source"}, ["image", "image-to-image"]),
     ("video", {"source_image_url": "source"}, ["video", "image-to-video"]),
     ("video", {"recipe_inputs": {"timeline": "[]"}}, ["video", "video-timeline"]),
+    ("video", {"source_image_url": "source", "recipe_inputs": {"keyframes": [{"frame": 0}, {"frame": 80}]}}, ["video", "image-to-video", "video-timeline"]),
     ("audio", {}, ["audio"]),
     ("3d", {}, ["3d"]),
 ])

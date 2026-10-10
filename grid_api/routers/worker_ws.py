@@ -304,7 +304,8 @@ async def refresh_worker(worker_id: str, info: dict):
         await r.setex(f"{WORKER_ONLINE_BY_NAME}{info['name']}", 60, "1")
 
 
-async def get_available_models(job_type: str | None = None, api_format: str | None = None) -> list[str]:
+async def get_available_models(job_type: str | None = None, api_format: str | None = None,
+                               media_feature: str | None = None) -> list[str]:
     """Get models from connected workers (reads from Redis).
 
     When `job_type` is given (e.g. "text"), only models served by a worker of
@@ -340,6 +341,8 @@ async def get_available_models(job_type: str | None = None, api_format: str | No
         if job_type and job_type not in (info.get("job_types") or ["text"]):
             continue
         if api_format and api_format not in (info.get("api_formats") or ["openai-chat"]):
+            continue
+        if media_feature and media_feature not in (info.get("media_features") or []):
             continue
         models.update(info.get("models", []))
     # Recipe-backed models: a media recipe can define a NEW model name served by an
@@ -451,6 +454,9 @@ async def worker_websocket(ws: WebSocket):
         # assumed to be plain OpenAI chat workers.
         api_formats = init_msg.get("api_formats") or ["openai-chat"]
         api_formats = [f for f in api_formats if f in ("openai-chat", "openai-responses", "anthropic")] or ["openai-chat"]
+        media_features = init_msg.get("media_features")
+        media_features = ([feature for feature in media_features if feature == "recipe-image-bindings-v1"]
+                          if isinstance(media_features, list) and len(media_features) <= 8 else [])
         # Input modalities the worker's model accepts (operator-declared). Surfaced
         # on /v1/models as input_modalities so the chat UI enables image upload for
         # vision models. Defaults to text-only for workers that don't advertise it.
@@ -598,6 +604,7 @@ async def worker_websocket(ws: WebSocket):
             "models": models,
             "job_types": job_types,
             "api_formats": api_formats,
+            "media_features": media_features,
             "modalities": modalities,
             "max_length": max_length,
             "max_context_length": max_context_length,
@@ -760,6 +767,14 @@ async def worker_websocket(ws: WebSocket):
                     continue
 
                 selected_model = matching[0]
+
+                feature = job["payload"].get("required_media_feature")
+                if feature and feature not in worker_info.get("media_features", []):
+                    requeued = await job_queue.requeue_for_mismatch(job)
+                    if not requeued:
+                        await token_stream.publish_error(job["job_id"], "No compatible media worker is available.", code=503)
+                        await credits.release_job(job["job_id"])
+                    continue
 
                 # Check API-format compatibility too. A job for /v1/responses or
                 # /v1/messages must land on a worker whose backend natively serves

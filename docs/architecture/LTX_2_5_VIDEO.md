@@ -20,7 +20,7 @@ validator evidence.
 ## Governed Contract
 
 The prospective model IDs are `LTX-2.5 Distilled BF16` and `LTX-2.5 Dev BF16`.
-Each has a separate text-to-video and first-image recipe. `_grid.videoContract`
+Each has a separate text-to-video and image-pin recipe. `_grid.videoContract`
 selects the strict `aipg.ltx-video.v1` contract; clients never submit graphs or
 choose checkpoint filenames. Graphs use the installed LTX-2.5 BF16 transformer,
 Gemma4-12B projection encoder and LTX-2.5 video/audio VAEs.
@@ -29,13 +29,13 @@ Gemma4-12B projection encoder and LTX-2.5 video/audio VAEs.
 | --- | --- | --- |
 | Default size | 960x544 | 960x544 |
 | Size band | 256..960 per axis, multiples of 32, at most 522240 pixels | Same |
-| Frames | 9..297, exactly 8n+1; default 81 | 9..81, exactly 8n+1; default 81 |
+| Frames | 9..337, exactly 8n+1; default 81 | 9..81, exactly 8n+1; default 81 |
 | FPS | 24 only | 24 only |
 | Steps | 8 only, fixed sigma schedule | 4..40; default 40 |
 | CFG | 1 only | 1..5; default 2 |
 | Sampler | euler_ancestral_cfg_pp | Same |
 | Audio | Generated synchronized audio, always on | Same |
-| First image | Inline PNG/JPEG/WebP, existing private source upload | Same |
+| Images | Up to 16 inline PNG/JPEG/WebP pins; first at frame 0 | Same |
 
 Explicit `frames` are never adjusted. `seconds` alone selects the nearest
 8n+1 frame count; effective duration is `frames / fps`. Four requested seconds
@@ -46,11 +46,18 @@ duration. Omitted seed randomizes once; explicit seed zero is preserved.
 Chat media uses the same 81-frame recipe default when no timing control is
 available, rather than imposing the legacy four-second default on dev.
 
-The first-image form accepts either `image` or a typed
-`keyframes: [{image, frame: 0, strength: 1}]`, never both. Multiple/nonzero guide
-positions reject before quota, upload or dispatch. The local CLI can test them,
-but frozen sections/ghosting in both dev and distilled multi-guide tests block
-public admission. LoRAs, timeline strings, unsupported samplers/schedulers,
+The image form accepts either `image` or typed `keyframes`, never both. Pins
+start at zero and must be unique, strictly increasing and within the clip;
+strength is a finite value in 0..1. Core expands only its governed scaffold,
+freezes the image bindings with the graph and requires a matching source list
+before reserve. All inline images decode before any upload or quota consumption.
+Total inputs are bounded to 32 MiB encoded / 24 MiB decoded, with the existing
+12 MiB per-image limit; repeated images share one source object.
+Multi-pin jobs require `video`, `image-to-video` and `video-timeline` admission,
+plus a worker advertising `recipe-image-bindings-v1`. Compatibility is checked
+before reserve and again at dispatch; old workers never receive those graphs.
+This is a transport compatibility claim, not a worker-fidelity attestation.
+LoRAs, timeline strings, unsupported samplers/schedulers,
 precision changes and disabling generated audio also reject instead of being
 ignored. Incoming source aspect is fitted under the same pixel ceiling when
 size is omitted; an explicit size remains authoritative.
@@ -97,6 +104,16 @@ Owned-rig local tests on October 10, 2026:
   and ComfyUI upload. The output namespace alone was changed for private QC.
   The first-image result blended the reference scene with the prompted new
   subject, so this does not qualify reliable character replacement.
+- The handoff meadow and dev action were rerendered concurrently through the
+  candidate Core resolver and actual multi-image worker adapter. The meadow used
+  seven pins / 337 frames and completed in 126.8 seconds on GPU0; dev action used
+  first/last pins / 33 frames / 40 steps / CFG 3 and completed in 39.1 seconds on
+  GPU1. Both decoded as 960x544 / 24 fps with stereo audio (14.01 and 1.33
+  seconds), matching their exact video units. Neither triggered the configured
+  one-second freeze diagnostic. Core/CLI graphs matched after binding inputs;
+  only the output namespace changed. These used the manifest prompt, references,
+  seed and global negative prompt, not an assertion of pixel-identical original
+  takes. Source serving was private loopback, not R2 or Grid WS.
 
 Raw inventory, model hashes, exact graphs, prompt IDs and generated media remain
 in the ignored private operator evidence, not in public fixtures. Maximum
@@ -145,9 +162,9 @@ with 622 frames (25.916667 seconds), plus the selected 297-frame cabin,
 
 That working production is the integration baseline. The cabin uses ten image
 pins, the meadow seven, the action first/last pins with dev CFG 3, and the opener
-a softened middle pin. The current first-image-only Grid candidate does not
-support these jobs; its distilled ceiling of 297 frames also excludes the
-337-frame meadow. Generic three-guide test failures describe those particular
+a softened middle pin. The candidate now carries these typed pin chains and
+the 337-frame meadow workload; this does not yet prove a complete Grid render,
+film export, billing or storage canary. Generic three-guide test failures describe those particular
 tests, not an inability of LTX to produce the maintainer's successful film.
 Preserve and port the known workflow rather than substituting the simpler
 qualification graph and claiming equivalent functionality.
@@ -175,8 +192,8 @@ a required fallback or evidence that the working LTX approach must be replaced.
 
 - Compare and execute the Core-resolved graphs through two enrolled one-job
   media-worker identities. Verify per-GPU state, result storage and exact units.
-- Port and reproduce the handoff's multi-pin/337-frame jobs before describing
-  this first-image candidate as the full Director contract. Promote bounded
+- Reproduce the handoff's multi-pin/337-frame jobs through the intended network
+  path before describing the candidate as the full Director contract. Promote bounded
   settings from the working baseline with separate money/storage proofs.
 - Choose separate explicit rates and test sufficient/insufficient credit,
   failed-job release, duplicate terminal, late success and restart recovery on
@@ -202,3 +219,9 @@ add actual SQL/worker-terminal lifecycle evidence, not live financial/GPU proof.
 Run the focused tests named in `recipes/qualification/AGENTS.md`, plus the full
 Grid suite. PostgreSQL/Redis/cross-repo CI remains a release gate; skipped
 integration tests must never be counted as passing evidence.
+
+The expanded candidate passed 2039 full local Grid tests / 275 skipped in a
+fresh dependency environment with disposable PostgreSQL 14 credit tests. Its
+focused money/transport/contract matrix passed 225 / 3 SQLite-only race skips.
+The earlier candidate completed required PostgreSQL 16/Redis/cross-repo CI;
+the expanded change must pass those required checks again before promotion.

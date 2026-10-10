@@ -55,6 +55,7 @@ def synthetic_dependencies(monkeypatch):
     monkeypatch.setattr(worker_ws.route_events, "capture_route", lambda **_kwargs: None)
     monkeypatch.setattr(worker_ws.route_events, "capture_outcome", lambda **_kwargs: None)
     monkeypatch.setattr(worker_ws, "record_job_complete", lambda **_kwargs: None)
+    monkeypatch.setattr(worker_ws, "get_available_models", AsyncMock(return_value=[DISTILLED, DEV]))
 
 
 @pytest_asyncio.fixture(params=["sqlite", "postgres"])
@@ -139,22 +140,30 @@ async def reserve_video(account_id, model=DISTILLED):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model,steps", [(DISTILLED, 8), (DEV, 40)])
-@pytest.mark.parametrize("source", [False, True])
+@pytest.mark.parametrize("source", ["none", "single", "multi"])
 async def test_real_hold_precedes_dispatch_and_worker_commits_before_done(db, monkeypatch, model, steps, source):
     account_id = await funded_account()
     observed = {}
+    frames = (337 if model == DISTILLED else 33) if source == "multi" else 81
     async def dispatch(job_id, payload, models, **_kwargs):
         cost = pricing.quote_video(model, payload["frames"] / payload["fps"])
         row, completed = await job_state(job_id)
         assert row["status"] == "held" and row["reserved_micro"] == cost
         assert row["media_result"] is None and not completed
         assert await conserved_balance(account_id) == (OPENING_MICRO - cost,) * 2
-        assert payload["frames"] == payload["recipe_spec"]["latent_video"]["inputs"]["length"] == 81
-        assert payload["recipe_spec"]["latent_audio"]["inputs"]["frames_number"] == 81
-        assert payload["steps"] == steps and payload["seconds"] == 81 / 24
+        assert payload["frames"] == payload["recipe_spec"]["latent_video"]["inputs"]["length"] == frames
+        assert payload["recipe_spec"]["latent_audio"]["inputs"]["frames_number"] == frames
+        assert payload["steps"] == steps and payload["seconds"] == frames / 24
         assert models == [model]
-        if source:
+        if source != "none":
             assert payload["recipe_image_inputs"] == "key_0.inputs.image"
+        if source == "multi":
+            assert payload["required_media_feature"] == "recipe-image-bindings-v1"
+            assert payload["recipe_image_bindings"] == [
+                {"image_index": 0, "path": "key_0.inputs.image"},
+                {"image_index": 1, "path": "key_1.inputs.image"},
+            ]
+            assert payload["recipe_spec"]["guide_1"]["inputs"]["frame_idx"] == frames - 1
         observed.update(job_id=job_id, payload=payload, cost=cost)
     async def publish_done(job_id, full_text):
         recovered = await media_results.recover(account_id, job_id=uuid.UUID(job_id))
@@ -183,15 +192,18 @@ async def test_real_hold_precedes_dispatch_and_worker_commits_before_done(db, mo
         "public_url": "https://assets.example/video.mp4", "key": "video.mp4",
         "put_url": "https://upload.example/slot", "content_type": "video/mp4"}])
     monkeypatch.setattr(worker_ws.storage, "uploaded_outputs_present", lambda *_a, **_k: True)
-    payload = {"prompt": "a moving red ball", "seed": 0, "n": 1, "recipe_inputs": {"frames": 81}}
-    if source:
+    payload = {"prompt": "a moving red ball", "seed": 0, "n": 1, "recipe_inputs": {"frames": frames}}
+    if source != "none":
         payload["source_image_url"] = "https://assets.example/source.png"
+    if source == "multi":
+        payload["source_image_urls"] = [payload["source_image_url"], "https://assets.example/last.png"]
+        payload["recipe_inputs"]["keyframes"] = [{"frame": 0}, {"frame": frames - 1, "strength": 0.5}]
     _, meta = await media.submit_and_wait(model, "video", payload, 1, account_id=account_id,
                                          progress_token="video-request")
     assert observed["events"] == ["done", "ack"]
     row, completed = await job_state(observed["job_id"])
     assert row["status"] == "settled" and len(completed) == 1
-    assert completed[0]["output_units"] == 81 and completed[0]["model"] == model
+    assert completed[0]["output_units"] == frames and completed[0]["model"] == model
     assert meta["execution"]["steps"] == steps
     assert meta["recipe_root"] == observed["payload"]["recipe_root"]
     assert await conserved_balance(account_id) == (OPENING_MICRO - observed["cost"],) * 2

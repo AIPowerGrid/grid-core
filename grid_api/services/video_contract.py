@@ -3,6 +3,7 @@
 
 """Bounded LTX-2.5 execution units shared by recipes, HTTP and billing."""
 
+import copy
 import math
 from typing import Literal
 
@@ -14,8 +15,9 @@ class LtxVideoContract(BaseModel):
 
     contract_schema: Literal["aipg.ltx-video.v1"] = Field(alias="schema")
     variant: Literal["distilled", "dev"]
-    max_frames: int = Field(ge=9, le=297)
+    max_frames: int = Field(ge=9, le=337)
     max_pixels: int = Field(ge=256 * 256, le=960 * 544)
+    max_keyframes: int = Field(default=0, ge=0, le=16)
 
     @model_validator(mode="after")
     def validate_capacity(self):
@@ -24,6 +26,13 @@ class LtxVideoContract(BaseModel):
         if self.variant == "dev" and self.max_frames > 81:
             raise ValueError("dev capacity above 81 frames is not qualified")
         return self
+
+
+class LtxKeyframe(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+    frame: int = Field(ge=0, le=336)
+    strength: float = Field(default=1.0, ge=0, le=1)
 
 
 class LtxVideoInputs(BaseModel):
@@ -35,8 +44,9 @@ class LtxVideoInputs(BaseModel):
     image: str | None = None  # Worker-bound upload filename, never fetched here.
     width: int = Field(default=960, ge=256, le=960)
     height: int = Field(default=544, ge=256, le=960)
-    frames: int | None = Field(default=None, ge=9, le=297)
-    seconds: float | None = Field(default=None, gt=0, le=297 / 24)
+    frames: int | None = Field(default=None, ge=9, le=337)
+    seconds: float | None = Field(default=None, gt=0, le=337 / 24)
+    keyframes: list[LtxKeyframe] = Field(default_factory=list, max_length=16)
     fps: Literal[24] = 24
     steps: int | None = Field(default=None, ge=4, le=40)
     cfg: float | None = Field(default=None, ge=1, le=5)
@@ -69,7 +79,55 @@ def normalize(contract: LtxVideoContract, values: dict) -> dict:
     cfg = inputs.cfg if inputs.cfg is not None else (1.0 if contract.variant == "distilled" else 2.0)
     if contract.variant == "distilled" and (steps != 8 or cfg != 1):
         raise ValueError("LTX-2.5 distilled requires 8 steps and CFG 1")
-    return {**inputs.model_dump(exclude_none=True), "frames": frames, "seconds": frames / inputs.fps, "steps": steps, "cfg": cfg}
+    pins = inputs.keyframes
+    positions = [pin.frame for pin in pins]
+    if len(pins) > contract.max_keyframes or (pins and (
+        positions[0] != 0 or positions != sorted(set(positions)) or positions[-1] >= frames
+    )):
+        raise ValueError("keyframes must start at zero and be strictly ordered within the clip")
+    result = {**inputs.model_dump(exclude_none=True), "frames": frames,
+              "seconds": frames / inputs.fps, "steps": steps, "cfg": cfg}
+    if not pins:
+        result.pop("keyframes")
+    return result
+
+
+def expand_keyframes(spec: dict, pins: list[dict]) -> list[dict]:
+    """Expand only the governed LTX first-image scaffold, never uploaded nodes."""
+    expected = {"key_0": "LoadImage", "scale_0": "ImageScale", "preprocess_0": "LTXVPreprocess",
+                "first_0": "LTXVImgToVideoInplace", "av_latent": "LTXVConcatAVLatent",
+                "guider": "CFGGuider", "crop": "LTXVCropGuides",
+                "conditioning": "LTXVConditioning", "video_vae": "VAELoader"}
+    if not pins or any(not isinstance(spec.get(name), dict)
+                       or spec[name].get("class_type") != kind
+                       or not isinstance(spec[name].get("inputs"), dict)
+                       for name, kind in expected.items()):
+        raise ValueError("recipe does not contain the governed keyframe scaffold")
+    spec["first_0"]["inputs"]["strength"] = pins[0]["strength"]
+    positive, negative, latent = ["conditioning", 0], ["conditioning", 1], ["first_0", 0]
+    bindings = [{"image_index": 0, "path": "key_0.inputs.image"}]
+    for index, pin in enumerate(pins[1:], 1):
+        for kind in ("key", "scale", "preprocess"):
+            name = f"{kind}_{index}"
+            if name in spec or f"guide_{index}" in spec:
+                raise ValueError("recipe collides with generated guide nodes")
+            spec[name] = copy.deepcopy(spec[f"{kind}_0"])
+        spec[f"scale_{index}"]["inputs"]["image"] = [f"key_{index}", 0]
+        spec[f"preprocess_{index}"]["inputs"]["image"] = [f"scale_{index}", 0]
+        name = f"guide_{index}"
+        spec[name] = {"class_type": "LTXVAddGuide", "inputs": {
+            "positive": positive, "negative": negative, "vae": ["video_vae", 0],
+            "latent": latent, "image": [f"preprocess_{index}", 0],
+            "frame_idx": pin["frame"], "strength": pin["strength"],
+        }}
+        positive, negative, latent = [name, 0], [name, 1], [name, 2]
+        bindings.append({"image_index": index, "path": f"key_{index}.inputs.image"})
+    spec["av_latent"]["inputs"]["video_latent"] = latent
+    for name in ("guider", "crop"):
+        spec[name]["inputs"].update(positive=positive, negative=negative)
+    if spec.get("sigmas", {}).get("class_type") == "LTXVScheduler":
+        spec["sigmas"]["inputs"]["latent"] = latent
+    return bindings
 
 
 def parse_size(size: str) -> tuple[int, int]:

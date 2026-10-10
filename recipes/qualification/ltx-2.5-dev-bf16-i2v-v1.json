@@ -69,6 +69,7 @@
       "schema": "aipg.ltx-video.v1",
       "variant": "dev",
       "max_frames": 81,
+      "max_keyframes": 16,
       "max_pixels": 522240
     }
   },

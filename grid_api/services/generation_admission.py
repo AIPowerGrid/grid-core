@@ -29,5 +29,6 @@ def require_media(job_type: str, payload: dict) -> None:
     elif job_type == "video":
         if payload.get("source_image_url"):
             require_path("image-to-video")
-        if payload.get("timeline") or (payload.get("recipe_inputs") or {}).get("timeline"):
+        if (payload.get("timeline") or (payload.get("recipe_inputs") or {}).get("timeline")
+                or len((payload.get("recipe_inputs") or {}).get("keyframes") or []) > 1):
             require_path("video-timeline")

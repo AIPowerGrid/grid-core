@@ -20,7 +20,7 @@ from ..auth import extract_api_key
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
 from ..services import loras as loras_svc
-from ..services import media, quota, recipes, video_contract
+from ..services import generation_admission, media, quota, recipes, video_contract
 from ..services import styles as styles_svc
 from .worker_ws import get_available_models
 
@@ -33,7 +33,7 @@ class VideoKeyframe(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
     image: str = Field(min_length=1, max_length=17_000_000)
-    frame: int = Field(ge=0, le=296)
+    frame: int = Field(ge=0, le=336)
     strength: float = Field(default=1.0, ge=0, le=1)
 
 
@@ -44,8 +44,8 @@ class VideoRequest(BaseModel):
     model: Optional[str] = None
     n: int = Field(default=1, ge=1, le=2)
     size: str = "768x512"
-    seconds: float | None = Field(default=None, gt=0, le=297 / 24, allow_inf_nan=False)
-    frames: int | None = Field(default=None, ge=9, le=297, strict=True)
+    seconds: float | None = Field(default=None, gt=0, le=337 / 24, allow_inf_nan=False)
+    frames: int | None = Field(default=None, ge=9, le=337, strict=True)
     fps: int = Field(default=24, ge=8, le=30, strict=True)
     image: Optional[str] = None  # img2video start frame: inline base64 / data: URI
     keyframes: list[VideoKeyframe] = Field(default_factory=list, max_length=16)
@@ -100,14 +100,13 @@ async def create_video(
             raise HTTPException(status_code=422, detail="Use image or keyframes, not both")
         source_image = body.image
         if body.keyframes:
-            if len(body.keyframes) != 1 or body.keyframes[0].frame != 0 or body.keyframes[0].strength != 1:
-                raise HTTPException(status_code=422, detail="Only one first-frame keyframe at frame 0 with strength 1 is qualified")
             source_image = body.keyframes[0].image
         contract = recipes.video_contract_for_model(model, has_source=bool(source_image))
         if contract is None and (body.frames is not None or body.keyframes):
             raise HTTPException(status_code=422, detail="This model has no typed frame/keyframe contract")
 
-        available = await get_available_models(job_type="video")
+        feature = "recipe-image-bindings-v1" if len(body.keyframes) > 1 else None
+        available = await get_available_models(job_type="video", **({"media_feature": feature} if feature else {}))
         if not available:
             raise HTTPException(status_code=503, detail="No video workers are online.")
         if model not in available:
@@ -137,6 +136,8 @@ async def create_video(
             if unsupported:
                 raise HTTPException(status_code=422, detail="Unsupported LTX-2.5 parameter; consult the model parameter contract")
             values = {"prompt": prompt, "fps": body.fps, **media.advanced_knob_inputs(extra)}
+            if body.keyframes:
+                values["keyframes"] = [{"frame": pin.frame, "strength": pin.strength} for pin in body.keyframes]
             for key in ("negative_prompt", "seed", "audio"):
                 if key in extra:
                     values[key] = extra[key]
@@ -163,6 +164,15 @@ async def create_video(
         seed = media.normalize_seed(extra.get("seed"))
         seeds = media.seeds_for_outputs(seed, body.n)
 
+        # Validate every inline pin before quota or any storage side effect.
+        decoded_pins = media.decode_video_keyframes([pin.image for pin in body.keyframes]) if body.keyframes else None
+        if decoded_pins and "size" not in set_fields:
+            width, height = video_contract.source_size(contract, *decoded_pins[0][2:])
+        generation_admission.require_media("video", {
+            "source_image_url": bool(source_image),
+            "recipe_inputs": {"keyframes": values.get("keyframes", []) if contract else [],
+                              "timeline": extra.get("timeline")},
+        })
         await quota.check_and_consume(dict(user))
 
         # Recipe knobs: pass effective dimensions/timing every time so the recipe,
@@ -174,7 +184,11 @@ async def create_video(
         # img2video: decode the inline start frame, AUTO-MATCH output size to it
         # (unless the caller pinned `size`), upload it, and let the worker load it.
         source_image_url = None
-        if source_image:
+        source_image_urls = None
+        if decoded_pins:
+            source_image_urls = await media.upload_video_keyframes(decoded_pins)
+            source_image_url = source_image_urls[0]
+        elif source_image:
             dims, source_image_url = await media.prepare_source_image(
                 model, source_image, size_was_set=("size" in set_fields))
             recipe_inputs.update(dims)
@@ -188,6 +202,8 @@ async def create_video(
         recipe_inputs.update(media.advanced_knob_inputs(extra))  # steps/cfg/sampler/scheduler
         if contract:
             recipe_inputs.update(steps=steps, cfg=cfg_scale, sampler=sampler, audio=True)
+            if body.keyframes:
+                recipe_inputs["keyframes"] = values["keyframes"]
         # Director/timeline recipes (e.g. LTX Director 2.0): forward the recipe's
         # string knobs. The resolver applies them ONLY if the recipe declares the
         # var (unknown inputs are ignored), so plain video recipes are unaffected.
@@ -226,6 +242,8 @@ async def create_video(
             payload["recipe_inputs"] = recipe_inputs
         if source_image_url:
             payload["source_image_url"] = source_image_url
+        if source_image_urls:
+            payload["source_image_urls"] = source_image_urls
         if loras:
             payload["loras"] = loras
 

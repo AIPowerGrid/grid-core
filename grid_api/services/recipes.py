@@ -381,11 +381,14 @@ def param_schema(ref: str | int) -> Optional[dict]:
             "audio": {"type": "enum", "options": [True]},
         })
         if any("image" in recipe.vars for recipe in cands):
+            max_keyframes = max(recipe.video_contract.max_keyframes for recipe in cands
+                                if recipe.video_contract is not None and "image" in recipe.vars)
             params["keyframes"] = {
-                "type": "array", "max_items": 1,
-                "description": "One inline image at frame 0, strength 1; cannot be combined with image",
+                "type": "array", "max_items": max_keyframes,
+                "description": "Inline image pins: first at frame 0, then unique increasing frames; strength 0..1; cannot be combined with image",
             }
-        schema["video_contract"] = contract.model_dump(by_alias=True)
+        schema["video_contract"] = {**contract.model_dump(by_alias=True),
+                                    "max_keyframes": params.get("keyframes", {}).get("max_items", 0)}
     return schema
 
 
@@ -512,6 +515,8 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
             # values into public/logged validation errors.
             raise RecipeError("Invalid LTX-2.5 inputs; consult the model parameter contract") from None
         execution = {key: inputs[key] for key in ("width", "height", "frames", "fps", "seconds", "steps", "cfg", "sampler", "audio")}
+        if inputs.get("keyframes"):
+            execution["keyframes"] = inputs["keyframes"]
 
     spec = copy.deepcopy(r.spec)
 
@@ -549,6 +554,13 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
         for p in (path if isinstance(path, list) else [path]):
             _set_path(spec, p, val)
 
+    image_bindings = None
+    if r.video_contract is not None and inputs.get("keyframes"):
+        try:
+            image_bindings = video_contract_svc.expand_keyframes(spec, inputs["keyframes"])
+        except ValueError:
+            raise RecipeError("LTX keyframe scaffold is unavailable") from None
+
     return {
         "recipe_root": r.recipe_root,
         "recipe_id": r.recipe_id,
@@ -561,6 +573,7 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
         "required_models": r.required_models,
         "lora_inject": r.lora_inject,   # worker splices LoraLoader nodes here (if loras requested)
         "image_paths": r.vars.get("image"),  # path(s) the worker binds a source image to (image slot is NOT pre-injected)
+        **({"image_bindings": image_bindings} if image_bindings is not None else {}),
         "spec": spec,
         **({"execution": execution} if execution is not None else {}),
     }

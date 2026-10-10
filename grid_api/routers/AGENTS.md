@@ -30,8 +30,10 @@ transport, accounts, stats, health/metrics.
   secret sanitization helpers.
 - `images.py` - `POST /v1/images/generations` native image jobs.
 - `videos.py` - `POST /v1/videos/generations` native video jobs.
-  Contract-backed LTX-2.5 candidates support exact 8n+1 frames and one typed
-  first-frame keyframe. Unsupported settings reject before quota/upload; the
+  Contract-backed LTX-2.5 candidates support exact 8n+1 frames and at most
+  sixteen ordered image pins, starting at frame zero. All images validate before
+  quota/upload; multi-pin jobs additionally require `video-timeline` admission
+  and the `recipe-image-bindings-v1` worker feature. Unsupported settings reject before quota/upload; the
   candidates are not loaded or deployed. See `LTX_2_5_VIDEO.md` for gates.
 - `audio.py` - `POST /v1/audio/generations` governed local ACE-Step jobs.
 - `worker_enrollment.py` - dark device-style manager pairing. Public create,

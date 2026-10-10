@@ -112,9 +112,10 @@ def test_parameter_schema_exposes_only_qualified_surface():
     schema = recipes.param_schema(MODEL)
     assert schema["params"]["size"]["multiple_of"] == 32
     assert schema["params"]["steps"]["minimum"] == schema["params"]["steps"]["maximum"] == 8
-    assert schema["params"]["frames"]["maximum"] == 297
-    assert schema["params"]["keyframes"]["max_items"] == 1
+    assert schema["params"]["frames"]["maximum"] == 337
+    assert schema["params"]["keyframes"]["max_items"] == 16
     assert schema["video_contract"]["schema"] == "aipg.ltx-video.v1"
+    assert schema["video_contract"]["max_keyframes"] == 16
 
 
 def test_text_only_recipe_does_not_advertise_keyframe_inputs():
@@ -215,3 +216,143 @@ async def test_reservation_and_dispatch_use_one_graph_snapshot(monkeypatch):
     assert payload["recipe_spec"]["latent_audio"]["inputs"]["frames_number"] == 97
     assert payload["seed"] == payload["recipe_spec"]["noise"]["inputs"]["noise_seed"] == 0
     assert meta["execution"]["seconds"] == 97 / 24
+
+
+@pytest.mark.parametrize("variant,frames,positions,strengths", [
+    ("distilled", 297, [0, 42, 72, 96, 125, 154, 190, 202, 226, 250], [1.0] * 10),
+    ("distilled", 337, [0, 56, 113, 145, 196, 244, 281], [1.0] * 7),
+    ("dev", 33, [0, 32], [1.0, 1.0]),
+    ("distilled", 81, [0, 14, 80], [1.0, 0.5, 1.0]),
+])
+def test_governed_expansion_carries_handoff_timed_pins(variant, frames, positions, strengths):
+    model = f"LTX-2.5 {'Distilled' if variant == 'distilled' else 'Dev'} BF16"
+    pins = [{"frame": frame, "strength": strength} for frame, strength in zip(positions, strengths)]
+    resolved = recipes.resolve_for_model(model, {"frames": frames, "keyframes": pins, "seed": 0,
+                                               "width": 768, "height": 512}, has_source=True)
+    graph = resolved["spec"]
+    assert resolved["execution"]["keyframes"] == pins
+    assert resolved["execution"]["seconds"] == frames / 24
+    assert graph["first_0"]["inputs"]["strength"] == strengths[0]
+    assert resolved["image_bindings"] == [
+        {"image_index": index, "path": f"key_{index}.inputs.image"} for index in range(len(pins))]
+    for index, pin in enumerate(pins[1:], 1):
+        assert graph[f"guide_{index}"]["inputs"]["frame_idx"] == pin["frame"]
+        assert graph[f"guide_{index}"]["inputs"]["strength"] == pin["strength"]
+        assert graph[f"guide_{index}"]["inputs"]["latent"] == (["first_0", 0] if index == 1 else [f"guide_{index - 1}", 2])
+        assert graph[f"scale_{index}"]["inputs"]["width"] == 768
+        assert graph[f"scale_{index}"]["inputs"]["height"] == 512
+    final = f"guide_{len(pins) - 1}"
+    assert graph["av_latent"]["inputs"]["video_latent"] == [final, 2]
+    assert graph["guider"]["inputs"]["positive"] == graph["crop"]["inputs"]["positive"] == [final, 0]
+    assert graph["guider"]["inputs"]["negative"] == graph["crop"]["inputs"]["negative"] == [final, 1]
+    if variant == "dev":
+        assert graph["sigmas"]["inputs"]["latent"] == [final, 2]
+    # Resolving another request must not mutate the canonical recipe.
+    fresh = recipes.resolve_for_model(model, {}, has_source=True)["spec"]
+    assert "guide_1" not in fresh
+    assert fresh["first_0"]["inputs"]["strength"] == 1
+
+
+@pytest.mark.parametrize("pins", [
+    [{"frame": 1}], [{"frame": 0}, {"frame": 0}],
+    [{"frame": 0}, {"frame": 32}, {"frame": 16}], [{"frame": 0}, {"frame": 81}],
+    [{"frame": True}], [{"frame": 0, "strength": float("nan")}],
+    [{"frame": 0, "strength": -0.1}], [{"frame": 0, "strength": 1.1}],
+    [{"frame": 0, "path": "arbitrary.inputs.file"}],
+    [{"frame": index} for index in range(17)],
+])
+def test_invalid_timed_pins_reject_at_recipe_boundary(pins):
+    with pytest.raises(recipes.RecipeError, match="Invalid LTX-2.5 inputs"):
+        recipes.resolve_for_model(MODEL, {"keyframes": pins}, has_source=True)
+
+
+def test_text_only_recipe_cannot_accept_pins():
+    with pytest.raises(recipes.RecipeError, match="Invalid LTX-2.5 inputs"):
+        recipes.resolve_for_model(MODEL, {"keyframes": [{"frame": 0}]}, has_source=False)
+
+
+@pytest.mark.parametrize("sources", [[], "not-a-list", [None], ["other"], ["first"] * 17])
+@pytest.mark.asyncio
+async def test_malformed_source_list_rejects_before_money(monkeypatch, sources):
+    reserve = AsyncMock()
+    monkeypatch.setattr(credits, "authorize_media", reserve)
+    with pytest.raises(HTTPException) as exc:
+        await media.submit_and_wait(MODEL, "video", {"source_image_urls": sources, "source_image_url": "first"}, 1)
+    assert exc.value.status_code == 422
+    reserve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sources", [["first"], ["first", "last"]])
+async def test_pin_sources_and_worker_compatibility_checked_before_money(monkeypatch, sources):
+    from grid_api.routers import worker_ws
+    reserve = AsyncMock()
+    monkeypatch.setattr(credits, "authorize_media", reserve)
+    available = AsyncMock(return_value=[])
+    monkeypatch.setattr(worker_ws, "get_available_models", available)
+    with pytest.raises(HTTPException) as exc:
+        await media.submit_and_wait(MODEL, "video", {
+            "source_image_url": "first", "source_image_urls": sources,
+            "recipe_inputs": {"keyframes": [{"frame": 0}, {"frame": 80}]},
+        }, 1)
+    assert exc.value.status_code == (422 if len(sources) == 1 else 503)
+    reserve.assert_not_awaited()
+
+
+@pytest.mark.parametrize("variant", ["distilled", "dev"])
+def test_broken_governed_scaffold_rejects_instead_of_skipping_references(variant):
+    model = f"LTX-2.5 {'Distilled' if variant == 'distilled' else 'Dev'} BF16"
+    recipe = next(recipe for recipe in recipes.recipes_for_model(model) if "image" in recipe.vars)
+    del recipe.spec["video_vae"]
+    with pytest.raises(recipes.RecipeError, match="scaffold is unavailable"):
+        recipes.resolve_for_model(model, {"keyframes": [{"frame": 0}, {"frame": 80}]}, has_source=True)
+
+
+def test_total_image_bounds_reject_before_decoding(monkeypatch):
+    calls = []
+    monkeypatch.setattr(media, "decode_source_image", lambda value: calls.append(value))
+    with pytest.raises(HTTPException) as exc:
+        media.decode_video_keyframes(["x" * (17 * 1024 * 1024)] * 2)
+    assert exc.value.status_code == 413
+    assert not calls
+
+
+def test_total_decoded_image_bound_rejects(monkeypatch):
+    monkeypatch.setattr(media, "decode_source_image", lambda _value: (b"x" * (9 * 1024 * 1024), "png", 32, 32))
+    with pytest.raises(HTTPException) as exc:
+        media.decode_video_keyframes(["a", "b", "c"])
+    assert exc.value.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_reused_reference_image_uploads_once(monkeypatch):
+    uploads = []
+    def upload(raw, ext):
+        uploads.append((raw, ext))
+        return f"https://source.invalid/{len(uploads)}.png"
+    monkeypatch.setattr(media.storage, "upload_source", upload)
+    urls = await media.upload_video_keyframes([(b"a", "png", 32, 32), (b"b", "png", 32, 32), (b"a", "png", 32, 32)])
+    assert urls == ["https://source.invalid/1.png", "https://source.invalid/2.png", "https://source.invalid/1.png"]
+    assert len(uploads) == 2
+
+
+@pytest.mark.asyncio
+async def test_available_models_filters_old_workers_for_timed_images(monkeypatch):
+    from grid_api.routers import worker_ws
+    class Pipeline:
+        def get(self, _key):
+            return self
+        async def execute(self):
+            return [json.dumps({"job_types": ["video"], "models": ["old-only"]}),
+                    json.dumps({"job_types": ["video"], "models": [MODEL], "media_features": ["recipe-image-bindings-v1"]}),
+                    json.dumps({"job_types": ["image"], "models": ["image-only"], "media_features": ["recipe-image-bindings-v1"]})]
+    class Redis:
+        async def smembers(self, _key):
+            return ["old", "new", "image"]
+        def pipeline(self):
+            return Pipeline()
+    monkeypatch.setattr(worker_ws, "get_redis", lambda: Redis())
+    ordinary = await worker_ws.get_available_models(job_type="video")
+    assert "old-only" in ordinary and MODEL in ordinary
+    compatible = await worker_ws.get_available_models(job_type="video", media_feature="recipe-image-bindings-v1")
+    assert MODEL in compatible and "old-only" not in compatible and "image-only" not in compatible

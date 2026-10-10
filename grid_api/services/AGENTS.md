@@ -11,6 +11,12 @@ content sanitization, and reward settlement.
   contract. Only recipes declaring `_grid.videoContract` use it. Qualified
   graphs are snapshotted before reserve; steps/frames/duration and quote units
   must match dispatch. `recipes/qualification/` is not loaded at startup.
+  Typed pins are metadata, not executable nodes: the resolver expands the
+  governed first-image scaffold into a fixed LTX guide chain. Distilled permits
+  up to 337 frames, dev 81, both at most sixteen ordered pins starting at zero.
+  Source lists and bindings must agree before reserve; multi-pin dispatch requires
+  `recipe-image-bindings-v1`. Old workers requeue without receiving the graph;
+  mismatch exhaustion releases the hold through the existing terminal path.
 
 - **Dispatch:** `job_queue.py` (Redis streams - the ONE live queue), `token_stream.py`
   (worker->client token relay), `media.py` (image/video job abstraction), `storage.py`
@@ -25,6 +31,8 @@ content sanitization, and reward settlement.
   them. Source-image, image-batch, and video-timeline capabilities additionally
   require their base image/video path. This is not a pricing or reward exemption;
   internal validator/setup probes retain their separate non-economic contracts.
+  Typed video requests with multiple image pins also require `video-timeline`.
+  The video router repeats admission before source uploads or quota consumption.
   `validate_rollout` rejects global charging with an omitted admission list
   before startup touches dependencies. Dark/allowlisted deployment can retain
   defaults; an explicit empty list is a valid closed rollout. This guard forces
