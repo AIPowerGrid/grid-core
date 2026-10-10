@@ -1,15 +1,17 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Private async video identity/outbox foundation, not public admission.
+"""Private journal and bounded outbox for default-off async video admission.
 
 Reservations remain the sole money/result authority. Redis may redeliver, but a
 SQL execution claim is irrevocable: uncertain execution is never rerendered.
-No router or scheduler currently creates these jobs.
+Only the scoped video-jobs ingress may admit these governed credit-backed jobs.
+Disabling new admission does not stop recovery or draining existing holds.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import math
@@ -42,6 +44,10 @@ class MediaJobConflict(MediaJobError):
 
 class MediaJobPaymentRequired(MediaJobError):
     """No positive, live credit reservation could be committed."""
+
+
+class MediaJobCapacityExceeded(MediaJobError):
+    """The canonical account already holds its allowed async work."""
 
 
 def _now() -> datetime:
@@ -101,6 +107,11 @@ def _key_hash(value: str) -> str:
     if key.version != 4:
         raise MediaJobError("idempotency key must be a UUIDv4")
     return hashlib.sha256(f"aipg-media-key-v1:{key}".encode("ascii")).hexdigest()
+
+
+def validate_idempotency_key(value: str) -> None:
+    """Ingress validation before any source upload or request-count quota."""
+    _key_hash(value)
 
 
 def _payload_hash(payload: dict, route_models: list[str], model: str, preferred_worker: str) -> str:
@@ -241,7 +252,7 @@ async def lookup_request(account_id, idempotency_key: str, request_hash: str) ->
         return await _lookup(session, account_id, key_hash, request_hash)
 
 
-async def reserve(job: PreparedMediaJob, *, user: dict | None = None) -> dict:
+async def reserve(job: PreparedMediaJob, *, user: dict | None = None, concurrency_limit: int | None = None) -> dict:
     """Serialize request identity across pocket draws; hold+journal commit together.
 
     PostgreSQL is the concurrency authority. NO KEY UPDATE blocks identity merges
@@ -251,6 +262,8 @@ async def reserve(job: PreparedMediaJob, *, user: dict | None = None) -> dict:
     from . import credits
 
     _validate_prepared(job)
+    if concurrency_limit is not None and (type(concurrency_limit) is not int or not 1 <= concurrency_limit <= 16):
+        raise MediaJobError("invalid async video concurrency limit")
     if user is not None and _uuid(user.get("account_id")) != job.account_id:
         raise MediaJobError("billing principal does not own prepared video job")
     async with await new_session() as session:
@@ -267,6 +280,13 @@ async def reserve(job: PreparedMediaJob, *, user: dict | None = None) -> dict:
             return existing
         if canonical != job.account_id:
             raise MediaJobConflict("new video requests require the current canonical account")
+        if concurrency_limit is not None:
+            family = await identities.account_family_ids(canonical, session=session, max_members=128)
+            held = await session.scalar(sa.select(sa.func.count()).select_from(media_jobs.join(
+                reservations, media_jobs.c.job_id == reservations.c.job_id,
+            )).where(media_jobs.c.account_id.in_(family), reservations.c.status == "held"))
+            if held >= concurrency_limit:
+                raise MediaJobCapacityExceeded("too many held async video jobs")
         authorization = await credits.authorize_media(
             job.account_id, job.model, "video", 1, job.seconds, job.job_id,
             record_reservation=True, user=user, max_cost_micro_usd=job.max_cost_micro,
@@ -323,8 +343,8 @@ async def dispatch_one(job_id, *, lease_seconds: int = 60) -> bool:
     """One bounded outbox attempt; failed/lost XADD replies leave a reclaimable lease.
 
     Duplicate Redis entries are permitted. The SQL execution fence, not XADD or
-    its reply, guarantees at-most-one worker dispatch. No background loop calls
-    this function yet; queued jobs lost from Redis require later reconciliation.
+    its reply, guarantees at-most-one worker dispatch. The background batch can
+    reclaim unstarted queued jobs after lease expiry, including after Redis loss.
     """
     job_id = str(_uuid(job_id))
     if type(lease_seconds) is not int or not 1 <= lease_seconds <= 300:
@@ -333,7 +353,7 @@ async def dispatch_one(job_id, *, lease_seconds: int = 60) -> bool:
         row = await _locked_job(session, job_id)
         now = _now()
         if (row is None or row["status"] != "held" or row["execution_started"] is not None
-                or row["dispatch_state"] == "queued" or row["dispatch_attempts"] >= MAX_DISPATCH_ATTEMPTS
+                or row["dispatch_attempts"] >= MAX_DISPATCH_ATTEMPTS
                 or (row["dispatch_deadline"] is not None and _aware(row["dispatch_deadline"]) > now)):
             return False
         token = str(uuid4())
@@ -343,20 +363,53 @@ async def dispatch_one(job_id, *, lease_seconds: int = 60) -> bool:
             dispatch_attempts=media_jobs.c.dispatch_attempts + 1,
         ))
         await session.commit()
-    stream_id = await job_queue.submit_job(
+    stream_id = await asyncio.wait_for(job_queue.submit_job(
         job_id, row["payload"], row["route_models"], job_type="video",
         preferred_worker=row["preferred_worker"],
-    )
+    ), timeout=min(5, lease_seconds / 2))
     if not isinstance(stream_id, str) or not _QUEUE_ID.fullmatch(stream_id):
         raise MediaJobError("invalid queue submission acknowledgement")
     async with await new_session() as session:
         # A worker may have claimed/executed while the publisher awaited XADD.
         await session.execute(media_jobs.update().where(
             media_jobs.c.job_id == job_id, media_jobs.c.dispatch_token == token,
-        ).values(dispatch_state="queued", queue_message_id=stream_id,
-                 dispatch_token=None, dispatch_deadline=None))
+        ).values(dispatch_state="queued", queue_message_id=stream_id))
         await session.commit()
     return True
+
+
+async def dispatch_batch(*, limit: int = 10, lease_seconds: int = 60) -> dict:
+    """Drain held requests even after admission rollback; never rerender a claim.
+
+    Re-publish unclaimed queued work after its bounded lease. This covers Redis
+    loss/trimming without treating transport state as execution authority.
+    Exhaustion releases only unstarted jobs under the existing financial lock.
+    """
+    from . import credits
+
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise MediaJobError("invalid async dispatch batch limit")
+    if type(lease_seconds) is not int or not 1 <= lease_seconds <= 300:
+        raise MediaJobError("invalid dispatch lease")
+    async with await new_session() as session:
+        rows = (await session.execute(sa.select(media_jobs.c.job_id, media_jobs.c.dispatch_attempts)
+            .join(reservations, media_jobs.c.job_id == reservations.c.job_id)
+            .where(reservations.c.status == "held", media_jobs.c.execution_started.is_(None),
+                   sa.or_(media_jobs.c.dispatch_deadline.is_(None), media_jobs.c.dispatch_deadline <= _now()))
+            .order_by(media_jobs.c.created, media_jobs.c.job_id).limit(limit))).all()
+    counts = {"queued": 0, "exhausted": 0, "errors": 0}
+    for job_id, attempts in rows:
+        try:
+            if attempts >= MAX_DISPATCH_ATTEMPTS:
+                await credits.release_job(job_id, only_if_unstarted_media=True)
+                counts["exhausted"] += 1
+            elif await dispatch_one(job_id, lease_seconds=lease_seconds):
+                counts["queued"] += 1
+        except Exception:
+            # The retained lease is recovery authority. Do not expose DB/queue
+            # exceptions, refund uncertain acceptance or skip the remaining batch.
+            counts["errors"] += 1
+    return counts
 
 
 async def claim_execution(*, job_id, payload: dict, route_models: list[str],

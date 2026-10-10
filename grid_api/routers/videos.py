@@ -56,24 +56,9 @@ class VideoRequest(BaseModel):
     progress_token: Optional[str] = None  # client id to poll live % at GET /v1/progress/{token}
 
 
-@router.post("/v1/videos/generations")
-@limiter.limit("4/minute")
-async def create_video(
-    request: Request,
-    body: VideoRequest,
-    apikey: Optional[str] = Header(None),
-    authorization: Optional[str] = Header(None),
-    x_grid_user_assertion: Optional[str] = Header(None),
-    x_grid_user_token: Optional[str] = Header(None),
-):
-    """Text-to-video generation (grid-native, OpenAI-style envelope)."""
+async def prepare_video(body: VideoRequest, user: dict, *, async_submission: bool = False) -> tuple[str, dict, list[int]]:
+    """Shared native ingress: validate, admit and upload; never reserve or queue."""
     try:
-        key = extract_api_key(apikey, authorization)
-        user = await accounts_svc.authenticate(
-            key, x_grid_user_assertion, user_token=x_grid_user_token,
-            required_scope="inference.submit",
-        )
-
         if body.worker:
             await accounts_svc.assert_owns_worker(user, body.worker)
 
@@ -106,7 +91,13 @@ async def create_video(
             raise HTTPException(status_code=422, detail="This model has no typed frame/keyframe contract")
 
         feature = "recipe-image-bindings-v1" if len(body.keyframes) > 1 else None
-        available = await get_available_models(job_type="video", **({"media_feature": feature} if feature else {}))
+        if async_submission:
+            features = ("async-video-resume-v1",) + ((feature,) if feature else ())
+            available = await get_available_models(job_type="video", media_features=features)
+            if contract is None:
+                raise HTTPException(422, detail="Async video requires a governed typed video recipe")
+        else:
+            available = await get_available_models(job_type="video", **({"media_feature": feature} if feature else {}))
         if not available:
             raise HTTPException(status_code=503, detail="No video workers are online.")
         if model not in available:
@@ -246,6 +237,34 @@ async def create_video(
             payload["source_image_urls"] = source_image_urls
         if loras:
             payload["loras"] = loras
+
+        if async_submission:
+            payload["required_media_features"] = list(features)
+        return model, payload, seeds
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Video preparation failed")
+        raise HTTPException(status_code=503, detail="Video preparation temporarily unavailable") from None
+
+
+@router.post("/v1/videos/generations")
+@limiter.limit("4/minute")
+async def create_video(
+    request: Request,
+    body: VideoRequest,
+    apikey: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+    x_grid_user_assertion: Optional[str] = Header(None),
+    x_grid_user_token: Optional[str] = Header(None),
+):
+    """Text-to-video generation (grid-native, OpenAI-style envelope)."""
+    try:
+        user = await accounts_svc.authenticate(
+            extract_api_key(apikey, authorization), x_grid_user_assertion,
+            user_token=x_grid_user_token, required_scope="inference.submit",
+        )
+        model, payload, seeds = await prepare_video(body, user)
 
         outputs, meta = await media.submit_and_wait(model, "video", payload, media.VIDEO_TIMEOUT,
                                               account_id=user.get("account_id"), concurrency_limit=media.MEDIA_CONCURRENCY,

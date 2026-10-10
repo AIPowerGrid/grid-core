@@ -93,6 +93,8 @@ validation, worker incentives, and trust boundaries.
   baseline; synthetic guide-test failures do not invalidate that production.
   The dark candidate now carries sixteen timed pins and the 337-frame distilled
   ceiling; network storage, money and full film/export parity remain separate gates.
+  Default-off async submit/status and the bounded SQL/Redis outbox are candidate
+  code; worker prompt/result resumption and restart qualification remain gates.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only

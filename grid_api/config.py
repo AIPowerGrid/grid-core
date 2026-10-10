@@ -86,6 +86,13 @@ class GridSettings(BaseSettings):
     # private pilot may enable this after its exact-hardware canary; public
     # manager publication remains a separate, broader qualification gate.
     audio_enabled: bool = False
+    # New async admission is independently dark. The outbox still drains old
+    # journaled holds when admission is disabled; never roll back its schema/fence.
+    media_async_enabled: bool = False
+    media_async_concurrency: int = Field(default=4, ge=1, le=16)
+    media_job_sweep_seconds: int = Field(default=10, ge=5, le=60)
+    media_job_dispatch_lease_seconds: int = Field(default=60, ge=30, le=300)
+    media_job_batch_size: int = Field(default=10, ge=1, le=50)
     # Native-manager device enrollment. Independently dark until the console
     # approval page and release manager are deployed together.
     worker_enrollment_enabled: bool = False

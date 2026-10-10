@@ -451,6 +451,90 @@ async def test_lost_xadd_reply_retries_same_payload_but_only_one_execution(db, r
     assert await counts() == (1, 1, 0)
 
 
+async def expire_dispatch(job_id):
+    async with await database.new_session() as session:
+        await session.execute(media_jobs.update().where(media_jobs.c.job_id == job_id).values(
+            dispatch_deadline=datetime.now(UTC) - timedelta(seconds=1)))
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_outbox_recovers_deleted_queue_but_never_republishes_claimed_work(db, redis, monkeypatch):
+    job = prepared(await owner())
+    await jobs.reserve(job)
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "off")
+    assert await jobs.dispatch_batch() == {"queued": 1, "exhausted": 0, "errors": 0}
+    assert await jobs.dispatch_batch() == {"queued": 0, "exhausted": 0, "errors": 0}
+    assert await redis.xlen(job_queue.MEDIA_STREAM_KEY) == 1
+    await redis.delete(job_queue.MEDIA_STREAM_KEY)
+    await expire_dispatch(job.job_id)
+    assert await jobs.dispatch_batch() == {"queued": 1, "exhausted": 0, "errors": 0}
+    assert await redis.xlen(job_queue.MEDIA_STREAM_KEY) == 1
+    assert await claim(job) == "claimed"
+    await expire_dispatch(job.job_id)
+    assert await jobs.dispatch_batch() == {"queued": 0, "exhausted": 0, "errors": 0}
+    assert (await snapshot(job))[1]["status"] == "held"
+    assert await counts() == (1, 1, 0)
+
+
+@pytest.mark.asyncio
+async def test_outbox_exhaustion_refunds_only_unstarted_requests(db, monkeypatch):
+    job = prepared(await owner())
+    await jobs.reserve(job)
+    submit = AsyncMock(side_effect=TimeoutError("synthetic uncertain queue reply"))
+    monkeypatch.setattr(job_queue, "submit_job", submit)
+    for _ in range(jobs.MAX_DISPATCH_ATTEMPTS):
+        assert await jobs.dispatch_batch() == {"queued": 0, "exhausted": 0, "errors": 1}
+        await expire_dispatch(job.job_id)
+    assert await jobs.dispatch_batch() == {"queued": 0, "exhausted": 1, "errors": 0}
+    assert await jobs.dispatch_batch() == {"queued": 0, "exhausted": 0, "errors": 0}
+    assert submit.await_count == jobs.MAX_DISPATCH_ATTEMPTS
+    assert (await snapshot(job))[1]["status"] == "settled"
+    assert await credits.get_balance(job.account_id) == OPENING
+    assert await counts() == (1, 1, 0)
+    # A claimed execution is not exhausted/released even if its attempt count
+    # and lease would otherwise select it. Terminal/sweeper authority is separate.
+    other = prepared(await owner())
+    await jobs.reserve(other)
+    assert await claim(other) == "claimed"
+    async with await database.new_session() as session:
+        await session.execute(media_jobs.update().where(media_jobs.c.job_id == other.job_id).values(
+            dispatch_attempts=jobs.MAX_DISPATCH_ATTEMPTS))
+        await session.commit()
+    assert await jobs.dispatch_batch() == {"queued": 0, "exhausted": 0, "errors": 0}
+    assert (await snapshot(other))[1]["status"] == "held"
+
+
+@pytest.mark.asyncio
+async def test_outbox_failure_does_not_skip_other_rows(db, monkeypatch):
+    first, second = prepared(await owner()), prepared(await owner())
+    await jobs.reserve(first)
+    await jobs.reserve(second)
+
+    async def submit(job_id, *_args, **_kwargs):
+        if job_id == first.job_id:
+            raise RuntimeError("synthetic private queue details")
+        return "123-1"
+
+    monkeypatch.setattr(job_queue, "submit_job", submit)
+    assert await jobs.dispatch_batch(limit=2) == {"queued": 1, "exhausted": 0, "errors": 1}
+    assert (await snapshot(first))[0]["dispatch_state"] == "dispatching"
+    assert (await snapshot(second))[0]["dispatch_state"] == "queued"
+
+
+@pytest.mark.asyncio
+async def test_pg_competing_outbox_schedulers_take_one_lease(db, redis):
+    if db[1] != "postgres":
+        pytest.skip("SQLite is not evidence for competing outbox schedulers")
+    job = prepared(await owner())
+    await jobs.reserve(job)
+    outcomes = await asyncio.wait_for(asyncio.gather(*(jobs.dispatch_batch(limit=1) for _ in range(12))), timeout=30)
+    assert sum(item["queued"] for item in outcomes) == 1
+    assert not sum(item["errors"] for item in outcomes)
+    assert await redis.xlen(job_queue.MEDIA_STREAM_KEY) == 1
+    assert (await snapshot(job))[0]["dispatch_attempts"] == 1
+
+
 @pytest.mark.asyncio
 async def test_pg_concurrent_requests_and_claims_are_single_winner(db):
     if db[1] != "postgres":

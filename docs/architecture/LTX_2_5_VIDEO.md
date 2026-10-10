@@ -227,12 +227,33 @@ Use authorized source media and private evidence; do not publish the handoff's
 private prompts or media as test fixtures. H3 is an inspiration/comparison, not
 a required fallback or evidence that the working LTX approach must be replaced.
 
-## Async Job Foundation
+## Candidate Async Video API
 
-The private `media_jobs` service and additive migration `0043` implement request
-identity, a bounded queue outbox attempt, an irrevocable worker execution claim
-and owner-only SQL status/result recovery. No public router or background
-scheduler creates these jobs yet. This foundation is not a released async API.
+The candidate `POST /v1/videos/jobs` and `GET /v1/videos/jobs/{job_id}` use the
+private `media_jobs` journal and additive migration `0043` for request identity,
+bounded queue dispatch, an irrevocable worker execution claim and owner-only
+SQL status/result recovery. New admission defaults off. The API is not released
+or deployed, and worker-restart continuation remains a promotion gate.
+
+Submission requires scoped `inference.submit` authentication (including
+delegation for a service acting for a user), a UUIDv4 `Idempotency-Key`, a typed
+governed video request and a positive integer `max_cost_micro_usd`. It shares
+native video preparation, validates every source and capability before quota/
+uploads, freezes one recipe graph and reserves before scheduling. Executable
+client graphs, URL source inputs, batches and base64 result envelopes are not
+accepted. The JSON body is bounded to 32 MiB plus 64 KiB before typed parsing;
+schema-validation failures do not echo source images or request values.
+
+The `aipg.video-job.v1` response exposes only job ID, model, state, cost ceiling,
+reserved/actual microUSD and committed result. POST returns 202 while pending,
+queued or `execution_uncertain`, and 200 when terminal, with `Location` and a
+five-second polling hint. GET returns 200 for owner-visible status or 404 for
+an unknown/unowned job. All responses are `Cache-Control: no-store`. Auth,
+identity, changed-intent, money and held-cap failures return 401/403, 422, 409,
+402 and 429 respectively. Disabled admission or temporary failures return 503;
+retry that exact request/key, never create a new key to recover an uncertain
+submission. Terminal jobs are `completed` or `closed_without_result`; there is
+no cancellation endpoint or public failure-reason taxonomy yet.
 
 A caller-generated UUIDv4 idempotency key is stored only as a hash. The account
 and normalized client-intent commitment identify one request. Intent must be
@@ -243,6 +264,9 @@ conflicts instead of creating another job. Proved account aliases may recover
 old requests; merged duplicate keys fail as ambiguous, never first-row-wins.
 
 PostgreSQL serializes admission with account merges and competing retries.
+The same lock enforces a canonical-account held async-job limit (default four,
+configurable from one to sixteen), including proved aliases. Replays bypass
+new-admission limits. This does not combine with synchronous media/text caps.
 The existing credit debit/reservation and journal insert commit together. A
 positive live credit hold and explicit cost ceiling are mandatory; charging-off,
 unpriced and over-budget requests create no journal. The compiled payload is
@@ -250,6 +274,22 @@ private customer data bounded to 256 KiB, not a public graph-execution interface
 It must contain only server-compiled governed nodes and uploaded input URLs,
 never API credentials or inline source blobs. Existing financial settlement
 and committed media results remain authoritative.
+
+The lifecycle outbox runs even when new admission is disabled. It selects at
+most ten eligible rows by default (maximum fifty), sleeping ten seconds between
+batches by default,
+and bounds each Redis submission to five seconds. Dispatch leases default to
+sixty seconds; six attempts exhaust to a guarded unstarted-only refund. Queued
+but unclaimed work can be republished after Redis loss or trimming. Claimed work
+is never republished. Replay/status do not depend on current model availability,
+recipe loading, new-admission enablement or charging configuration.
+
+Every admitting worker must advertise `async-video-resume-v1`, plus
+`recipe-image-bindings-v1` for multi-pin jobs, on the same worker. Dispatch
+checks the same full feature set. These are compatibility declarations, not
+fidelity or execution attestations. No current worker release has durable
+prompt/result resumption or advertises the new resume capability; admission
+must remain off until that implementation and restart canaries are qualified.
 
 Dispatch leases can be reclaimed after an uncertain Redis reply. That can
 produce duplicate queue entries: Redis acceptance is not exactly-once GPU
@@ -283,10 +323,18 @@ Lost SQL commit-reply tests prove no WS dispatch after an ambiguous claim and
 eventual refund through the existing sweeper. PostgreSQL DDL parity and ten
 execution-versus-queue-give-up races additionally exercise the real constraints.
 
-Remaining async work: shared typed video preparation, authenticated
-submit/status endpoints, bounded account concurrency and scheduling, queued-job
-loss reconciliation, worker prompt/result persistence, complete crash/restart
-canaries, and retained input/result lifecycle. Do not enable public admission
+Router/outbox tests additionally exercise real scoped keys, owner isolation,
+lost commit-response replay, no extra quota/debit on serial retries, changed
+intent, strict/redacted input bounds, typed OpenAPI, competing admissions and
+outbox leases, Redis stream loss, bounded exhaustion and draining after rollback.
+Worker/GPU/storage availability is synthetic in these tests; they do not prove
+safe worker continuation or live Grid image-to-video operation.
+
+Apply `0043` before starting the candidate even with admission disabled, because
+the background outbox reads the journal. Preserve the journal/execution fence
+on rollback. Remaining async work is worker prompt/result persistence and
+Core reconnect continuation, full process crash/restart canaries, retained
+input/result lifecycle and operational alerting. Do not enable public admission
 until those gates pass.
 
 ## Remaining Release Gates
@@ -299,9 +347,9 @@ until those gates pass.
 - Choose separate explicit rates and test sufficient/insufficient credit,
   failed-job release, duplicate terminal, late success and restart recovery on
   disposable PostgreSQL before a bounded real canary.
-- Add durable asynchronous submit/status/results and request identity.
-  The private journal/fence is implemented; public admission, scheduling and
-  safe worker continuation remain unfinished. Existing synchronous recovery
+- Qualify the candidate durable async submit/status, journal, concurrency and
+  outbox against real workers/storage and process faults. Safe worker
+  continuation remains unfinished. Existing synchronous recovery
   is not an async submission contract.
 - Add request-bound Base USDC x402 payment-before-dispatch and refunds. The
   existing text-only x402 route is not video support.
@@ -323,8 +371,11 @@ Run the focused tests named in `recipes/qualification/AGENTS.md`, plus the full
 Grid suite. PostgreSQL/Redis/cross-repo CI remains a release gate; skipped
 integration tests must never be counted as passing evidence.
 
-The expanded candidate passed 2039 full local Grid tests / 275 skipped in a
-fresh dependency environment with disposable PostgreSQL 14 credit tests. Its
-focused money/transport/contract matrix passed 225 / 3 SQLite-only race skips.
-The earlier candidate completed required PostgreSQL 16/Redis/cross-repo CI;
-the expanded change must pass those required checks again before promotion.
+The candidate's full local regression passed 2419 tests / 22 skipped with all
+four disposable PostgreSQL test URLs supplied. Final ingress/outbox checks
+then passed 100 / 7 skipped, including the added deep-JSON rejection case.
+Local PostgreSQL is version 14; the skips are not passing concurrency or
+external-integration evidence. Foundation commit `a07046af` passed required
+PostgreSQL 16/Redis/cross-repo CI. The newer API/outbox changes must pass those
+required checks again before promotion. No production database or funds were
+used by these regression tests.
