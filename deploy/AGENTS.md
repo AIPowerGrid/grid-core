@@ -73,6 +73,18 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Async video remains a default-off candidate, not production admission.
+  Apply migration `0043` before starting this release, even with
+  `MEDIA_ASYNC_ENABLED=0`: the lifecycle outbox reads `grid_media_jobs`.
+  Defaults are `MEDIA_ASYNC_CONCURRENCY=4`, `MEDIA_JOB_SWEEP_SECONDS=10`,
+  `MEDIA_JOB_DISPATCH_LEASE_SECONDS=60`, and `MEDIA_JOB_BATCH_SIZE=10`.
+  Turning admission off preserves authenticated replay/status and drains
+  already accepted holds. Never drop journal history or restore a worker
+  handler without the execution fence. Enablement additionally requires
+  qualified `async-video-resume-v1` workers, durable prompt/result recovery,
+  restart/crash proofs and supervised billing/storage canaries. The current
+  media-worker candidate does not advertise that capability; do not add it by
+  hand merely to bypass the gate. See `docs/architecture/LTX_2_5_VIDEO.md`.
 - Core `ca1f2a12` / Alembic `0042` was selected September28 at 19:00:18 UTC.
   PR/main CI, production backup/restore, drained cutover and authenticated
   reduced-account response checks passed; all six workers returned. Billing,

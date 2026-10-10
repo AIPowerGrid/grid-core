@@ -314,7 +314,8 @@ async def refresh_worker(worker_id: str, info: dict):
 
 
 async def get_available_models(job_type: str | None = None, api_format: str | None = None,
-                               media_feature: str | None = None) -> list[str]:
+                               media_feature: str | None = None,
+                               media_features: tuple[str, ...] = ()) -> list[str]:
     """Get models from connected workers (reads from Redis).
 
     When `job_type` is given (e.g. "text"), only models served by a worker of
@@ -352,6 +353,8 @@ async def get_available_models(job_type: str | None = None, api_format: str | No
         if api_format and api_format not in (info.get("api_formats") or ["openai-chat"]):
             continue
         if media_feature and media_feature not in (info.get("media_features") or []):
+            continue
+        if not set(media_features).issubset(info.get("media_features") or []):
             continue
         models.update(info.get("models", []))
     # Recipe-backed models: a media recipe can define a NEW model name served by an
@@ -464,7 +467,8 @@ async def worker_websocket(ws: WebSocket):
         api_formats = init_msg.get("api_formats") or ["openai-chat"]
         api_formats = [f for f in api_formats if f in ("openai-chat", "openai-responses", "anthropic")] or ["openai-chat"]
         media_features = init_msg.get("media_features")
-        media_features = ([feature for feature in media_features if feature == "recipe-image-bindings-v1"]
+        media_features = ([feature for feature in media_features if isinstance(feature, str)
+                           and feature in {"recipe-image-bindings-v1", "async-video-resume-v1"}]
                           if isinstance(media_features, list) and len(media_features) <= 8 else [])
         # Input modalities the worker's model accepts (operator-declared). Surfaced
         # on /v1/models as input_modalities so the chat UI enables image upload for
@@ -778,7 +782,11 @@ async def worker_websocket(ws: WebSocket):
                 selected_model = matching[0]
 
                 feature = job["payload"].get("required_media_feature")
-                if feature and feature not in worker_info.get("media_features", []):
+                required_features = job["payload"].get("required_media_features", [])
+                features_ok = (isinstance(required_features, list) and len(required_features) <= 8
+                               and all(isinstance(item, str) and item in worker_info.get("media_features", [])
+                                       for item in required_features))
+                if not features_ok or (feature and feature not in worker_info.get("media_features", [])):
                     requeued = await job_queue.requeue_for_mismatch(job)
                     if not requeued:
                         await token_stream.publish_error(job["job_id"], "No compatible media worker is available.", code=503)

@@ -44,6 +44,7 @@ from .routers import (
     validator,
     validator_compensation,
     validator_pairing,
+    video_jobs,
     videos,
     worker_enrollment,
     worker_ws,
@@ -81,6 +82,24 @@ async def _stale_job_reclaimer():
                 dedupe_key="stale-job-reclaimer-failed",
             )
         await asyncio.sleep(60)  # Check every minute
+
+
+async def _media_job_outbox():
+    """Drain admitted async holds, including after new admission is disabled."""
+    from .config import get_settings
+    from .services import media_jobs
+    from .safe_logging import error_type
+
+    settings = get_settings()
+    while True:
+        try:
+            counts = await media_jobs.dispatch_batch(limit=settings.media_job_batch_size,
+                                                     lease_seconds=settings.media_job_dispatch_lease_seconds)
+            if counts["errors"]:
+                logger.warning("Async media outbox attempt errors=%s", counts["errors"])
+        except Exception as exc:
+            logger.error("Async media outbox unavailable error_type=%s", error_type(exc))
+        await asyncio.sleep(settings.media_job_sweep_seconds)
 
 
 async def _reservation_sweeper():
@@ -425,6 +444,7 @@ async def lifespan(app: FastAPI):
     _styles.load_local_styles(os.path.join(_base, "styles"))
     recipe_sync = asyncio.create_task(_recipe_sync_loop())
     sweeper = asyncio.create_task(_reservation_sweeper())
+    media_job_outbox = asyncio.create_task(_media_job_outbox())
     validator_history_sweeper = asyncio.create_task(_validator_history_sweeper())
     validator_cohort_monitor = asyncio.create_task(_validator_cohort_monitor())
     validator_shadow_collector = asyncio.create_task(_validator_shadow_collector())
@@ -449,13 +469,14 @@ async def lifespan(app: FastAPI):
     reclaimer.cancel()
     recipe_sync.cancel()
     sweeper.cancel()
+    media_job_outbox.cancel()
     validator_history_sweeper.cancel()
     validator_cohort_monitor.cancel()
     validator_shadow_collector.cancel()
     oauth_state_sweeper.cancel()
     validator_bond_sync.cancel()
     billing_monitor.cancel()
-    await asyncio.gather(validator_shadow_collector, return_exceptions=True)
+    await asyncio.gather(validator_shadow_collector, media_job_outbox, return_exceptions=True)
     from .services import route_events as _route_events
     await _route_events.drain()
     await close_p2p()  # Shutdown P2P
@@ -535,6 +556,7 @@ app.include_router(responses.router)
 app.include_router(images.router)
 app.include_router(media_results.router)
 app.include_router(videos.router)
+app.include_router(video_jobs.router)
 app.include_router(audio.router)
 app.include_router(threed.router)
 app.include_router(worker_ws.router)

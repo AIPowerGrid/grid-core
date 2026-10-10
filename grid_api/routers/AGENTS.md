@@ -35,6 +35,19 @@ transport, accounts, stats, health/metrics.
   quota/upload; multi-pin jobs additionally require `video-timeline` admission
   and the `recipe-image-bindings-v1` worker feature. Unsupported settings reject before quota/upload; the
   candidates are not loaded or deployed. See `LTX_2_5_VIDEO.md` for gates.
+- `video_jobs.py` - candidate `POST /v1/videos/jobs` and owner-only
+  `GET /v1/videos/jobs/{job_id}`. New admission defaults off. Scoped
+  `inference.submit` authentication, a UUIDv4 `Idempotency-Key`, a positive
+  `max_cost_micro_usd` and a live credit hold are required. The typed body is
+  bounded before JSON parsing and input-bearing validation errors are redacted.
+  Replay/recovery remain available after admission rollback; changed intent
+  returns 409. One committed hold/journal accepts the request before the outbox
+  queues it. Returns 202 for pending/queued/uncertain execution and 200 for a
+  committed terminal, with `Location`, private `no-store`, and bounded polling.
+  Workers must themselves support every required feature, including
+  `async-video-resume-v1`; availability is not a union of unrelated workers'
+  features. No current worker release advertises that new capability.
+  This is credit-only, not x402, cancellation or worker-restart qualification.
 - `audio.py` - `POST /v1/audio/generations` governed local ACE-Step jobs.
 - `worker_enrollment.py` - dark device-style manager pairing. Public create,
   intent, poll, and ACK endpoints are capability-bound by a high-entropy
@@ -44,8 +57,8 @@ transport, accounts, stats, health/metrics.
   Internally marked async video jobs require a committed `media_jobs` execution
   claim before presigning or WS dispatch. Duplicate/closed jobs acknowledge only
   the queue, never another worker payment or client DONE. Claim errors do not
-  dispatch or acknowledge the queue. No public endpoint currently creates these
-  jobs; the fence remains required during eventual admission rollback.
+  dispatch or acknowledge the queue. Only the default-off scoped async ingress
+  creates these jobs; the fence remains required during admission rollback.
   Mismatch/feature/format exhaustion, disconnect give-up and prefetch cleanup
   use the unstarted-only release guard for marked jobs. Genuine render failures
   retain the ordinary release path; a duplicate queue delivery cannot refund

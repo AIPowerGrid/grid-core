@@ -337,27 +337,8 @@ async def _inflight_release(account_id) -> None:
         await r.set(key, 0)
 
 
-async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int,
-                          account_id=None, concurrency_limit: int | None = None,
-                          preferred_worker: str = "", progress_token: str = "",
-                          billing_user: dict | None = None,
-                          max_cost_micro_usd: int | None = None) -> tuple[list[dict], dict]:
-    """Queue a media job and block until the worker reports the result.
-
-    Returns (outputs, meta): the list of output objects ({url, key, sha256,
-    seed}) and a meta dict {worker, gen_time, model} describing which worker ran
-    it and how long it took. Progress events on the channel are ignored; the
-    DONE event carries the media JSON.
-
-    If account_id + concurrency_limit are given, enforces a per-account in-flight cap
-    (long media jobs would otherwise let one key monopolize the worker pool) — 429 over.
-
-    `preferred_worker` (a worker NAME the caller has verified the account owns)
-    expresses soft affinity — the grid prefers that worker but won't stall if it's
-    offline or busy."""
-    if max_cost_micro_usd is not None and (type(max_cost_micro_usd) is not int
-                                         or not 0 <= max_cost_micro_usd <= 2**63 - 1):
-        raise HTTPException(status_code=422, detail="Invalid maximum media cost")
+async def prepare_dispatch(model: str, job_type: str, payload: dict) -> tuple[dict, dict | None]:
+    """Validate and freeze governed execution before either ingress moves money."""
     sources = payload.get("source_image_urls")
     if sources is not None and (job_type != "video" or not isinstance(sources, list)
                                or not 1 <= len(sources) <= 16
@@ -365,8 +346,6 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
                                or sources[0] != payload.get("source_image_url")):
         raise HTTPException(status_code=422, detail="Invalid video keyframe source list")
     generation_admission.require_media(job_type, payload)
-    if progress_token and (not isinstance(progress_token, str) or len(progress_token) > 128):
-        raise HTTPException(status_code=422, detail="progress_token must be at most 128 characters")
     n = int(payload.get("n", 1) or 1)
     validate_batch_request(
         job_type,
@@ -407,6 +386,42 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
                    "cfg_scale": execution["cfg"], "sampler_name": execution["sampler"],
                    "length": execution["frames"], "video_length": execution["frames"],
                    "seed": resolved_recipe["seed"], "seeds": [resolved_recipe["seed"]]}
+    return payload, resolved_recipe
+
+
+def bind_dispatch_recipe(model: str, payload: dict, spec: dict | None) -> tuple[dict, list[str]]:
+    """Attach the already resolved graph and bindings, without re-resolving."""
+    if spec is not None:
+        payload = {**payload, "recipe_engine": spec["engine"], "recipe_spec": spec["spec"],
+                   "recipe_root": spec["recipe_root"], "recipe_id": spec.get("recipe_id"),
+                   "seed": spec["seed"], "deterministic": spec["deterministic"]}
+        if payload.get("loras") and spec.get("lora_inject"):
+            payload["recipe_lora_inject"] = spec["lora_inject"]
+        if payload.get("source_image_url") and spec.get("image_paths"):
+            payload["recipe_image_inputs"] = spec["image_paths"]
+        if spec.get("image_bindings"):
+            payload["recipe_image_bindings"] = spec["image_bindings"]
+    route_models = spec.get("required_models") if spec and spec.get("required_models") else [model]
+    return payload, route_models
+
+
+async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int,
+                          account_id=None, concurrency_limit: int | None = None,
+                          preferred_worker: str = "", progress_token: str = "",
+                          billing_user: dict | None = None,
+                          max_cost_micro_usd: int | None = None) -> tuple[list[dict], dict]:
+    """Reserve, queue and wait for committed media; HTTP timeouts do not cancel it.
+
+    The caller proves ownership of soft worker affinity. Returned outputs and
+    metadata describe the existing durable worker terminal, not another settler.
+    """
+    if max_cost_micro_usd is not None and (type(max_cost_micro_usd) is not int
+                                         or not 0 <= max_cost_micro_usd <= 2**63 - 1):
+        raise HTTPException(status_code=422, detail="Invalid maximum media cost")
+    if progress_token and (not isinstance(progress_token, str) or len(progress_token) > 128):
+        raise HTTPException(status_code=422, detail="progress_token must be at most 128 characters")
+    payload, resolved_recipe = await prepare_dispatch(model, job_type, payload)
+    n = int(payload.get("n", 1) or 1)
     job_id = str(uuid4())
 
     # Billing gate: media cost is deterministic from the request (n images /
@@ -494,31 +509,12 @@ async def _submit_and_wait_inner(model: str, job_type: str, payload: dict, timeo
     except recipes.RecipeError as e:
         # Out-of-range / invalid knob → reject so the caller learns, not silently altered.
         raise HTTPException(status_code=422, detail=str(e))
-    if spec is not None:
-        payload = {**payload, "recipe_engine": spec["engine"], "recipe_spec": spec["spec"],
-                   "recipe_root": spec["recipe_root"], "recipe_id": spec.get("recipe_id"),
-                   "seed": spec["seed"], "deterministic": spec["deterministic"]}
-        # LoRAs: ride the request's validated `loras` + the recipe's injection spec to the
-        # worker, which downloads/verifies the weights and splices LoraLoader nodes.
-        if payload.get("loras") and spec.get("lora_inject"):
-            payload["recipe_lora_inject"] = spec["lora_inject"]
-        # Source image: the image slot is NOT pre-injected (the grid doesn't know the
-        # ComfyUI-side filename). Tell the worker which graph path(s) to bind the
-        # uploaded source image to, so it can point the recipe's LoadImage at it.
-        if payload.get("source_image_url") and spec.get("image_paths"):
-            payload["recipe_image_inputs"] = spec["image_paths"]
-        if spec.get("image_bindings"):
-            payload["recipe_image_bindings"] = spec["image_bindings"]
-        logger.info(f"{job_type} job {job_id} resolved recipe {spec['recipe_root']} "
-                    f"({spec['name']}, engine={spec['engine']})"
-                    + (f" +{len(payload['loras'])} lora(s)" if payload.get('loras') else ""))
-
     # Route on the recipe's requiredModels (the checkpoint names WORKERS advertise),
     # not the recipe's display name: a recipe can define a NEW model ("LTX-2.3 Audio")
     # served by an EXISTING checkpoint ("LTX-2.3"). The worker matches on what it has and
     # runs the resolved recipe_spec regardless of display name. Falls back to the model
     # name for the legacy path (no recipe) or a recipe with no requiredModels.
-    route_models = (spec.get("required_models") if spec and spec.get("required_models") else [model])
+    payload, route_models = bind_dispatch_recipe(model, payload, spec)
     # Mark before the Redis call. A connection can drop after Redis accepted
     # XADD but before its reply reached Core; conservatively treating that as
     # dispatched leaves the hold to the durable terminal/sweeper instead of

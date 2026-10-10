@@ -21,12 +21,18 @@ content sanitization, and reward settlement.
 - **Dispatch:** `job_queue.py` (Redis streams - the ONE live queue), `token_stream.py`
   (worker->client token relay), `media.py` (image/video job abstraction), `storage.py`
   (presigned R2 upload), `enforcement.py` (worker strike/evict).
-- `media_jobs.py` owns the private, unscheduled async-video journal foundation.
-  No router creates these rows yet. A UUIDv4 idempotency key is hashed, bound to
+- `media_jobs.py` owns the private journal for default-off async video ingress
+  and the bounded background outbox. A UUIDv4 idempotency key is hashed, bound to
   the canonical account and normalized-intent hash, then retained with one
   immutable compiled graph. PostgreSQL serializes pocket draws; the existing
   credit hold and journal insert commit together. Live positive credit holds and
   explicit cost caps are required; dry-run never writes an async job.
+  The canonical-account lock also serializes the held async-job cap (default
+  four, at most sixteen), including proved aliases. This is separate from the
+  synchronous media/text concurrency limits; replay does not consume a slot.
+  Unclaimed queued work can be republished after lease expiry, including after
+  Redis loss. Each queue attempt has a five-second maximum; six attempts exhaust
+  to an unstarted-only release. The outbox continues after admission rollback.
   Outbox retries may create duplicate Redis entries. Before any marked job's WS
   dispatch, the worker handler must commit the SQL execution fence under the
   existing financial job lock. Never clear that fence on reconnect, requeue or
@@ -35,8 +41,13 @@ content sanitization, and reward settlement.
   Queue give-up may release a marked job only with `only_if_unstarted_media`
   under that same job lock. The original terminal/sweeper can still release;
   a duplicate delivery must not refund another worker's running hold.
-  Public admission, bounded scheduling, queued-job reconciliation, worker prompt
-  persistence and restart canaries remain release gates. See `LTX_2_5_VIDEO.md`.
+  Public enablement, worker prompt/result persistence, safe continuation and
+  crash/restart canaries remain release gates. Old workers must not advertise
+  `async-video-resume-v1`. See `LTX_2_5_VIDEO.md`.
+- `media.prepare_dispatch` freezes the same governed graph/execution units for
+  HTTP waiting and async ingress; `bind_dispatch_recipe` attaches that exact
+  snapshot without another recipe resolution. Native source validation,
+  capability admission and uploads are shared through `videos.prepare_video`.
 - `probe.py` is a retired fail-closed compatibility shim, not a sampler.
   Its old `GRID_PROBE_*` variables cannot dispatch work. Use the existing
   assignment-bound validator or manager-bound setup paths for no-DEN checks;
