@@ -39,10 +39,19 @@ content sanitization, and reward settlement.
   rollback. Uncertain execution awaits reconciliation/refund, not a rerender.
   Financial/results authority remains `grid_reservations`; no second settler.
   Queue give-up may release a marked job only with `only_if_unstarted_media`
-  under that same job lock. The original terminal/sweeper can still release;
+  under that same job lock. The current leased terminal or stale-hold sweeper can still release;
   a duplicate delivery must not refund another worker's running hold.
-  Public enablement, worker prompt/result persistence, safe continuation and
-  crash/restart canaries remain release gates. Old workers must not advertise
+  Candidate original-worker continuation selects only held executions bound to
+  the authenticated worker UUID, exact selected checkpoint and required features.
+  A 60-second renewable private Core lease fences both success and failure in
+  the money transaction; replaced/expired sessions move nothing. Renewal stops
+  at 30 minutes from the original claim, never restarting that budget. Resume is
+  sent directly with `resume:true`, the original job/graph/seed and fresh,
+  attempt-isolated upload slots; a missing local journal must not rerender.
+  Pre-0044 NULL leases remain uncertain, never backfilled. Recovery works after
+  new-admission rollback and Redis loss. Legacy workers perform no recovery query.
+  Public enablement, joint worker/GPU/R2 crash canaries, retained inputs/results
+  and bounded private cache retention remain release gates. Old workers must not advertise
   `async-video-resume-v1`. See `LTX_2_5_VIDEO.md`.
 - `media.prepare_dispatch` freezes the same governed graph/execution units for
   HTTP waiting and async ingress; `bind_dispatch_recipe` attaches that exact
@@ -835,6 +844,14 @@ content sanitization, and reward settlement.
   over a newer cached block.
 
 ## Verification
+
+- `tests/test_media_job_journal.py` additionally exercises original-worker/model/
+  feature binding, private lease fencing, 25 competing PostgreSQL resumptions,
+  refund/resume races, stale detach/renew/terminal rejection and 0043-to-0044
+  schema parity. Mocked worker dispatch proves the fresh `resume:true` envelope
+  has one original hold/result. The separate router process test kills real Core
+  and destroys its private Redis queue; worker output/storage remain synthetic.
+  These do not establish joint GPU/R2 recovery or public release qualification.
 
 - `tests/test_ltx25_billing.py` verifies candidate video duration/graph holds
   before dispatch and the ordinary worker terminal's commit-before-DONE/ACK.

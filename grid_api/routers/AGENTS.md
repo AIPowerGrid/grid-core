@@ -61,8 +61,16 @@ transport, accounts, stats, health/metrics.
   creates these jobs; the fence remains required during admission rollback.
   Mismatch/feature/format exhaustion, disconnect give-up and prefetch cleanup
   use the unstarted-only release guard for marked jobs. Genuine render failures
-  retain the ordinary release path; a duplicate queue delivery cannot refund
+  must hold the current Core execution lease; a duplicate queue delivery cannot refund
   an already-running worker's hold.
+  Candidate original-worker reconnect uses SQL, not Redis/model routing: the
+  exact worker UUID, checkpoint and features must still match. After the prior
+  60-second lease expires, the same job/graph/seed can receive `resume:true` and
+  fresh, attempt-isolated upload slots. Renewal stops at the original 30-minute
+  budget. Success and failure validate the private lease in the money transaction;
+  superseded sessions publish no DONE/error/ACK, DEN or success metrics. Frame
+  job IDs must match. Core never sends its private lease token to the worker.
+  The worker must refuse a missing local journal instead of starting a render.
   Durable media recovery retains Core's dispatched recipe root for image and
   video as well as audio. Never replace it with the worker's reported root.
   Audio still requires its existing matching-root echo; image/video retention
@@ -409,6 +417,13 @@ expired or out-of-scope pilots return 503 without revealing membership.
 - Keep request-size checks before sanitizer/tokenization for CPU and memory safety.
 
 ## Verification
+
+- `tests/test_media_resume_process.py` kills real isolated Core after WS dispatch
+  or a committed settlement, erases only its private Redis database, restarts
+  with async admission disabled and proves same-worker recovery plus one hold,
+  charge, result and ledger completion. Scoped auth and worker registration are
+  real; accelerated leases, worker output and R2 presence are fixtures. This is
+  not the joint native-worker/GPU/R2 crash canary or a production rollout.
 
 - `tests/test_validator_hostile_path.py` reuses the disposable Core process-crash
   fixture (`CREDITS_TEST_DB_URL`, local Redis). Real HTTP registration/scoped auth,

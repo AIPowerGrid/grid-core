@@ -115,8 +115,8 @@ async def test_incomplete_image_batch_releases_before_settlement(monkeypatch):
 
     assert result is True
     assert events == [
-        ("error", "job-image", "Worker output verification failed."),
         ("release", "job-image", None),
+        ("error", "job-image", "Worker output verification failed."),
     ]
 
 
@@ -169,6 +169,6 @@ async def test_missing_image_object_releases_before_settlement(monkeypatch):
 
     assert result is True
     assert events == [
-        ("error", "job-image", "Worker output verification failed."),
         ("release", "job-image", None),
+        ("error", "job-image", "Worker output verification failed."),
     ]

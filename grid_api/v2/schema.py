@@ -810,6 +810,9 @@ media_jobs = sa.Table(
     sa.Column("queue_message_id", sa.String(64), nullable=True),
     sa.Column("execution_worker_id", sa.Uuid, nullable=True),
     sa.Column("execution_started", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("execution_model", sa.String(255), nullable=True),
+    sa.Column("execution_token", sa.String(36), nullable=True),
+    sa.Column("execution_deadline", sa.DateTime(timezone=True), nullable=True),
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
     sa.UniqueConstraint("account_id", "idempotency_hash", name="uq_grid_media_jobs_owner_key"),
     sa.CheckConstraint("length(idempotency_hash) = 64 AND length(request_hash) = 64 AND length(payload_hash) = 64",
@@ -822,8 +825,15 @@ media_jobs = sa.Table(
     sa.CheckConstraint("(execution_worker_id IS NULL AND execution_started IS NULL) OR "
                        "(execution_worker_id IS NOT NULL AND execution_started IS NOT NULL)",
                        name="ck_grid_media_jobs_execution"),
+    sa.CheckConstraint("(execution_model IS NULL AND execution_token IS NULL AND execution_deadline IS NULL) OR "
+                       "(execution_model IS NOT NULL AND length(execution_model) > 0 AND "
+                       "execution_token IS NOT NULL AND length(execution_token) = 36 AND "
+                       "execution_deadline IS NOT NULL AND execution_started IS NOT NULL)",
+                       name="ck_grid_media_jobs_execution_lease"),
 )
 sa.Index("ix_grid_media_jobs_dispatch", media_jobs.c.dispatch_state, media_jobs.c.dispatch_deadline,
+         media_jobs.c.created)
+sa.Index("ix_grid_media_jobs_resume", media_jobs.c.execution_worker_id, media_jobs.c.execution_deadline,
          media_jobs.c.created)
 
 

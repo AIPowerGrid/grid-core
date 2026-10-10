@@ -28,6 +28,12 @@ validator shadow-observation records.
   state remains the sole charge/refund/result authority. Retain these rows on
   rollback; downgrade refuses any history. Apply the migration before creating
   marked jobs, and never roll back to worker dispatch code without the fence.
+  Migration `0044` adds nullable original execution-model/session-lease fields
+  and an original-worker recovery index. Existing claims remain NULL and cannot
+  acquire fabricated resume authority. New claims require all lease fields;
+  terminal/refund authority checks the current lease under the financial job
+  lock. Downgrade refuses any recorded lease, even after settlement. Apply before
+  candidate startup and retain lease-aware transport/financial writers on rollback.
 
 - Migration `0042` adds `grid_credits.funded_balance_micro` and the append-only
   `grid_credit_ledger.funded_delta_micro`. Both default to zero: historical

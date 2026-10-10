@@ -303,8 +303,8 @@ async def test_unsigned_audio_result_is_released_without_ledger_write(monkeypatc
     assert presign["expires"] == audio.AUDIO_UPLOAD_URL_TTL
     assert presign["expires"] > audio.AUDIO_WORKER_TIMEOUT
     assert events == [
-        ("error", "job-audio", "Worker receipt verification failed."),
         ("release", "job-audio"),
+        ("error", "job-audio", "Worker receipt verification failed."),
     ]
 
 
@@ -376,8 +376,8 @@ async def test_incomplete_audio_result_is_released_before_signature_or_settlemen
     )
     assert result is True
     assert events == [
-        ("error", "job-audio", "Worker output verification failed."),
         ("release", "job-audio"),
+        ("error", "job-audio", "Worker output verification failed."),
     ]
 
 
@@ -450,6 +450,6 @@ async def test_missing_audio_object_is_released_before_signature_or_settlement(m
     )
     assert result is True
     assert events == [
-        ("error", "job-audio", "Worker output verification failed."),
         ("release", "job-audio"),
+        ("error", "job-audio", "Worker output verification failed."),
     ]
