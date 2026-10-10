@@ -24,13 +24,13 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from redis.asyncio import Redis
 from redis.exceptions import ConnectionError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from grid_api import database
 from grid_api.routers import worker_ws
 from grid_api.services import credits, job_queue, pricing, recipes
@@ -165,7 +165,7 @@ async def snapshot(job):
 async def claim(job, **changes):
     args = dict(job_id=job.job_id, payload=job.payload, route_models=job.route_models,
                 preferred_worker=job.preferred_worker, selected_model=job.route_models[0],
-                worker_id=uuid4(), job_type="video")
+                worker_id=uuid4(), job_type="video", execution_token=str(uuid4()))
     return await jobs.claim_execution(**{**args, **changes})
 
 
@@ -281,13 +281,17 @@ async def test_result_uses_existing_atomic_terminal_and_survives_disabled_chargi
     job = prepared(await owner())
     await jobs.reserve(job)
     assert await claim(job) == "claimed"
+    journal = (await snapshot(job))[0]
     output = {"media": [{"url": "https://assets.example/video.mp4", "key": "video.mp4", "sha256": "a" * 64, "seed": 0}],
               "model": job.route_models[0], "worker": "test-worker", "gen_time": 1.0, "recipe_root": job.payload["recipe_root"]}
-    values = dict(job_id=job.job_id, worker_id=str(uuid4()), wallet="", model=job.route_models[0],
+    values = dict(job_id=job.job_id, worker_id=str(journal["execution_worker_id"]), wallet="", model=job.route_models[0],
                   job_type="video", den=1.0, output_units=81, prompt_hash="b" * 64, result_hash="c" * 64)
     monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "off")
-    assert await credits.record_and_settle(ledger_values=values, exact=True, media_result=output) == "settled"
-    assert await credits.record_and_settle(ledger_values=values, exact=True, media_result=output) == "duplicate"
+    token = (await snapshot(job))[0]["execution_token"]
+    assert await credits.record_and_settle(ledger_values=values, exact=True, media_result=output,
+                                           media_execution_token=token) == "settled"
+    assert await credits.record_and_settle(ledger_values=values, exact=True, media_result=output,
+                                           media_execution_token=token) == "duplicate"
     recovered = await jobs.recover(job.account_id, job.job_id)
     assert recovered["state"] == "completed" and recovered["result"] == output
     assert recovered["actual_micro"] == recovered["reserved_micro"]
@@ -349,7 +353,7 @@ async def test_real_worker_terminal_commits_result_before_done_and_never_rerende
                 assert (await jobs.recover(job.account_id, job.job_id))["state"] == "completed"
             messages.append(message["type"])
         async def receive_json(self):
-            return {"type": "done", "results": [{"index": 0, "sha256": "a" * 64, "seed": 0}]}
+            return {"type": "done", "id": job.job_id, "results": [{"index": 0, "sha256": "a" * 64, "seed": 0}]}
     monkeypatch.setattr(worker_ws.storage, "presign_outputs", lambda *_a, **_k: [{
         "public_url": "https://assets.example/video.mp4", "key": "video.mp4",
         "put_url": "https://upload.example/slot", "content_type": "video/mp4"}])
@@ -446,7 +450,8 @@ async def test_lost_xadd_reply_retries_same_payload_but_only_one_execution(db, r
     for queued in (first, second):
         outcomes.append(await jobs.claim_execution(job_id=queued["job_id"], payload=queued["payload"],
             route_models=queued["models"], preferred_worker=queued["preferred_worker"],
-            selected_model=queued["models"][0], worker_id=uuid4(), job_type=queued["job_type"]))
+            selected_model=queued["models"][0], worker_id=uuid4(), job_type=queued["job_type"],
+            execution_token=str(uuid4())))
     assert outcomes == ["claimed", "duplicate"]
     assert await counts() == (1, 1, 0)
 
@@ -576,7 +581,7 @@ async def test_pg_refund_vs_execution_race_and_late_success_never_mint_payout(db
     assert await claim(job) == "closed"
     values = dict(job_id=job.job_id, worker_id=str(uuid4()), wallet="", model=job.route_models[0],
                   job_type="video", den=1.0, output_units=81, prompt_hash="b" * 64, result_hash="c" * 64)
-    assert await credits.record_and_settle(ledger_values=values, exact=True) == "stale_no_payout"
+    assert await credits.record_and_settle(ledger_values=values, exact=True) == "execution_superseded"
     assert await credits.get_balance(job.account_id) == OPENING
     assert await counts() == (1, 1, 0)
 
@@ -642,11 +647,20 @@ def test_prepared_snapshot_is_immutable_and_bounded():
                          route_models=job.route_models, max_cost_micro=100_000)
 
 
+def lease_migration():
+    path = ROOT / "alembic/versions/0044_media_execution_lease.py"
+    spec = importlib.util.spec_from_file_location("media_lease_migration", path)
+    revision = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(revision)
+    return revision
+
+
 def test_migration_matches_schema_and_cannot_erase_execution_history():
     path = ROOT / "alembic/versions/0043_media_job_journal.py"
     spec = importlib.util.spec_from_file_location("media_journal_migration", path)
     revision = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(revision)
+    leases = lease_migration()
     engine = sa.create_engine("sqlite://")
     try:
         with engine.begin() as connection:
@@ -654,17 +668,21 @@ def test_migration_matches_schema_and_cannot_erase_execution_history():
             metadata.create_all(connection, tables=[table for table in metadata.sorted_tables if table != media_jobs])
             with Operations.context(MigrationContext.configure(connection)):
                 revision.upgrade()
+                leases.upgrade()
                 inspector = sa.inspect(connection)
                 actual = {column["name"]: column["nullable"] for column in inspector.get_columns(media_jobs.name)}
                 assert actual == {column.name: column.nullable for column in media_jobs.columns}
                 assert {c["name"] for c in inspector.get_check_constraints(media_jobs.name)} == {
                     c.name for c in media_jobs.constraints if isinstance(c, sa.CheckConstraint)}
                 assert {c["name"] for c in inspector.get_unique_constraints(media_jobs.name)} == {"uq_grid_media_jobs_owner_key"}
-                assert {c["name"] for c in inspector.get_indexes(media_jobs.name)} == {"ix_grid_media_jobs_dispatch"}
+                assert {c["name"] for c in inspector.get_indexes(media_jobs.name)} == {
+                    "ix_grid_media_jobs_dispatch", "ix_grid_media_jobs_resume"}
                 assert {c["referred_table"] for c in inspector.get_foreign_keys(media_jobs.name)} == {
                     "grid_reservations", "grid_accounts"}
+                leases.downgrade()
                 revision.downgrade()
                 revision.upgrade()
+                leases.upgrade()
                 aid = uuid4()
                 job = prepared(aid)
                 connection.execute(accounts.insert().values(id=aid, flags={}))
@@ -677,6 +695,10 @@ def test_migration_matches_schema_and_cannot_erase_execution_history():
                 with pytest.raises(RuntimeError, match="refuse to discard"):
                     revision.downgrade()
                 assert connection.scalar(sa.select(sa.func.count()).select_from(media_jobs)) == 1
+                connection.execute(media_jobs.update().values(execution_worker_id=uuid4(), execution_started=datetime.now(UTC),
+                    execution_model=MODEL, execution_token=str(uuid4()), execution_deadline=datetime.now(UTC)))
+                with pytest.raises(RuntimeError, match="refuse to discard"):
+                    leases.downgrade()
     finally:
         engine.dispose()
 
@@ -689,10 +711,12 @@ async def test_migration_matches_actual_postgres_table_contract(db):
     spec = importlib.util.spec_from_file_location("media_journal_pg_migration", path)
     revision = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(revision)
+    leases = lease_migration()
     def migrated(connection):
         media_jobs.drop(connection)
         with Operations.context(MigrationContext.configure(connection)):
             revision.upgrade()
+            leases.upgrade()
             inspector = sa.inspect(connection)
             assert {c["name"]: c["nullable"] for c in inspector.get_columns(media_jobs.name)} == {
                 column.name: column.nullable for column in media_jobs.columns}
@@ -701,7 +725,276 @@ async def test_migration_matches_actual_postgres_table_contract(db):
             assert {c["name"] for c in inspector.get_unique_constraints(media_jobs.name)} == {"uq_grid_media_jobs_owner_key"}
             assert {c["referred_table"] for c in inspector.get_foreign_keys(media_jobs.name)} == {
                 "grid_reservations", "grid_accounts"}
+            leases.downgrade()
             revision.downgrade()
             revision.upgrade()
+            leases.upgrade()
     async with db[0].kw["bind"].begin() as connection:
         await connection.run_sync(migrated)
+
+
+async def expire_execution(job_id):
+    async with await database.new_session() as session:
+        await session.execute(
+            media_jobs.update().where(media_jobs.c.job_id == job_id).values(execution_deadline=datetime.now(UTC) - timedelta(seconds=1)),
+        )
+        await session.commit()
+
+
+async def resume(worker, model=MODEL, features=None):
+    return await jobs.claim_resumption(
+        worker_id=worker, models=[model], media_features=["async-video-resume-v1"] if features is None else features,
+    )
+
+
+def terminal_values(job, worker):
+    return dict(
+        job_id=job.job_id,
+        worker_id=str(worker),
+        wallet="",
+        model=job.route_models[0],
+        job_type="video",
+        den=1.0,
+        output_units=81,
+        prompt_hash="b" * 64,
+        result_hash="c" * 64,
+    )
+
+
+@pytest.mark.asyncio
+async def test_resume_requires_original_worker_expired_lease_and_exact_capabilities(db, monkeypatch):
+    job, worker, token = prepared(await owner(), seed=17), uuid4(), str(uuid4())
+    await jobs.reserve(job)
+    assert await claim(job, worker_id=worker, execution_token=token) == "claimed"
+    assert await resume(worker) is None
+    await expire_execution(job.job_id)
+    assert await resume(uuid4()) is None
+    assert await resume(worker, model="another-model") is None
+    assert await resume(worker, features=[]) is None
+    async with await database.new_session() as session:
+        # Simulate a row predating 0044: no authority is fabricated from its graph.
+        await session.execute(
+            media_jobs.update()
+            .where(media_jobs.c.job_id == job.job_id)
+            .values(execution_token=None, execution_model=None, execution_deadline=None),
+        )
+        await session.commit()
+    assert await resume(worker) is None
+    async with await database.new_session() as session:
+        await session.execute(
+            media_jobs.update()
+            .where(media_jobs.c.job_id == job.job_id)
+            .values(execution_token=token, execution_model=MODEL, execution_deadline=datetime.now(UTC) - timedelta(seconds=1)),
+        )
+        await session.commit()
+    monkeypatch.setattr(credits, "_CHARGING_MODE_ENV", "off")
+    recovered = await resume(worker)
+    assert recovered["job_id"] == job.job_id and recovered["payload"] == job.payload
+    assert recovered["selected_model"] == job.route_models[0]
+    assert recovered["execution_token"] != token and recovered["payload"]["seed"] == 17
+    assert await counts() == (1, 1, 0) and len((await snapshot(job))[2]) == 1
+    assert (await snapshot(job))[0]["execution_worker_id"] == worker
+    assert await resume(worker) is None
+
+
+@pytest.mark.asyncio
+async def test_reconnect_cannot_bypass_required_multi_pin_feature(db):
+    worker = uuid4()
+    base = prepared(await owner())
+    job = jobs.prepare(
+        account_id=base.account_id,
+        idempotency_key=str(uuid4()),
+        request_hash=INTENT_HASH,
+        model=MODEL,
+        payload={**base.payload, "required_media_features": ["recipe-image-bindings-v1", "async-video-resume-v1"]},
+        route_models=base.route_models,
+        max_cost_micro=base.max_cost_micro,
+    )
+    await jobs.reserve(job)
+    assert await claim(job, worker_id=worker) == "claimed"
+    await expire_execution(job.job_id)
+    assert await resume(worker) is None
+    assert await resume(worker, features=["recipe-image-bindings-v1", "async-video-resume-v1"]) is not None
+
+
+@pytest.mark.asyncio
+async def test_old_connection_cannot_settle_refund_or_detach_successor(db):
+    job, worker, old = prepared(await owner()), uuid4(), str(uuid4())
+    await jobs.reserve(job)
+    assert await claim(job, worker_id=worker, execution_token=old) == "claimed"
+    await expire_execution(job.job_id)
+    new = (await resume(worker))["execution_token"]
+    for token in (None, old, str(uuid4())):
+        assert (
+            await credits.record_and_settle(ledger_values=terminal_values(job, worker), exact=True, media_execution_token=token)
+            == "execution_superseded"
+        )
+    assert await credits.release_job(job.job_id, media_execution_token=old) is False
+    assert await jobs.renew_execution(job_id=job.job_id, worker_id=worker, execution_token=old) is False
+    await jobs.detach_execution(job_id=job.job_id, execution_token=old)
+    assert await resume(worker) is None
+    assert (await snapshot(job))[1]["status"] == "held"
+    assert await counts() == (1, 1, 0)
+    assert (
+        await credits.record_and_settle(ledger_values=terminal_values(job, uuid4()), exact=True, media_execution_token=new)
+        == "execution_superseded"
+    )
+    assert (
+        await credits.record_and_settle(
+            ledger_values={**terminal_values(job, worker), "model": "wrong"}, exact=True, media_execution_token=new,
+        )
+        == "execution_superseded"
+    )
+    assert await credits.record_and_settle(ledger_values=terminal_values(job, worker), exact=True, media_execution_token=new) == "settled"
+    assert await credits.record_and_settle(ledger_values=terminal_values(job, worker), exact=True, media_execution_token=new) == "duplicate"
+    assert await counts() == (1, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_expired_session_cannot_renew_or_move_money_and_total_budget_never_resets(db):
+    job, worker, token = prepared(await owner()), uuid4(), str(uuid4())
+    await jobs.reserve(job)
+    assert await claim(job, worker_id=worker, execution_token=token) == "claimed"
+    await expire_execution(job.job_id)
+    assert await jobs.renew_execution(job_id=job.job_id, worker_id=worker, execution_token=token) is False
+    assert await credits.release_job(job.job_id, media_execution_token=token) is False
+    assert (
+        await credits.record_and_settle(ledger_values=terminal_values(job, worker), exact=True, media_execution_token=token)
+        == "execution_superseded"
+    )
+    new = (await resume(worker))["execution_token"]
+    assert await jobs.renew_execution(job_id=job.job_id, worker_id=worker, execution_token=new) is True
+    async with await database.new_session() as session:
+        await session.execute(
+            media_jobs.update()
+            .where(media_jobs.c.job_id == job.job_id)
+            .values(execution_started=datetime.now(UTC) - timedelta(seconds=jobs.MAX_EXECUTION_SECONDS + 1)),
+        )
+        await session.commit()
+    assert await jobs.renew_execution(job_id=job.job_id, worker_id=worker, execution_token=new) is False
+    await expire_execution(job.job_id)
+    assert await resume(worker) is None
+    # The existing stale-hold/maintainer authority may close uncertainty exactly once.
+    await credits.release_job(job.job_id)
+    await credits.release_job(job.job_id)
+    assert await credits.get_balance(job.account_id) == OPENING
+    assert await counts() == (1, 1, 0)
+    assert await resume(worker) is None
+
+
+@pytest.mark.asyncio
+async def test_pg_competing_reconnects_take_one_private_execution_lease(db):
+    if db[1] != "postgres":
+        pytest.skip("SQLite is not a concurrent resumption proof")
+    job, worker = prepared(await owner()), uuid4()
+    await jobs.reserve(job)
+    assert await claim(job, worker_id=worker) == "claimed"
+    await expire_execution(job.job_id)
+    outcomes = await asyncio.wait_for(asyncio.gather(*(resume(worker) for _ in range(25))), timeout=30)
+    winners = [item for item in outcomes if item is not None]
+    assert len(winners) == 1
+    assert (await snapshot(job))[0]["execution_token"] == winners[0]["execution_token"]
+    assert await counts() == (1, 1, 0) and len((await snapshot(job))[2]) == 1
+
+
+@pytest.mark.asyncio
+async def test_pg_refund_racing_reconnect_never_pays_after_refund(db):
+    if db[1] != "postgres":
+        pytest.skip("SQLite is not a refund/resume concurrency proof")
+    for _ in range(8):
+        job, worker = prepared(await owner()), uuid4()
+        await jobs.reserve(job)
+        assert await claim(job, worker_id=worker) == "claimed"
+        await expire_execution(job.job_id)
+        recovered, _ = await asyncio.wait_for(asyncio.gather(resume(worker), credits.release_job(job.job_id)), timeout=10)
+        if recovered is not None:
+            assert (
+                await credits.record_and_settle(
+                    ledger_values=terminal_values(job, worker), exact=True, media_execution_token=recovered["execution_token"],
+                )
+                == "stale_no_payout"
+            )
+        assert await credits.get_balance(job.account_id) == OPENING
+        assert (await snapshot(job))[1]["status"] == "settled"
+        assert await resume(worker) is None
+    assert await counts() == (8, 8, 0)
+
+
+@pytest.mark.asyncio
+async def test_actual_media_dispatch_recovers_original_job_with_fresh_presign(db, monkeypatch):
+    job, worker = prepared(await owner(), seed=19), uuid4()
+    await jobs.reserve(job)
+    sends, presigns = [], []
+
+    def presign(*_args, **_kwargs):
+        presigns.append(len(presigns))
+        return [
+            {
+                "public_url": "https://assets.example/video.mp4",
+                "key": "video.mp4",
+                "put_url": f"https://upload.example/attempt-{len(presigns)}",
+                "content_type": "video/mp4",
+            },
+        ]
+
+    class Socket:
+        def __init__(self, disconnect=False):
+            self.disconnect = disconnect
+
+        async def send_json(self, message):
+            sends.append(message)
+
+        async def receive_json(self):
+            if self.disconnect:
+                raise worker_ws.WebSocketDisconnect(code=1006)
+            return {"type": "done", "id": job.job_id, "results": [{"index": 0, "sha256": "a" * 64, "seed": 19}]}
+
+    monkeypatch.setattr(worker_ws.storage, "presign_outputs", presign)
+    monkeypatch.setattr(worker_ws.storage, "uploaded_outputs_present", lambda *_a, **_k: True)
+    monkeypatch.setattr(worker_ws.token_stream, "publish_done", AsyncMock())
+    monkeypatch.setattr(worker_ws.route_events, "capture_route", lambda **_k: None)
+    monkeypatch.setattr(worker_ws.route_events, "capture_outcome", lambda **_k: None)
+    monkeypatch.setattr(worker_ws, "record_job_complete", lambda **_k: None)
+    queued = {"job_id": job.job_id, "job_type": "video", "payload": job.payload, "models": job.route_models}
+    with pytest.raises(worker_ws.WebSocketDisconnect):
+        await worker_ws._handle_media_job(Socket(disconnect=True), queued, MODEL, str(worker), {})
+    assert (await snapshot(job))[1]["status"] == "held"
+    recovered = await resume(worker)
+    assert recovered is not None
+    assert await worker_ws._handle_media_job(Socket(), recovered, MODEL, str(worker), {}, resume_token=recovered["execution_token"]) is True
+    first, second = [message for message in sends if message["type"] == "job"]
+    assert first["id"] == second["id"] == job.job_id
+    assert first["payload"] == second["payload"] == job.payload
+    assert "resume" not in first and second["resume"] is True
+    assert first["upload"][0]["put_url"] != second["upload"][0]["put_url"]
+    assert "execution_token" not in second and "_media_execution_token" not in second["payload"]
+    assert await counts() == (1, 1, 1) and len((await snapshot(job))[2]) == 1
+    assert (await jobs.recover(job.account_id, job.job_id))["state"] == "completed"
+    worker_ws.token_stream.publish_done.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_wrong_job_frame_never_refunds_running_execution(db, monkeypatch):
+    job, worker = prepared(await owner()), uuid4()
+    await jobs.reserve(job)
+    socket = AsyncMock()
+    socket.receive_json.return_value = {"type": "error", "id": str(uuid4()), "message": "another job"}
+    monkeypatch.setattr(
+        worker_ws.storage,
+        "presign_outputs",
+        lambda *_a, **_k: [
+            {
+                "public_url": "https://assets.example/video.mp4",
+                "key": "video.mp4",
+                "put_url": "https://upload.example/slot",
+                "content_type": "video/mp4",
+            },
+        ],
+    )
+    monkeypatch.setattr(worker_ws.token_stream, "publish_error", AsyncMock())
+    monkeypatch.setattr(worker_ws.route_events, "capture_route", lambda **_k: None)
+    queued = {"job_id": job.job_id, "job_type": "video", "payload": job.payload, "models": job.route_models}
+    with pytest.raises(worker_ws.WebSocketDisconnect):
+        await worker_ws._handle_media_job(socket, queued, MODEL, str(worker), {})
+    assert (await snapshot(job))[1]["status"] == "held" and await counts() == (1, 1, 0)
+    worker_ws.token_stream.publish_error.assert_not_awaited()

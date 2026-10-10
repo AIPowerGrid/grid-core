@@ -18,9 +18,11 @@ import math
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID, uuid4, uuid5
 
 import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import new_session
 from ..v2.schema import accounts, media_jobs, reservations
@@ -28,6 +30,9 @@ from . import identities, job_queue, media_results, validator_audit_budgets
 
 MAX_PAYLOAD_BYTES = 256 * 1024
 MAX_DISPATCH_ATTEMPTS = 6
+EXECUTION_LEASE_SECONDS = 60
+EXECUTION_RENEW_SECONDS = 20
+MAX_EXECUTION_SECONDS = 1800
 MARKER = "_grid_media_job_version"
 _NAMESPACE = UUID("291c2882-f497-4c23-b82f-f4731a0723d6")
 _HASH = re.compile(r"^[0-9a-f]{64}$")
@@ -164,13 +169,16 @@ def prepare(*, account_id, idempotency_key: str, request_hash: str, model: str,
     owner = _uuid(account_id)
     key_hash = _key_hash(idempotency_key)
     frozen = {**payload, MARKER: 1}
+    seconds = frozen.get("seconds")
+    if not isinstance(seconds, (int, float)) or isinstance(seconds, bool) or not math.isfinite(seconds):
+        raise MediaJobError("compiled video duration required")
     job = PreparedMediaJob(
         job_id=str(uuid5(_NAMESPACE, f"{owner}:{key_hash}")), account_id=owner,
         idempotency_hash=key_hash, request_hash=_digest(request_hash),
         payload_hash=_payload_hash(frozen, route_models, model, preferred_worker),
         model=model, payload_json=_json(frozen), route_json=_json(route_models),
         preferred_worker=preferred_worker, max_cost_micro=max_cost_micro,
-        seconds=frozen.get("seconds"),
+        seconds=float(seconds),
     )
     _validate_prepared(job)
     return job
@@ -413,9 +421,11 @@ async def dispatch_batch(*, limit: int = 10, lease_seconds: int = 60) -> dict:
 
 
 async def claim_execution(*, job_id, payload: dict, route_models: list[str],
-                          preferred_worker: str, selected_model: str, worker_id, job_type: str) -> str:
+                          preferred_worker: str, selected_model: str, worker_id, job_type: str,
+                          execution_token: str) -> str:
     """Commit before sending any WS job; DB failure or ambiguity must not dispatch."""
     job_id, worker_id = str(_uuid(job_id)), _uuid(worker_id)
+    execution_token = _execution_token(execution_token)
     async with await new_session() as session:
         row = await _locked_job(session, job_id)
         if (row is None or job_type != "video" or row["payload_hash"] != _payload_hash(
@@ -430,10 +440,184 @@ async def claim_execution(*, job_id, payload: dict, route_models: list[str],
             return "closed"
         if row["execution_started"] is not None:
             return "duplicate"
+        now = _now()
         updated = await session.execute(media_jobs.update().where(
             media_jobs.c.job_id == job_id, media_jobs.c.execution_started.is_(None),
-        ).values(execution_worker_id=worker_id, execution_started=_now()))
+        ).values(execution_worker_id=worker_id, execution_started=now, execution_model=selected_model,
+                 execution_token=execution_token, execution_deadline=now + timedelta(seconds=EXECUTION_LEASE_SECONDS)))
         if updated.rowcount != 1:
             raise MediaJobError("execution claim did not commit one job")
         await session.commit()
         return "claimed"
+
+
+def _execution_token(value: str) -> str:
+    token = _uuid(value)
+    if token.version != 4 or str(token) != value:
+        raise MediaJobError("canonical execution lease token required")
+    return value
+
+
+def _live_execution(row: dict, now: datetime) -> bool:
+    return (
+        row["status"] == "held"
+        and row["execution_deadline"] is not None
+        and _aware(row["execution_deadline"]) > now
+        and row["execution_started"] is not None
+        and _aware(row["execution_started"]) + timedelta(seconds=MAX_EXECUTION_SECONDS) > now
+    )
+
+
+async def terminal_authorized_in_session(
+    session: AsyncSession, *, job_id: str, execution_token: str | None, worker_id: UUID | str | None = None, model: str | None = None,
+) -> bool:
+    """Caller owns the financial job lock. An old WS cannot charge or refund.
+
+    Unmarked legacy jobs retain their existing terminal path. Journal jobs always
+    require their current Core lease; NULL pre-0044 rows are never reconstructed.
+    Closed rows may repeat the matching terminal, but cannot move money again.
+    """
+    row = (
+        (
+            await session.execute(
+                sa.select(media_jobs, reservations.c.status)
+                .join(
+                    reservations,
+                    media_jobs.c.job_id == reservations.c.job_id,
+                )
+                .where(media_jobs.c.job_id == str(job_id))
+                .with_for_update(),
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if row is None:
+        return execution_token is None
+    if (
+        execution_token is None
+        or row["execution_token"] != _execution_token(execution_token)
+        or (worker_id is not None and row["execution_worker_id"] != _uuid(worker_id))
+        or (model is not None and row["execution_model"] != model)
+    ):
+        return False
+    return row["status"] != "held" or _live_execution(dict(row), _now())
+
+
+async def renew_execution(*, job_id: str, worker_id: UUID | str, execution_token: str) -> bool:
+    """A lease expires irrevocably for this session, including during DB failure."""
+    job_id, worker_id, token = str(_uuid(job_id)), _uuid(worker_id), _execution_token(execution_token)
+    async with await new_session() as session:
+        row = await _locked_job(session, job_id)
+        now = _now()
+        if row is None or row["execution_worker_id"] != worker_id or row["execution_token"] != token or not _live_execution(row, now):
+            return False
+        deadline = min(
+            now + timedelta(seconds=EXECUTION_LEASE_SECONDS), _aware(row["execution_started"]) + timedelta(seconds=MAX_EXECUTION_SECONDS),
+        )
+        await session.execute(media_jobs.update().where(media_jobs.c.job_id == job_id).values(execution_deadline=deadline))
+        await session.commit()
+        return True
+
+
+async def detach_execution(*, job_id: str, execution_token: str) -> None:
+    """End only this session's lease; never clear the original execution fence."""
+    async with await new_session() as session:
+        row = await _locked_job(session, str(_uuid(job_id)))
+        if row is not None and row["execution_token"] == _execution_token(execution_token):
+            await session.execute(media_jobs.update().where(media_jobs.c.job_id == row["job_id"]).values(execution_deadline=_now()))
+            await session.commit()
+
+
+async def claim_resumption(*, worker_id: UUID | str, models: list[str], media_features: list[str]) -> dict[str, Any] | None:
+    """Authenticated original worker only, outside Redis routing and new admission.
+
+    Return the immutable execution and a private Core lease. The WS envelope MUST
+    carry resume:true: a worker missing its journal must refuse, not render again.
+    A live lease, mismatched capability or legacy NULL lease cannot be reclaimed.
+    """
+    if "async-video-resume-v1" not in media_features:
+        return None
+    worker_id = _uuid(worker_id)
+    now = _now()
+    async with await new_session() as session:
+        candidates = (
+            (
+                await session.execute(
+                    sa.select(media_jobs.c.job_id)
+                    .join(
+                        reservations,
+                        media_jobs.c.job_id == reservations.c.job_id,
+                    )
+                    .where(
+                        media_jobs.c.execution_worker_id == worker_id,
+                        reservations.c.status == "held",
+                        media_jobs.c.execution_deadline <= now,
+                        media_jobs.c.execution_started > now - timedelta(seconds=MAX_EXECUTION_SECONDS),
+                    )
+                    .order_by(media_jobs.c.created, media_jobs.c.job_id)
+                    .limit(16),
+                )
+            )
+            .scalars()
+            .all()
+        )
+    for job_id in candidates:
+        async with await new_session() as session:
+            row = await _locked_job(session, job_id)
+            now = _now()
+            if (
+                row is None
+                or row["status"] != "held"
+                or row["execution_worker_id"] != worker_id
+                or row["execution_token"] is None
+                or row["execution_deadline"] is None
+                or _aware(row["execution_deadline"]) > now
+                or row["execution_started"] is None
+                or _aware(row["execution_started"]) + timedelta(seconds=MAX_EXECUTION_SECONDS) <= now
+            ):
+                continue
+            payload = row["payload"]
+            required = payload.get("required_media_features", [])
+            feature = payload.get("required_media_feature")
+            if (
+                row["execution_model"] not in models
+                or not isinstance(required, list)
+                or len(required) > 8
+                or not all(isinstance(item, str) and item in media_features for item in required)
+                or (feature and feature not in media_features)
+            ):
+                continue
+            if (
+                row["hold_owner"] != row["account_id"]
+                or row["hold_model"] != row["model"]
+                or row["billing_source"] != "credits"
+                or not 0 < row["reserved_micro"] <= row["max_cost_micro"]
+                or row["execution_model"] not in row["route_models"]
+                or row["payload_hash"] != _payload_hash(payload, row["route_models"], row["model"], row["preferred_worker"])
+            ):
+                raise MediaJobError("resumption does not match original video authorization")
+            token = str(uuid4())
+            await session.execute(
+                media_jobs.update()
+                .where(media_jobs.c.job_id == job_id)
+                .values(
+                    execution_token=token,
+                    execution_deadline=min(
+                        now + timedelta(seconds=EXECUTION_LEASE_SECONDS),
+                        _aware(row["execution_started"]) + timedelta(seconds=MAX_EXECUTION_SECONDS),
+                    ),
+                ),
+            )
+            await session.commit()
+            return {
+                "job_id": job_id,
+                "job_type": "video",
+                "payload": payload,
+                "models": row["route_models"],
+                "preferred_worker": row["preferred_worker"],
+                "selected_model": row["execution_model"],
+                "execution_token": token,
+                "worker_id": str(worker_id),
+            }
+    return None

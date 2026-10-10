@@ -145,15 +145,17 @@ async def test_completed_result_recovers_after_admission_rollback(api):
     response = await post(api, key=key, body={"seed": 0})
     row = await stored(response.json()["job_id"])
     worker = uuid4()
+    token = str(uuid4())
     assert await media_jobs.claim_execution(job_id=row["job_id"], payload=row["payload"],
         route_models=row["route_models"], preferred_worker="", selected_model=MODEL,
-        worker_id=worker, job_type="video") == "claimed"
+        worker_id=worker, job_type="video", execution_token=token) == "claimed"
     result = {"media": [{"url": "https://media.invalid/video.mp4", "key": "synthetic/video.mp4",
                          "sha256": "a" * 64, "seed": 0}], "model": MODEL,
               "worker": "synthetic-worker", "gen_time": 1.0, "recipe_root": row["payload"]["recipe_root"]}
     values = dict(job_id=row["job_id"], worker_id=str(worker), wallet="", model=MODEL,
                   job_type="video", den=1.0, output_units=81, prompt_hash="b" * 64, result_hash="c" * 64)
-    assert await credits.record_and_settle(ledger_values=values, exact=True, media_result=result) == "settled"
+    assert await credits.record_and_settle(ledger_values=values, exact=True, media_result=result,
+                                          media_execution_token=token) == "settled"
     settings.media_async_enabled = False
     recovered = await client.get(response.headers["location"], headers={"apikey": credential})
     assert recovered.json()["state"] == "completed" and recovered.json()["result"] == result

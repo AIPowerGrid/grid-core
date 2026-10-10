@@ -287,9 +287,10 @@ recipe loading, new-admission enablement or charging configuration.
 Every admitting worker must advertise `async-video-resume-v1`, plus
 `recipe-image-bindings-v1` for multi-pin jobs, on the same worker. Dispatch
 checks the same full feature set. These are compatibility declarations, not
-fidelity or execution attestations. No current worker release has durable
-prompt/result resumption or advertises the new resume capability; admission
-must remain off until that implementation and restart canaries are qualified.
+fidelity or execution attestations. The candidate worker has a private
+prompt/result journal, but no current public worker release advertises the new
+resume capability; admission must remain off until joint recovery and restart
+canaries are qualified.
 
 Dispatch leases can be reclaimed after an uncertain Redis reply. That can
 produce duplicate queue entries: Redis acceptance is not exactly-once GPU
@@ -301,17 +302,37 @@ client DONE. A missing, mismatched or unavailable authorization cannot dispatch.
 Queue mismatch exhaustion, disconnect give-up and prefetched-delivery cleanup
 may refund a marked job only before its execution claim, under that same SQL
 lock. A duplicate delivery cannot refund the hold of a worker already rendering.
-The original terminal and stale-hold sweeper retain their release authority.
+The current leased terminal and stale-hold sweeper retain their release authority.
 The marker is internal routing metadata, not a client capability or a security
 boundary against a compromised trusted Redis/coordinator.
 
-An execution claim is never cleared automatically. If Core crashes after that
-claim, it cannot know whether the worker began rendering. Recovery reports
-`execution_uncertain` until committed completion or financial closure; it does
-not blindly resubmit. Current workers do not persist Comfy prompt IDs/results,
-so successful continuation of this crash case is still unqualified. The stale
-reservation sweeper retains its existing financial backstop. Admission rollback
-must retain the schema and execution guard for outstanding jobs.
+An execution claim is never cleared automatically. Candidate migration `0044`
+adds the exact originally selected checkpoint, private Core session token and
+lease deadline. Reconnect can reclaim only a held job assigned to the same
+authenticated, account-owned worker UUID with matching model/features, after
+the previous lease expires. It does not route to a substitute worker, reserve
+again, recompile the graph or choose another seed. Old NULL lease rows remain
+uncertain: no historical model/session authority is manufactured.
+
+The 60-second session lease renews every 20 seconds and stops at 30 minutes
+from the original claim. Failed renewal closes the connection; an expired
+session cannot resurrect its token. Success and worker-failure refunds check
+the current lease inside the existing financial job lock/transaction. Replaced
+connections cannot charge, pay, refund, acknowledge or publish a terminal for
+their successor. The stale-hold sweeper retains its independent backstop.
+Core's lease token never enters a worker message, upload key or public status.
+
+Resumption is a direct WS job with top-level `resume:true`, the original
+job/model/payload and new presigned slots in an attempt-isolated namespace.
+An old attempt's PUT URLs cannot overwrite a resumed attempt's object. The
+worker must recover its saved prompt/cache; missing local state must refuse
+instead of submitting another Comfy prompt. Successful worker messages must
+carry that same job ID. Admission-off and Redis loss do not block SQL recovery.
+No current public worker release advertises this capability. The candidate
+worker journal passed a separate native Comfy process-crash proof, not yet
+this combined Core/worker/GPU/R2 lifecycle. Worker cache retention and immutable,
+Core-hashed output verification remain separate promotion gates; ordinary HEAD
+checks and worker-reported hashes are not proof of video content or fidelity.
 
 Synthetic-worker tests cover atomic hold/journal writes, account privacy and
 alias ambiguity, changed-intent conflicts, output recovery, refund/late-success,
@@ -330,12 +351,29 @@ outbox leases, Redis stream loss, bounded exhaustion and draining after rollback
 Worker/GPU/storage availability is synthetic in these tests; they do not prove
 safe worker continuation or live Grid image-to-video operation.
 
-Apply `0043` before starting the candidate even with admission disabled, because
-the background outbox reads the journal. Preserve the journal/execution fence
-on rollback. Remaining async work is worker prompt/result persistence and
-Core reconnect continuation, full process crash/restart canaries, retained
-input/result lifecycle and operational alerting. Do not enable public admission
-until those gates pass.
+Real isolated Core process tests now kill the server after WS dispatch or after
+the committed terminal, erase only its private Redis database, then restart
+with admission disabled. Same-worker scoped registration and direct recovery
+retain one job/hold/charge/result/completion. Separate PostgreSQL tests cover
+25 competing reconnects, stale session success/refund/detach, wrong-worker/
+model/features, the original time budget and refund races. Worker output, storage
+presence and accelerated lease clocks are synthetic; this is not a joint GPU/R2
+canary, storage-integrity proof, price activation or a production rollout.
+
+The leased-recovery follow-up passed 2437 local Core tests / 24 skipped with
+all four disposable PostgreSQL test URLs supplied. Local PostgreSQL is 14;
+fresh PostgreSQL 16/Redis/cross-repo CI remains required for this revision.
+The new lease service/tests and migration pass Ruff; the service also passes
+isolated mypy with imported modules skipped. Legacy money/transport lint
+findings are unchanged, not a clean whole-repo lint or strict-type claim.
+Tracked-source and reachable-history secret scans pass without new exceptions.
+
+Apply through `0044` before starting the candidate even with admission disabled,
+because the outbox and financial/worker paths read these columns. Preserve the
+journal, execution fence and lease-aware writers on rollback. Remaining async
+work is joint native-worker/GPU/R2 crash canaries, retained input/result and
+bounded cache lifecycle, immutable verified outputs and operational alerting.
+Do not enable public admission until those gates pass.
 
 ## Remaining Release Gates
 
@@ -348,8 +386,8 @@ until those gates pass.
   failed-job release, duplicate terminal, late success and restart recovery on
   disposable PostgreSQL before a bounded real canary.
 - Qualify the candidate durable async submit/status, journal, concurrency and
-  outbox against real workers/storage and process faults. Safe worker
-  continuation remains unfinished. Existing synchronous recovery
+  outbox against real workers/storage and process faults. The candidate Core
+  lease and worker journal need their joint end-to-end qualification. Existing synchronous recovery
   is not an async submission contract.
 - Add request-bound Base USDC x402 payment-before-dispatch and refunds. The
   existing text-only x402 route is not video support.

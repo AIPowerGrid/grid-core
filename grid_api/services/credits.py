@@ -1350,7 +1350,8 @@ async def open_reservation(job_id, account_id, model: str, reserved_micro: int, 
 
 
 async def settle_job(job_id, completion_tokens: int, *, status: str = "ok",
-                     only_if_unstarted_media: bool = False) -> None:
+                     only_if_unstarted_media: bool = False,
+                     media_execution_token: str | None = None) -> bool:
     """Authoritative terminal settlement (called from the worker-WS handler).
 
     Reconciles the held amount against ACTUAL grid-counted usage (refund the
@@ -1367,6 +1368,12 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok",
     service_reconcile = None  # (service_id, actual_micro) — Redis after commit
     try:
         async with await new_session() as s:
+            await validator_audit_budgets.lock_job_in_session(s, job_id)
+            if media_execution_token is not None:
+                from . import media_jobs
+                if status != "failed" or not await media_jobs.terminal_authorized_in_session(
+                        s, job_id=str(job_id), execution_token=media_execution_token):
+                    return False
             if only_if_unstarted_media:
                 # A duplicate queue delivery may exhaust retries while the first
                 # worker is rendering. Serialize its give-up with the execution
@@ -1374,12 +1381,11 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok",
                 from ..v2.schema import media_jobs
                 if status != "failed":
                     raise ValueError("unstarted-media guard applies only to release")
-                await validator_audit_budgets.lock_job_in_session(s, job_id)
                 journal = (await s.execute(sa.select(media_jobs.c.execution_started).where(
                     media_jobs.c.job_id == str(job_id),
                 ).with_for_update())).first()
                 if journal is None or journal.execution_started is not None:
-                    return
+                    return False
             row = (await s.execute(
                 sa.select(reservations_t.c.account_id, reservations_t.c.model,
                           reservations_t.c.reserved_micro, reservations_t.c.prompt_toks,
@@ -1391,7 +1397,7 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok",
                 .where(reservations_t.c.job_id == str(job_id))
             )).first()
             if not row:
-                return
+                return False
 
             res = await s.execute(
                 sa.update(reservations_t)
@@ -1401,7 +1407,7 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok",
             )
             if res.rowcount == 0:
                 await s.rollback()
-                return  # lost the race — another terminal already settled it
+                return False  # lost the race — another terminal already settled it
 
             aid, model = row[0], row[1]
             from .identities import canonical_account_id
@@ -1465,6 +1471,7 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok",
             await _promo_release(promo_restore[0], str(job_id), keep_micro=promo_restore[1])
         if service_reconcile is not None:
             await service_limits.reconcile(service_reconcile[0], str(job_id), service_reconcile[1])
+        return True
     except Exception as exc:
         logger.error(
             "settle_job failed job=%s error_type=%s (refund may be owed)",
@@ -1477,6 +1484,7 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok",
             "Durable job settlement failed; the hold remains recoverable.",
             job=job_id,
         )
+        return False
 
 
 async def settle_exact(job_id) -> None:
@@ -1522,10 +1530,15 @@ async def settle_exact(job_id) -> None:
         )
 
 
-async def release_job(job_id, *, only_if_unstarted_media: bool = False) -> None:
+async def release_job(job_id, *, only_if_unstarted_media: bool = False,
+                      media_execution_token: str | None = None) -> bool | None:
     """Terminal release for a job that produced nothing billable (client error,
     worker fault surfaced, give-up). Full refund of exactly one held demand or
     compensated-audit reservation, once."""
+    if media_execution_token is not None:
+        if only_if_unstarted_media:
+            raise ValueError("execution and unstarted release guards are exclusive")
+        return await settle_job(job_id, 0, status="failed", media_execution_token=media_execution_token)
     if only_if_unstarted_media:
         await settle_job(job_id, 0, status="failed", only_if_unstarted_media=True)
         return
@@ -1576,7 +1589,8 @@ async def release_job(job_id, *, only_if_unstarted_media: bool = False) -> None:
 
 
 async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
-                            exact: bool = False, media_result: dict | None = None) -> str:
+                            exact: bool = False, media_result: dict | None = None,
+                            media_execution_token: str | None = None) -> str:
     """ATOMIC terminal for a SUCCESSFUL job: write the worker-payout ledger row
     AND settle the exclusive demand or compensated-audit reservation in ONE
     transaction — both commit or neither.
@@ -1596,6 +1610,7 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
       'no_reservation'  — ledger written; no held row (dry-run / legacy / free)
       'stale_no_payout' — reservation existed but already closed → rolled back, no
                           ledger row, no payout, no charge
+      'execution_superseded' — async worker lease expired/replaced; no terminal authority
       'audit_manual_review' — a pre-existing payout row conflicted with a held
                               audit; budget remains quarantined for review
       'error'           — nothing committed (retryable; the sweeper recovers)
@@ -1611,6 +1626,11 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
                 raise ValueError("media recovery result does not match terminal")
         async with await new_session() as s:
             await validator_audit_budgets.lock_job_in_session(s, job_id)
+            from . import media_jobs
+            if not await media_jobs.terminal_authorized_in_session(
+                    s, job_id=job_id, execution_token=media_execution_token,
+                    worker_id=ledger_values["worker_id"], model=ledger_values["model"]):
+                return "execution_superseded"
             row = (await s.execute(
                 sa.select(reservations_t.c.account_id, reservations_t.c.model,
                           reservations_t.c.reserved_micro, reservations_t.c.prompt_toks,

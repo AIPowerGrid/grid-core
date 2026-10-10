@@ -53,10 +53,12 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
 - **Async video:** `MEDIA_ASYNC_ENABLED=0` closes new async admission only.
-  Apply migration `0043` before starting this candidate even with the flag off:
+  Apply migrations through `0044` before starting this candidate even with the flag off:
   the outbox reads its journal. Typed settings bound held async concurrency,
   batch size, lease and cadence. Retain the schema and irreversible execution
   fence on rollback; never rerender a claimed job based on queue loss alone.
+  Original-worker continuation uses a separate renewable Core execution lease,
+  not another queue attempt. Expired/replaced sessions cannot settle or refund.
 - An enrolled worker's verified signing authority is independent of later
   account payout-preference changes. Reconnection retains the exact owned
   delegation with fresh proof, never arbitrary old wallets or another account's

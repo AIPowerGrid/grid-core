@@ -62,6 +62,20 @@ from grid_api.config import GridSettings
 GridSettings.model_config["env_file"] = None
 GridSettings.async_database_url = property(lambda self: os.environ["TEST_DB_URL"])
 from grid_api.services import credits, job_queue
+if os.environ.get("TEST_ASYNC_VIDEO") == "1":
+    import json
+    from grid_api.services import media_jobs, pricing, recipes
+    from grid_api.services.recipe_import import recipe_root
+    original_load = recipes.load_local_recipes
+    def load_with_candidates(directory):
+        original_load(directory)
+        for path in Path("recipes/qualification").glob("*.json"):
+            graph = json.loads(path.read_text())
+            recipes.register_recipe(recipe_root(graph), graph["_grid"]["name"], graph)
+    recipes.load_local_recipes = load_with_candidates
+    pricing.PRICING["ltx-2.5 distilled bf16"] = pricing.ModelPrice(0, 0, video_per_second=0.02)
+    media_jobs.EXECUTION_LEASE_SECONDS = 2
+    media_jobs.EXECUTION_RENEW_SECONDS = 0.4
 original_sweep = credits.sweep_stale_reservations
 async def sweep(*args, **kwargs):
     result = await original_sweep(*args, **kwargs)

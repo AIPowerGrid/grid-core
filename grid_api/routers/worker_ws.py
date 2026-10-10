@@ -697,6 +697,19 @@ async def worker_websocket(ws: WebSocket):
 
         try:
             while True:
+                # Resume the original execution directly from SQL, never through
+                # model routing or a new reservation. Old workers query nothing.
+                resumed = await media_jobs.claim_resumption(
+                    worker_id=worker_id, models=models, media_features=media_features,
+                )
+                if resumed is not None:
+                    ok = await _handle_media_job(
+                        ws, resumed, resumed["selected_model"], worker_id, worker_info,
+                        resume_token=resumed["execution_token"],
+                    )
+                    if not ok:
+                        break
+                    continue
                 # Wait for the next job, or time out every 10s to keepalive.
                 try:
                     job = await asyncio.wait_for(local_jobs.get(), timeout=10)
@@ -1700,7 +1713,80 @@ async def _handle_validator_media_probe(
         return True
 
 
-async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict) -> bool:
+async def _handle_media_job(
+    ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict, *, resume_token: str | None = None,
+) -> bool:
+    """Keep Core execution authority separate from the permanent render fence."""
+    if media_jobs.MARKER not in job["payload"]:
+        return await _dispatch_media_job(ws, job, selected_model, worker_id, worker_info)
+    token = resume_token or str(uuid4())
+    try:
+        if resume_token is None:
+            claim = await media_jobs.claim_execution(
+                job_id=job["job_id"],
+                payload=job["payload"],
+                route_models=job.get("models", []),
+                preferred_worker=job.get("preferred_worker", ""),
+                selected_model=selected_model,
+                worker_id=worker_id,
+                job_type=job.get("job_type", "image"),
+                execution_token=token,
+            )
+            if claim != "claimed":
+                return True  # Queue duplicate/closed, never sent to another worker.
+        elif not await media_jobs.renew_execution(job_id=job["job_id"], worker_id=worker_id, execution_token=token):
+            return False
+    except Exception as exc:
+        logger.error("Async media execution claim failed job=%s error_type=%s", opaque_id(job["job_id"]), error_type(exc))
+        return False
+
+    job = {**job, "_media_execution_token": token, "_media_resume": resume_token is not None}
+
+    async def renew_lease() -> None:
+        while True:
+            await asyncio.sleep(media_jobs.EXECUTION_RENEW_SECONDS)
+            try:
+                valid = await asyncio.wait_for(
+                    media_jobs.renew_execution(
+                        job_id=job["job_id"],
+                        worker_id=worker_id,
+                        execution_token=token,
+                    ),
+                    timeout=5,
+                )
+            except Exception as exc:
+                logger.error("Async media lease renewal failed job=%s error_type=%s", opaque_id(job["job_id"]), error_type(exc))
+                valid = False
+            if not valid:
+                await asyncio.wait_for(ws.close(code=1012), timeout=5)
+                return
+
+    renewal = asyncio.create_task(renew_lease())
+    try:
+        ok = await _dispatch_media_job(ws, job, selected_model, worker_id, worker_info)
+        if not ok:
+            await asyncio.wait_for(ws.close(code=1012), timeout=5)
+        return ok
+    finally:
+        renewal.cancel()
+        await asyncio.gather(renewal, return_exceptions=True)
+        try:
+            await asyncio.wait_for(media_jobs.detach_execution(job_id=job["job_id"], execution_token=token), timeout=5)
+        except Exception as exc:
+            # A lost DB response leaves only the bounded old lease, never a new
+            # render authorization. Reconnect waits for its expiry.
+            logger.error("Async media lease detach failed job=%s error_type=%s", opaque_id(job["job_id"]), error_type(exc))
+
+
+async def _release_media_execution(job: dict) -> bool:
+    token = job.get("_media_execution_token")
+    if token is not None:
+        return await credits.release_job(job["job_id"], media_execution_token=token) is True
+    await credits.release_job(job["job_id"])
+    return True
+
+
+async def _dispatch_media_job(ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict) -> bool:
     """Dispatch one image/video job to the worker and collect the result.
 
     The job message carries presigned PUT slots so the worker uploads outputs
@@ -1717,30 +1803,15 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
     payload = job["payload"]
     job_type = job.get("job_type", "image")
 
-    # New async work must retain this fence even when new admission is rolled
-    # back. A committed claim is never cleared on disconnect or Redis redelivery.
-    if media_jobs.MARKER in payload:
-        try:
-            claim = await media_jobs.claim_execution(
-                job_id=job_id, payload=payload, route_models=job.get("models", []),
-                preferred_worker=job.get("preferred_worker", ""), selected_model=selected_model,
-                worker_id=worker_id, job_type=job_type,
-            )
-        except Exception as exc:
-            logger.error("Async media execution claim failed job=%s error_type=%s",
-                         opaque_id(job_id), error_type(exc))
-            return False
-        if claim != "claimed":
-            # No WS job was sent, so no worker ACK, den, metrics or client DONE.
-            # The original execution/result or existing refund is authoritative.
-            return True
-
     n = int(payload.get("n", 1) or 1)
     ext = payload.get("ext") or ("mp4" if job_type == "video" else "wav" if job_type == "audio" else "glb" if job_type == "3d" else "webp")
     upload_expires = audio.AUDIO_UPLOAD_URL_TTL if job_type == "audio" else 900
+    # Expired connections retain old PUT URLs. A resumed upload must use a new
+    # object namespace so that transport cannot overwrite the winner's result.
+    upload_id = f"{job_id}/attempt-{uuid4().hex}" if job.get("_media_execution_token") else job_id
     try:
         upload_slots = storage.presign_outputs(
-            job_id,
+            upload_id,
             n,
             ext,
             expires=upload_expires,
@@ -1748,8 +1819,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
         )
     except Exception as e:
         logger.error(f"Presign failed for job {job_id}: {e}")
+        if not await _release_media_execution(job):
+            return False
         await token_stream.publish_error(job_id, "Storage unavailable; please retry.")
-        await credits.release_job(job_id)  # terminal: never dispatched → refund the hold
         return True
 
     await ws.send_json(
@@ -1760,6 +1832,7 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
             "model": selected_model,
             "payload": payload,
             "upload": [{"put_url": s["put_url"], "key": s["key"], "content_type": s["content_type"]} for s in upload_slots],
+            **({"resume": True} if job.get("_media_resume") else {}),
         },
     )
     route_events.capture_route(job=job, selected_model=selected_model, worker_id=worker_id)
@@ -1769,6 +1842,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
     while True:
         msg = await asyncio.wait_for(ws.receive_json(), timeout=receive_timeout)
         msg_type = msg.get("type")
+        if job.get("_media_execution_token") and msg_type != "pong" and msg.get("id") != job_id:
+            # Unknown/late frames cannot act as this job's terminal authority.
+            raise WebSocketDisconnect(code=1008)
 
         if msg_type == "progress":
             pct = msg.get("pct", 0)
@@ -1792,8 +1868,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
             expected_recipe_root = payload.get("recipe_root") if job_type == "audio" else None
             if expected_recipe_root and msg.get("recipe_root") != expected_recipe_root:
                 logger.error("Audio worker returned the wrong recipe root for job %s", job_id)
+                if not await _release_media_execution(job):
+                    return False
                 await token_stream.publish_error(job_id, "Worker recipe verification failed.")
-                await credits.release_job(job_id)
                 route_events.capture_outcome(
                     job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
                 )
@@ -1802,8 +1879,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 reported = _validated_media_results(msg.get("results"), n)
             except ValueError as exc:
                 logger.error("Media output verification failed for job %s: %s", job_id, exc)
+                if not await _release_media_execution(job):
+                    return False
                 await token_stream.publish_error(job_id, "Worker output verification failed.")
-                await credits.release_job(job_id)
                 route_events.capture_outcome(
                     job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
                 )
@@ -1829,8 +1907,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 return False
             if not uploaded:
                 logger.error("Media output object is missing or invalid for job %s", job_id)
+                if not await _release_media_execution(job):
+                    return False
                 await token_stream.publish_error(job_id, "Worker output verification failed.")
-                await credits.release_job(job_id)
                 route_events.capture_outcome(
                     job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
                 )
@@ -1874,8 +1953,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
             )
             if _requires_signed_receipt(job_type, worker_info) and not verified_sig:
                 logger.error("Managed worker returned an invalid receipt for job %s", job_id)
+                if not await _release_media_execution(job):
+                    return False
                 await token_stream.publish_error(job_id, "Worker receipt verification failed.")
-                await credits.release_job(job_id)
                 route_events.capture_outcome(
                     job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
                 )
@@ -1909,7 +1989,11 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 ),
                 exact=True,
                 media_result=media_result,
+                **({"media_execution_token": job["_media_execution_token"]}
+                   if job.get("_media_execution_token") else {}),
             )
+            if settle_result == "execution_superseded":
+                return False  # No client DONE/error, worker ACK, den or metrics.
             if settle_result == "error":
                 # Terminal didn't commit → error out and DON'T ack (return False),
                 # leaving the job for stale-reclaim rather than acking unsettled.
@@ -1949,9 +2033,10 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
 
         elif msg_type == "error":
             logger.error(f"Worker error on media job {job_id}: {msg.get('message')}")
+            if not await _release_media_execution(job):
+                return False
             await token_stream.publish_error(job_id, msg.get("message", "Worker error"))
             record_job_failed()
-            await credits.release_job(job_id)  # terminal failure → refund the hold
             route_events.capture_outcome(job=job, worker_id=worker_id, terminal_status="failed")
             return True
 
