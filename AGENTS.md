@@ -60,6 +60,10 @@ owning AGENTS.md and any affected parent Child DOX Index.
   host deploys consume only matching binary wheels from the lock and do not
   upgrade pip during release construction; dependency updates must regenerate
   it and pass the CI lock-drift and `pip-audit` gates.
+- Retain the reviewed PyJWT 2.15.1, multidict 6.9.1 and urllib3 2.8.0
+  security floors in both dependency declarations. Updating these libraries
+  still requires authentication/funding/worker regression tests; never waive
+  audit findings to unblock a feature release.
 - Treat `grid_ledger` and `grid_credit_ledger` as append-only economic records.
   Do not mutate historical ledger rows except via an explicit audited migration.
 - Worker/model claims are untrusted until verified by registry sync, signed
