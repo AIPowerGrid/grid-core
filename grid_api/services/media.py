@@ -340,7 +340,8 @@ async def _inflight_release(account_id) -> None:
 async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int,
                           account_id=None, concurrency_limit: int | None = None,
                           preferred_worker: str = "", progress_token: str = "",
-                          billing_user: dict | None = None) -> tuple[list[dict], dict]:
+                          billing_user: dict | None = None,
+                          max_cost_micro_usd: int | None = None) -> tuple[list[dict], dict]:
     """Queue a media job and block until the worker reports the result.
 
     Returns (outputs, meta): the list of output objects ({url, key, sha256,
@@ -354,6 +355,9 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
     `preferred_worker` (a worker NAME the caller has verified the account owns)
     expresses soft affinity — the grid prefers that worker but won't stall if it's
     offline or busy."""
+    if max_cost_micro_usd is not None and (type(max_cost_micro_usd) is not int
+                                         or not 0 <= max_cost_micro_usd <= 2**63 - 1):
+        raise HTTPException(status_code=422, detail="Invalid maximum media cost")
     sources = payload.get("source_image_urls")
     if sources is not None and (job_type != "video" or not isinstance(sources, list)
                                or not 1 <= len(sources) <= 16
@@ -425,9 +429,10 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
             payload.get("recipe_inputs") or {},
             has_source=bool(payload.get("source_image_url")),
         ) or DEFAULT_VIDEO_SECONDS
+    cost_limit = {"max_cost_micro_usd": max_cost_micro_usd} if max_cost_micro_usd is not None else {}
     auth = await credits.authorize_media(account_id, model, job_type, n, seconds, job_id,
                                          record_reservation=True, user=billing_user,
-                                         client_ref=progress_token or None)
+                                         client_ref=progress_token or None, **cost_limit)
     if not auth["ok"]:
         raise HTTPException(status_code=402, detail=auth.get("reason", "payment required"))
     if account_id is not None and concurrency_limit:

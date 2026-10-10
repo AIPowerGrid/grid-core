@@ -139,6 +139,54 @@ async def reserve_video(account_id, model=DISTILLED):
 
 
 @pytest.mark.asyncio
+async def test_shot_image_cap_blocks_repricing_without_reserve_or_dispatch(db, monkeypatch):
+    account_id = await funded_account()
+    # The agent observed 2500, but the live reserve sees 5000. A quote cannot
+    # freeze pricing; the server-enforced ceiling is what protects the account.
+    monkeypatch.setattr(pricing, "quote_image", lambda *_args: 5000)
+    dispatch = AsyncMock()
+    monkeypatch.setattr(job_queue, "submit_job", dispatch)
+    with pytest.raises(HTTPException) as exc:
+        await media.submit_and_wait(
+            "z-image-turbo", "image", {"n": 1}, 1,
+            account_id=account_id, max_cost_micro_usd=3000,
+        )
+    assert exc.value.status_code == 402
+    dispatch.assert_not_awaited()
+    credits._promo_first.assert_not_awaited()
+    credits._free_first.assert_not_awaited()
+    async with await database.new_session() as session:
+        assert await session.scalar(sa.select(sa.func.count()).select_from(reservations)) == 0
+        assert await session.scalar(sa.select(sa.func.count()).select_from(ledger)) == 0
+    assert await conserved_balance(account_id) == (OPENING_MICRO,) * 2
+
+
+@pytest.mark.asyncio
+async def test_shot_image_at_cost_ceiling_retains_durable_result_and_one_charge(db):
+    account_id = await funded_account()
+    job_id, model = str(uuid.uuid4()), "z-image-turbo"
+    cost = pricing.quote_image(model, 1)
+    authorized = await credits.authorize_media(
+        account_id, model, "image", 1, None, job_id,
+        record_reservation=True, client_ref="shot-image-test", max_cost_micro_usd=cost,
+    )
+    assert authorized["ok"] and authorized["reserved"] == cost
+    values = dict(job_id=job_id, worker_id=str(uuid.uuid4()), wallet="", model=model,
+                  job_type="image", den=1.0, output_units=1, prompt_hash="b" * 64,
+                  result_hash="c" * 64)
+    result = {"media": [{"url": "https://images.aipg.art/synthetic.png", "key": "synthetic.png",
+                         "sha256": "a" * 64, "seed": 42}],
+              "model": model, "worker": "image-test", "gen_time": 2.0}
+    assert await credits.record_and_settle(ledger_values=values, exact=True, media_result=result) == "settled"
+    assert await credits.record_and_settle(ledger_values=values, exact=True, media_result=result) == "duplicate"
+    recovered = await media_results.recover(account_id, client_ref="shot-image-test")
+    assert recovered["state"] == "completed" and recovered["actual_micro"] == cost
+    assert recovered["result"]["media"][0]["seed"] == 42
+    assert len((await job_state(job_id))[1]) == 1
+    assert await conserved_balance(account_id) == (OPENING_MICRO - cost,) * 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("model,steps", [(DISTILLED, 8), (DEV, 40)])
 @pytest.mark.parametrize("source", ["none", "single", "multi"])
 async def test_real_hold_precedes_dispatch_and_worker_commits_before_done(db, monkeypatch, model, steps, source):

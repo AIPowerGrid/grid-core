@@ -299,3 +299,10 @@ def test_quote_request_is_strict_and_bounded():
             modality="image",
             unknown=True,
         )
+
+
+def test_quote_accepts_distilled_handoff_frame_ceiling():
+    form = accounts_router.CreditQuoteForm(model="ltx-2.5-distilled-bf16", modality="video", frames=337)
+    assert form.frames == 337
+    with pytest.raises(ValidationError):
+        accounts_router.CreditQuoteForm(model=form.model, modality="video", frames=338)

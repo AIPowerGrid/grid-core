@@ -50,6 +50,7 @@ async def health():
     return {
         "status": "ok" if redis_ok else "degraded",
         "build_commit": build_commit(),
+        "features": ["image-max-cost-micro-usd-v1"],
         "redis": redis_ok,
         "workers_connected": workers,
         "models_available": models,
