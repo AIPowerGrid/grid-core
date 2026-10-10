@@ -89,6 +89,9 @@ validation, worker incentives, and trust boundaries.
   observations, reference-film recreation/audio-preservation benchmark and
   outstanding financial/async/x402/promotion gates. Native multi-shot and
   character-reference parity are measured gates, not inferred from a model swap.
+  The maintainer's completed LTX handoff and retained rig takes are the film
+  baseline; synthetic guide-test failures do not invalidate that production.
+  The first-image/297-frame candidate is explicitly an incomplete subset.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only
