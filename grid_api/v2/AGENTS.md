@@ -20,6 +20,15 @@ validator shadow-observation records.
 
 ## Local Contracts
 
+- Migration `0043` creates empty private `grid_media_jobs` request/execution
+  records; no historical request is reconstructed or admitted. Each row has a
+  matching reservation FK and a unique account/idempotency-hash pair. The
+  compiled graph is private bounded customer data, not public telemetry.
+  Dispatch leases are reclaimable; execution claims are irrevocable. Reservation
+  state remains the sole charge/refund/result authority. Retain these rows on
+  rollback; downgrade refuses any history. Apply the migration before creating
+  marked jobs, and never roll back to worker dispatch code without the fence.
+
 - Migration `0042` adds `grid_credits.funded_balance_micro` and the append-only
   `grid_credit_ledger.funded_delta_micro`. Both default to zero: historical
   grants and purchased labels are not proof of external funding. A DB check

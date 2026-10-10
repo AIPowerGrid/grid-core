@@ -21,6 +21,22 @@ content sanitization, and reward settlement.
 - **Dispatch:** `job_queue.py` (Redis streams - the ONE live queue), `token_stream.py`
   (worker->client token relay), `media.py` (image/video job abstraction), `storage.py`
   (presigned R2 upload), `enforcement.py` (worker strike/evict).
+- `media_jobs.py` owns the private, unscheduled async-video journal foundation.
+  No router creates these rows yet. A UUIDv4 idempotency key is hashed, bound to
+  the canonical account and normalized-intent hash, then retained with one
+  immutable compiled graph. PostgreSQL serializes pocket draws; the existing
+  credit hold and journal insert commit together. Live positive credit holds and
+  explicit cost caps are required; dry-run never writes an async job.
+  Outbox retries may create duplicate Redis entries. Before any marked job's WS
+  dispatch, the worker handler must commit the SQL execution fence under the
+  existing financial job lock. Never clear that fence on reconnect, requeue or
+  rollback. Uncertain execution awaits reconciliation/refund, not a rerender.
+  Financial/results authority remains `grid_reservations`; no second settler.
+  Queue give-up may release a marked job only with `only_if_unstarted_media`
+  under that same job lock. The original terminal/sweeper can still release;
+  a duplicate delivery must not refund another worker's running hold.
+  Public admission, bounded scheduling, queued-job reconciliation, worker prompt
+  persistence and restart canaries remain release gates. See `LTX_2_5_VIDEO.md`.
 - `probe.py` is a retired fail-closed compatibility shim, not a sampler.
   Its old `GRID_PROBE_*` variables cannot dispatch work. Use the existing
   assignment-bound validator or manager-bound setup paths for no-DEN checks;
