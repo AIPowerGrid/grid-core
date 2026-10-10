@@ -1086,7 +1086,8 @@ async def reconcile(user: dict, model: str, prompt_tokens: int, completion_token
 async def authorize_media(account_id, model: str, job_type: str, n: int, seconds, job_id,
                           *, record_reservation: bool = False, user: dict | None = None,
                           client_ref: str | None = None,
-                          max_cost_micro_usd: int | None = None) -> dict:
+                          max_cost_micro_usd: int | None = None,
+                          prepared_media_job=None) -> dict:
     """Pre-dispatch billing gate for media (image/video). Unlike text, media cost
     is deterministic from the request (n images / video seconds), so we reserve
     the EXACT cost up front; on success it stands (settle_exact), on failure it's
@@ -1099,8 +1100,15 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
     if max_cost_micro_usd is not None and (type(max_cost_micro_usd) is not int
                                          or not 0 <= max_cost_micro_usd <= 2**63 - 1):
         raise ValueError("invalid maximum media cost")
+    if prepared_media_job is not None:
+        from . import media_jobs
+        if not record_reservation or not isinstance(prepared_media_job, media_jobs.PreparedMediaJob):
+            raise ValueError("durable media job requires its credit reservation")
+        prepared_media_job.validate_binding(account_id, model, job_type, n, seconds, job_id, max_cost_micro_usd)
     billing_user = user or {"account_id": account_id}
     if not charging_enabled_for(billing_user, model):
+        if prepared_media_job is not None:
+            return {"ok": False, "reserved": 0, "status": "async_unavailable"}
         return {"ok": True, "reserved": 0, "status": "dry_run"}
     if not pricing.is_priced_for(model, job_type):
         _economic_alert(
@@ -1123,11 +1131,15 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
     else:
         cost = pricing.quote_image(model, int(n or 1))
     if cost <= 0:
+        if prepared_media_job is not None:
+            return {"ok": False, "reserved": 0, "status": "async_unavailable"}
         return {"ok": True, "reserved": 0, "status": "free"}
     if not account_id:
         return {"ok": False, "reserved": 0, "status": "no_account",
                 "reason": "billing requires a v2 account"}
     cost = await apply_holder_discount(cost, account_id=account_id)
+    if prepared_media_job is not None and cost <= 0:
+        return {"ok": False, "reserved": 0, "status": "async_unavailable"}
     if max_cost_micro_usd is not None and cost > max_cost_micro_usd:
         return {"ok": False, "reserved": 0, "status": "cost_limit",
                 "reason": "media cost exceeds max_cost_micro_usd"}
@@ -1205,6 +1217,8 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                                                      free_micro=from_free, promo_micro=from_promo,
                                                      service_id=(user or {}).get("service_id"),
                                                      media_client_ref=client_ref)
+                if prepared_media_job is not None:
+                    await media_jobs.insert_in_session(s, prepared_media_job)
             except IntegrityError:
                 await s.rollback()
                 reserved = await _reservation_reserved_micro(job_id)
@@ -1335,7 +1349,8 @@ async def open_reservation(job_id, account_id, model: str, reserved_micro: int, 
         )
 
 
-async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> None:
+async def settle_job(job_id, completion_tokens: int, *, status: str = "ok",
+                     only_if_unstarted_media: bool = False) -> None:
     """Authoritative terminal settlement (called from the worker-WS handler).
 
     Reconciles the held amount against ACTUAL grid-counted usage (refund the
@@ -1352,6 +1367,19 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok") -> N
     service_reconcile = None  # (service_id, actual_micro) — Redis after commit
     try:
         async with await new_session() as s:
+            if only_if_unstarted_media:
+                # A duplicate queue delivery may exhaust retries while the first
+                # worker is rendering. Serialize its give-up with the execution
+                # claim; never let that delivery refund the original's hold.
+                from ..v2.schema import media_jobs
+                if status != "failed":
+                    raise ValueError("unstarted-media guard applies only to release")
+                await validator_audit_budgets.lock_job_in_session(s, job_id)
+                journal = (await s.execute(sa.select(media_jobs.c.execution_started).where(
+                    media_jobs.c.job_id == str(job_id),
+                ).with_for_update())).first()
+                if journal is None or journal.execution_started is not None:
+                    return
             row = (await s.execute(
                 sa.select(reservations_t.c.account_id, reservations_t.c.model,
                           reservations_t.c.reserved_micro, reservations_t.c.prompt_toks,
@@ -1494,10 +1522,13 @@ async def settle_exact(job_id) -> None:
         )
 
 
-async def release_job(job_id) -> None:
+async def release_job(job_id, *, only_if_unstarted_media: bool = False) -> None:
     """Terminal release for a job that produced nothing billable (client error,
     worker fault surfaced, give-up). Full refund of exactly one held demand or
     compensated-audit reservation, once."""
+    if only_if_unstarted_media:
+        await settle_job(job_id, 0, status="failed", only_if_unstarted_media=True)
+        return
     try:
         audit_release = False
         async with await new_session() as s:

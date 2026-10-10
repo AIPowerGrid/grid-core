@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0042`
+- `versions/` - ordered migration revisions. Current source head: `0043`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -55,8 +55,16 @@ production database match the Grid-owned schema contracts without relying on
   changing historical credit, completion, reward, or identity records.
   `0041` adds empty immutable hourly worker payout plans. It adopts no historical
   payout row and does not enable any sender or timer.
+  `0042` adds zero-default externally funded credit lineage.
+  `0043` adds empty private async media request/execution journals. No public
+  submit route or scheduler creates them yet.
 
 ## Local Contracts
+
+- Apply `0043` before creating any async media job. No history is backfilled,
+  paid job is queued or API is enabled by migration. Retain the table and
+  execution-fence-aware worker transport on rollback after its first use;
+  downgrade refuses any stored identity, including refunded or completed jobs.
 
 - `0042` adds zero-default funded balance/ledger metadata and the funded-subset
   constraint without changing spendable balances. Drain holds and pause credit

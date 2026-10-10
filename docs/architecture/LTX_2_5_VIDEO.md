@@ -227,6 +227,68 @@ Use authorized source media and private evidence; do not publish the handoff's
 private prompts or media as test fixtures. H3 is an inspiration/comparison, not
 a required fallback or evidence that the working LTX approach must be replaced.
 
+## Async Job Foundation
+
+The private `media_jobs` service and additive migration `0043` implement request
+identity, a bounded queue outbox attempt, an irrevocable worker execution claim
+and owner-only SQL status/result recovery. No public router or background
+scheduler creates these jobs yet. This foundation is not a released async API.
+
+A caller-generated UUIDv4 idempotency key is stored only as a hash. The account
+and normalized client-intent commitment identify one request. Intent must be
+fingerprinted before an omitted seed is randomized or sources are uploaded;
+the first accepted request retains its actual seed, graph, input URLs, routing
+models, affinity and cost ceiling. Repeating that key with different intent
+conflicts instead of creating another job. Proved account aliases may recover
+old requests; merged duplicate keys fail as ambiguous, never first-row-wins.
+
+PostgreSQL serializes admission with account merges and competing retries.
+The existing credit debit/reservation and journal insert commit together. A
+positive live credit hold and explicit cost ceiling are mandatory; charging-off,
+unpriced and over-budget requests create no journal. The compiled payload is
+private customer data bounded to 256 KiB, not a public graph-execution interface.
+It must contain only server-compiled governed nodes and uploaded input URLs,
+never API credentials or inline source blobs. Existing financial settlement
+and committed media results remain authoritative.
+
+Dispatch leases can be reclaimed after an uncertain Redis reply. That can
+produce duplicate queue entries: Redis acceptance is not exactly-once GPU
+execution. The worker handler first takes the same SQL job lock as financial
+release/settlement, verifies the exact frozen queue payload/routing, and commits
+one execution claim before presigning or sending a WS job. A duplicate or
+refunded job is queue-acknowledged without another WS job, DEN, success metric or
+client DONE. A missing, mismatched or unavailable authorization cannot dispatch.
+Queue mismatch exhaustion, disconnect give-up and prefetched-delivery cleanup
+may refund a marked job only before its execution claim, under that same SQL
+lock. A duplicate delivery cannot refund the hold of a worker already rendering.
+The original terminal and stale-hold sweeper retain their release authority.
+The marker is internal routing metadata, not a client capability or a security
+boundary against a compromised trusted Redis/coordinator.
+
+An execution claim is never cleared automatically. If Core crashes after that
+claim, it cannot know whether the worker began rendering. Recovery reports
+`execution_uncertain` until committed completion or financial closure; it does
+not blindly resubmit. Current workers do not persist Comfy prompt IDs/results,
+so successful continuation of this crash case is still unqualified. The stale
+reservation sweeper retains its existing financial backstop. Admission rollback
+must retain the schema and execution guard for outstanding jobs.
+
+Synthetic-worker tests cover atomic hold/journal writes, account privacy and
+alias ambiguity, changed-intent conflicts, output recovery, refund/late-success,
+25 concurrent admissions and 25 competing execution claims on real PostgreSQL.
+A disposable real Redis test loses the XADD reply, reclaims the lease and
+observes two queue entries but only one execution claim. These are transport
+and money proofs, not GPU fidelity, durable worker resumption or live canaries.
+Lost SQL commit-reply tests prove no WS dispatch after an ambiguous claim and
+eventual refund through the existing sweeper. PostgreSQL DDL parity and ten
+execution-versus-queue-give-up races additionally exercise the real constraints.
+
+Remaining async work: shared typed video preparation, authenticated
+submit/status endpoints, bounded account concurrency and scheduling, queued-job
+loss reconciliation, worker prompt/result persistence, complete crash/restart
+canaries, and retained input/result lifecycle. Do not enable public admission
+until those gates pass.
+
 ## Remaining Release Gates
 
 - Compare and execute the Core-resolved graphs through two enrolled one-job
@@ -238,7 +300,9 @@ a required fallback or evidence that the working LTX approach must be replaced.
   failed-job release, duplicate terminal, late success and restart recovery on
   disposable PostgreSQL before a bounded real canary.
 - Add durable asynchronous submit/status/results and request identity.
-  Existing synchronous recovery is not an async submission contract.
+  The private journal/fence is implemented; public admission, scheduling and
+  safe worker continuation remain unfinished. Existing synchronous recovery
+  is not an async submission contract.
 - Add request-bound Base USDC x402 payment-before-dispatch and refunds. The
   existing text-only x402 route is not video support.
 - Build film manifests, take selection, local editing and agent budgets; update

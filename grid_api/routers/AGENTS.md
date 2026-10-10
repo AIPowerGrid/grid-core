@@ -41,6 +41,15 @@ transport, accounts, stats, health/metrics.
   enrollment ID plus poll secret; prepare/approve require a recent scoped user
   token and a payout-wallet signature.
 - `worker_ws.py` - `/v1/workers/ws`: registration + dispatch + health/eviction + streaming.
+  Internally marked async video jobs require a committed `media_jobs` execution
+  claim before presigning or WS dispatch. Duplicate/closed jobs acknowledge only
+  the queue, never another worker payment or client DONE. Claim errors do not
+  dispatch or acknowledge the queue. No public endpoint currently creates these
+  jobs; the fence remains required during eventual admission rollback.
+  Mismatch/feature/format exhaustion, disconnect give-up and prefetch cleanup
+  use the unstarted-only release guard for marked jobs. Genuine render failures
+  retain the ordinary release path; a duplicate queue delivery cannot refund
+  an already-running worker's hold.
   Durable media recovery retains Core's dispatched recipe root for image and
   video as well as audio. Never replace it with the worker's reported root.
   Audio still requires its existing matching-root echo; image/video retention

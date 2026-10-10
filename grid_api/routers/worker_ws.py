@@ -31,12 +31,14 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from ..config import get_settings
 from ..database import new_session
 from ..redis_client import get_redis
+from ..safe_logging import error_type, opaque_id
 from ..services import accounts as accounts_svc
 from ..services import (
     audio,
     chat_output,
     credits,
     job_queue,
+    media_jobs,
     route_events,
     signing,
     storage,
@@ -63,6 +65,13 @@ WORKER_ACTIVE_SET = "grid:workers:active"
 WORKER_ONLINE_BY_NAME = "grid:worker:online:"
 RETIRED_WORKER_MODEL_PREFIXES = ("flux.1-krea-dev", "flux1-krea-dev")
 WORKER_SELF_CANARY_MEDIA_TIMEOUT_SECONDS = 840
+
+
+async def _release_undispatched_job(job: dict) -> None:
+    if media_jobs.MARKER in (job.get("payload") or {}):
+        await credits.release_job(job["job_id"], only_if_unstarted_media=True)
+    else:
+        await credits.release_job(job["job_id"])
 
 
 async def _worker_online(worker_name: str) -> bool:
@@ -729,7 +738,7 @@ async def worker_websocket(ws: WebSocket):
                         code=503,
                     )
                     await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
-                    await credits.release_job(job["job_id"])
+                    await _release_undispatched_job(job)
                     current_job = None
                     continue
 
@@ -763,7 +772,7 @@ async def worker_websocket(ws: WebSocket):
                             f"No worker available for the requested model(s): "
                             f"{', '.join(job_models) if job_models else 'unspecified'}.",
                         )
-                        await credits.release_job(job["job_id"])  # gave up → refund the hold
+                        await _release_undispatched_job(job)  # Only an unstarted async job may release.
                     continue
 
                 selected_model = matching[0]
@@ -773,7 +782,7 @@ async def worker_websocket(ws: WebSocket):
                     requeued = await job_queue.requeue_for_mismatch(job)
                     if not requeued:
                         await token_stream.publish_error(job["job_id"], "No compatible media worker is available.", code=503)
-                        await credits.release_job(job["job_id"])
+                        await _release_undispatched_job(job)
                     continue
 
                 # Check API-format compatibility too. A job for /v1/responses or
@@ -790,7 +799,7 @@ async def worker_websocket(ws: WebSocket):
                             f"No worker available serving the '{job_format}' API for "
                             f"model(s): {', '.join(job_models) if job_models else 'unspecified'}.",
                         )
-                        await credits.release_job(job["job_id"])  # gave up → refund the hold
+                        await _release_undispatched_job(job)
                     continue
 
                 # Track current job for retry on disconnect
@@ -1188,7 +1197,7 @@ async def worker_websocket(ws: WebSocket):
                 logger.error(f"Worker disconnected with job {job_id}; requeue gave up — failing to client")
                 await token_stream.publish_error(job_id, "Worker disconnected during generation; no capacity to retry.")
                 if not is_validator_probe:
-                    await credits.release_job(job_id)  # terminal: refund the hold
+                    await _release_undispatched_job(current_job)
 
         # Drain a PREFETCHED-but-undispatched job (local_jobs, maxsize=1) so it
         # requeues immediately instead of waiting out the stale-reclaim loop. The
@@ -1217,7 +1226,7 @@ async def worker_websocket(ws: WebSocket):
                         pid,
                         "Worker disconnected before dispatch; no capacity to retry.",
                     )
-                    await credits.release_job(pid)
+                    await _release_undispatched_job(prefetched)
             except Exception:
                 logger.error("failed to requeue prefetched job on cleanup", exc_info=True)
 
@@ -1699,6 +1708,24 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
     job_id = job["job_id"]
     payload = job["payload"]
     job_type = job.get("job_type", "image")
+
+    # New async work must retain this fence even when new admission is rolled
+    # back. A committed claim is never cleared on disconnect or Redis redelivery.
+    if media_jobs.MARKER in payload:
+        try:
+            claim = await media_jobs.claim_execution(
+                job_id=job_id, payload=payload, route_models=job.get("models", []),
+                preferred_worker=job.get("preferred_worker", ""), selected_model=selected_model,
+                worker_id=worker_id, job_type=job_type,
+            )
+        except Exception as exc:
+            logger.error("Async media execution claim failed job=%s error_type=%s",
+                         opaque_id(job_id), error_type(exc))
+            return False
+        if claim != "claimed":
+            # No WS job was sent, so no worker ACK, den, metrics or client DONE.
+            # The original execution/result or existing refund is authoritative.
+            return True
 
     n = int(payload.get("n", 1) or 1)
     ext = payload.get("ext") or ("mp4" if job_type == "video" else "wav" if job_type == "audio" else "glb" if job_type == "3d" else "webp")
