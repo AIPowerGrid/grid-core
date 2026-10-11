@@ -148,7 +148,8 @@ class Worker:
         return value
 
 
-async def dispatch(monkeypatch, account, job, incoming, *, retry=False, disconnected=False, mismatch=False):
+async def dispatch(monkeypatch, account, job, incoming, *, retry=False, disconnected=False, mismatch=False, expired=False):
+    job["dispatch_deadline_expired"] = expired
     worker = Worker(job, incoming)
     ended = asyncio.Event()
     pending = [job]
@@ -200,6 +201,7 @@ async def dispatch(monkeypatch, account, job, incoming, *, retry=False, disconne
     monkeypatch.setattr(transport, "_requires_managed_profile", lambda *_: False)
     for name in ("register_worker", "unregister_worker", "refresh_worker", "_clear_strikes"):
         monkeypatch.setattr(transport, name, AsyncMock())
+    monkeypatch.setattr(transport, "_requeue_incompatible_job", requeue)
     monkeypatch.setattr(transport, "_is_in_cooldown", AsyncMock(return_value=False))
     monkeypatch.setattr(transport, "_record_strike", AsyncMock(return_value=1))
     monkeypatch.setattr(transport.job_queue, "pop_job", pop)
@@ -246,10 +248,20 @@ async def dispatch(monkeypatch, account, job, incoming, *, retry=False, disconne
         await asyncio.sleep(0)
     assert result is None or isinstance(result, asyncio.CancelledError), result
     assert any(message["type"] == "ready" for message in worker.sent), worker.sent
-    assert sum(message["type"] == "job" for message in worker.sent) == (0 if mismatch else 1)
+    assert sum(message["type"] == "job" for message in worker.sent) == (0 if mismatch or expired else 1)
     assert not successes
     assert not any(message["type"] == "ack" and message.get("den", 0) > 0 for message in worker.sent)
     return requeues, acks, errors
+
+
+@pytest.mark.parametrize("fmt", FORMATS)
+async def test_expired_routed_delivery_refunds_without_backend_dispatch(pg, monkeypatch, fmt):
+    account, job, _ = await reserve(pg, fmt)
+    requeues, acks, errors = await dispatch(monkeypatch, account, job, [], expired=True)
+    assert not requeues and not acks and len(errors) == 1
+    assert await credits.get_balance(account) == INITIAL
+    async with pg() as session:
+        assert await session.scalar(sa.select(sa.func.count()).select_from(tables.ledger)) == 0
 
 
 @pytest.mark.parametrize("retry", [False, True])

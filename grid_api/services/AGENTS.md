@@ -603,8 +603,22 @@ content sanitization, and reward settlement.
   Affinity exhaustion keeps the claim for local execution. Generation retries
   use a separate message-carried counter (including any legacy Redis counter
   during upgrade), capped at two for compatible-worker failures. Mismatch
-  bounces retain their separate cap. Stale recovery preserves both counters;
+  bounces with no compatible live peer retain their separate cap. Stale recovery preserves both counters;
   it is not itself a backend failure or a new generation attempt.
+  Compatibility routing transfers the original pending delivery with XCLAIM,
+  guarded by its current consumer and the peer's exact fresh registry snapshot.
+  The same worker must have the model, modality, API format and every feature;
+  a server-owned `stream-inbox-v1` marker excludes older Core receivers. The
+  per-worker inbox stores only delivery IDs plus one-use nonces, bounded by the
+  stream cap and twice the wait-window TTL. Changed-owner/old notifications
+  cannot dispatch or refund. Pending-load ordering favors a less-loaded peer;
+  busy compatible capacity does not consume the absence-search bounce budget.
+  Queue age survives mismatch/affinity/stale handoffs; only a genuine capped
+  generation retry starts a new capacity wait. Routed waits are bounded to five
+  minutes for text and fifteen for media. Expired delivery closes only that
+  queue item and must use the existing unstarted-only async refund guard.
+  The outbox, execution lease and stale-hold deadlines remain independent.
+  There is no model-fidelity claim or new worker binary requirement.
   `tests/test_job_queue_redis.py` uses isolated Unix-socket Redis to prove append
   errors, duplicate races, metadata retention, caps and child-process death
   immediately before/after handoff. Lua errors do not roll back writes; retain
@@ -612,6 +626,12 @@ content sanitization, and reward settlement.
   not prove Redis persistence loss, exactly-once GPU execution, stream trimming
   under overload, full Uvicorn restart, or SQL/queue distributed transactions.
   Paid settlement remains guarded separately by its durable reservation.
+  `routers/tests/test_worker_dispatch_routing.py` combines real disposable Redis
+  with SQLite/PostgreSQL holds for busy-peer delivery without another payload
+  or debit, joint capability/target/protocol checks, notification replay,
+  registry races, expiry and no-refund-after-execution. Queue subprocess tests
+  additionally kill the coordinator around the claim transfer. These are not
+  a native-GPU full-film, purchased-credit or production rollout canary.
 - Money paths must stay idempotent and tested; value-moving credit ledger writes
   require non-null refs and must not overdraft under concurrency.
 - Validator compensation is separate from worker den and audit-execution

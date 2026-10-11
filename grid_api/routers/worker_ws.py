@@ -30,7 +30,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..config import get_settings
 from ..database import new_session
-from ..redis_client import get_redis
+from ..redis_client import CONSUMER_GROUP, get_redis
 from ..safe_logging import error_type, opaque_id
 from ..services import accounts as accounts_svc
 from ..services import (
@@ -81,6 +81,48 @@ async def _worker_online(worker_name: str) -> bool:
         return False
     r = get_redis()
     return bool(await r.get(f"{WORKER_ONLINE_BY_NAME}{worker_name}"))
+
+
+async def _requeue_incompatible_job(job: dict) -> bool:
+    """Route to one fully compatible peer, including busy peers, before bouncing."""
+    payload = job.get("payload") or {}
+    features = payload.get("required_media_features", [])
+    feature = payload.get("required_media_feature")
+    api_format = payload.get("api_format", "openai-chat")
+    if (not isinstance(features, list) or len(features) > 8
+            or not all(isinstance(item, str) for item in features)
+            or feature is not None and not isinstance(feature, str)
+            or not isinstance(api_format, str)):
+        return await job_queue.requeue_for_mismatch(job)
+    required = set(features) | ({feature} if feature else set())
+    r = get_redis()
+    workers = sorted(await r.smembers(WORKER_ACTIVE_SET))
+    pipe = r.pipeline()
+    for worker in workers:
+        pipe.get(f"{WORKER_STATUS_PREFIX}{worker}{WORKER_STATUS_SUFFIX}")
+    snapshots = await pipe.execute() if workers else []
+    compatible = []
+    for worker, snapshot in zip(workers, snapshots):
+        if not snapshot or worker == job.get("worker_id"):
+            continue
+        info = json.loads(snapshot)
+        if (info.get("dispatch_protocol") != job_queue.ROUTING_PROTOCOL
+                or job.get("hard_target_worker") and info.get("name") != job["hard_target_worker"]
+                or job.get("job_type", "text") not in (info.get("job_types") or ["text"])
+                or api_format not in (info.get("api_formats") or ["openai-chat"])
+                or not required.issubset(info.get("media_features") or [])
+                or job.get("models") and not any(model in (info.get("models") or []) for model in job["models"])
+                or not info.get("models")):
+            continue
+        compatible.append((worker, snapshot))
+    if compatible:
+        pending = await r.xpending(job.get("stream") or job_queue._stream_for(job.get("job_type", "text")), CONSUMER_GROUP)
+        loads = {item["name"]: item["pending"] for item in pending.get("consumers", [])}
+        for worker, snapshot in sorted(compatible, key=lambda item: (loads.get(item[0], 0), item[0])):
+            status = await job_queue.route_to_worker(job, worker, snapshot)
+            if status != "unavailable":
+                return status != "closed"
+    return await job_queue.requeue_for_mismatch(job)
 
 
 # In-process tracking for WebSocket handles (can't serialize these to Redis)
@@ -613,6 +655,7 @@ async def worker_websocket(ws: WebSocket):
 
         # Register in Redis (visible to all processes)
         worker_info = {
+            "dispatch_protocol": job_queue.ROUTING_PROTOCOL,
             "worker_id": worker_id,
             "user_id": user["id"],
             "name": worker_name,
@@ -741,6 +784,11 @@ async def worker_websocket(ws: WebSocket):
 
                 # Got a job → dispatch it (model check + text/media paths below).
 
+                if job.get("dispatch_deadline_expired"):
+                    await token_stream.publish_error(job["job_id"], "Compatible worker capacity wait expired.", code=503)
+                    await _release_undispatched_job(job)
+                    continue
+
                 # ── Worker targeting ──
                 # Validator probes and setup canaries use hard targeting. If
                 # Redis hands the job to any other worker, that worker must not
@@ -779,12 +827,13 @@ async def worker_websocket(ws: WebSocket):
                 # hands jobs to a random worker regardless of served models, so
                 # a mismatch is normal in a heterogeneous pool. Requeue for
                 # another worker instead of discarding (which would strand the
-                # client). If the job has bounced past the requeue limit, no
-                # worker serves the model — fault it and tell the client.
+                # client). A live compatible peer receives the original pending
+                # delivery directly; it may be busy. Bounce count alone cannot
+                # prove a model is unavailable in a heterogeneous pool.
                 job_models = job["models"]
                 matching = [m for m in job_models if m in models] if job_models else models
                 if not matching:
-                    requeued = await job_queue.requeue_for_mismatch(job)
+                    requeued = await _requeue_incompatible_job(job)
                     if not requeued:
                         await token_stream.publish_error(
                             job["job_id"],
@@ -802,7 +851,7 @@ async def worker_websocket(ws: WebSocket):
                                and all(isinstance(item, str) and item in worker_info.get("media_features", [])
                                        for item in required_features))
                 if not features_ok or (feature and feature not in worker_info.get("media_features", [])):
-                    requeued = await job_queue.requeue_for_mismatch(job)
+                    requeued = await _requeue_incompatible_job(job)
                     if not requeued:
                         await token_stream.publish_error(job["job_id"], "No compatible media worker is available.", code=503)
                         await _release_undispatched_job(job)
@@ -815,7 +864,7 @@ async def worker_websocket(ws: WebSocket):
                 job_format = job["payload"].get("api_format", "openai-chat")
                 worker_formats = worker_info.get("api_formats") or ["openai-chat"]
                 if job_format not in worker_formats:
-                    requeued = await job_queue.requeue_for_mismatch(job)
+                    requeued = await _requeue_incompatible_job(job)
                     if not requeued:
                         await token_stream.publish_error(
                             job["job_id"],

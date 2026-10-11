@@ -105,6 +105,14 @@ transport, accounts, stats, health/metrics.
   use the unstarted-only release guard for marked jobs. Genuine render failures
   must hold the current Core execution lease; a duplicate queue delivery cannot refund
   an already-running worker's hold.
+  Model/feature/format mismatch first seeks one fully compatible live peer and
+  transfers the original pending delivery, even if that peer is busy. Core's
+  registry adds its own inbox-protocol marker; worker claims cannot opt an older
+  coordinator into receiving it. Exact fresh snapshots and consumer ownership
+  fence the handoff. No-peer search keeps the existing bounce cap; busy-peer
+  wait has a separate bounded deadline. Expiry sends no backend job/DONE or
+  worker payout and uses the same unstarted-only async release guard. Hard
+  targeting and soft-affinity policies are not relaxed by this candidate.
   Candidate original-worker reconnect uses SQL, not Redis/model routing: the
   exact worker UUID, checkpoint and features must still match. After the prior
   60-second lease expires, the same job/graph/seed can receive `resume:true` and

@@ -12,11 +12,22 @@ generation gate or charging setting is changed by this candidate.
 
 Isolated native A2V and V2V now pass one 337-frame /14.041667-second network
 section with exact source commitments, one test-credit charge and automatic
-private-input cleanup. This is synthetic lifecycle evidence, not public worker
+private-input cleanup. This is isolated unfunded lifecycle evidence, not public worker
 startup, purchased-credit, multi-pin film or visual-quality qualification.
 A subsequent shared private-Core test also passes simultaneous A2V/V2V on two
 normal worker identities, same-job process-crash recovery and a repeat audit.
 It uses unfunded test credits and does not enroll public workers.
+
+The first original-input managed five-shot film run failed: four completed,
+but an idle incompatible Dev reader exhausted the Distilled opener's 25
+mismatch retries while its compatible peer was busy. That unstarted job was
+refunded without a completion row. The read-only failure audit verifies
+583,334 unfunded test micro-USD charged, four full decodes, twenty native input
+pixel checks and absence of all twenty recorded private source objects. No
+replacement or full-film export was performed. Slightly shorter raw native
+audio is retained; exact final export clocks remain unqualified.
+The compatibility-routing candidate below must pass required CI and a fresh
+native managed-film acceptance before this gate can close.
 
 Two matching native GPU-pinned ComfyUI instances have completed concurrent
 local distilled renders on the owned dual-Blackwell rig. ComfyUI remains
@@ -38,6 +49,46 @@ obtain licensing/legal clarification before public activation. An AGPL code
 license or a successful private test is not model-use clearance.
 
 ## Governed Contract
+
+### Compatible Capacity Routing
+
+A mismatched reader first finds one live worker that supports the actual
+checkpoint, job modality, API format and all required media features together.
+Capabilities from different workers cannot be combined. Busy workers retain
+their registry TTL; presence is not idle capacity or verified model identity.
+
+Core transfers the original pending Redis delivery to the selected peer using
+XCLAIM. Per-worker inboxes carry only delivery IDs and single-use notification
+nonces; the stream remains the payload/ownership authority. The original
+consumer and exact current registry snapshot fence the transfer. One-use
+notifications prevent stale hints from redelivering the same pending item after
+multiple handoffs. No new reservation, recipe copy, generation attempt or
+worker-binary protocol is created.
+
+Only receivers registered by Core with its server-owned `stream-inbox-v1`
+marker may receive these deliveries. Old Core processes continue the existing
+stream path during overlap; they must not be assumed to consume new inboxes.
+Notifications are bounded by the stream cap and twice the wait-window TTL.
+An idle blocked reader may take up to its existing five-second poll interval
+to notice an inbox; concurrent blocking readers are not added.
+
+Queue age survives mismatch, affinity and stale recovery. Routed capacity wait
+is capped at five minutes for text and fifteen for media; genuine backend
+retries retain their separate two-retry cap and a fresh wait window. Expired
+queue deliveries use the existing unstarted-only async release guard and
+cannot refund an already-running worker's hold. Async outbox and execution
+lease budgets are separate and unchanged. Hard-target bindings never fall
+back to unrelated peers, and existing affinity policies remain unchanged.
+
+Focused local qualification passes 128 tests against disposable Redis and
+SQLite/local PostgreSQL 14, including queue-process death around handoff,
+notification replay, stale registry/legacy receiver exclusion, busy-peer
+reservation preservation and expiry refunds across six formats. The full local
+Core suite passes 2,769 tests with 28 skips on that candidate; those skips do
+not establish the optional cross-repo or other environment-dependent gates.
+This is not PostgreSQL 16 CI, full Uvicorn/native-GPU restart, purchased funding, stream
+overload or full-film acceptance. The earlier failed film and its source pins
+remain immutable; another run needs a separately committed/reviewed candidate.
 
 ### Worker Startup Inventory
 
