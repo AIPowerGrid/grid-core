@@ -17,6 +17,17 @@ content sanitization, and reward settlement.
   Source lists and bindings must agree before reserve; multi-pin dispatch requires
   `recipe-image-bindings-v1`. Old workers requeue without receiving the graph;
   mismatch exhaustion releases the hold through the existing terminal path.
+  Distilled candidates may declare audio/video source modes. Core expands only
+  its fixed frozen-audio/Union-Canny scaffold, independently of optional opening
+  image pins. A character portrait is not identity-only conditioning.
+- `video_sources.py` owns bounded inline WAV/MP4 input decoding, exact-duration
+  audio validation and isolated FFmpeg probe/full-frame checks. It accepts no
+  input URLs or filenames. Validate all inputs before quota/upload, retain
+  hash/size/role/timing commitments and require them to match the compiled
+  source slots before a hold. MP4 verification has two process-local slots;
+  cancelled callers retain their slot until their decoder task finishes.
+  FFmpeg time/individual-allocation limits are not a complete OS sandbox.
+  Source retention/privacy and joint native/billing qualification remain gates.
 
 - **Dispatch:** `job_queue.py` (Redis streams - the ONE live queue), `token_stream.py`
   (worker->client token relay), `media.py` (image/video job abstraction), `storage.py`
@@ -85,6 +96,10 @@ content sanitization, and reward settlement.
   internal validator/setup probes retain their separate non-economic contracts.
   Typed video requests with multiple image pins also require `video-timeline`.
   The video router repeats admission before source uploads or quota consumption.
+  `audio-to-video` and `video-to-video` are new default-dark subpaths; both
+  require `video`, and motion-guided video also requires `audio-to-video`.
+  Source-bearing dispatch requires one worker with `recipe-media-sources-v1`
+  plus every other requested feature. The public worker does not advertise it.
   `validate_rollout` rejects global charging with an omitted admission list
   before startup touches dependencies. Dark/allowlisted deployment can retain
   defaults; an explicit empty list is a valid closed rollout. This guard forces

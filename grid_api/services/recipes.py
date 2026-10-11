@@ -89,6 +89,11 @@ def _recipe_from_workflow(
 ) -> Recipe:
     meta = dict(workflow.get("_grid") or {})
     spec = {k: v for k, v in workflow.items() if k != "_grid"}
+    contract = (video_contract_svc.LtxVideoContract.model_validate(meta["videoContract"])
+                if "videoContract" in meta else None)
+    if contract:
+        for mode in contract.source_modes:
+            video_contract_svc.expand_sources(copy.deepcopy(spec), mode)
     return Recipe(
         recipe_root=recipe_root.lower(),
         recipe_id=recipe_id,
@@ -105,8 +110,7 @@ def _recipe_from_workflow(
         model_name=str(meta.get("modelName") or name),
         lora_inject=(meta.get("loraInject") or None),
         seed_max=int(meta.get("seedMax") or (2**53 - 1)),
-        video_contract=(video_contract_svc.LtxVideoContract.model_validate(meta["videoContract"])
-                        if "videoContract" in meta else None),
+        video_contract=contract,
     )
 
 
@@ -276,7 +280,9 @@ def generation_modes(ref: str | int) -> list[str]:
         else:
             mode = "img2video" if "image" in recipe.vars else "txt2video"
         modes.add(mode)
-    order = ("txt2img", "img2img", "txt2video", "img2video")
+        if recipe.video_contract:
+            modes.update(f"{mode}2video" for mode in recipe.video_contract.source_modes)
+    order = ("txt2img", "img2img", "txt2video", "img2video", "audio2video", "video2video")
     return [mode for mode in order if mode in modes]
 
 
@@ -387,7 +393,21 @@ def param_schema(ref: str | int) -> Optional[dict]:
                 "type": "array", "max_items": max_keyframes,
                 "description": "Inline image pins: first at frame 0, then unique increasing frames; strength 0..1; cannot be combined with image",
             }
+        source_modes = sorted({mode for recipe in cands if recipe.video_contract
+                               for mode in recipe.video_contract.source_modes})
+        if source_modes:
+            params["reference_audio"] = {
+                "type": "audio", "max_bytes": 12 * 1024 * 1024,
+                "description": "Inline exact-duration 48 kHz stereo PCM16 WAV; held fixed during video generation",
+            }
+        if "video" in source_modes:
+            params["reference_video"] = {
+                "type": "video", "max_bytes": 32 * 1024 * 1024,
+                "description": "Inline H.264 MP4 motion guide at the explicit requested size, 24 fps and exact frame count; requires reference_audio",
+            }
+            params["guide_strength"] = {"type": "number", "minimum_exclusive": 0, "maximum": 1, "default": 0.85}
         schema["video_contract"] = {**contract.model_dump(by_alias=True),
+                                    "source_modes": source_modes,
                                     "max_keyframes": params.get("keyframes", {}).get("max_items", 0)}
     return schema
 
@@ -517,6 +537,10 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
         execution = {key: inputs[key] for key in ("width", "height", "frames", "fps", "seconds", "steps", "cfg", "sampler", "audio")}
         if inputs.get("keyframes"):
             execution["keyframes"] = inputs["keyframes"]
+        if inputs.get("source_mode"):
+            execution["source_mode"] = inputs["source_mode"]
+        if "guide_strength" in inputs:
+            execution["guide_strength"] = inputs["guide_strength"]
 
     spec = copy.deepcopy(r.spec)
 
@@ -561,6 +585,14 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
         except ValueError:
             raise RecipeError("LTX keyframe scaffold is unavailable") from None
 
+    source_bindings = None
+    if r.video_contract is not None and inputs.get("source_mode"):
+        try:
+            source_bindings = video_contract_svc.expand_sources(
+                spec, inputs["source_mode"], inputs.get("guide_strength", 0.85))
+        except (ValueError, KeyError):
+            raise RecipeError("LTX source-conditioning scaffold is unavailable") from None
+
     return {
         "recipe_root": r.recipe_root,
         "recipe_id": r.recipe_id,
@@ -574,6 +606,7 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
         "lora_inject": r.lora_inject,   # worker splices LoraLoader nodes here (if loras requested)
         "image_paths": r.vars.get("image"),  # path(s) the worker binds a source image to (image slot is NOT pre-injected)
         **({"image_bindings": image_bindings} if image_bindings is not None else {}),
+        **({"source_bindings": source_bindings} if source_bindings is not None else {}),
         "spec": spec,
         **({"execution": execution} if execution is not None else {}),
     }

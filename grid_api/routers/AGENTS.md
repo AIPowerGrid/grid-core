@@ -35,6 +35,17 @@ transport, accounts, stats, health/metrics.
   quota/upload; multi-pin jobs additionally require `video-timeline` admission
   and the `recipe-image-bindings-v1` worker feature. Unsupported settings reject before quota/upload; the
   candidates are not loaded or deployed. See `LTX_2_5_VIDEO.md` for gates.
+  Distilled candidates additionally accept explicit inline `reference_audio`
+  (complete exact-duration 48 kHz stereo PCM16 WAV) and `reference_video`
+  (fully decoded exact-frame 24 fps H.264 MP4 at the explicit requested size).
+  Motion references require a separate audio input; neither role is an opening
+  image. Both source modes are default-dark and require compatible workers.
+  `_video_body.py` bounds both native video JSON routes to 64 MiB + 64 KiB
+  before parsing and redacts input-bearing validation errors. The combined
+  encoded source budget is 64 MiB, with stricter per-kind/image budgets.
+  Source byte hashes join durable normalized request identity; replay never
+  reuploads, trims or regenerates a source. Input roles/bytes must match the
+  governed graph before reserve. This is not character identity or lip accuracy.
 - `video_jobs.py` - candidate `POST /v1/videos/jobs` and owner-only
   `GET /v1/videos/jobs/{job_id}`, plus `GET /v1/videos/jobs` with the
   `Idempotency-Key` header for lost initial replies. GET never admits, uploads,

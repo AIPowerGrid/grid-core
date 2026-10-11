@@ -9,6 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+SourceMode = Literal["generated", "audio", "video"]
+
 
 class LtxVideoContract(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
@@ -18,6 +20,7 @@ class LtxVideoContract(BaseModel):
     max_frames: int = Field(ge=9, le=337)
     max_pixels: int = Field(ge=256 * 256, le=960 * 544)
     max_keyframes: int = Field(default=0, ge=0, le=16)
+    source_modes: list[Literal["audio", "video"]] = Field(default_factory=list, max_length=2)
 
     @model_validator(mode="after")
     def validate_capacity(self):
@@ -25,6 +28,10 @@ class LtxVideoContract(BaseModel):
             raise ValueError("max_frames must be 8n+1")
         if self.variant == "dev" and self.max_frames > 81:
             raise ValueError("dev capacity above 81 frames is not qualified")
+        if len(self.source_modes) != len(set(self.source_modes)):
+            raise ValueError("source modes must be unique")
+        if self.source_modes and self.variant != "distilled":
+            raise ValueError("source conditioning is qualified only on the distilled scaffold")
         return self
 
 
@@ -52,6 +59,8 @@ class LtxVideoInputs(BaseModel):
     cfg: float | None = Field(default=None, ge=1, le=5)
     sampler: Literal["euler_ancestral_cfg_pp"] = "euler_ancestral_cfg_pp"
     audio: Literal[True] = True
+    source_mode: SourceMode = "generated"
+    guide_strength: float | None = Field(default=None, gt=0, le=1)
 
     @field_validator("fps", "audio", mode="before")
     @classmethod
@@ -64,6 +73,10 @@ class LtxVideoInputs(BaseModel):
 def normalize(contract: LtxVideoContract, values: dict) -> dict:
     """Seconds select the nearest 8n+1 clip; explicit frames are never rounded."""
     inputs = LtxVideoInputs.model_validate(values)
+    if inputs.source_mode != "generated" and inputs.source_mode not in contract.source_modes:
+        raise ValueError("recipe does not support this source conditioning mode")
+    if inputs.guide_strength is not None and inputs.source_mode != "video":
+        raise ValueError("guide strength requires a video reference")
     if inputs.width % 32 or inputs.height % 32:
         raise ValueError("LTX-2.5 dimensions must be multiples of 32")
     if inputs.width * inputs.height > contract.max_pixels:
@@ -89,7 +102,63 @@ def normalize(contract: LtxVideoContract, values: dict) -> dict:
               "seconds": frames / inputs.fps, "steps": steps, "cfg": cfg}
     if not pins:
         result.pop("keyframes")
+    if inputs.source_mode == "generated":
+        result.pop("source_mode")
+    elif inputs.source_mode == "video":
+        result["guide_strength"] = inputs.guide_strength if inputs.guide_strength is not None else 0.85
     return result
+
+
+def expand_sources(spec: dict, mode: SourceMode, guide_strength: float = 0.85) -> list[dict]:
+    """Bind input roles to a fixed, Core-owned audio/Union-Control scaffold."""
+    if mode == "generated":
+        return []
+    expected = {"model": "UNETLoader", "video_vae": "VAELoader", "audio_vae": "VAELoader",
+                "latent_audio": "LTXVEmptyLatentAudio", "av_latent": "LTXVConcatAVLatent",
+                "guider": "CFGGuider", "crop": "LTXVCropGuides", "video": "CreateVideo",
+                "decode_audio": "LTXVAudioVAEDecode"}
+    added = {"source_audio", "encode_audio", "audio_mask", "source_video", "source_frames",
+             "source_edges", "control_model", "video_guide"}
+    if (mode not in {"audio", "video"} or not 0 < guide_strength <= 1
+            or added.intersection(spec)
+            or any(not isinstance(spec.get(name), dict)
+                   or spec[name].get("class_type") != kind
+                   or not isinstance(spec[name].get("inputs"), dict)
+                   for name, kind in expected.items())
+            or spec["av_latent"]["inputs"].get("audio_latent") != ["latent_audio", 0]
+            or spec["video"]["inputs"].get("audio") != ["decode_audio", 0]):
+        raise ValueError("recipe does not contain the governed source scaffold")
+    spec["source_audio"] = {"class_type": "LoadAudio", "inputs": {"audio": "grid_reference.wav"}}
+    spec["encode_audio"] = {"class_type": "LTXVAudioVAEEncode", "inputs": {
+        "audio": ["source_audio", 0], "audio_vae": ["audio_vae", 0]}}
+    spec["audio_mask"] = {"class_type": "SolidMask", "inputs": {"value": 0.0, "width": 1, "height": 1}}
+    spec["latent_audio"] = {"class_type": "SetLatentNoiseMask", "inputs": {
+        "samples": ["encode_audio", 0], "mask": ["audio_mask", 0]}}
+    spec["video"]["inputs"]["audio"] = ["source_audio", 0]
+    del spec["decode_audio"]
+    bindings = [{"role": "reference_audio", "path": "source_audio.inputs.audio"}]
+    if mode == "video":
+        # A motion reference is not an opening image. Keep the existing video
+        # latent/pins, if any, and add control independently of first-frame I2V.
+        latent = spec["av_latent"]["inputs"]["video_latent"]
+        positive, negative = (spec["guider"]["inputs"][key] for key in ("positive", "negative"))
+        spec["control_model"] = {"class_type": "LTXICLoRALoaderModelOnly", "inputs": {
+            "model": ["model", 0], "lora_name": "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors",
+            "strength_model": 1.0}}
+        spec["source_video"] = {"class_type": "LoadVideo", "inputs": {"file": "grid_reference.mp4"}}
+        spec["source_frames"] = {"class_type": "GetVideoComponents", "inputs": {"video": ["source_video", 0]}}
+        spec["source_edges"] = {"class_type": "Canny", "inputs": {
+            "image": ["source_frames", 0], "low_threshold": 0.35, "high_threshold": 0.75}}
+        spec["video_guide"] = {"class_type": "LTXAddVideoICLoRAGuide", "inputs": {
+            "positive": positive, "negative": negative, "vae": ["video_vae", 0], "latent": latent,
+            "image": ["source_edges", 0], "frame_idx": 0, "strength": guide_strength,
+            "latent_downscale_factor": ["control_model", 1], "crop": "disabled",
+            "use_tiled_encode": False, "tile_size": 256, "tile_overlap": 64}}
+        spec["av_latent"]["inputs"]["video_latent"] = ["video_guide", 2]
+        spec["guider"]["inputs"].update(model=["control_model", 0], positive=["video_guide", 0], negative=["video_guide", 1])
+        spec["crop"]["inputs"].update(positive=["video_guide", 0], negative=["video_guide", 1])
+        bindings.append({"role": "reference_video", "path": "source_video.inputs.file"})
+    return bindings
 
 
 def expand_keyframes(spec: dict, pins: list[dict]) -> list[dict]:

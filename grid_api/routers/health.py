@@ -51,7 +51,7 @@ async def health():
         "status": "ok" if redis_ok else "degraded",
         "build_commit": build_commit(),
         # Contract availability is not new-admission or worker qualification.
-        "features": ["image-max-cost-micro-usd-v1", "video-async-credit-jobs-v1"],
+        "features": ["image-max-cost-micro-usd-v1", "video-async-credit-jobs-v1", "video-source-conditioning-v1"],
         "redis": redis_ok,
         "workers_connected": workers,
         "models_available": models,

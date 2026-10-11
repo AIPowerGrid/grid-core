@@ -20,13 +20,14 @@ from ..auth import extract_api_key
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
 from ..services import loras as loras_svc
-from ..services import generation_admission, media, quota, recipes, video_contract
+from ..services import generation_admission, media, quota, recipes, video_contract, video_sources
 from ..services import styles as styles_svc
 from .worker_ws import get_available_models
+from ._video_body import BoundedVideoRoute
 
 logger = logging.getLogger("grid_api.videos")
 
-router = APIRouter()
+router = APIRouter(route_class=BoundedVideoRoute)
 
 
 class VideoKeyframe(BaseModel):
@@ -48,6 +49,8 @@ class VideoRequest(BaseModel):
     frames: int | None = Field(default=None, ge=9, le=337, strict=True)
     fps: int = Field(default=24, ge=8, le=30, strict=True)
     image: Optional[str] = None  # img2video start frame: inline base64 / data: URI
+    reference_audio: str | None = Field(default=None, min_length=1, max_length=16_777_280)
+    reference_video: str | None = Field(default=None, min_length=1, max_length=44_739_308)
     keyframes: list[VideoKeyframe] = Field(default_factory=list, max_length=16)
     loras: Optional[list] = None  # gated via loras service (rejected unless model supports them)
     response_format: Optional[str] = "url"  # "url" | "b64_json"
@@ -63,7 +66,7 @@ async def prepare_video(body: VideoRequest, user: dict, *, async_submission: boo
             await accounts_svc.assert_owns_worker(user, body.worker)
 
         extra = body.model_dump(exclude={"prompt", "model", "n", "size", "seconds", "fps", "image",
-                                         "frames", "keyframes", "loras", "response_format", "worker", "style", "progress_token"})
+                                         "frames", "keyframes", "reference_audio", "reference_video", "loras", "response_format", "worker", "style", "progress_token"})
         prompt = body.prompt
         style_model = None
         style_loras: list = []
@@ -87,15 +90,24 @@ async def prepare_video(body: VideoRequest, user: dict, *, async_submission: boo
         if body.keyframes:
             source_image = body.keyframes[0].image
         contract = recipes.video_contract_for_model(model, has_source=bool(source_image))
-        if contract is None and (body.frames is not None or body.keyframes):
+        source_mode = "video" if body.reference_video else "audio" if body.reference_audio else "generated"
+        if contract is None and (body.frames is not None or body.keyframes or source_mode != "generated"):
             raise HTTPException(status_code=422, detail="This model has no typed frame/keyframe contract")
+        if source_mode != "generated" and source_mode not in contract.source_modes:
+            raise HTTPException(422, detail="This recipe does not accept the requested audio/video reference mode")
+        if body.reference_video and (not body.reference_audio or "size" not in body.model_fields_set):
+            raise HTTPException(422, detail="Video reference requires reference_audio and an explicit output size")
 
         feature = "recipe-image-bindings-v1" if len(body.keyframes) > 1 else None
+        source_features = ("recipe-media-sources-v1",) if source_mode != "generated" else ()
         if async_submission:
-            features = ("async-video-resume-v1",) + ((feature,) if feature else ())
+            features = ("async-video-resume-v1",) + source_features + ((feature,) if feature else ())
             available = await get_available_models(job_type="video", media_features=features)
             if contract is None:
                 raise HTTPException(422, detail="Async video requires a governed typed video recipe")
+        elif source_features:
+            features = source_features + ((feature,) if feature else ())
+            available = await get_available_models(job_type="video", media_features=features)
         else:
             available = await get_available_models(job_type="video", **({"media_feature": feature} if feature else {}))
         if not available:
@@ -123,10 +135,14 @@ async def prepare_video(body: VideoRequest, user: dict, *, async_submission: boo
                 raise HTTPException(status_code=422, detail="LTX-2.5 LoRAs are not qualified")
             if body.response_format not in ("url", "b64_json"):
                 raise HTTPException(status_code=422, detail="response_format must be url or b64_json")
-            unsupported = set(extra) - {"negative_prompt", "seed", "steps", "cfg_scale", "sampler", "audio"}
+            unsupported = set(extra) - {"negative_prompt", "seed", "steps", "cfg_scale", "sampler", "audio", "guide_strength"}
             if unsupported:
                 raise HTTPException(status_code=422, detail="Unsupported LTX-2.5 parameter; consult the model parameter contract")
             values = {"prompt": prompt, "fps": body.fps, **media.advanced_knob_inputs(extra)}
+            if source_mode != "generated":
+                values["source_mode"] = source_mode
+            if extra.get("guide_strength") is not None:
+                values["guide_strength"] = extra["guide_strength"]
             if body.keyframes:
                 values["keyframes"] = [{"frame": pin.frame, "strength": pin.strength} for pin in body.keyframes]
             for key in ("negative_prompt", "seed", "audio"):
@@ -159,11 +175,20 @@ async def prepare_video(body: VideoRequest, user: dict, *, async_submission: boo
         decoded_pins = media.decode_video_keyframes([pin.image for pin in body.keyframes]) if body.keyframes else None
         if decoded_pins and "size" not in set_fields:
             width, height = video_contract.source_size(contract, *decoded_pins[0][2:])
+        # Source-bearing paths are default dark, independently of charging.
+        # Check before decoding MP4s, uploads or consuming caller quota.
         generation_admission.require_media("video", {
             "source_image_url": bool(source_image),
+            "source_media": ([{"role": "reference_audio"}] + ([{"role": "reference_video"}] if body.reference_video else []))
+                            if source_mode != "generated" else [],
             "recipe_inputs": {"keyframes": values.get("keyframes", []) if contract else [],
                               "timeline": extra.get("timeline")},
         })
+        if sum(len(value) for value in ([pin.image for pin in body.keyframes] +
+                                       [body.image, body.reference_audio, body.reference_video]) if value) > video_sources.MAX_ENCODED_BYTES:
+            raise HTTPException(413, detail="Combined video inputs exceed the encoded limit")
+        source_media = await video_sources.validate_sources(body.reference_audio, body.reference_video,
+                                                           frames=frames, width=width, height=height)
         await quota.check_and_consume(dict(user))
 
         # Recipe knobs: pass effective dimensions/timing every time so the recipe,
@@ -193,6 +218,10 @@ async def prepare_video(body: VideoRequest, user: dict, *, async_submission: boo
         recipe_inputs.update(media.advanced_knob_inputs(extra))  # steps/cfg/sampler/scheduler
         if contract:
             recipe_inputs.update(steps=steps, cfg=cfg_scale, sampler=sampler, audio=True)
+            if source_mode != "generated":
+                recipe_inputs["source_mode"] = source_mode
+                if "guide_strength" in values:
+                    recipe_inputs["guide_strength"] = values["guide_strength"]
             if body.keyframes:
                 recipe_inputs["keyframes"] = values["keyframes"]
         # Director/timeline recipes (e.g. LTX Director 2.0): forward the recipe's
@@ -202,6 +231,8 @@ async def prepare_video(body: VideoRequest, user: dict, *, async_submission: boo
         # LTXDirector schema — generous cap; the others stay tight.
         for k, cap in (("timeline", 25_000_000), ("local_prompts", 100_000),
                        ("segment_lengths", 100_000), ("guide_strength", 100_000)):
+            if contract:
+                continue
             v = extra.get(k)
             if v is not None:
                 recipe_inputs[k] = str(v)[:cap]
@@ -235,10 +266,12 @@ async def prepare_video(body: VideoRequest, user: dict, *, async_submission: boo
             payload["source_image_url"] = source_image_url
         if source_image_urls:
             payload["source_image_urls"] = source_image_urls
+        if source_media:
+            payload["source_media"] = await video_sources.upload_sources(source_media)
         if loras:
             payload["loras"] = loras
 
-        if async_submission:
+        if async_submission or source_features:
             payload["required_media_features"] = list(features)
         return model, payload, seeds
     except HTTPException:

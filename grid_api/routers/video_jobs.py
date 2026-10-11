@@ -9,57 +9,26 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
 from pydantic import ConfigDict, Field
 
 from ..auth import extract_api_key
 from ..config import get_settings
 from ..ratelimit import limiter
-from ..services import accounts, media, media_jobs
+from ..services import accounts, media, media_jobs, video_sources
+from . import _video_body
 from .videos import VideoRequest, prepare_video
 
-MAX_BODY_BYTES = 32 * 1024 * 1024 + 64 * 1024
+MAX_BODY_BYTES = _video_body.MAX_BODY_BYTES
 PRIVATE = {"Cache-Control": "no-store"}
 
 
-class BoundedVideoRoute(APIRoute):
+class BoundedVideoRoute(_video_body.BoundedVideoRoute):
     """Bound before FastAPI JSON validation and redact its input-bearing errors."""
 
-    def get_route_handler(self):
-        original = super().get_route_handler()
-
-        async def guarded(request: Request):
-            try:
-                if request.method == "POST":
-                    if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
-                        raise HTTPException(415, detail="Content-Type must be application/json")
-                    length = request.headers.get("content-length")
-                    if length is not None:
-                        if not length.isascii() or not length.isdigit() or len(length) > 20:
-                            raise HTTPException(400, detail="Invalid Content-Length")
-                        if int(length) > MAX_BODY_BYTES:
-                            raise HTTPException(413, detail="Video request exceeds the body limit")
-                    content = bytearray()
-                    async for chunk in request.stream():
-                        if len(content) + len(chunk) > MAX_BODY_BYTES:
-                            raise HTTPException(413, detail="Video request exceeds the body limit")
-                        content.extend(chunk)
-                    # Starlette's body cache lets the original typed route read
-                    # the bounded body, preserving generated OpenAPI schemas.
-                    request._body = bytes(content)
-                response = await original(request)
-                response.headers.update(PRIVATE)
-                return response
-            except RequestValidationError:
-                return JSONResponse({"detail": "Invalid async video request"}, status_code=422, headers=PRIVATE)
-            except RecursionError:
-                return JSONResponse({"detail": "Video request exceeds JSON nesting limit"}, status_code=422, headers=PRIVATE)
-            except HTTPException as exc:
-                return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers={**(exc.headers or {}), **PRIVATE})
-
-        return guarded
+    @staticmethod
+    def body_limit() -> int:
+        return MAX_BODY_BYTES
 
 
 router = APIRouter(route_class=BoundedVideoRoute)
@@ -79,6 +48,7 @@ class AsyncVideoRequest(VideoRequest):
     cfg_scale: float | None = Field(default=None, ge=1, le=5)
     sampler: Literal["euler_ancestral_cfg_pp"] = "euler_ancestral_cfg_pp"
     audio: bool = True
+    guide_strength: float | None = Field(default=None, gt=0, le=1)
     response_format: Literal["url"] = "url"
     worker: str | None = Field(default=None, min_length=1, max_length=255)
     style: str | None = Field(default=None, min_length=1, max_length=128)
@@ -100,6 +70,14 @@ def request_hash(body: AsyncVideoRequest) -> str:
         intent["image"] = {"sha256": digests[0]}
     for pin, digest in zip(intent["keyframes"], digests):
         pin["image"] = {"sha256": digest}
+    for role in ("reference_audio", "reference_video"):
+        value = getattr(body, role)
+        if value is None:
+            intent.pop(role)
+        else:
+            intent[role] = {"sha256": hashlib.sha256(video_sources.decode_inline(value, role)).hexdigest()}
+    if body.guide_strength is None:
+        intent.pop("guide_strength")
     encoded = json.dumps({"schema": "aipg.video-intent.v1", "request": intent},
                          sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
     return hashlib.sha256(encoded.encode("ascii")).hexdigest()

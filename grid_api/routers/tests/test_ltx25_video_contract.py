@@ -4,6 +4,7 @@
 import base64
 import io
 import json
+import wave
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -14,7 +15,7 @@ from PIL import Image
 
 from grid_api.models.openai import ChatCompletionRequest
 from grid_api.routers import openai, videos
-from grid_api.services import media, recipes, storage
+from grid_api.services import media, recipes, storage, video_sources
 from grid_api.services.recipe_import import recipe_root
 
 MODEL = "LTX-2.5 Distilled BF16"
@@ -156,3 +157,61 @@ async def test_chat_video_uses_the_same_units(setup, model, steps, cfg):
     assert payload["cfg_scale"] == cfg
     assert payload["seed"] == 0
     assert payload["recipe_inputs"]["seconds"] == 81 / 24
+
+
+def reference_audio(frames=9):
+    data = io.BytesIO()
+    with wave.open(data, "wb") as writer:
+        writer.setparams((2, 2, 48_000, 0, "NONE", "not compressed"))
+        writer.writeframes(b"\0" * frames * 2000 * 4)
+    return base64.b64encode(data.getvalue()).decode()
+
+
+@pytest.mark.asyncio
+async def test_audio_ingress_uploads_committed_source_not_executable_inputs(setup, monkeypatch):
+    app, submit, _quota = setup
+    monkeypatch.setattr(storage, "upload_source", lambda *_args: "https://source.invalid/private.wav")
+    encoded = reference_audio()
+    response = await post(app, {"frames": 9, "reference_audio": encoded})
+    assert response.status_code == 200, response.text
+    body = submit.call_args.args[2]
+    assert body["recipe_inputs"]["source_mode"] == "audio"
+    assert body["source_media"][0]["samples"] == 18_000
+    assert body["source_media"][0]["role"] == "reference_audio"
+    assert body["required_media_features"] == ["recipe-media-sources-v1"]
+    assert encoded not in str(body)
+    assert "source_image_url" not in body
+
+
+@pytest.mark.asyncio
+async def test_default_dark_source_path_rejects_before_decoder_or_storage(setup, monkeypatch):
+    app, submit, quota = setup
+    def closed(*_args):
+        raise videos.HTTPException(503, detail="closed source path")
+    monkeypatch.setattr(videos.generation_admission, "require_media", closed)
+    validate = AsyncMock()
+    monkeypatch.setattr(video_sources, "validate_sources", validate)
+    response = await post(app, {"frames": 9, "reference_audio": reference_audio()})
+    assert response.status_code == 503
+    validate.assert_not_awaited()
+    quota.assert_not_awaited()
+    submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("values", [
+    {"reference_video": "private-source"},
+    {"reference_audio": reference_audio(17), "frames": 9},
+    {"reference_audio": reference_audio(), "model": "LTX-2.5 Dev BF16"},
+    {"guide_strength": 0.5},
+])
+async def test_bad_source_modes_reject_before_quota_upload_or_dispatch(setup, monkeypatch, values):
+    app, submit, quota = setup
+    upload = AsyncMock()
+    monkeypatch.setattr(video_sources, "upload_sources", upload)
+    response = await post(app, values)
+    assert response.status_code == 422, response.text
+    assert "private-source" not in response.text
+    quota.assert_not_awaited()
+    upload.assert_not_awaited()
+    submit.assert_not_awaited()
