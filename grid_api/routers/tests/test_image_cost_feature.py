@@ -15,4 +15,5 @@ async def test_health_advertises_image_cost_limit_without_account_details(monkey
     monkeypatch.setattr(health, "get_connected_worker_count", AsyncMock(return_value=0))
     result = await health.health()
     assert "image-max-cost-micro-usd-v1" in result["features"]
+    assert "video-async-credit-jobs-v1" in result["features"]
     assert "account_id" not in result

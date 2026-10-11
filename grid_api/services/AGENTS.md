@@ -38,6 +38,10 @@ content sanitization, and reward settlement.
   existing financial job lock. Never clear that fence on reconnect, requeue or
   rollback. Uncertain execution awaits reconciliation/refund, not a rerender.
   Financial/results authority remains `grid_reservations`; no second settler.
+  Recovery reads accept exactly one owned job UUID or hashed request key and
+  expose the normalized intent digest, never key text or private payloads.
+  Request-key recovery is a read, not another admission or retry. Proved
+  aliases remain recoverable; merged duplicate keys fail as ambiguous.
   Queue give-up may release a marked job only with `only_if_unstarted_media`
   under that same job lock. The current leased terminal or stale-hold sweeper can still release;
   a duplicate delivery must not refund another worker's running hold.

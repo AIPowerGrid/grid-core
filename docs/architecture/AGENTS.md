@@ -94,7 +94,10 @@ validation, worker incentives, and trust boundaries.
   The dark candidate now carries sixteen timed pins and the 337-frame distilled
   ceiling; network storage, money and full film/export parity remain separate gates.
   Default-off async submit/status and the bounded SQL/Redis outbox are candidate
-  code. Original-worker leased resumption has isolated PostgreSQL/Core crash
+  code. Owner-only key-header GET recovery now handles a lost initial reply
+  without another admission/upload; the stored normalized intent digest binds
+  client recovery and merged keys remain ambiguous. This contract is not
+  public admission or a funded CLI canary. Original-worker leased resumption has isolated PostgreSQL/Core crash
   coverage; joint native-worker/GPU/storage recovery and private retention
   remain promotion gates. Candidate async outputs are source-conditionally copied
   and Core-hashed before settlement; fixture tests are not live R2/video quality

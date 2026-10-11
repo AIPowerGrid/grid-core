@@ -229,7 +229,8 @@ a required fallback or evidence that the working LTX approach must be replaced.
 
 ## Candidate Async Video API
 
-The candidate `POST /v1/videos/jobs` and `GET /v1/videos/jobs/{job_id}` use the
+The candidate `POST /v1/videos/jobs`, `GET /v1/videos/jobs/{job_id}` and
+`GET /v1/videos/jobs` with an `Idempotency-Key` header use the
 private `media_jobs` journal and additive migration `0043` for request identity,
 bounded queue dispatch, an irrevocable worker execution claim and owner-only
 SQL status/result recovery. New admission defaults off. The API is not released
@@ -244,7 +245,7 @@ client graphs, URL source inputs, batches and base64 result envelopes are not
 accepted. The JSON body is bounded to 32 MiB plus 64 KiB before typed parsing;
 schema-validation failures do not echo source images or request values.
 
-The `aipg.video-job.v1` response exposes only job ID, model, state, cost ceiling,
+The `aipg.video-job.v1` response exposes only job ID, normalized `request_hash`, model, state, cost ceiling,
 reserved/actual microUSD and committed result. POST returns 202 while pending,
 queued or `execution_uncertain`, and 200 when terminal, with `Location` and a
 five-second polling hint. GET returns 200 for owner-visible status or 404 for
@@ -254,6 +255,29 @@ identity, changed-intent, money and held-cap failures return 401/403, 422, 409,
 retry that exact request/key, never create a new key to recover an uncertain
 submission. Terminal jobs are `completed` or `closed_without_result`; there is
 no cancellation endpoint or public failure-reason taxonomy yet.
+
+Lost initial replies can recover through the key-header GET without another
+POST or re-uploading source images. It applies the same `inference.submit`
+authentication/delegation and proved account-family scope, bounds/validates
+the UUIDv4 key, reads only one hold/journal and changes no economic or dispatch
+state. Unknown/foreign keys return indistinguishable 404s; merged duplicate
+keys return 409, never an arbitrary result. Recovery remains available with
+new admission disabled. Key text is never a URL query or bearer capability.
+The returned request hash permits a client to verify its original
+`aipg.video-intent.v1` commitment. That digest uses sorted compact ASCII JSON
+of normalized typed defaults, omits `size` only when the original body omitted
+it, and replaces inline image values with decoded-byte SHA-256 objects.
+Public synthetic distilled/dev fingerprints are pinned in Core and Director.
+
+`/health.features` includes `video-async-credit-jobs-v1` for this durable
+credit/intent/GET contract. It does **not** enable admission, load recipes,
+advertise workers, prove purchased funding or qualify x402. An agent client
+must still receive a positive live exact-frame quote, enforce the Core ceiling
+and handle disabled/capacity/financial errors. The local Director now saves an
+intent-bound receipt before one POST and recovers through GET only; output
+download checks committed bytes and independently decodes frame/audio/codec
+conformance. Its synthetic HTTP/MP4 tests are not a new native/funded CLI canary,
+film-wide budget, take-selection/export implementation or production release.
 
 A caller-generated UUIDv4 idempotency key is stored only as a hash. The account
 and normalized client-intent commitment identify one request. Intent must be
