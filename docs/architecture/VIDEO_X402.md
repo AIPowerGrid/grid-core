@@ -156,7 +156,35 @@ key. Tests use newly generated, unfunded keys and the actual locked SDK signer,
 not a mocked recovery function. They prove compatible typed-data hashes and
 signatures when the quote nonce/deadline are selected before signing, and reject
 the stock client's random nonce or alteration of its already-signed payload.
-This is a protocol-level opt-in proof, **not a published Grid client adapter**.
+Separate SDK candidates now implement the opt-in preparation and explicit
+signer-callback sequence: Python `2f599e1a` (`0.2.0a2`) and JavaScript `60547a07`
+(`0.2.0-preview.2`). They independently implement the public wire contract under
+MIT, without copying AGPL runtime code or adding crypto dependencies. This is
+**not a package release or an enabled payment rail**.
+
+Both require a trusted authenticated quote plus independently retained expected
+model/intent hash/recipient/network/ceiling. They check the nonce commitment,
+canonical domain, exact integers and signing window before returning unsigned
+JSON-RPC data, including mandatory `EIP712Domain` definitions. Never use a copied
+response hash as independent intent verification or claim to prove the hidden
+execution plan. Current `payment_enabled:false` blocks signer callbacks.
+Explicit future-enabled callbacks sign only, with expiry rechecked afterwards;
+private signed capabilities are not exposed by ordinary repr/JSON. No SDK HTTP,
+payment sender, fallback, retries or key handling is added.
+
+Private SQLite/PostgreSQL quote HTTP/auth plus both SDKs pass twelve generated/
+audio/video and Base/Base-Sepolia protocol cases. Actual preview signing is
+refused; only test-local future-enabled copies exercise new unfunded signatures,
+private two-phase IPC and Core's real verifier. Every case leaves balance
+unchanged with no hold/job/completion. Python's normal suite passes 116 tests,
+JS passes 104 and compiled runtime smoke passes two cases; strict typing, build,
+format/package inspection and npm audit also pass locally. This does not qualify
+a live wallet, funded contract/facilitator, production, GPU or real payment.
+The exact SDK candidates also pass GitHub Python 3.9..3.12 and Node 18/20/22/24
+runtime/package/security matrices. The combined existing video HTTP/recovery
+and new signing qualification passes 68 cases locally on SQLite/PostgreSQL.
+Core CI now pins those exact SDK commits and runs both suites; the fresh Core
+revision's Linux/PostgreSQL 16 result remains a separate gate.
 
 Verification requires a caller-owned, authenticated SQL quote and an expected
 payer. It accepts exactly the inner `authorization` and `signature` fields with
@@ -275,8 +303,11 @@ PostgreSQL 16 [required CI](https://github.com/AIPowerGrid/grid-core/actions/run
 2,872 full-suite passes, restored migration/schema parity through `0046`, decoder
 and shadow Redis checks, pinned video SDK/Core HTTP qualification and the
 Console/node compensation handoff. Those results do not qualify the later
-signing-domain/verifier changes. Exact-commit CI for this follow-up, real
-payment and native quote-to-funded job qualification remain pending. Neither
+signing-domain/verifier changes. The offline verifier `0022f640` separately passes
+[exact-commit Linux/PostgreSQL 16 CI](https://github.com/AIPowerGrid/grid-core/actions/runs/38179418365).
+The later RPC domain-type completion and pinned SDK gate pass the same local
+2,942-test Grid suite, but still need fresh exact-commit CI. Real payment and
+native quote-to-funded job qualification remain pending. Neither
 local nor CI fixture results change public serving permission.
 
 ## Build And Qualification Order
@@ -291,7 +322,8 @@ local nor CI fixture results change public serving permission.
 2. Offline exact signature binding now passes wrong nonce/amount/payer/domain/
    deadline, changed source commitments, legacy-domain refusal and unsupported
    signature controls. The tested opt-in SDK signing sequence is not a released
-   client. Build the published adapter/outer-envelope integration and qualify
+   client. The SDK callback candidates are implemented/tested, not published.
+   Finish outer-envelope integration and qualify
    live account/token/facilitator compatibility before taking payment.
 3. Attempt journal, independent chain proof and atomic prepaid hold/outbox.
    Prove duplicates, concurrency and cross-rail claims on PostgreSQL 16. Keep

@@ -152,6 +152,7 @@ content sanitization, and reward settlement.
   funded admission and real refunds remain separate implementation gates.
 - `video_eip3009.py` is an offline, admission-time exact EIP-3009 binding
   helper, not a payment endpoint. It builds unsigned SDK-compatible typed data
+  including the mandatory JSON-RPC `EIP712Domain` type definitions,
   and checks canonical 65-byte low-S signatures against one owner-loaded v2
   quote's amount/payer/recipient/nonce/domain/window. It rejects self-payments,
   compact/wrapped signatures, unbound SDK nonces and expired quotes. Core never
@@ -161,6 +162,10 @@ content sanitization, and reward settlement.
   outer-envelope validation and durable financial admission remain required.
   Do not use its current-window check to abandon recovery of an earlier payment
   attempt after expiry. No real-wallet prompting or published client exists.
+  Separate MIT SDK candidates now supply dependency-free policy/preparation and
+  explicit signer callbacks. Their actual preview path blocks signing; private
+  Core/SQL qualification uses future-enabled copies and unfunded signatures,
+  not an enabled HTTP payment rail or released package.
 - `media.compile_dispatch` is the non-I/O governed compiler; the existing
   async `prepare_dispatch` wrapper additionally checks compatible workers.
   It freezes the same governed graph/execution units for

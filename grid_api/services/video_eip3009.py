@@ -23,7 +23,7 @@ from eth_account.messages import encode_typed_data
 from eth_keys.constants import SECPK1_N
 from eth_keys.exceptions import BadSignature
 from x402.mechanisms.evm.eip712 import build_typed_data_for_signing
-from x402.mechanisms.evm.types import ExactEIP3009Authorization, ExactEIP3009Payload
+from x402.mechanisms.evm.types import DOMAIN_TYPES, ExactEIP3009Authorization, ExactEIP3009Payload
 
 from . import video_quotes as quotes
 
@@ -82,7 +82,7 @@ def _typed_data(snapshot: dict, authorization: ExactEIP3009Authorization) -> dic
     )
     # JSON-ready for eth_signTypedData_v4, without changing the SDK's types.
     message["nonce"] = "0x" + message["nonce"].hex()
-    return {"domain": dict(frozen), "types": copy.deepcopy(types),
+    return {"domain": dict(frozen), "types": copy.deepcopy({**DOMAIN_TYPES, **types}),
             "primaryType": primary_type, "message": message}
 
 
