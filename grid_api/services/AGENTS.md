@@ -614,8 +614,11 @@ content sanitization, and reward settlement.
   cannot dispatch or refund. Pending-load ordering favors a less-loaded peer;
   busy compatible capacity does not consume the absence-search bounce budget.
   Queue age survives mismatch/affinity/stale handoffs; only a genuine capped
-  generation retry starts a new capacity wait. Routed waits are bounded to five
-  minutes for text and fifteen for media. Expired delivery closes only that
+  generation retry starts a new capacity wait. Redis rechecks the original
+  pending owner and deadline immediately before dispatch after local prefetch;
+  expiry closes only that delivery, and superseded readers do nothing.
+  Routed waits are bounded to five minutes for text and fifteen for media.
+  Expired delivery closes only that
   queue item and must use the existing unstarted-only async refund guard.
   The outbox, execution lease and stale-hold deadlines remain independent.
   There is no model-fidelity claim or new worker binary requirement.

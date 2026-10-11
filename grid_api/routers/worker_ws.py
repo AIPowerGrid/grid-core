@@ -784,6 +784,13 @@ async def worker_websocket(ws: WebSocket):
 
                 # Got a job → dispatch it (model check + text/media paths below).
 
+                if job.get("routed_dispatch") and not job.get("dispatch_deadline_expired"):
+                    status = await job_queue.routed_dispatch_status(job)
+                    if status == "superseded":
+                        continue
+                    if status not in {"ready", "closed"}:
+                        raise RuntimeError("unknown routed dispatch status")
+                    job["dispatch_deadline_expired"] = status == "closed"
                 if job.get("dispatch_deadline_expired"):
                     await token_stream.publish_error(job["job_id"], "Compatible worker capacity wait expired.", code=503)
                     await _release_undispatched_job(job)
