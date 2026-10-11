@@ -136,6 +136,9 @@ content sanitization, and reward settlement.
   Five-minute quotes freeze canonical owner/request key, normalized intent,
   source-byte commitments, selected seed/graph/units, undiscounted price-book
   snapshot, canonical Base USDC recipient/network and one derived nonce.
+  New binding-v2 snapshots also freeze the USDC EIP-712 name/version/chain/token
+  domain; old domainless v1 quotes remain readable/replayable without upgrade,
+  repricing or a replacement nonce, but cannot acquire signing authority.
   Reads verify the commitment and indexed fields; replay never recompiles or
   reprices. PostgreSQL globally serializes inserts and retained-row caps while
   account locks fence merges; no decoder/storage/network call runs under those
@@ -145,8 +148,19 @@ content sanitization, and reward settlement.
   toward the pilot's caps; no deletion/reused identity or payment acceptance
   exists. No quote can enqueue, upload, consume quota, debit, pay or refund.
   Apply `0046` before using these optional routes and retain quote history on
-  rollback. Exact-signature binding, payment proof, cross-rail claim ownership,
+  rollback. HTTP signature acceptance, live payment proof, cross-rail claim ownership,
   funded admission and real refunds remain separate implementation gates.
+- `video_eip3009.py` is an offline, admission-time exact EIP-3009 binding
+  helper, not a payment endpoint. It builds unsigned SDK-compatible typed data
+  and checks canonical 65-byte low-S signatures against one owner-loaded v2
+  quote's amount/payer/recipient/nonce/domain/window. It rejects self-payments,
+  compact/wrapped signatures, unbound SDK nonces and expired quotes. Core never
+  signs or takes private keys; the bound result contains no signature or
+  funded state. No database, RPC, replay claim, balance/code check, facilitator,
+  upload or dispatch occurs. Live signer classification/token-domain checks,
+  outer-envelope validation and durable financial admission remain required.
+  Do not use its current-window check to abandon recovery of an earlier payment
+  attempt after expiry. No real-wallet prompting or published client exists.
 - `media.compile_dispatch` is the non-I/O governed compiler; the existing
   async `prepare_dispatch` wrapper additionally checks compatible workers.
   It freezes the same governed graph/execution units for
@@ -976,6 +990,11 @@ content sanitization, and reward settlement.
   disposable PostgreSQL: native synthetic source validation, price/seed replay,
   owner/merge isolation, retained-cap races, corruption and migration parity.
   No facilitator, payment, production admission or GPU quality is proved.
+- `tests/test_video_eip3009.py` performs real offline ECDSA and locked x402 SDK
+  typed-data/digest compatibility on both Base networks, source-commitment and
+  changed-domain/payer/nonce/amount/expiry controls, unsupported signatures,
+  immutable views and legacy refusal. Synthetic keys never hold funds. This is
+  not a live facilitator/contract, published adapter or payment canary.
 
 - `tests/test_ltx25_appearance.py` checks the separate fixed Ingredients profile,
   nonanimated/unrotated PNG decoding, default-dark admission, committed roles/

@@ -27,6 +27,9 @@ validator shadow-observation records.
   commitment and indexed fields on every recovery. Expired rows retain their
   identity and consume fixed pilot capacity. Apply before using optional quote
   routes; retain on rollback. Downgrade refuses any recorded quotation history.
+  Binding-v2 JSON snapshots freeze the signing domain without new columns or
+  backfill. Domainless v1 quotes remain readable with their original nonce and
+  commitment; they cannot be upgraded or used by the offline signing verifier.
 
 - Migration `0043` creates empty private `grid_media_jobs` request/execution
   records; no historical request is reconstructed or admitted. Each row has a

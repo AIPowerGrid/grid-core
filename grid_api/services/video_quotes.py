@@ -37,6 +37,14 @@ USDC = {
 _preparing: set[UUID] = set()
 
 
+def payment_domain(network: str) -> dict:
+    """Pinned canonical USDC domains; live contract verification is separate."""
+    if network not in USDC:
+        raise VideoQuoteError("unsupported video payment network")
+    return {"name": "USD Coin" if network == "eip155:8453" else "USDC", "version": "2",
+            "chainId": int(network.split(":")[1]), "verifyingContract": USDC[network]}
+
+
 class VideoQuoteError(ValueError):
     """Invalid quote contract; messages contain no request values."""
 
@@ -172,13 +180,14 @@ def prepare(*, account_id, idempotency_key: str, request_hash: str, plan: video_
     created = _now().replace(microsecond=0)
     expires = created + timedelta(seconds=TTL_SECONDS)
     quote = PreparedVideoQuote(_canonical({
-        "schema": "aipg.video-quote-binding.v1", "quote_id": str(uuid4()), "job_id": str(uuid4()),
+        "schema": "aipg.video-quote-binding.v2", "quote_id": str(uuid4()), "job_id": str(uuid4()),
         "owner": str(owner), "idempotency_hash": key_hash, "request_hash": intent,
         "plan": frozen, "plan_hash": plan.sha256,
         "price": {"version": pricing.PRICE_BOOK_VERSION, "currency": "USD", "video_per_second_usd": rate,
                   "discount_bps": 0},
         "payment": {"scheme": "exact", "network": network, "asset": USDC[network], "pay_to": pay_to,
-                    "amount_micro": amount, "valid_after": 0, "valid_before": int(expires.timestamp())},
+                    "amount_micro": amount, "valid_after": 0, "valid_before": int(expires.timestamp()),
+                    "eip712_domain": payment_domain(network)},
         "max_cost_micro": max_cost_micro, "created": int(created.timestamp()), "expires": int(expires.timestamp()),
         "salt": secrets.token_hex(32),
     }))
@@ -198,7 +207,8 @@ def _validate_row(row: dict) -> dict:
                 raise VideoQuoteError("video quote deadline changed")
         payment, plan, price = snapshot["payment"], snapshot["plan"], snapshot["price"]
         rate, seconds = price["video_per_second_usd"], plan["payload"]["seconds"]
-        if (snapshot["schema"] != "aipg.video-quote-binding.v1" or plan["schema"] != "aipg.video-plan.v1"
+        if (snapshot["schema"] not in {"aipg.video-quote-binding.v1", "aipg.video-quote-binding.v2"}
+                or plan["schema"] != "aipg.video-plan.v1"
                 or _hash(plan) != _digest(row["plan_hash"]) or payment["network"] not in USDC
                 or payment["asset"] != USDC[payment["network"]] or payment["scheme"] != "exact"
                 or payment["pay_to"] != _address(payment["pay_to"]) or payment["valid_after"] != 0
@@ -212,6 +222,11 @@ def _validate_row(row: dict) -> dict:
                 or type(row["amount_micro"]) is not int or not 0 < row["amount_micro"] <= row["max_cost_micro"]
                 or not _HASH.fullmatch(snapshot["salt"])):
             raise VideoQuoteError("invalid video quote binding")
+        if snapshot["schema"] == "aipg.video-quote-binding.v2":
+            if payment.get("eip712_domain") != payment_domain(payment["network"]):
+                raise VideoQuoteError("video quote signing domain changed")
+        elif "eip712_domain" in payment:
+            raise VideoQuoteError("legacy quote cannot acquire a signing domain")
         for key in ("idempotency_hash", "request_hash", "commitment"):
             _digest(row[key])
         return snapshot
@@ -306,6 +321,7 @@ def view(row: dict) -> dict:
     plan = snapshot["plan"]
     return {
         "schema": "aipg.video-quote.v1", "quote_id": str(row["id"]), "job_id": str(row["job_id"]),
+        "binding_schema": snapshot["schema"],
         "state": "expired" if _aware(row["expires"]) <= _now() else "quoted", "payment_enabled": False,
         "request_hash": row["request_hash"], "plan_hash": row["plan_hash"], "commitment": row["commitment"],
         "authorization_nonce": row["authorization_nonce"], "payment": dict(snapshot["payment"]),

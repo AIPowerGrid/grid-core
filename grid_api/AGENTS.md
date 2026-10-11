@@ -82,6 +82,9 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   Optional quote reads require migration `0046`. This feature is not payment
   acceptance, video admission or model-use clearance. Rollback closes new
   quotations while preserving authenticated recovery and immutable history.
+  Offline EIP-3009 matching is non-routable evidence; it grants neither live
+  signer approval nor funded job authority. Current-window expiry cannot
+  discard an already attempted payment's reconciliation/refund obligation.
 - An enrolled worker's verified signing authority is independent of later
   account payout-preference changes. Reconnection retains the exact owned
   delegation with fresh proof, never arbitrary old wallets or another account's

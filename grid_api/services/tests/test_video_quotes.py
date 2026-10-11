@@ -98,6 +98,21 @@ async def test_replay_after_tariff_change_and_expiry_keeps_one_nonce_seed_and_pl
 
 
 @pytest.mark.asyncio
+async def test_legacy_domainless_quote_recovers_without_upgrade_or_new_nonce(db, admission):
+    aid = await owner(0)
+    current, key = await prepared(aid)
+    legacy = current.snapshot
+    legacy["schema"] = "aipg.video-quote-binding.v1"
+    legacy["payment"].pop("eip712_domain")
+    old = quotes.PreparedVideoQuote(quotes._canonical(legacy))
+    saved, _ = await quotes.persist(old, idempotency_key=key, **LIMITS)
+    replay, created = await quotes.persist(current, idempotency_key=key, **LIMITS)
+    assert not created and replay["snapshot"] == saved["snapshot"] == legacy
+    assert replay["authorization_nonce"] == saved["authorization_nonce"]
+    assert "eip712_domain" not in quotes.view(await quotes.lookup(aid, idempotency_key=key))["payment"]
+
+
+@pytest.mark.asyncio
 async def test_changed_intent_conflicts_and_foreign_selectors_are_hidden(db, admission):
     aid, stranger = await owner(0), await owner(0)
     quote, key = await prepared(aid)

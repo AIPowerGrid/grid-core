@@ -179,8 +179,12 @@ validation, worker incentives, and trust boundaries.
   see `LTX_2_5_VIDEO.md` for pins and the retained private proof digest.
 - `VIDEO_X402.md` - authenticated prepaid-video design and current private
   quotation foundation. Default-off owner-bound quote POST/GET freeze one
-  source/seed/graph/tariff/deadline/nonce without money or dispatch. Remaining
-  work includes exact-signature binding, payment-before-outbox admission,
+  source/seed/graph/tariff/deadline/nonce without money or dispatch.
+  Binding-v2 snapshots include the signing domain; legacy v1 identities recover
+  unchanged without signing authority. Offline exact-signature checks and locked
+  SDK compatibility are candidates, not HTTP acceptance or a released adapter.
+  Remaining work includes published client/outer-envelope integration, live
+  chain/account/facilitator proof, payment-before-outbox admission,
   cross-rail replay protection, separate refund obligations and real payment
   qualification. No signer, payment collection or production authority exists.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
