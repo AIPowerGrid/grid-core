@@ -330,9 +330,33 @@ instead of submitting another Comfy prompt. Successful worker messages must
 carry that same job ID. Admission-off and Redis loss do not block SQL recovery.
 No current public worker release advertises this capability. The candidate
 worker journal passed a separate native Comfy process-crash proof, not yet
-this combined Core/worker/GPU/R2 lifecycle. Worker cache retention and live
-storage verification remain separate promotion gates; ordinary HEAD checks
+this combined Core/worker/GPU/R2 lifecycle. The candidate local-cache retention
+contract below and live storage verification still need joint qualification; ordinary HEAD checks
 and worker-reported hashes are not proof of video content or fidelity.
+
+The dedicated worker credential can read `POST /v1/workers/self/media-jobs`
+without account-management or inference scope. It accepts at most 32 unique
+canonical UUIDs and 2048 body bytes, binds them to the registered rig's original
+execution worker UUID, and returns only `held`, `closed` or `unknown` plus
+worker/job IDs. `closed` requires a committed settled reservation (completion
+or release); elapsed time, foreign jobs and unprovable leases remain unknown.
+The endpoint is read-only, no-store, limited to 120 reads/minute and independent
+of new-admission enablement. Customer prompts, balances, results and private
+execution tokens are never included.
+
+The candidate worker requires a matching `held` response before any marked
+job can create local identity, build a graph or POST to ComfyUI. Every 60 seconds
+it reconciles existing identities in bounded batches. An authenticated cached-
+job ACK or confirmed closure is durably recorded before deleting that job's
+private MP4/partial cache. Interrupted cleanup repeats after restart. At most
+128 confirmed-closed identities remain; unresolved entries are never pruned.
+Mandatory Core preflight refuses even an old closed ID whose local history has
+already been pruned. Old acknowledged rows without closure metadata require
+fresh Core confirmation. Requests use the configured HTTPS API origin (HTTP
+only on loopback), no ambient proxies or redirects, and a 10-second total/
+4096-byte response bound. Unavailable, mismatched or unknown responses preserve
+state and refuse new execution. This is not retention of ComfyUI's own inputs,
+outputs or model cache, nor R2 input/result/attempt/orphan cleanup.
 
 Candidate async video now freezes every paid output before its SQL terminal.
 Only a canonical Core-issued attempt key and one bounded 256-MiB MP4 are

@@ -98,7 +98,10 @@ validation, worker incentives, and trust boundaries.
   coverage; joint native-worker/GPU/storage recovery and private retention
   remain promotion gates. Candidate async outputs are source-conditionally copied
   and Core-hashed before settlement; fixture tests are not live R2/video quality
-  qualification. Apply migrations through `0044` even with admission off.
+  qualification. Rig-scoped terminal reads and mandatory worker preflight now
+  support Core-confirmed local-cache cleanup and bounded closed history; joint
+  canaries and ComfyUI/R2 retention remain separate gates. Apply migrations
+  through `0044` even with admission off.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only

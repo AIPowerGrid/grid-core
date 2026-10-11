@@ -47,6 +47,7 @@ from .routers import (
     video_jobs,
     videos,
     worker_enrollment,
+    worker_media,
     worker_ws,
 )
 from .services import x402_payments
@@ -561,6 +562,7 @@ app.include_router(audio.router)
 app.include_router(threed.router)
 app.include_router(worker_ws.router)
 app.include_router(worker_enrollment.router)
+app.include_router(worker_media.router)
 app.include_router(stats.router)
 app.include_router(styles.router)
 app.include_router(validator.router)
