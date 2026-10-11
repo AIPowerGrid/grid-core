@@ -178,7 +178,35 @@ sound checks at offset zero, with identical decoded AAC across both clips on
 the same decoder. This is a short local quality comparison, not a new Grid
 dispatch/settlement, exact identity, source-motion or lip-sync proof. Original
 Grid results and their failures remain retained; no default changed. The new
-explicit control still needs a pinned native Grid-path qualification.
+explicit control has a separate pinned native Grid-path proof below; the local
+comparison alone did not establish it.
+
+Core `2998232955435aed5538d02bd7b408dc4140b141`, worker
+`1332fa20c6eba4f529a8b64c5689ea777f5c803f` and Director
+`f80b7a919e34e4d65aa32401c8ac10bcf8247a13` now pass the private
+two-worker attention-0.25 canary. Both native prompts ran concurrently before
+the private Core/workers were deliberately SIGKILLed, without interrupting GPU
+services. Same-pin GET-only recovery and a second observation retain one
+prompt/completion/settlement per job, acknowledged/pruned worker journals and
+unchanged selected exports. Each 121-frame job charges exactly 100,834 unfunded
+test micro-USD; shared balance and ledger sum equal 798,332 with funded balance
+zero. All five exact private inputs have committed cleanup plus independent S3
+absence. Actual uploaded bytes, Advanced appearance-guide class/value, repeated
+sheet, frozen audio, motion chain and no opening pin were verified. The repeated
+proof SHA-256 is
+`f0140dc98c02f1912821f6ec7ef232be88de99e121df7558cb92d2f367dfd97b`.
+Outputs are byte-identical to the matched local comparison and independently
+pass full decode/clock/aligned-audio checks. All frame thumbnails show no sheet
+flash; this is not exact identity, source-motion/lip-sync or long-shot proof.
+One pre-dispatch scratch-socket setup failure is retained separately; no job
+or hold was created by that failure. Public admission, rates, production and
+real money remain unchanged.
+
+Fresh exact `29982329` Linux/Python3.12/PostgreSQL16 CI also passes: 2731 Grid
+tests / 28 explicit skips, all 56 SQLite/Postgres SDK qualification cases,
+migration/backup-restore through `0045`, and the real Console/node compensation
+handoff. The native canary uses local Postgres14 and is separate evidence,
+not purchased-credit/full-film acceptance, model-use clearance or video x402.
 
 The optional-control follow-up passes 2735 Core tests / 24 explicit skips on
 Mac/Python3.13 with all four disposable PostgreSQL14 URLs supplied and the
