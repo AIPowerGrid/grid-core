@@ -36,7 +36,12 @@ transport, accounts, stats, health/metrics.
   and the `recipe-image-bindings-v1` worker feature. Unsupported settings reject before quota/upload; the
   candidates are not loaded or deployed. See `LTX_2_5_VIDEO.md` for gates.
 - `video_jobs.py` - candidate `POST /v1/videos/jobs` and owner-only
-  `GET /v1/videos/jobs/{job_id}`. New admission defaults off. Scoped
+  `GET /v1/videos/jobs/{job_id}`, plus `GET /v1/videos/jobs` with the
+  `Idempotency-Key` header for lost initial replies. GET never admits, uploads,
+  dispatches or moves money; unknown/foreign keys return indistinguishable 404s
+  and merged duplicate keys fail 409. Key text is not a URL selector or bearer
+  capability. The private response adds the stored normalized `request_hash`
+  so a client can bind recovery to its own intent. New admission defaults off. Scoped
   `inference.submit` authentication, a UUIDv4 `Idempotency-Key`, a positive
   `max_cost_micro_usd` and a live credit hold are required. The typed body is
   bounded before JSON parsing and input-bearing validation errors are redacted.
@@ -212,6 +217,8 @@ transport, accounts, stats, health/metrics.
 - `styles.py` - `GET /v1/styles` for curated creative presets.
 - `health.py` - `GET /health`, including the immutable full release commit when
   the runtime can prove it from `GRID_BUILD_COMMIT` or a detached checkout.
+  `video-async-credit-jobs-v1` advertises the async credit/intent/recovery
+  contract, not enabled admission, available workers or financial qualification.
 - `metrics.py` - `GET /metrics` Prometheus exposition.
 - `oauth.py` - default-off OAuth discovery, bounded public-client registration,
   S256 authorization/token exchange, Console-only consent inspection/decision,
@@ -438,6 +445,13 @@ expired or out-of-scope pilots return 503 without revealing membership.
 - Keep request-size checks before sanitizer/tokenization for CPU and memory safety.
 
 ## Verification
+
+- `tests/test_video_jobs.py` covers request-key GET recovery with real scoped
+  keys and SQLite/PostgreSQL, including missing/foreign/scope-rejected keys,
+  no second quota/hold, admission rollback and redacted errors. The service
+  journal tests additionally prove alias recovery and merged-key ambiguity.
+  Synthetic distilled/dev normalized-intent fingerprints are pinned in Core
+  and Director; neither fixtures nor matching digests prove a live paid CLI job.
 
 - `tests/test_media_resume_process.py` kills real isolated Core after WS dispatch
   or a committed settlement, erases only its private Redis database, restarts

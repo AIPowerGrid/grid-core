@@ -183,6 +183,67 @@ async def test_lost_commit_response_recovers_original_request_not_another_debit(
 
 
 @pytest.mark.asyncio
+async def test_lost_reply_recovers_by_key_with_no_post_upload_quota_or_second_hold(api):
+    client, aid, credential, settings, quota, available = api
+    key = uuid4()
+    original = await post(api, key=key)
+    row = await stored(original.json()["job_id"])
+    balance = await credits.get_balance(aid)
+    settings.media_async_enabled = False
+    available.reset_mock()
+    recovered = await client.get("/v1/videos/jobs", headers={"apikey": credential, "Idempotency-Key": str(key)})
+    assert recovered.status_code == 200
+    assert recovered.json() == original.json()
+    assert recovered.json()["request_hash"] == row["request_hash"]
+    assert recovered.headers["cache-control"] == "no-store"
+    assert "payload" not in recovered.json() and "idempotency_hash" not in recovered.json()
+    assert await counts() == (1, 1, 0) and await credits.get_balance(aid) == balance
+    available.assert_not_awaited()
+    quota.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_key_recovery_is_scoped_and_not_a_bearer_capability(api):
+    client, aid, credential, *_ = api
+    key = uuid4()
+    original = await post(api, key=key)
+    observer = await accounts.issue_key(aid, scopes=["account.read"])
+    stranger = await accounts.issue_key(await owner(), scopes=["inference.submit"])
+    for auth_key, status in ((None, 401), (observer, 403), (stranger, 404), (credential, 200)):
+        headers = {"Idempotency-Key": str(key), **({"apikey": auth_key} if auth_key else {})}
+        result = await client.get("/v1/videos/jobs", headers=headers)
+        assert result.status_code == status
+        assert result.headers["cache-control"] == "no-store"
+        if status != 200:
+            assert original.json()["job_id"] not in result.text
+    missing = await client.get("/v1/videos/jobs", headers={"apikey": credential, "Idempotency-Key": str(uuid4())})
+    assert missing.status_code == 404
+    assert await counts() == (1, 1, 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", [None, "private-marker", "0" * 65, "00000000-0000-1000-8000-000000000000"])
+async def test_key_recovery_rejects_missing_malformed_and_unbounded_keys_without_echo(api, key):
+    client, _, credential, *_ = api
+    response = await client.get("/v1/videos/jobs", headers={
+        "apikey": credential, **({"Idempotency-Key": key} if key is not None else {}),
+    })
+    assert response.status_code == 422 and response.headers["cache-control"] == "no-store"
+    assert "private-marker" not in response.text
+    assert await counts() == (0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_key_recovery_database_failure_is_private(api, monkeypatch):
+    client, _, credential, *_ = api
+    monkeypatch.setattr(media_jobs, "recover", AsyncMock(side_effect=RuntimeError("private-marker")))
+    response = await client.get("/v1/videos/jobs", headers={"apikey": credential, "Idempotency-Key": str(uuid4())})
+    assert response.status_code == 503 and response.headers["cache-control"] == "no-store"
+    assert "private-marker" not in response.text
+    assert await counts() == (0, 0, 0)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("body", [{"seed": True}, {"n": True}, {"n": 2}, {"audio": False},
     {"response_format": "b64_json"}, {"recipe_spec": {"secret": "private-marker"}},
     {"keyframes": [{"image": "private-marker", "frame": 80}]}])
@@ -258,6 +319,19 @@ def test_normalized_intent_hashes_image_bytes_and_preserves_size_semantics():
     explicit = video_jobs.AsyncVideoRequest(**{**original.model_dump(), "size": "768x512"})
     assert video_jobs.request_hash(original) != video_jobs.request_hash(explicit)
     assert video_jobs.request_hash(original) != video_jobs.request_hash(original.model_copy(update={"seed": 0}))
+
+
+@pytest.mark.parametrize("variant,cfg,digest", [
+    ("Distilled", 1.0, "ff5564001dd3f129a4edc10db7d434d8805dc62b5ef71efae37654283f2d9bb4"),
+    ("Dev", 3.0, "196b13865d0062b00c158e8d112c4eee379e02320592df9acf9032105a2fa94b"),
+])
+def test_normalized_intent_matches_director_v1_golden(variant, cfg, digest):
+    body = video_jobs.AsyncVideoRequest(
+        prompt="A synthetic red ball rolls on a table", model=f"LTX-2.5 {variant} BF16",
+        size="256x256", frames=33, seed=42, steps=8 if variant == "Distilled" else 40,
+        cfg_scale=cfg, max_cost_micro_usd=40_000,
+    )
+    assert video_jobs.request_hash(body) == digest
 
 
 def test_async_settings_are_dark_and_bounded():

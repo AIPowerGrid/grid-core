@@ -183,3 +183,22 @@ async def get_video_job(
         return JSONResponse({"schema": "aipg.video-job.v1", **status}, headers=PRIVATE)
     except Exception as exc:
         return _error(exc)
+
+
+@router.get("/v1/videos/jobs")
+@limiter.limit("60/minute")
+async def get_video_request(
+    request: Request, idempotency_key: str | None = Header(None, max_length=64),
+    apikey: str | None = Header(None), authorization: str | None = Header(None),
+    x_grid_user_assertion: str | None = Header(None), x_grid_user_token: str | None = Header(None),
+):
+    """Recover a lost submission reply without another POST or input upload."""
+    try:
+        user = await _authenticate(apikey, authorization, x_grid_user_assertion, x_grid_user_token)
+        media_jobs.validate_idempotency_key(idempotency_key)
+        status = await media_jobs.recover(user["account_id"], idempotency_key=idempotency_key)
+        if status is None:
+            raise HTTPException(404, detail="No video job found")
+        return JSONResponse({"schema": "aipg.video-job.v1", **status}, headers=PRIVATE)
+    except Exception as exc:
+        return _error(exc)

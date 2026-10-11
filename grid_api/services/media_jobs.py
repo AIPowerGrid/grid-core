@@ -308,20 +308,27 @@ async def reserve(job: PreparedMediaJob, *, user: dict | None = None, concurrenc
         return stored
 
 
-async def recover(account_id, job_id) -> dict | None:
+async def recover(account_id, job_id=None, *, idempotency_key: str | None = None) -> dict | None:
     """Owner-only status; uncertain execution is explicit, not an automatic retry."""
+    if (job_id is None) == (idempotency_key is None):
+        raise MediaJobError("exactly one video recovery selector required")
+    selector = (media_jobs.c.job_id == str(_uuid(job_id)) if job_id is not None
+                else media_jobs.c.idempotency_hash == _key_hash(idempotency_key))
     async with await new_session() as session:
         family = await identities.account_family_ids(account_id, session=session, max_members=128)
-        row = (await session.execute(sa.select(
-            media_jobs.c.job_id, media_jobs.c.model, media_jobs.c.max_cost_micro,
+        rows = (await session.execute(sa.select(
+            media_jobs.c.job_id, media_jobs.c.model, media_jobs.c.max_cost_micro, media_jobs.c.request_hash,
             media_jobs.c.dispatch_state, media_jobs.c.execution_started,
             reservations.c.status, reservations.c.reserved_micro, reservations.c.actual_micro,
             reservations.c.media_result,
         ).join(reservations, media_jobs.c.job_id == reservations.c.job_id).where(
-            media_jobs.c.job_id == str(_uuid(job_id)), media_jobs.c.account_id.in_(family),
-        ))).mappings().one_or_none()
-    if row is None:
+            selector, media_jobs.c.account_id.in_(family),
+        ).limit(2))).mappings().all()
+    if not rows:
         return None
+    if len(rows) != 1:
+        raise MediaJobConflict("video request is ambiguous after account merge")
+    row = rows[0]
     result = row["media_result"]
     if result is not None:
         if row["status"] != "settled":
@@ -331,6 +338,7 @@ async def recover(account_id, job_id) -> dict | None:
              else "execution_uncertain" if row["execution_started"] is not None
              else "queued" if row["dispatch_state"] == "queued" else "pending_dispatch")
     return {"job_id": row["job_id"], "model": row["model"], "state": state,
+            "request_hash": row["request_hash"],
             "reserved_micro": row["reserved_micro"], "max_cost_micro": row["max_cost_micro"],
             "actual_micro": row["actual_micro"], "result": result}
 

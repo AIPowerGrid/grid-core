@@ -237,6 +237,7 @@ async def test_same_key_on_another_account_is_independent_and_private(db):
     await jobs.reserve(b)
     assert a.job_id != b.job_id and await counts() == (2, 2, 0)
     assert await jobs.recover(second, a.job_id) is None
+    assert (await jobs.recover(second, idempotency_key=str(key)))["job_id"] == b.job_id
     with pytest.raises(jobs.MediaJobError, match="billing principal"):
         await jobs.reserve(prepared(first), user={"account_id": second})
 
@@ -251,6 +252,7 @@ async def test_proved_alias_can_recover_but_merged_duplicate_keys_are_ambiguous(
                                                              merge_ref="synthetic-merge"))
         await session.commit()
     assert (await jobs.recover(second, a.job_id))["job_id"] == a.job_id
+    assert (await jobs.recover(second, idempotency_key=str(key)))["job_id"] == a.job_id
     replay = await jobs.lookup_request(second, str(key), INTENT_HASH)
     assert replay["job_id"] == a.job_id
     # Construct an earlier independently enrolled row, not a new ambiguous admission.
@@ -260,6 +262,8 @@ async def test_proved_alias_can_recover_but_merged_duplicate_keys_are_ambiguous(
     assert authorized["ok"]
     with pytest.raises(jobs.MediaJobConflict, match="ambiguous"):
         await jobs.lookup_request(second, str(key), INTENT_HASH)
+    with pytest.raises(jobs.MediaJobConflict, match="ambiguous"):
+        await jobs.recover(second, idempotency_key=str(key))
 
 
 @pytest.mark.asyncio
