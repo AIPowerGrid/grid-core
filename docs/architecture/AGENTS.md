@@ -102,7 +102,11 @@ validation, worker incentives, and trust boundaries.
   unstarted opener after an incompatible reader exhausted mismatch retries
   while its compatible peer was busy. Its read-only failure audit is retained.
   A candidate original-delivery/one-use-inbox routing fix has real Redis/SQL
-  regressions; a fresh native full-film run and required CI remain gates.
+  regressions, exact-revision PostgreSQL16 CI and a separate passing native
+  five-shot mix run on both GPUs, including reply-loss/SIGKILL recovery,
+  immutable repeat, exact test-credit settlement and private-input cleanup.
+  The missing source soundtrack/reference-cut parity, purchased funding and
+  public release remain gates; preserve the earlier failed film unchanged.
   A separate native Ingredients comparison passes unfunded transport/settlement,
   same-job recovery after explicit client/worker fixes and private-input cleanup.
   Audio-only output leaks the reference sheet early; motion-guided samples are
