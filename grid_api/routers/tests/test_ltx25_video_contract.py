@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from PIL import Image
 
 from grid_api.models.openai import ChatCompletionRequest
@@ -19,6 +19,78 @@ from grid_api.services import media, recipes, storage, video_sources
 from grid_api.services.recipe_import import recipe_root
 
 MODEL = "LTX-2.5 Distilled BF16"
+
+
+@pytest.mark.asyncio
+async def test_startup_inventory_keeps_legacy_recipe_shape(setup):
+    root = Path(__file__).resolve().parents[3]
+    spec = json.loads((root / "recipes/flux2-klein-t2i.json").read_text())
+    recipes.register_recipe(recipe_root(spec), spec["_grid"]["name"], spec)
+    model = spec["_grid"]["modelName"]
+    app = FastAPI()
+    app.include_router(openai.router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(f"/v1/models/{model}/recipe", headers={"apikey": "test-key"})
+    assert response.status_code == 200
+    for record in response.json()["recipes"]:
+        assert set(record) == {
+            "name", "recipe_root", "job_type", "required_models", "node_types",
+            "model_files", "image_paths", "spec",
+        }
+
+
+@pytest.mark.asyncio
+async def test_startup_inventory_still_requires_authentication(setup, monkeypatch):
+    from grid_api.services import accounts
+    auth = AsyncMock(side_effect=HTTPException(status_code=401, detail="Invalid API key"))
+    monkeypatch.setattr(accounts, "authenticate", auth)
+    app = FastAPI()
+    app.include_router(openai.router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(f"/v1/models/{MODEL}/recipe")
+        assert response.status_code == 401
+        auth.assert_not_awaited()
+        response = await client.get(f"/v1/models/{MODEL}/recipe", headers={"apikey": "invalid-key"})
+    assert response.status_code == 401
+    assert "recipes" not in response.json()
+    auth.assert_awaited_once_with("invalid-key")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model,variant,modes", [
+    (MODEL, "distilled", {"audio", "video"}),
+    ("LTX-2.5 Dev BF16", "dev", set()),
+])
+async def test_startup_recipe_inventory_includes_governed_source_requirements(
+    setup, model, variant, modes,
+):
+    originals = {r.recipe_root: json.dumps(r.spec, sort_keys=True)
+                 for r in recipes.recipes_for_model(model)}
+    app = FastAPI()
+    app.include_router(openai.router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                base_url="http://test") as client:
+        response = await client.get(f"/v1/models/{model}/recipe", headers={"apikey": "test-key"})
+    assert response.status_code == 200
+    records = response.json()["recipes"]
+    assert len(records) == 2
+    for record in records:
+        contract = record["video_contract"]
+        assert contract["schema"] == "aipg.ltx-video.v1"
+        assert contract["variant"] == variant
+        assert set(contract["source_modes"]) == modes
+        assert set(record["source_requirements"]) == modes
+        for requirements in record["source_requirements"].values():
+            assert set(record["node_types"]) - {"LTXVAudioVAEDecode", "LTXVEmptyLatentAudio"} <= set(requirements["node_types"])
+            assert {"LoadAudio", "LTXVAudioVAEEncode", "SetLatentNoiseMask"} <= set(requirements["node_types"])
+        if "video" in modes:
+            video = record["source_requirements"]["video"]
+            assert {"LoadVideo", "GetVideoComponents", "Canny", "LTXAddVideoICLoRAGuide"} <= set(video["node_types"])
+            assert "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors" in video["model_files"]
+        assert "source_audio" not in record["spec"]
+        assert originals[record["recipe_root"]] == json.dumps(
+            recipes.get_recipe(record["recipe_root"]).spec, sort_keys=True,
+        )
 
 
 @pytest.fixture

@@ -105,6 +105,11 @@ validation, worker incentives, and trust boundaries.
   support Core-confirmed local-cache cleanup and bounded closed history; joint
   canaries and ComfyUI/R2 retention remain separate gates. Apply migrations
   through `0045` even with admission off.
+  Authenticated startup recipe inventory now includes the governed video
+  contract and per-mode expanded node/file requirements without changing base
+  graphs or legacy responses. Candidate opt-in normal worker startup checks
+  these before recovery/source advertisement; default release/admission remain
+  dark and inventory is not GPU fidelity or financial qualification.
   Native synthetic audio/video-source canaries now prove the isolated actual
   Core/WS/GPU/R2 path, byte commitments, optional opening image, one test-credit
   settlement and lost-reply recovery. The first source-video output-selection

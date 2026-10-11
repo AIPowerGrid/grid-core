@@ -24,6 +24,25 @@ validator evidence.
 
 ## Governed Contract
 
+### Worker Startup Inventory
+
+Authenticated `GET /v1/models/{model_id}/recipe` adds `video_contract` and
+`source_requirements` only to contract-backed video entries. Source requirements
+come from separate copies of the exact resolved base graph, expanded per governed
+mode; base/stored graphs and legacy recipe response fields remain unchanged.
+This is read-only protocol inventory, not a GPU render, price/admission change
+or proof of installed weight identity.
+
+The media-worker candidate's normal startup can opt into
+`GRID_ASYNC_VIDEO=true` only with one explicit LTX BF16 model, video-only jobs,
+healthy loopback ComfyUI and private POSIX state. It verifies this Core inventory
+before declaring recovery; no test subclass or unbilled smoke render is needed.
+`GRID_VIDEO_SOURCE_MODES=audio,video` must check both governed distilled modes
+before declaring the existing shared source feature. A partial list cannot
+declare it. Default flags remain off/empty, older Core responses reject, and
+signed-profile/blind-trust overrides cannot bypass checks. Public release,
+paid qualification and source/appearance quality remain independent gates.
+
 The prospective model IDs are `LTX-2.5 Distilled BF16` and `LTX-2.5 Dev BF16`.
 Each has a separate text-to-video and image-pin recipe. `_grid.videoContract`
 selects the strict `aipg.ltx-video.v1` contract; clients never submit graphs or
