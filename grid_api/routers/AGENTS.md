@@ -14,6 +14,10 @@ transport, accounts, stats, health/metrics.
   collects worker output. The request model normalizes OpenAI's current
   `max_completion_tokens` field to the Grid's metered `max_tokens` worker cap;
   conflicting dual fields are rejected.
+  Authenticated `GET /v1/models/{model_id}/recipe` retains legacy recipe shape;
+  governed video entries add `video_contract` and separately expanded
+  `source_requirements` node/file inventories. Preserve the stored/base graph.
+  Inventory reads never enable admission or prove execution/fidelity.
   The x402 route is a separate default-off, accountless Base-USDC lane. It is
   non-streaming and text-only until a stream-aware settlement adapter exists.
 - `anthropic.py` - `POST /v1/messages` raw Anthropic Messages passthrough.
@@ -64,7 +68,8 @@ transport, accounts, stats, health/metrics.
   committed terminal, with `Location`, private `no-store`, and bounded polling.
   Workers must themselves support every required feature, including
   `async-video-resume-v1`; availability is not a union of unrelated workers'
-  features. No current worker release advertises that new capability.
+  features. Released/default workers do not advertise that new capability;
+  candidate opt-in startup requires matching authenticated recipe inventories.
   This is credit-only, not x402, cancellation or worker-restart qualification.
 - `audio.py` - `POST /v1/audio/generations` governed local ACE-Step jobs.
 - `worker_enrollment.py` - dark device-style manager pairing. Public create,

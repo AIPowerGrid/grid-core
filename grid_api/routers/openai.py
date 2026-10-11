@@ -8,6 +8,7 @@ The only difference from the Anthropic endpoint is the JSON envelope.
 """
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -840,13 +841,13 @@ def _text_param_schema(model_id: str) -> dict:
 @router.get("/v1/models/{model_id}/recipe")
 async def get_model_recipe(model_id: str, apikey: Optional[str] = Header(None),
                            authorization: Optional[str] = Header(None)):
-    """Worker preflight: the canary-resolved recipe(s) for a media model, plus the
-    node types + model files a worker must have to run it. A worker fetches this at
-    startup, checks nodes/files against its ComfyUI /object_info, then smoke-runs the
-    `spec` — advertising the model only if it produces a real output. Authed (workers
-    hold a grid key); recipe graphs aren't secret but we don't serve them anonymously.
+    """Authenticated worker inventory: canary-resolved media recipes and files.
+
+    Governed video recipes also publish their contract and separately expanded
+    source requirements. Reading/checking inventory does not submit a smoke job,
+    enable admission or prove GPU execution/model fidelity.
     """
-    from ..services import accounts as accounts_svc, recipes
+    from ..services import accounts as accounts_svc, recipes, video_contract
     await accounts_svc.authenticate(extract_api_key(apikey, authorization))
 
     recs = recipes.recipes_for_model(model_id)
@@ -858,7 +859,7 @@ async def get_model_recipe(model_id: str, apikey: Optional[str] = Header(None),
         if "steps" in r.vars and "steps" in r.clamps:
             canary["steps"] = r.clamps["steps"][0]
         resolved = recipes.resolve(r.recipe_root, canary)
-        out.append({
+        item = {
             "name": r.name,
             "recipe_root": r.recipe_root,
             "job_type": r.job_type,
@@ -867,7 +868,19 @@ async def get_model_recipe(model_id: str, apikey: Optional[str] = Header(None),
             "model_files": recipes.model_files(resolved["spec"]),
             "image_paths": resolved.get("image_paths"),
             "spec": resolved["spec"],
-        })
+        }
+        if r.video_contract is not None:
+            item["video_contract"] = r.video_contract.model_dump(by_alias=True)
+            requirements = {}
+            for mode in r.video_contract.source_modes:
+                source_spec = copy.deepcopy(resolved["spec"])
+                video_contract.expand_sources(source_spec, mode)
+                requirements[mode] = {
+                    "node_types": recipes.node_types(source_spec),
+                    "model_files": recipes.model_files(source_spec),
+                }
+            item["source_requirements"] = requirements
+        out.append(item)
     return {"model": model_id, "recipes": out}
 
 
