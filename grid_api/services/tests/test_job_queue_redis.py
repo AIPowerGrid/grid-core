@@ -273,3 +273,54 @@ async def test_coordinator_queue_process_kill_recovers_once(redis, phase, mode, 
         if child.returncode is None:
             child.kill()
         await child.communicate()
+
+
+_CHILD_ROUTE = """
+import asyncio, json, sys
+from redis.asyncio import Redis
+from grid_api.services import job_queue as queue
+async def main():
+    client = Redis(unix_socket_path=sys.argv[1], decode_responses=True)
+    phase, job, target, snapshot = sys.argv[2], json.loads(sys.argv[3]), sys.argv[4], sys.argv[5]
+    class PausedClient:
+        async def eval(self, *args):
+            if phase == 'after':
+                await client.eval(*args)
+            print('route-paused', flush=True)
+            await asyncio.Event().wait()
+    queue.get_redis = lambda: PausedClient()
+    await queue.route_to_worker(job, target, snapshot)
+asyncio.run(main())
+"""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["before", "after"])
+@pytest.mark.parametrize("job_type", ["text", "video"])
+async def test_route_process_kill_preserves_one_pending_delivery(redis, phase, job_type):
+    job = await pending_job(job_type)
+    target, snapshot = "route-recipient", json.dumps({"models": ["test-model"]})
+    await redis.sadd("grid:workers:active", target)
+    await redis.set(f"grid:worker:{target}:status", snapshot, ex=60)
+    root = Path(__file__).resolve().parents[3]
+    child = await asyncio.create_subprocess_exec(
+        sys.executable, "-c", _CHILD_ROUTE, redis.connection_pool.connection_kwargs["path"],
+        phase, json.dumps(job), target, snapshot, cwd=root, env={**os.environ, "PYTHONPATH": str(root)},
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        assert await asyncio.wait_for(child.stdout.readline(), 10) == b"route-paused\n"
+        child.kill()
+        await asyncio.wait_for(child.wait(), 5)
+        if phase == "before":
+            assert await queue.claim_stale_jobs() == 1
+        recovered = await queue.pop_job(target, timeout_ms=1, job_types=[job_type])
+        assert recovered["job_id"] == job["job_id"] and recovered["payload"] == job["payload"]
+        assert recovered["stream_id"] == job["stream_id"] if phase == "after" else recovered["stream_id"] != job["stream_id"]
+        assert await queue.pop_job(target, timeout_ms=1, job_types=[job_type]) is None
+        assert (await redis.xpending(job["stream"], queue.CONSUMER_GROUP))["pending"] == 1
+        await queue.ack_job(recovered["stream_id"], recovered["stream"])
+    finally:
+        if child.returncode is None:
+            child.kill()
+        await child.communicate()

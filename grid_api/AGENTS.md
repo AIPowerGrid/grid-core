@@ -36,6 +36,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - **Dispatch:** exactly one live job queue - `services/job_queue.py` (Redis streams). The
   `services/p2p/` variants are default-off scaffolding and must not become the
   production path without a dedicated design/test pass.
+  Candidate compatibility routing transfers the original pending delivery to
+  a fully compatible live peer, using bounded one-use inbox notifications.
+  Those notifications are not another payload queue or financial authority.
+  Server-owned registry protocol markers exclude older Core receivers.
 - **On-chain:** read via background sync loops or offline jobs, cached; never
   perform Base RPC calls on the hot request path.
 - The validator bond loop may update only existing reviewed reference rows. It

@@ -98,6 +98,11 @@ validation, worker incentives, and trust boundaries.
   baseline; synthetic guide-test failures do not invalidate that production.
   The dark candidate now carries sixteen timed pins and the 337-frame distilled
   ceiling; network storage, money and full film/export parity remain separate gates.
+  The first native managed five-shot run completed four and refunded one
+  unstarted opener after an incompatible reader exhausted mismatch retries
+  while its compatible peer was busy. Its read-only failure audit is retained.
+  A candidate original-delivery/one-use-inbox routing fix has real Redis/SQL
+  regressions; a fresh native full-film run and required CI remain gates.
   A separate native Ingredients comparison passes unfunded transport/settlement,
   same-job recovery after explicit client/worker fixes and private-input cleanup.
   Audio-only output leaks the reference sheet early; motion-guided samples are
