@@ -119,6 +119,12 @@ owning AGENTS.md and any affected parent Child DOX Index.
   commits and run the real PostgreSQL/Core/Console/node compensation handoff.
   Cross-repo source pins are an explicit compatibility baseline; update them
   with reviewed client changes, never silently follow moving branches.
+- PR/main CI also pins both video SDK candidates and runs their optional
+  generated/audio/video qualification on SQLite and PostgreSQL 16. JavaScript
+  uses actual localhost HTTP to the isolated Core router, not mocked fetch;
+  scoped fixture keys, synthetic media and test balances never reach production.
+  One POST, GET-only recovery after reply loss/rollback and 401/403/404 isolation
+  are required. This does not prove GPU output, funded storage or video x402.
 - Router billing/settlement coverage: `pytest grid_api/routers/`.
 - Legacy smoke tests live under `tests/` and may skip without external services.
 - For docs-only changes, run at least `git diff --check` and inspect the DOX
