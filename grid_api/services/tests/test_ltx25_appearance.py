@@ -58,10 +58,13 @@ def setup(monkeypatch):
 
 
 @pytest.mark.parametrize("mode", ["audio", "video"])
-def test_appearance_is_an_independent_guide_not_an_opening_pin(mode):
+@pytest.mark.parametrize("attention", [None, 0.25])
+def test_appearance_is_an_independent_guide_not_an_opening_pin(mode, attention):
     recipe = recipes.recipes_for_model(MODEL)[0]
     original = copy.deepcopy(recipe.spec)
-    result = recipes.resolve_for_model(MODEL, {"source_mode": mode, "reference_image": True, "seed": 0})
+    values = {"source_mode": mode, "reference_image": True, "seed": 0}
+    baseline = recipes.resolve_for_model(MODEL, values)
+    result = recipes.resolve_for_model(MODEL, {**values, **({"reference_attention_strength": attention} if attention is not None else {})})
     graph, execution = result["spec"], result["execution"]
     assert validate_recipe({"_grid": {}, **graph}) == []
     assert recipe.spec == original
@@ -71,6 +74,16 @@ def test_appearance_is_an_independent_guide_not_an_opening_pin(mode):
     assert (execution["width"], execution["height"], execution["frames"], execution["steps"], execution["cfg"]) == (768, 448, 121, 40, 2)
     assert execution["seconds"] == 121 / 24
     assert graph["reference_sheet"]["inputs"]["amount"] == 121
+    assert execution.get("reference_attention_strength") == attention
+    if attention is None:
+        assert graph["reference_guide"]["class_type"] == "LTXAddVideoICLoRAGuide"
+        assert "attention_strength" not in graph["reference_guide"]["inputs"]
+    else:
+        assert graph["reference_guide"]["class_type"] == "LTXAddVideoICLoRAGuideAdvanced"
+        assert graph["reference_guide"]["inputs"]["attention_strength"] == attention
+        assert {name: node for name, node in graph.items() if name != "reference_guide"} == {
+            name: node for name, node in baseline["spec"].items() if name != "reference_guide"}
+        assert graph["reference_guide"]["inputs"]["strength"] == 1
     assert graph["reference_guide"]["inputs"]["latent"] == ["latent_video", 0]
     assert graph["video"]["inputs"]["audio"] == ["source_audio", 0]
     assert graph["audio_mask"]["inputs"]["value"] == 0
@@ -92,6 +105,7 @@ def test_appearance_is_an_independent_guide_not_an_opening_pin(mode):
     {"keyframes": [{"frame": 0}]}, {"frames": 81}, {"frames": 337},
     {"width": 448, "height": 768}, {"steps": 8}, {"cfg": 1},
     {"reference_strength": 0}, {"reference_strength": float("nan")},
+    *[{"reference_attention_strength": value} for value in (0, -0.1, 1.1, True, "0.25", float("inf"), float("nan"))],
     {"motion_attention_strength": 0}, {"motion_attention_strength": float("inf")},
 ])
 def test_unqualified_profile_variations_reject_without_echoing_inputs(change):
@@ -113,6 +127,8 @@ def test_appearance_never_falls_back_to_standard_recipes(model):
         recipes.resolve_for_model(model, {"reference_image": True})
     with pytest.raises(recipes.RecipeError):
         recipes.resolve_for_model(model, {"reference_strength": 0.5})
+    with pytest.raises(recipes.RecipeError):
+        recipes.resolve_for_model(model, {"reference_attention_strength": 0.25})
 
 
 @pytest.mark.parametrize("raw", [b"not-an-image", png((448, 768)), png(fmt="JPEG"), png()[:64]])
@@ -176,8 +192,9 @@ def test_intent_binds_appearance_separately_and_all_quality_controls():
     equivalent = {**base, "reference_image": "data:image/png;base64," + base["reference_image"]}
     assert video_jobs.request_hash(video_jobs.AsyncVideoRequest(**equivalent)) == original
     for change in ({"reference_image": inline(png(color="blue"))}, {"reference_strength": 0.5},
-                   {"motion_attention_strength": 0.5}):
+                   {"motion_attention_strength": 0.5}, {"reference_attention_strength": 0.25}):
         assert video_jobs.request_hash(video_jobs.AsyncVideoRequest(**{**base, **change})) != original
+    assert video_jobs.request_hash(video_jobs.AsyncVideoRequest(**{**base, "reference_attention_strength": None})) == original
 
 
 @pytest.mark.asyncio
@@ -195,6 +212,7 @@ async def test_authenticated_inventory_lists_ingredients_and_advanced_control_wi
     for mode in ("audio", "video"):
         assert "ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors" in record["source_requirements"][mode]["model_files"]
         assert "RepeatImageBatch" in record["source_requirements"][mode]["node_types"]
+        assert "LTXAddVideoICLoRAGuideAdvanced" in record["source_requirements"][mode]["node_types"]
     assert "LTXAddVideoICLoRAGuideAdvanced" in record["source_requirements"]["video"]["node_types"]
 
 
@@ -204,6 +222,8 @@ def test_new_profile_stays_non_serving_unpriced_and_exposes_exact_controls():
     assert params["reference_image"]["width"] == 768
     assert params["frames"]["minimum"] == params["frames"]["maximum"] == 121
     assert params["steps"]["minimum"] == params["steps"]["maximum"] == 40
+    assert params["reference_attention_strength"]["maximum"] == 1
+    assert "default" not in params["reference_attention_strength"]
     recipes.load_local_recipes(str(ROOT / "recipes"))
     assert MODEL not in {recipe.model_name for recipe in recipes._LOCAL_RECIPES.values()}
 
@@ -232,7 +252,8 @@ def test_animated_or_rotated_appearance_images_reject():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["audio", "video"])
-async def test_core_payload_reaches_actual_worker_appearance_adapter(monkeypatch, tmp_path, mode):
+@pytest.mark.parametrize("attention", [None, 0.25])
+async def test_core_payload_reaches_actual_worker_appearance_adapter(monkeypatch, tmp_path, mode, attention):
     """Optional joint protocol check; mocked HTTP is not a native GPU/R2 canary."""
     source = os.environ.get("MEDIA_VIDEO_WORKER_SOURCE")
     if not source:
@@ -243,6 +264,8 @@ async def test_core_payload_reaches_actual_worker_appearance_adapter(monkeypatch
         pytest.fail("joint adapter check requires a reviewed worker checkout and its test runtime")
     body = {"prompt": "synthetic test", "model": MODEL, "seed": 0,
             "reference_image": inline(png()), "reference_audio": inline(wav(121))}
+    if attention is not None:
+        body["reference_attention_strength"] = attention
     if mode == "video":
         decoder = shutil.which("ffmpeg")
         if not decoder or not shutil.which("ffprobe"):
@@ -298,6 +321,9 @@ async def run():
             assert graph[node]["inputs"][field] == "bound-" + str(index + 1) + "." + extension
         assert graph["video"]["inputs"]["audio"] == ["source_audio", 0]
         assert graph["reference_guide"]["inputs"]["latent"] == ["latent_video", 0]
+        if "reference_attention_strength" in body["recipe_inputs"]:
+            assert graph["reference_guide"]["class_type"] == "LTXAddVideoICLoRAGuideAdvanced"
+            assert graph["reference_guide"]["inputs"]["attention_strength"] == body["recipe_inputs"]["reference_attention_strength"]
         if "source_video" in graph:
             assert graph["control_model"]["inputs"]["model"] == ["reference_model", 0]
             assert graph["video_guide"]["inputs"]["latent"] == ["reference_guide", 2]

@@ -50,6 +50,7 @@ class AsyncVideoRequest(VideoRequest):
     audio: bool = True
     guide_strength: float | None = Field(default=None, gt=0, le=1)
     reference_strength: float | None = Field(default=None, gt=0, le=1)
+    reference_attention_strength: float | None = Field(default=None, gt=0, le=1)
     motion_attention_strength: float | None = Field(default=None, gt=0, le=1)
     response_format: Literal["url"] = "url"
     worker: str | None = Field(default=None, min_length=1, max_length=255)
@@ -78,7 +79,7 @@ def request_hash(body: AsyncVideoRequest) -> str:
             intent.pop(role)
         else:
             intent[role] = {"sha256": hashlib.sha256(video_sources.decode_inline(value, role)).hexdigest()}
-    for key in ("guide_strength", "reference_strength", "motion_attention_strength"):
+    for key in ("guide_strength", "reference_strength", "reference_attention_strength", "motion_attention_strength"):
         if getattr(body, key) is None:
             intent.pop(key)
     encoded = json.dumps({"schema": "aipg.video-intent.v1", "request": intent},

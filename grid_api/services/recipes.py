@@ -420,6 +420,8 @@ def param_schema(ref: str | int) -> Optional[dict]:
                                          "width": 768, "height": 448, "content_type": "image/png",
                                          "description": "Appearance guide, not an opening frame; requires source audio and Ingredients"}
             params["reference_strength"] = {"type": "number", "minimum_exclusive": 0, "maximum": 1, "default": 1.0}
+            params["reference_attention_strength"] = {"type": "number", "minimum_exclusive": 0, "maximum": 1,
+                                                        "description": "Optional appearance-guide attention; omission preserves the original guide"}
             params["guide_strength"]["default"] = 0.5
             params["motion_attention_strength"] = {"type": "number", "minimum_exclusive": 0, "maximum": 1, "default": 0.25,
                                                     "description": "Video-reference attention only; requires reference_video"}
@@ -556,7 +558,7 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
             execution["keyframes"] = inputs["keyframes"]
         if inputs.get("source_mode"):
             execution["source_mode"] = inputs["source_mode"]
-        for key in ("guide_strength", "appearance_profile", "reference_strength", "motion_attention_strength"):
+        for key in ("guide_strength", "appearance_profile", "reference_strength", "reference_attention_strength", "motion_attention_strength"):
             if key in inputs:
                 execution[key] = inputs[key]
 
@@ -606,7 +608,8 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
     source_bindings = None
     if r.video_contract is not None and inputs.get("source_mode"):
         try:
-            source_bindings = (video_contract_svc.expand_appearance(spec, inputs["reference_strength"])
+            source_bindings = (video_contract_svc.expand_appearance(
+                                   spec, inputs["reference_strength"], inputs.get("reference_attention_strength"))
                                if r.video_contract.appearance_profile else [])
             source_bindings.extend(video_contract_svc.expand_sources(
                 spec, inputs["source_mode"], inputs.get("guide_strength", 0.85), inputs.get("motion_attention_strength")))

@@ -55,11 +55,15 @@ transport, accounts, stats, health/metrics.
   The separate `LTX-2.5 Dev BF16 Ingredients` candidate accepts `reference_image`
   as appearance-only PNG conditioning with source audio and optional motion
   video, never `image`/`keyframes`. Its fixed 121-frame/768x448/40-step profile
-  cannot widen ordinary Dev. Finite `reference_strength` and video-only
-  `motion_attention_strength` join normalized intent; absent new fields preserve
+  cannot widen ordinary Dev. Finite `reference_strength`, optional
+  `reference_attention_strength` and video-only `motion_attention_strength`
+  join normalized intent; absent new fields preserve
   existing request hashes. `appearance-to-video` is default-off and requires
   `recipe-appearance-reference-v1` on the same worker as every other feature.
   The recipe stays non-serving/unpriced; compiler tests do not qualify output.
+  Reference attention has no advertised default: omission keeps the original
+  appearance guide, while explicit (0, 1] selects Core's Advanced node only
+  there. The same node is required in both authenticated source inventories.
 - `video_jobs.py` - candidate `POST /v1/videos/jobs` and owner-only
   `GET /v1/videos/jobs/{job_id}`, plus `GET /v1/videos/jobs` with the
   `Idempotency-Key` header for lost initial replies. GET never admits, uploads,

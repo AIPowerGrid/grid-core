@@ -68,6 +68,7 @@ class LtxVideoInputs(BaseModel):
     guide_strength: float | None = Field(default=None, gt=0, le=1)
     reference_image: bool = False  # Presence only; private bytes use a separate source role.
     reference_strength: float | None = Field(default=None, gt=0, le=1)
+    reference_attention_strength: float | None = Field(default=None, gt=0, le=1)
     motion_attention_strength: float | None = Field(default=None, gt=0, le=1)
 
     @field_validator("fps", "audio", mode="before")
@@ -107,7 +108,8 @@ def normalize(contract: LtxVideoContract, values: dict) -> dict:
         if (not inputs.reference_image or inputs.source_mode == "generated" or inputs.image
                 or inputs.keyframes or (inputs.width, inputs.height) != (768, 448)):
             raise ValueError("Ingredients requires a separate appearance image and exact-duration source audio")
-    elif inputs.reference_image or inputs.reference_strength is not None or inputs.motion_attention_strength is not None:
+    elif (inputs.reference_image or inputs.reference_strength is not None
+          or inputs.reference_attention_strength is not None or inputs.motion_attention_strength is not None):
         raise ValueError("recipe does not support appearance references")
     if inputs.source_mode != "generated" and inputs.source_mode not in contract.source_modes:
         raise ValueError("recipe does not support this source conditioning mode")
@@ -208,7 +210,8 @@ def expand_sources(spec: dict, mode: SourceMode, guide_strength: float = 0.85,
     return bindings
 
 
-def expand_appearance(spec: dict, strength: float = 1.0) -> list[dict]:
+def expand_appearance(spec: dict, strength: float = 1.0,
+                      attention_strength: float | None = None) -> list[dict]:
     """Apply the fixed Ingredients guide, never a frame-zero image latent."""
     expected = {"model": "UNETLoader", "latent_video": "EmptyLTXVLatentVideo",
                 "av_latent": "LTXVConcatAVLatent", "guider": "CFGGuider",
@@ -216,6 +219,8 @@ def expand_appearance(spec: dict, strength: float = 1.0) -> list[dict]:
                 "conditioning": "LTXVConditioning", "video_vae": "VAELoader"}
     added = {"reference_model", "reference_image", "reference_scale", "reference_sheet", "reference_guide"}
     if (not 0 < strength <= 1 or added.intersection(spec)
+            or (attention_strength is not None and
+                (type(attention_strength) not in (int, float) or not 0 < attention_strength <= 1))
             or any(not isinstance(spec.get(name), dict) or spec[name].get("class_type") != kind
                    or not isinstance(spec[name].get("inputs"), dict) for name, kind in expected.items())
             or spec["model"]["inputs"].get("unet_name") != "ltx-2.5-22b-dev-transformer-bf16.safetensors"
@@ -235,6 +240,9 @@ def expand_appearance(spec: dict, strength: float = 1.0) -> list[dict]:
         "latent": ["latent_video", 0], "image": ["reference_sheet", 0], "frame_idx": 0,
         "strength": strength, "latent_downscale_factor": ["reference_model", 1], "crop": "disabled",
         "use_tiled_encode": False, "tile_size": 256, "tile_overlap": 64}}
+    if attention_strength is not None:
+        spec["reference_guide"]["class_type"] = "LTXAddVideoICLoRAGuideAdvanced"
+        spec["reference_guide"]["inputs"]["attention_strength"] = attention_strength
     spec["av_latent"]["inputs"]["video_latent"] = ["reference_guide", 2]
     spec["guider"]["inputs"].update(model=["reference_model", 0], positive=["reference_guide", 0], negative=["reference_guide", 1])
     spec["crop"]["inputs"].update(positive=["reference_guide", 0], negative=["reference_guide", 1])

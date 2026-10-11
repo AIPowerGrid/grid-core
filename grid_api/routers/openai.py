@@ -883,6 +883,9 @@ async def get_model_recipe(model_id: str, apikey: Optional[str] = Header(None),
                     "node_types": recipes.node_types(source_spec),
                     "model_files": recipes.model_files(source_spec),
                 }
+                if r.video_contract.appearance_profile:
+                    requirements[mode]["node_types"] = sorted(set(requirements[mode]["node_types"]) |
+                                                              {"LTXAddVideoICLoRAGuideAdvanced"})
             item["source_requirements"] = requirements
         out.append(item)
     return {"model": model_id, "recipes": out}

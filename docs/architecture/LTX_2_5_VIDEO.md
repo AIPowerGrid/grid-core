@@ -137,6 +137,11 @@ and guide rather than replacing them. `reference_strength` defaults to 1;
 video-only `guide_strength` defaults to 0.5 and `motion_attention_strength` to
 0.25. All are finite in (0, 1] and committed with the graph/execution. The latter
 selects Core's fixed advanced control node, never a client-supplied graph.
+Optional `reference_attention_strength` is separately finite in (0, 1]. An
+explicit value changes only the appearance guide to the Advanced node and
+commits its attention value; omission preserves the original graph and intent.
+It does not change reference denoising or motion controls. Both source-mode
+inventories require the Advanced node, even when a request omits this control.
 This layout is not proof that an output never flashes a reference, preserves
 identity, follows all motion or lip-syncs accurately.
 
@@ -163,6 +168,28 @@ Audio-only appearance output shows the reference sheet early, while six
 motion-guided samples look promising. Measured appearance/motion/lip quality,
 funded/public acceptance and model-use clearance still gate promotion. Earlier
 local Ingredients takes and distilled runs alone are not proof for this recipe.
+
+A matched native follow-up lowered only appearance attention to 0.25 for both
+audio-only and motion-guided clips, preserving the original sources, prompt,
+seed, bucket, 121-frame repeated sheet and soundtrack. All 121 frame thumbnails
+per clip show no sheet/portrait flash; every frame decodes and both clocks equal
+121/24 seconds. All 242,000 samples per stereo channel pass the aligned source
+sound checks at offset zero, with identical decoded AAC across both clips on
+the same decoder. This is a short local quality comparison, not a new Grid
+dispatch/settlement, exact identity, source-motion or lip-sync proof. Original
+Grid results and their failures remain retained; no default changed. The new
+explicit control still needs a pinned native Grid-path qualification.
+
+The optional-control follow-up passes 2735 Core tests / 24 explicit skips on
+Mac/Python3.13 with all four disposable PostgreSQL14 URLs supplied and the
+actual reviewed worker adapter selected. Skips include SQLite-only concurrency
+counterparts, optional private capture, unselected Console/node compensation
+handoff and Redis observer fixtures; this does not replace Linux/Postgres16 CI.
+The pinned SDK peers pass 56 qualification cases, zero skips, on SQLite and
+Postgres14, including real JS loopback HTTP for both appearance modes with
+attention omitted/explicit, one committed hold/settlement, changed-control
+identity and GET-only recovery. Media execution/storage remain synthetic in
+that suite; it is not the local render or purchased-credit proof.
 
 Local verification for this addition passed the full Core suite with 2706 tests
 and 24 skipped, supplying all four disposable PostgreSQL test URLs. The isolated
