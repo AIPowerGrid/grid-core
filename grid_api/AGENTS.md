@@ -53,6 +53,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
 - **Async video:** `MEDIA_ASYNC_ENABLED=0` closes new async admission only.
+  Audio/video conditioning adds separately default-dark `audio-to-video` and
+  `video-to-video` admission. Do not infer these gates from the base video path,
+  charging mode or health features. MP4 source verification needs FFmpeg/ffprobe;
+  missing tools reject rather than bypassing validation.
   Apply migrations through `0044` before starting this candidate even with the flag off:
   the outbox reads its journal. Typed settings bound held async concurrency,
   batch size, lease and cadence. Retain the schema and irreversible execution

@@ -22,6 +22,7 @@ from grid_api import auth, database
 from grid_api.config import GridSettings
 from grid_api.routers import video_jobs, videos, worker_ws
 from grid_api.services import accounts, credits, media_jobs, recipes
+from grid_api.services.tests.test_video_sources import wav
 from grid_api.services.tests.test_media_job_journal import (
     MODEL,
     OPENING,
@@ -332,6 +333,59 @@ def test_normalized_intent_matches_director_v1_golden(variant, cfg, digest):
         cfg_scale=cfg, max_cost_micro_usd=40_000,
     )
     assert video_jobs.request_hash(body) == digest
+
+
+def test_audio_intent_matches_director_golden_and_commits_decoded_bytes():
+    encoded = base64.b64encode(wav(33)).decode("ascii")
+    body = video_jobs.AsyncVideoRequest(
+        prompt="A synthetic red ball rolls on a table", model=MODEL,
+        size="256x256", frames=33, seed=42, steps=8, cfg_scale=1.0,
+        max_cost_micro_usd=40_000, reference_audio="data:audio/wav;base64," + encoded,
+    )
+    digest = video_jobs.request_hash(body)
+    assert digest == "b2942c5edc0745627231ac72fe6e6c8e80b6931902914662feff54cc3d679804"
+    assert video_jobs.request_hash(body.model_copy(update={"reference_audio": encoded})) == digest
+    different = base64.b64encode(wav(33)[:-1] + b"\1").decode("ascii")
+    assert video_jobs.request_hash(body.model_copy(update={"reference_audio": different})) != digest
+
+
+@pytest.mark.asyncio
+async def test_audio_replay_keeps_one_hold_without_another_source_upload_or_quota(api, monkeypatch):
+    client, aid, credential, settings, quota, _available = api
+    uploaded = []
+
+    def source_upload(raw, extension):
+        uploaded.append((raw, extension))
+        return "https://" + "a" * 32 + ".r2.cloudflarestorage.com/private/source.wav"
+
+    monkeypatch.setattr(videos.video_sources.storage, "upload_source", source_upload)
+    body = {"frames": 33, "size": "256x256", "seed": 42,
+            "reference_audio": base64.b64encode(wav(33)).decode("ascii")}
+    key = uuid4()
+    first = await post(api, key=key, body=body)
+    assert first.status_code == 202, first.text
+    job = first.json()["job_id"]
+    row = await stored(job)
+    assert row["payload"]["recipe_inputs"]["source_mode"] == "audio"
+    assert row["payload"]["recipe_source_bindings"] == [
+        {"role": "reference_audio", "path": "source_audio.inputs.audio"}]
+    assert row["payload"]["source_media"][0]["samples"] == 66_000
+    assert row["payload"]["required_media_features"] == [
+        "async-video-resume-v1", "recipe-media-sources-v1"]
+    assert await credits.get_balance(aid) == OPENING - 27_500
+    assert len(uploaded) == 1 and uploaded[0] == (wav(33), "wav")
+    settings.media_async_enabled = False
+    quota.reset_mock()
+
+    async def forbidden(*_args, **_kwargs):
+        pytest.fail("accepted replay must not decode sources, upload or prepare again")
+
+    monkeypatch.setattr(video_jobs, "prepare_video", forbidden)
+    replay = await post(api, key=key, body=body)
+    assert replay.status_code == 202 and replay.json()["job_id"] == job
+    assert len(uploaded) == 1 and quota.await_count == 0
+    assert await counts() == (1, 1, 0)
+    assert await credits.get_balance(aid) == OPENING - 27_500
 
 
 def test_async_settings_are_dark_and_bounded():

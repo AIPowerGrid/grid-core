@@ -354,6 +354,8 @@ async def prepare_dispatch(model: str, job_type: str, payload: dict) -> tuple[di
     )
     resolved_recipe = None
     contract = recipes.video_contract_for_model(model, has_source=bool(payload.get("source_image_url"))) if job_type == "video" else None
+    if contract is None and (payload.get("source_media") or (payload.get("recipe_inputs") or {}).get("source_mode")):
+        raise HTTPException(422, detail="Source-conditioned video requires a typed recipe contract")
     if sources is not None and (contract is None or not (payload.get("recipe_inputs") or {}).get("keyframes")):
         raise HTTPException(status_code=422, detail="Video keyframe sources require a typed keyframe contract")
     if contract:
@@ -379,6 +381,19 @@ async def prepare_dispatch(model: str, job_type: str, payload: dict) -> tuple[di
                 if model not in available:
                     raise HTTPException(status_code=503, detail="No compatible video keyframe worker is available")
                 payload = {**payload, "required_media_feature": "recipe-image-bindings-v1"}
+        source_bindings = resolved_recipe.get("source_bindings") or []
+        source_media = payload.get("source_media") or []
+        if source_bindings or source_media:
+            from .video_sources import validate_commitments
+            validate_commitments(source_media, source_bindings, resolved_recipe["execution"])
+            features = set(payload.get("required_media_features") or []) | {"recipe-media-sources-v1"}
+            if len(bindings or []) > 1:
+                features.add("recipe-image-bindings-v1")
+            from ..routers.worker_ws import get_available_models
+            available = await get_available_models(job_type="video", media_features=tuple(sorted(features)))
+            if model not in available:
+                raise HTTPException(503, detail="No compatible source-conditioned video worker is available")
+            payload = {**payload, "required_media_features": sorted(features)}
         execution = resolved_recipe["execution"]
         # Snapshot one validated graph before money moves. Every ingress,
         # including chat, gets its billing/reward units from that same graph.
@@ -401,6 +416,8 @@ def bind_dispatch_recipe(model: str, payload: dict, spec: dict | None) -> tuple[
             payload["recipe_image_inputs"] = spec["image_paths"]
         if spec.get("image_bindings"):
             payload["recipe_image_bindings"] = spec["image_bindings"]
+        if spec.get("source_bindings"):
+            payload["recipe_source_bindings"] = spec["source_bindings"]
     route_models = spec.get("required_models") if spec and spec.get("required_models") else [model]
     return payload, route_models
 

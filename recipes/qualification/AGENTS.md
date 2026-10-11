@@ -16,8 +16,14 @@ make it recursive: placing a workflow here must not activate it.
 
 - Keep customer model IDs distinct from LTX-2.3 and between dev/distilled.
 - No arbitrary executable nodes, filename selectors, precision switches,
-  LoRAs, audio input or timeline JSON from clients. Typed image pins may expand
+  LoRAs or timeline JSON from clients. Typed image pins may expand
   only the Core-owned first-image scaffold; images bind through declared slots.
+  Distilled graphs now declare audio/video source modes for qualification.
+  Only Core's fixed source expansion can add the frozen-audio and official
+  Union-Canny branches. Input WAV/MP4 bytes are normalized and independently
+  validated upstream, hash-bound to roles and worker slots, never ignored.
+  Opening images remain explicit/optional; no appearance-only identity claim.
+  New source admission and public worker advertisement remain disabled.
 - Distilled ceiling is 337 frames; dev remains 81. Text-only graphs accept no
   pins; image graphs permit up to sixteen strictly increasing pins starting at
   zero, within the clip, with finite strengths in 0..1. These ceilings describe

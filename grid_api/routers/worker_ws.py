@@ -469,7 +469,7 @@ async def worker_websocket(ws: WebSocket):
         api_formats = [f for f in api_formats if f in ("openai-chat", "openai-responses", "anthropic")] or ["openai-chat"]
         media_features = init_msg.get("media_features")
         media_features = ([feature for feature in media_features if isinstance(feature, str)
-                           and feature in {"recipe-image-bindings-v1", "async-video-resume-v1"}]
+                           and feature in {"recipe-image-bindings-v1", "recipe-media-sources-v1", "async-video-resume-v1"}]
                           if isinstance(media_features, list) and len(media_features) <= 8 else [])
         # Input modalities the worker's model accepts (operator-declared). Surfaced
         # on /v1/models as input_modalities so the chat UI enables image upload for

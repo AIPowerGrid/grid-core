@@ -62,6 +62,7 @@
       "variant": "distilled",
       "max_frames": 337,
       "max_keyframes": 0,
+      "source_modes": ["audio", "video"],
       "max_pixels": 522240
     }
   },
