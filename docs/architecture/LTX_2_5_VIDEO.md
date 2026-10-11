@@ -25,9 +25,13 @@ refunded without a completion row. The read-only failure audit verifies
 583,334 unfunded test micro-USD charged, four full decodes, twenty native input
 pixel checks and absence of all twenty recorded private source objects. No
 replacement or full-film export was performed. Slightly shorter raw native
-audio is retained; exact final export clocks remain unqualified.
-The compatibility-routing candidate below must pass required CI and a fresh
-native managed-film acceptance before this gate can close.
+audio is retained; that failed run did not qualify final export clocks.
+A separately authorized original-input run now passes all five jobs on both
+GPUs after accepted-reply loss, private Core/bridge SIGKILL and same-job GET-only
+recovery. Its 623-frame mix has exact audio/video clocks, one charge/completion
+per job and independently verified private-input deletion. A repeat preserves
+the proof and film bytes. This closes the isolated native mix gate, not the
+missing original soundtrack/622-frame reference parity or purchased funding.
 
 Two matching native GPU-pinned ComfyUI instances have completed concurrent
 local distilled renders on the owned dual-Blackwell rig. ComfyUI remains
@@ -94,10 +98,34 @@ The initial routing commit `eadf0129` separately passes required Linux/Python
 3.12/PostgreSQL 16 CI in run `38171307901`, including restore/migration and
 pinned SDK/Console/node gates, with 2,769 full-suite passes and 28 skips. That
 result does not qualify the subsequent dispatch-time prefetch follow-up, which
-needs fresh exact-commit CI. Neither set of tests proves full Uvicorn/native-GPU
-restart, purchased funding, stream overload or full-film acceptance. The earlier
-failed film and its source pins remain immutable; another run needs a separately
-committed/reviewed candidate.
+has its own exact-revision CI and native acceptance below. Neither test suite
+alone proves GPU execution, purchased funding, stream overload or film quality.
+The earlier failed film and its source pins remain immutable.
+
+Core `112dd055dd61552f645e95c285c32553631b9f81` passes required
+Linux/Python3.12/PostgreSQL16 CI run `38172933239`: 2,785 Grid tests /28 skips,
+56 SDK/Core real-HTTP cases, restore/migration and Console/node gates. A separate
+native run at worker `1332fa20c6eba4f529a8b64c5689ea777f5c803f` and Director
+`e035bec59b8deeaf7628681f9b4f2606e4493e4c` completes the original five-shot,
+multi-pin/337-frame workload with one initial POST per shot. All five accepted
+replies were discarded and private Core/bridge processes were SIGKILLed; the
+unchanged GPU services retained native work. New admission was disabled for
+authenticated GET-only recovery and repeat observation.
+
+Both audits retain exactly five prompts, reservations and completions, with
+23 matching native timed-image uses and absence of all twenty deduplicated
+private R2 objects. The unfunded test charges total 650,834 micro-USD; the
+account balance/ledger sum remain 349,166 with funded balance zero. Local
+ceilings reconcile to zero held and 1,349,166 available from a two-million
+project budget. The actual 960x544/24fps H.264/AAC stereo mix fully decodes to
+623 frames with matching 25.958333-second audio/video clocks and no new spend.
+The repeat returns proof SHA-256
+`e1941f185702a7e97a19407b9dd046e36cc24ecac63734cb70a397b7b90cdcd6`
+and mix SHA-256
+`fe3ff00d7847c8a07734e84908cb1c1a2ea3a2e6d75bdf0fd92010dd65c18c8f`
+unchanged. Independent offline CLI full decode/contact-sheet review passes.
+This is private test-credit/native integration, not purchased funding, full
+reference-film parity, measured creative/model fidelity or public approval.
 
 ### Worker Startup Inventory
 
@@ -1051,9 +1079,10 @@ not a newer doc-only commit, public release or complete full-film workflow.
 - Publish reviewed profiles and qualify public enrollment for two one-job
   media-worker identities. The shared private-Core run above proves per-GPU
   state, storage and units, not the installer or production fleet.
-- Reproduce the handoff's multi-pin/337-frame jobs through the intended network
-  path before describing the candidate as the full Director contract. Promote bounded
-  settings from the working baseline with separate money/storage proofs.
+- Extend the passing isolated handoff multi-pin/337-frame network workload to
+  reviewed public profiles and measured quality/capacity limits. The five-shot
+  mix proves that bounded native path, not arbitrary settings or complete
+  reference-film/soundtrack parity.
 - Review separate explicit rates and complete a bounded purchased-credit
   canary. Disposable PostgreSQL lifecycle tests and unfunded native canaries
   do not establish actual external funding or approve customer prices.
