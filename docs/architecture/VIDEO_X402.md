@@ -3,7 +3,8 @@
 
 # Video x402 Build
 
-Status: **private quotation candidate implemented; payment remains a proposal**.
+Status: **private quotation and offline signature-binding candidates implemented;
+payment collection remains a proposal**.
 Reviewed against the candidate async video code and locally locked x402 2.16.0
 SDK on October 11, 2026. The quote routes below are independently default-off
 and have no payment collection, reservation, dispatch, refund sender or
@@ -29,6 +30,8 @@ immutable `grid_video_quotes` table (migration `0046`). There is no relationship
 that grants a quote row a reservation or executable outbox authority. Apply the
 migration before using the optional routes, including GET recovery after
 rollback. Downgrade refuses to discard any retained row, even an expired quote.
+`services/video_eip3009.py` supplies an offline, admission-time verifier only.
+No HTTP handler accepts a signature or calls this helper to move money.
 
 ## Proposed First Version
 
@@ -61,6 +64,9 @@ Responses are `no-store`; they explicitly return `payment_enabled: false` and
 do not emit a `PAYMENT-REQUIRED` header. GET and identical replay remain available
 after disabling new quotes or expiry; expired identity never means reprice,
 extend, replace or mint a new nonce. Recovery uses GET, not another generation.
+The additive `binding_schema` names the stored quote-binding revision. New v2
+quotes include `payment.eip712_domain`; domainless v1 quotes remain recoverable
+with their original commitment/nonce and cannot be upgraded into signing quotes.
 
 **Not implemented:** `POST /v1/x402/videos/quotes/{quote_id}/pay`. The future
 route must bind the identical intent and signed exact payment, with no alternate
@@ -119,18 +125,19 @@ admission; neither may silently allow expired keys to become new payments.
 Commit canonical owner, hashed idempotency key, normalized request hash, source
 byte/role/timing commitments, one selected seed, resolved graph/recipe commitment,
 execution units, price version, exact micro-USDC amount, recipient, chain/token
-and deadline in an immutable quote. This binding is implemented for private
+and deadline in an immutable quote. New binding-v2 snapshots additionally freeze
+the token's EIP-712 name/version/chain/verifying-contract domain. This binding is implemented for private
 quotation; the existing request hash alone does not
 freeze a generated seed or compiled graph; never resolve either after payment.
 
 Allocate one job UUID and random quote salt. Derive a unique 32-byte authorization
 nonce from a versioned canonical quote commitment. Publish its verification
-fields; the future payment verifier must require the signed nonce to match.
+fields; the offline verifier now requires the signed nonce to match.
 Changing the job, prompt, source,
 price, graph or deadline requires a new quote, never mutation. SQL uniqueness
 binds the planned nonce to one quote/job. Unsigned `extra` or `resource` metadata
 alone cannot supply this binding. Current nonce uniqueness and commitment
-verification do not prove a signature, received payment, cross-rail replay
+verification alone do not prove a signature, received payment, cross-rail replay
 protection or compatibility with an unmodified x402 client.
 
 [EIP-3009](https://eips.ethereum.org/EIPS/eip-3009) signs nonce, value, recipient
@@ -140,6 +147,40 @@ The locked SDK's default exact client generates its own random nonce. An explici
 tested opt-in client adapter must choose the quote nonce **before signing**;
 editing a signed payload is invalid. Do not claim stock-client interoperability
 without that test, or fall back to an unbound payment for unsupported wallets.
+
+### Offline Signature Binding
+
+The helper constructs JSON-ready unsigned `TransferWithAuthorization` data
+through the pinned SDK's EIP-712 builder. Core never signs or takes a private
+key. Tests use newly generated, unfunded keys and the actual locked SDK signer,
+not a mocked recovery function. They prove compatible typed-data hashes and
+signatures when the quote nonce/deadline are selected before signing, and reject
+the stock client's random nonce or alteration of its already-signed payload.
+This is a protocol-level opt-in proof, **not a published Grid client adapter**.
+
+Verification requires a caller-owned, authenticated SQL quote and an expected
+payer. It accepts exactly the inner `authorization` and `signature` fields with
+canonical string amounts/deadlines, and compares every field against the frozen
+quote. Signature recovery uses `eth-account`, the frozen domain and the SDK's
+standard types. Only raw 65-byte signatures with v=27/28 and canonical low-S
+are accepted. Self-payment, compact signatures and wrapped smart-wallet forms
+are refused, without returning the supplied signature or request values.
+The quote window is checked before and after cryptographic work.
+
+The result retains no signature or paid/funded state. Its authorization identity
+commits chain/token/payer/nonce for future shared replay claims; **no claim is
+currently written**, so repeating a valid offline verification is not prevented.
+It does not check balance, authorization consumption, live token implementation/
+domain, payer code/delegation, confirmation, receipts or facilitator support.
+These require separately qualified bounded chain reads before financial
+admission. Offline key recovery alone does not prove the live account is an EOA.
+The future ingress must also validate the outer x402 envelope and owner/intent;
+unsigned metadata cannot replace nonce binding. Nothing prompts a real wallet.
+
+This is an admission-time current-window check, not a historical receipt
+verifier. An already attempted payment still requires reconciliation after
+expiry; the helper's expiry refusal is never proof that funds were not sent or
+permission to discard a refund/recovery obligation. No live payment route exists.
 
 Signed payment headers are temporary spending capabilities, not recovery tokens.
 Never put them in URLs, logs, result envelopes or ordinary evidence exports.
@@ -217,18 +258,26 @@ refund obligations or private-input cleanup.
 ## Local Qualification
 
 October 11 candidate verification uses Python 3.13, local PostgreSQL 14 and
-FFmpeg/FFprobe. The focused quote suite passes 87 tests; four skips are the
+FFmpeg/FFprobe. The focused quote/signature suite passes 157 tests; four skips are the
 SQLite variants of PostgreSQL-only concurrency/DDL proofs, whose PostgreSQL
-variants execute. The full Grid suite passes 2,872 tests with 32 skips and 139
+variants execute. The independent signature suite passes 68 tests without RPC
+or funded keys. The full Grid suite passes 2,942 tests with 32 skips and 139
 warnings. Skips include optional private captures, reviewed worker/Console
 integration and separately configured shadow Redis checks, alongside the
 SQLite variants of PostgreSQL-only tests; they are not claimed as verified.
 A separate empty database migrates from genesis through `0046`, and
 `alembic check` reports no schema drift. New Python files pass targeted Ruff;
 tracked source and full reachable HEAD history pass the existing secret and
-infrastructure scan policy without new exclusions. Exact-commit Linux/
-PostgreSQL 16 CI remains pending, as do real payment and native quote-to-funded
-job qualification. These local results do not change public serving permission.
+infrastructure scan policy without new exclusions.
+
+The preceding quote-only `d3d4e122` passes exact-commit Linux/Python 3.12/
+PostgreSQL 16 [required CI](https://github.com/AIPowerGrid/grid-core/actions/runs/38177700720):
+2,872 full-suite passes, restored migration/schema parity through `0046`, decoder
+and shadow Redis checks, pinned video SDK/Core HTTP qualification and the
+Console/node compensation handoff. Those results do not qualify the later
+signing-domain/verifier changes. Exact-commit CI for this follow-up, real
+payment and native quote-to-funded job qualification remain pending. Neither
+local nor CI fixture results change public serving permission.
 
 ## Build And Qualification Order
 
@@ -239,8 +288,11 @@ job qualification. These local results do not change public serving permission.
    reservations and dispatch. Required PostgreSQL 16 CI remains an exact-commit
    gate; fixtures do not prove production or payment compatibility. Public-scale
    preparation and replay-tombstone retention remain separate work.
-2. Exact client binding and server verifier: wrong nonce/amount/payer/domain/
-   deadline, changed sources/graph and unsupported signing/account types.
+2. Offline exact signature binding now passes wrong nonce/amount/payer/domain/
+   deadline, changed source commitments, legacy-domain refusal and unsupported
+   signature controls. The tested opt-in SDK signing sequence is not a released
+   client. Build the published adapter/outer-envelope integration and qualify
+   live account/token/facilitator compatibility before taking payment.
 3. Attempt journal, independent chain proof and atomic prepaid hold/outbox.
    Prove duplicates, concurrency and cross-rail claims on PostgreSQL 16. Keep
    the existing text x402 contract unchanged.

@@ -99,6 +99,8 @@ transport, accounts, stats, health/metrics.
   quota, credit or dispatch. One retained quote returns 201; exact replay 200,
   changed intent 409 and exhausted retained capacity 429. GET/accepted replay
   survive rollback and expiry; expired identity never becomes a new quote.
+  `binding_schema` distinguishes readable legacy v1 from new v2 snapshots
+  with a frozen `payment.eip712_domain`; no old commitment is rewritten.
   Replies are private/no-store and explicitly `payment_enabled:false`; no
   `/pay` route or PAYMENT-REQUIRED challenge exists. This is not a live x402
   rail, held generation, stock-client compatibility or public model permission.
