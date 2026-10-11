@@ -22,6 +22,18 @@ container and prior services are preserved for rollback. Local qualification
 does not establish Grid billing, x402, execution attestation or independent
 validator evidence.
 
+### Model-Use Permission
+
+Public serving remains gated independently of code and canaries. The official
+[LTX-2.x license](https://github.com/Lightricks/LTX-2/blob/a95ab856bf29407b6b066ede0abe1846050db56c/LICENSE-2_x)
+is dated August 11, 2026. Attachment A.20 requires separate commercial permission
+for competing products/services; being below Section 2.1's revenue threshold
+does not remove that restriction. Its hosted-distribution terms also require
+passing use restrictions to users. Grid's competitive-service classification
+and the terms applicable to each installed weight revision remain unresolved;
+obtain licensing/legal clarification before public activation. An AGPL code
+license or a successful private test is not model-use clearance.
+
 ## Governed Contract
 
 ### Worker Startup Inventory
@@ -445,6 +457,14 @@ production release. Candidate Python and JavaScript SDKs additionally provide
 one-POST async video submission and GET-only job/key recovery for all three
 source modes. SDK contract tests and synthetic Core SQL qualification do not
 qualify actual GPU execution, creative quality, paid funding or x402.
+
+Pinned PR/main CI additionally runs synthetic SDK/Core qualification on SQLite
+and PostgreSQL 16. A separate JavaScript case uses unmocked fetch against an
+ephemeral loopback Core router: all three source modes, one actual POST, GET
+recovery after a post-commit 503, terminal replay after admission rollback, and
+real 401/403/404 isolation. It has no Core lifespan/background tasks, GPU worker,
+R2 or purchased funds. This is HTTP/auth/SQL compatibility, not a physical
+network-outage or native managed-film test.
 
 A caller-generated UUIDv4 idempotency key is stored only as a hash. The account
 and normalized client-intent commitment identify one request. Intent must be

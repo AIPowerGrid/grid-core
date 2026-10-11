@@ -89,6 +89,11 @@ validation, worker incentives, and trust boundaries.
   observations, reference-film recreation/audio-preservation benchmark and
   outstanding financial/async/x402/promotion gates. Native multi-shot and
   character-reference parity are measured gates, not inferred from a model swap.
+  Public service additionally requires model-use clearance for the actual
+  installed revisions; code licensing and private canaries do not resolve the
+  official weight license's competing-service restriction. Pure execution plans
+  are not durable price quotes. Pinned SDK/Core SQLite/PostgreSQL HTTP tests
+  prove protocol/auth/SQL behavior, not native output or purchased funding.
   The maintainer's completed LTX handoff and retained rig takes are the film
   baseline; synthetic guide-test failures do not invalidate that production.
   The dark candidate now carries sixteen timed pins and the 337-frame distilled

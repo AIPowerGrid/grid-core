@@ -156,6 +156,30 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
+      - name: Checkout pinned Python video SDK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: AIPowerGrid/grid-sdk-python
+          ref: 15b9f2cf83203122aabb37b4d9af6cf18f082a2c
+          path: .integration/sdk-python
+          persist-credentials: false
+      - name: Checkout pinned JavaScript video SDK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: AIPowerGrid/grid-sdk-js
+          ref: 185b16be1df22047caf2b15e886e687a8bb153c8
+          path: .integration/sdk-js
+          persist-credentials: false
+      - name: Build pinned JavaScript video SDK
+        working-directory: .integration/sdk-js
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+      - name: PostgreSQL Core and real HTTP video SDK qualification
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          AIPG_JS_VIDEO_QUALIFICATION: ${{ github.workspace }}/.integration/sdk-js/qualification/core-wire.mjs
+        run: python -m pytest .integration/sdk-python/qualification/test_core_video_jobs.py -q -rs
       - name: Build pinned Console for local consent integration
         working-directory: .integration/console
         run: |
