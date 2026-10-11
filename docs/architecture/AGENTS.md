@@ -161,6 +161,13 @@ validation, worker incentives, and trust boundaries.
   Its separate native joint execution/recovery/cleanup proof uses unfunded test
   credits; funded/public acceptance and measured appearance quality remain gates.
   It does not inherit distilled source proof or promote its mixed visual results.
+  A separate attention-0.25 canary now passes concurrent native execution,
+  same-pin planned Core/worker crash recovery, unchanged repeat observation,
+  two exact test-credit settlements and all five private-input deletions.
+  Outputs equal the matched local comparison, with no sheet flash in every
+  inspected frame thumbnail; identity/motion/lip quality and purchased/public
+  acceptance remain separate. Exact `29982329` Linux/Postgres16 CI also passed;
+  see `LTX_2_5_VIDEO.md` for pins and the retained private proof digest.
 - `VIDEO_X402.md` - unimplemented authenticated prepaid-video proposal: exact
   USDC quote/nonce binding, payment-before-outbox admission, cross-rail replay
   protection, separate refund obligations and staged qualification. No route,
