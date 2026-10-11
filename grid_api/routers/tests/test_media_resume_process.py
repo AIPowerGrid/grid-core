@@ -7,6 +7,7 @@ The native worker journal/GPU recovery is qualified separately. This tests real
 scoped registration, original-worker SQL binding, WS resume envelopes and money.
 """
 
+import hashlib
 import json
 from uuid import UUID, uuid4
 
@@ -49,6 +50,10 @@ async def registered(core, credential, name="resume-fixture"):
 async def test_real_core_restart_preserves_one_job_charge_and_original_worker(rig, phase):
     core, engine, redis, account, key, worker_key = rig
     await core.kill()
+    async with engine.begin() as connection:
+        await connection.execute(tables.api_keys.update().where(
+            tables.api_keys.c.hash == hashlib.sha256((core.env["GRID_SALT"] + worker_key).encode()).hexdigest(),
+        ).values(key_kind="worker", label="worker:resume-fixture"))
     core.env.update(TEST_ASYNC_VIDEO="1", MEDIA_ASYNC_ENABLED="1", MEDIA_JOB_SWEEP_SECONDS="5")
     await core.start("committed" if phase == "committed" else "none")
     first, worker_id = await registered(core, worker_key)
@@ -68,6 +73,11 @@ async def test_real_core_restart_preserves_one_job_charge_and_original_worker(ri
             original = await frame(first, "job")
             assert original["id"] == created.json()["job_id"] and "resume" not in original
             job_id = original["id"]
+            status = await client.post("/v1/workers/self/media-jobs", headers={"apikey": worker_key}, json={"job_ids": [job_id]})
+            assert status.status_code == 200 and status.json() == {
+                "schema": "aipg.worker.media-journal.v1", "worker_id": worker_id,
+                "jobs": [{"job_id": job_id, "state": "held"}],
+            }
             if phase == "committed":
                 await first.send(json.dumps({"type": "done", "id": job_id, "results": [{"index": 0, "sha256": "a" * 64, "seed": 31}]}))
 
@@ -102,6 +112,12 @@ async def test_real_core_restart_preserves_one_job_charge_and_original_worker(ri
                 await second.send(json.dumps({"type": "done", "id": job_id, "results": [{"index": 0, "sha256": "a" * 64, "seed": 31}]}))
                 ack = await frame(second, "ack")
                 assert ack["id"] == job_id
+            status = await client.post("/v1/workers/self/media-jobs", headers={"apikey": worker_key}, json={"job_ids": [job_id]})
+            assert status.status_code == 200 and status.json() == {
+                "schema": "aipg.worker.media-journal.v1", "worker_id": worker_id,
+                "jobs": [{"job_id": job_id, "state": "closed"}],
+            }
+            assert status.headers["cache-control"] == "no-store"
             recovered = await client.get(created.headers["location"])
             assert recovered.status_code == 200 and recovered.json()["state"] == "completed", recovered.text
             replay = await client.post("/v1/videos/jobs", headers={"Idempotency-Key": idempotency}, json=body)

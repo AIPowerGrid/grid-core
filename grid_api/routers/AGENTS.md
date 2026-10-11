@@ -145,6 +145,9 @@ transport, accounts, stats, health/metrics.
   wallet, allowlisted frontend domain/URI, Base chain id, issue/expiry time, and
   a single-use nonce. `/wallet/nonce` remains for authenticated wallet-link
   proofs, not for minting a login session.
+- `worker_media.py` - `POST /v1/workers/self/media-jobs`, a private read-only
+  cache-reconciliation authority for the exact rig bound to a dedicated worker
+  credential. It does not grant account access, dispatch or financial writes.
 - `stats.py` - `GET /v1/workers`, progress polling, recipe-aware model status
   (raw worker checkpoints plus executable recipe-backed public model names), usage totals,
   model stats, wallet earnings, `GET /v1/payouts/public` (aggregate payout
@@ -216,6 +219,18 @@ transport, accounts, stats, health/metrics.
 - `tests/` - router-level tests, including billing/settlement behavior.
 
 ## Local Contracts
+
+- Worker media-status accepts 1..32 unique canonical job UUIDs in a body bounded
+  to 2048 bytes before parsing. Require `worker.connect`, v2 `key_kind=worker`
+  and the exact `worker:{name}` label; resolve that registered worker only
+  within its proved account family. Do not compare the paying customer's
+  `media_jobs.account_id` to the worker owner. Only jobs whose original
+  `execution_worker_id` is this worker are visible. A committed `settled`
+  reservation is `closed`; a current held execution is `held`; missing,
+  foreign, expired, legacy or uncertain jobs are indistinguishable `unknown`.
+  Never infer closure from elapsed time. Return only worker/job IDs and these
+  states, use no-store and 120 reads/minute, and continue serving recovery with
+  new async admission disabled. DB ambiguity fails 503 without private details.
 
 - `GET /v1/account` remains `account.read` gated and returns `no-store`.
   Raw linked-identity display hints and sibling API-key metadata require both
@@ -427,7 +442,11 @@ expired or out-of-scope pilots return 503 without revealing membership.
 - `tests/test_media_resume_process.py` kills real isolated Core after WS dispatch
   or a committed settlement, erases only its private Redis database, restarts
   with async admission disabled and proves same-worker recovery plus one hold,
-  charge, result and ledger completion. Scoped auth and worker registration are
+  charge, result and ledger completion. Its dedicated worker credential also
+  observes `held` before completion and `closed` after restart, including the
+  lost-ACK case. `tests/test_worker_media_status.py` covers real scoped keys,
+  SQLite/PostgreSQL rig isolation, legacy/expiry uncertainty, private errors,
+  body bounds and absence of money writes. Scoped auth and worker registration are
   real; accelerated leases, worker output and R2 presence are fixtures. This is
   not the joint native-worker/GPU/R2 crash canary or a production rollout.
 

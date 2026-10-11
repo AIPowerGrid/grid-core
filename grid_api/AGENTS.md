@@ -59,6 +59,9 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   fence on rollback; never rerender a claimed job based on queue loss alone.
   Original-worker continuation uses a separate renewable Core execution lease,
   not another queue attempt. Expired/replaced sessions cannot settle or refund.
+  Rig-scoped read-only `/v1/workers/self/media-jobs` confirms irreversible
+  closure for local-cache retention, including lost ACKs after settlement. It
+  remains available on admission rollback; unknown/expired is not closed.
 - An enrolled worker's verified signing authority is independent of later
   account payout-preference changes. Reconnection retains the exact owned
   delegation with fresh proof, never arbitrary old wallets or another account's
