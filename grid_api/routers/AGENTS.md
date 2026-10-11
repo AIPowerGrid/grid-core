@@ -91,6 +91,18 @@ transport, accounts, stats, health/metrics.
   opening images now also validate before quota, not during upload.
   This is credit-only, not x402, cancellation or worker-restart qualification.
 - `audio.py` - `POST /v1/audio/generations` governed local ACE-Step jobs.
+- `video_quotes.py` - default-off private `POST /v1/x402/videos/quotes` and
+  owner-only GET by quote UUID or `Idempotency-Key` header. Scope is
+  `inference.submit`; creation additionally requires one of at most ten pilot
+  accounts and an explicit at-most-24-hour deadline. It uses the same bounded
+  native video intent/source validation and immutable compiler without staging,
+  quota, credit or dispatch. One retained quote returns 201; exact replay 200,
+  changed intent 409 and exhausted retained capacity 429. GET/accepted replay
+  survive rollback and expiry; expired identity never becomes a new quote.
+  Replies are private/no-store and explicitly `payment_enabled:false`; no
+  `/pay` route or PAYMENT-REQUIRED challenge exists. This is not a live x402
+  rail, held generation, stock-client compatibility or public model permission.
+  The optional quotation table requires migration `0046` before use.
 - `worker_enrollment.py` - dark device-style manager pairing. Public create,
   intent, poll, and ACK endpoints are capability-bound by a high-entropy
   enrollment ID plus poll secret; prepare/approve require a recent scoped user
@@ -496,6 +508,11 @@ expired or out-of-scope pilots return 503 without revealing membership.
 - Keep request-size checks before sanitizer/tokenization for CPU and memory safety.
 
 ## Verification
+
+- `tests/test_video_quotes.py` uses real scoped auth and SQLite/PostgreSQL
+  rows for default-off/private admission, source-byte conflicts, expiry and
+  lost-reply GET recovery. Upload/quota/reservation/dispatch are forbidden test
+  effects; `/pay` is absent. This is not real USDC settlement or GPU proof.
 
 - `tests/test_video_jobs.py` covers request-key GET recovery with real scoped
   keys and SQLite/PostgreSQL, including missing/foreign/scope-rejected keys,

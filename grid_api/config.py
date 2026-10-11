@@ -98,6 +98,15 @@ class GridSettings(BaseSettings):
     media_private_source_bucket: str = Field(
         default="", pattern=r"^(?:[a-z0-9][a-z0-9-]{1,61}[a-z0-9])?$"
     )
+    # Private quotation pilot only; no payment verifier/sender or dispatch.
+    video_x402_quotes_enabled: bool = False
+    video_x402_quote_accounts: list[UUID] = Field(default_factory=list, max_length=10, repr=False)
+    video_x402_quotes_until: AwareDatetime | None = None
+    video_x402_quote_network: Literal["eip155:8453", "eip155:84532"] = "eip155:84532"
+    video_x402_quote_pay_to: str = Field(default="", pattern=r"^(?:0x[0-9a-fA-F]{40})?$")
+    video_x402_quote_max_micro: int = Field(default=1_000_000, ge=1, le=1_000_000_000)
+    video_x402_quote_per_account: int = Field(default=8, ge=1, le=32)
+    video_x402_quote_capacity: int = Field(default=256, ge=1, le=4096)
     # Native-manager device enrollment. Independently dark until the console
     # approval page and release manager are deployed together.
     worker_enrollment_enabled: bool = False
@@ -223,6 +232,21 @@ class GridSettings(BaseSettings):
     grid_treasury_monitor_token: str = Field(default="", pattern=r"^(?:0x[0-9a-fA-F]{40})?$")
     grid_treasury_min_eth_wei: int = Field(default=0, ge=0, le=2**256 - 1)
     grid_treasury_min_token_raw: int = Field(default=0, ge=0, le=2**256 - 1)
+
+    @model_validator(mode="after")
+    def validate_video_quote_pilot(self):
+        if self.video_x402_quote_capacity < self.video_x402_quote_per_account:
+            raise ValueError("Video quote capacity must cover the account limit")
+        if len(set(self.video_x402_quote_accounts)) != len(self.video_x402_quote_accounts):
+            raise ValueError("Video quote pilot accounts must be distinct")
+        if self.video_x402_quotes_enabled:
+            now = datetime.now(UTC)
+            if (not self.video_x402_quote_accounts or not self.video_x402_quote_pay_to
+                    or int(self.video_x402_quote_pay_to[2:], 16) == 0
+                    or self.video_x402_quotes_until is None
+                    or not now < self.video_x402_quotes_until <= now + timedelta(hours=24)):
+                raise ValueError("Video quote pilot requires accounts, nonzero recipient and an expiry within 24 hours")
+        return self
 
     @model_validator(mode="after")
     def validate_worker_reward_demand(self):

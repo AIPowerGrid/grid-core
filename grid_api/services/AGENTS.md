@@ -130,7 +130,23 @@ content sanitization, and reward settlement.
   yielding. Returned dictionaries cannot mutate the snapshot. This is not a
   durable quote, frozen tariff, payment authorization, recovery selector or
   public graph interface. Core still prices and reserves through the existing
-  live-credit authority; x402 quote/payment/refund implementation remains absent.
+  live-credit authority. `video_quotes.py` now separately persists bounded
+  immutable private quotes; planning alone is still not quotation authority.
+- `video_quotes.py` owns `grid_video_quotes`, not reservations or the outbox.
+  Five-minute quotes freeze canonical owner/request key, normalized intent,
+  source-byte commitments, selected seed/graph/units, undiscounted price-book
+  snapshot, canonical Base USDC recipient/network and one derived nonce.
+  Reads verify the commitment and indexed fields; replay never recompiles or
+  reprices. PostgreSQL globally serializes inserts and retained-row caps while
+  account locks fence merges; no decoder/storage/network call runs under those
+  locks. Cheap capacity preflight precedes native decoding. Preparation is
+  additionally bounded to two owners per process and one per local owner; this
+  is not a cross-replica decoder lease. Expired rows remain readable and count
+  toward the pilot's caps; no deletion/reused identity or payment acceptance
+  exists. No quote can enqueue, upload, consume quota, debit, pay or refund.
+  Apply `0046` before using these optional routes and retain quote history on
+  rollback. Exact-signature binding, payment proof, cross-rail claim ownership,
+  funded admission and real refunds remain separate implementation gates.
 - `media.compile_dispatch` is the non-I/O governed compiler; the existing
   async `prepare_dispatch` wrapper additionally checks compatible workers.
   It freezes the same governed graph/execution units for
@@ -955,6 +971,11 @@ content sanitization, and reward settlement.
   over a newer cached block.
 
 ## Verification
+
+- `tests/test_video_quotes.py` exercises immutable quotation on SQLite and
+  disposable PostgreSQL: native synthetic source validation, price/seed replay,
+  owner/merge isolation, retained-cap races, corruption and migration parity.
+  No facilitator, payment, production admission or GPU quality is proved.
 
 - `tests/test_ltx25_appearance.py` checks the separate fixed Ingredients profile,
   nonanimated/unrotated PNG decoding, default-dark admission, committed roles/

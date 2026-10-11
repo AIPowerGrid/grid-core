@@ -73,6 +73,19 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Private video quotation is separate from async generation and text x402.
+  `VIDEO_X402_QUOTES_ENABLED=0` is the default; enabling additionally requires
+  at most ten explicit `VIDEO_X402_QUOTE_ACCOUNTS`, a nonzero
+  `VIDEO_X402_QUOTE_PAY_TO` and `VIDEO_X402_QUOTES_UNTIL` within 24 hours.
+  The network defaults to Base Sepolia. Each immutable quote lasts five minutes
+  and uses undiscounted price-book rates; it never collects payment or touches
+  credits/uploads/quota/dispatch. Apply `0046` before using this optional API.
+  Default retained caps are eight/account and 256 globally, including expired
+  identities; saturation holds new quotes rather than deleting/repricing them.
+  GET and matching replay remain available after rollback. A distributed
+  decoder-work lease and bounded replay tombstone retention remain public
+  scale gates. No `/pay` endpoint, facilitator or refund sender exists.
+
 - Async video remains a default-off candidate, not production admission.
   Source conditioning additionally requires explicit `audio-to-video` /
   `video-to-video` allowlist entries, which are excluded from omitted defaults.

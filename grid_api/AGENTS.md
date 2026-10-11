@@ -76,6 +76,12 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   Rig-scoped read-only `/v1/workers/self/media-jobs` confirms irreversible
   closure for local-cache retention, including lost ACKs after settlement. It
   remains available on admission rollback; unknown/expired is not closed.
+- **Video quotation:** independently default-off `VIDEO_X402_QUOTES_ENABLED`
+  permits only a bounded, explicitly expiring account pilot. Quote creation
+  validates/compiles without uploads, quota, credits, dispatch or chain calls.
+  Optional quote reads require migration `0046`. This feature is not payment
+  acceptance, video admission or model-use clearance. Rollback closes new
+  quotations while preserving authenticated recovery and immutable history.
 - An enrolled worker's verified signing authority is independent of later
   account payout-preference changes. Reconnection retains the exact owned
   delegation with fresh proof, never arbitrary old wallets or another account's

@@ -846,6 +846,35 @@ sa.Index("ix_grid_media_jobs_source_cleanup", media_jobs.c.source_cleanup_attemp
          sqlite_where=sa.text("source_objects IS NOT NULL AND source_cleanup_at IS NULL"))
 
 
+# Immutable, private video quotation only. No reservation FK, outbox state,
+# payment signature or settlement authority exists in this table.
+video_quotes = sa.Table(
+    "grid_video_quotes",
+    metadata,
+    sa.Column("id", sa.Uuid, primary_key=True),
+    sa.Column("job_id", sa.Uuid, nullable=False),
+    sa.Column("account_id", sa.Uuid, sa.ForeignKey("grid_accounts.id"), nullable=False),
+    sa.Column("idempotency_hash", sa.String(64), nullable=False),
+    sa.Column("request_hash", sa.String(64), nullable=False),
+    sa.Column("plan_hash", sa.String(64), nullable=False),
+    sa.Column("commitment", sa.String(64), nullable=False),
+    sa.Column("authorization_nonce", sa.String(66), nullable=False),
+    sa.Column("snapshot", sa.JSON, nullable=False),
+    sa.Column("amount_micro", sa.BigInteger, nullable=False),
+    sa.Column("max_cost_micro", sa.BigInteger, nullable=False),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("expires", sa.DateTime(timezone=True), nullable=False),
+    sa.UniqueConstraint("account_id", "idempotency_hash", name="uq_grid_video_quotes_owner_key"),
+    sa.UniqueConstraint("job_id", name="uq_grid_video_quotes_job"),
+    sa.UniqueConstraint("authorization_nonce", name="uq_grid_video_quotes_nonce"),
+    sa.CheckConstraint("length(idempotency_hash) = 64 AND length(request_hash) = 64 AND "
+                       "length(plan_hash) = 64 AND length(commitment) = 64 AND length(authorization_nonce) = 66",
+                       name="ck_grid_video_quotes_hashes"),
+    sa.CheckConstraint("amount_micro > 0 AND max_cost_micro >= amount_micro", name="ck_grid_video_quotes_amount"),
+    sa.CheckConstraint("expires > created", name="ck_grid_video_quotes_expiry"),
+)
+
+
 # x402 is a post-response on-chain settlement rail. A verified authorization is
 # recorded before dispatch. The before-settle hook durably records the exact
 # attempted amount before the facilitator can touch chain. Facilitator success

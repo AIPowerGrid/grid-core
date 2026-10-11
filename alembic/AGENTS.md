@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0045`
+- `versions/` - ordered migration revisions. Current source head: `0046`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -62,8 +62,16 @@ production database match the Grid-owned schema contracts without relying on
   recovery index without reconstructing any historical execution authority.
   `0045` adds nullable exact private-source retention authority and cleanup
   timestamps, without adopting historical URLs or changing economic records.
+  `0046` creates empty immutable private video quotations, with owner/key,
+  job UUID and derived-nonce uniqueness, positive bounded amount and expiry
+  constraints. No signature, reservation, payment, dispatch or backfill exists.
 
 ## Local Contracts
+
+- Apply `0046` before using the optional quote routes, even for recovery after
+  their creation flag is rolled back. Ordinary video/credit paths do not read
+  this new table. Retain it on rollback; downgrade refuses any quotation,
+  including expired state, rather than silently freeing a reused request key.
 
 - Apply through `0045` before starting this candidate, even with admission off.
   Ordinary journal reads and the independent source-cleanup loop select the new

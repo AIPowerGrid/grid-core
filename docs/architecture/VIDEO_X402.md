@@ -1,14 +1,13 @@
 <!-- SPDX-FileCopyrightText: 2026 AI Power Grid -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
-# Video x402 Build Proposal
+# Video x402 Build
 
-Status: **payment design proposal, not implemented or enabled**. Reviewed against the
-candidate async video code and locally locked x402 2.16.0 SDK on October 11,
-2026. This document creates no route, payment collection, refund sender or
-production authority. Its side-effect-free execution-planning prerequisite is
-now implemented separately, as described below; no quote/payment API follows
-from that prerequisite. Credit-backed video remains the first integration path;
+Status: **private quotation candidate implemented; payment remains a proposal**.
+Reviewed against the candidate async video code and locally locked x402 2.16.0
+SDK on October 11, 2026. The quote routes below are independently default-off
+and have no payment collection, reservation, dispatch, refund sender or
+production authority. Credit-backed video remains the first integration path;
 [LTX qualification](LTX_2_5_VIDEO.md) and model-use permission still gate launch.
 
 ## Current Boundary
@@ -24,6 +23,12 @@ Current owners are `routers/video_jobs.py`, `services/media_jobs.py`,
 `services/settlement/aggregate.py`. The async journal currently requires an
 account and a live credit hold. Existing x402 reconciliation requires a terminal
 actual charge. Neither is already a prepaid-video implementation.
+
+`routers/video_quotes.py` and `services/video_quotes.py` now own a separate
+immutable `grid_video_quotes` table (migration `0046`). There is no relationship
+that grants a quote row a reservation or executable outbox authority. Apply the
+migration before using the optional routes, including GET recovery after
+rollback. Downgrade refuses to discard any retained row, even an expired quote.
 
 ## Proposed First Version
 
@@ -41,15 +46,26 @@ configuration is not proof. The
 defines payment authorization and settlement. Job binding and the async lifecycle
 below are Grid-specific additions, not standard x402 guarantees.
 
-Proposed routes, **not callable today**:
+Implemented candidate routes, **private and default-off, not deployed**:
 
 - `POST /v1/x402/videos/quotes`: scoped authenticated request, UUIDv4
   `Idempotency-Key`, bounded video intent and positive cost ceiling.
-- `POST /v1/x402/videos/quotes/{quote_id}/pay`: identical intent and signed exact
-  payment; no alternate account, recipient or executable graph.
-- `GET /v1/x402/videos/quotes/{quote_id}`: owner-only payment/job/refund status.
+- `GET /v1/x402/videos/quotes/{quote_id}`: owner-only frozen quote status.
 - `GET /v1/x402/videos/quotes`: owner-only lost-reply recovery with the original
   `Idempotency-Key` header.
+
+All three require `inference.submit`, with the existing service/user delegation
+rules. New rows return 201, identical POST replay returns 200, changed intent or
+ambiguous merged keys return 409, and foreign/missing reads return the same 404.
+Responses are `no-store`; they explicitly return `payment_enabled: false` and
+do not emit a `PAYMENT-REQUIRED` header. GET and identical replay remain available
+after disabling new quotes or expiry; expired identity never means reprice,
+extend, replace or mint a new nonce. Recovery uses GET, not another generation.
+
+**Not implemented:** `POST /v1/x402/videos/quotes/{quote_id}/pay`. The future
+route must bind the identical intent and signed exact payment, with no alternate
+account, recipient or executable graph. No current route accepts a payment
+signature, invokes a facilitator, checks chain receipts or owes a refund.
 
 Quotes never upload inputs, debit pockets or enqueue. Native source validation
 now returns private `VideoInputs` without quota/uploads. The non-I/O compiler
@@ -58,28 +74,64 @@ credit ingress binds uploaded locations to that exact graph rather than
 re-resolving it. Source validation still performs compatible-worker/ownership
 reads and bounded local decoding. The compiler itself performs none of those
 reads, storage, quota, monetary I/O or GPU work. Its in-memory snapshots are
-not persisted quotes, frozen tariffs or payment authority. `prepare_video`
+not themselves persisted quotes, frozen tariffs or payment authority. `prepare_video`
 still consumes quota/uploads as the legacy waiting wrapper and must not be used
-as a quotation API. Durable price/owner/deadline/nonce binding remains to build.
-Bound rows, decoder work,
-outstanding quotes and payment exposure per account and globally. Start with a
-five-minute quote/authorization lifetime and return its exact deadline. This is
-a proposed policy value, not an existing setting.
+as a quotation API. The separate quote service now freezes and persists the
+private plan and undiscounted positive governed tariff, independent of credit
+pockets, holder discounts, free allowance or current balance. Stored sources
+are byte/role/timing commitments, not source bytes or uploaded objects. The
+owner response omits the private full graph, prompt, salt and key hash.
+
+## Private Quote Limits
+
+`VIDEO_X402_QUOTES_ENABLED` defaults false. New quote admission also requires
+one to ten distinct allowlisted account UUIDs, a nonzero configured recipient,
+and an explicit UTC pilot deadline at most 24 hours ahead when enabled at
+startup. Admission rechecks the deadline after source preparation and again
+under the SQL commit lock. Existing media/model/source gates still apply.
+Enabling this pilot is not public model-use clearance or payment activation.
+
+`VIDEO_X402_QUOTE_NETWORK` defaults to `eip155:84532` (Base Sepolia); the only
+other accepted network is `eip155:8453`. Assets are the canonical Circle USDC
+contracts, never an operator-supplied bridged token. Each quote expires five
+minutes after creation and freezes that exact authorization deadline. The
+default operator ceiling is 1,000,000 micro-USD, bounded to 1..1,000,000,000;
+the client's positive ceiling must also cover the exact tariff. Neither is a
+spend approval while `payment_enabled` remains false.
+
+Retained-row caps default to eight per account family and 256 globally, with
+configured bounds of 1..32 and 1..4096 respectively. Expired rows consume the
+same cap: saturation rejects new quotes rather than deleting replay identities.
+PostgreSQL transaction-scoped advisory serialization plus account locks recheck
+capacity and identity before insert. No network or decoding work runs under
+those locks. SQLite compatibility tests are not concurrency proof.
+
+Before decoding, a cheap capacity check rejects already saturated pilots.
+Preparation admits at most two owners per process and one preparation per
+owner, without an unbounded wait queue. MP4 decoding has its own bounded
+executor and retains decoder capacity through cancellation. This is **not a
+cross-replica decoder lease**. Distributed preparation admission and bounded
+retention with durable replay tombstones are required before public-scale quote
+admission; neither may silently allow expired keys to become new payments.
 
 ## Request And Payment Binding
 
 Commit canonical owner, hashed idempotency key, normalized request hash, source
 byte/role/timing commitments, one selected seed, resolved graph/recipe commitment,
 execution units, price version, exact micro-USDC amount, recipient, chain/token
-and deadline in an immutable quote. The existing request hash alone does not
+and deadline in an immutable quote. This binding is implemented for private
+quotation; the existing request hash alone does not
 freeze a generated seed or compiled graph; never resolve either after payment.
 
 Allocate one job UUID and random quote salt. Derive a unique 32-byte authorization
 nonce from a versioned canonical quote commitment. Publish its verification
-fields and require the signed nonce to match. Changing the job, prompt, source,
+fields; the future payment verifier must require the signed nonce to match.
+Changing the job, prompt, source,
 price, graph or deadline requires a new quote, never mutation. SQL uniqueness
-binds an authorization to one quote/job. Unsigned `extra` or `resource` metadata
-alone cannot supply this binding.
+binds the planned nonce to one quote/job. Unsigned `extra` or `resource` metadata
+alone cannot supply this binding. Current nonce uniqueness and commitment
+verification do not prove a signature, received payment, cross-rail replay
+protection or compatibility with an unmodified x402 client.
 
 [EIP-3009](https://eips.ethereum.org/EIPS/eip-3009) signs nonce, value, recipient
 and validity, and emits `AuthorizationUsed`. Committing the Grid quote through
@@ -95,7 +147,7 @@ Retained authorizations need private access-controlled storage and bounded
 expiry. Reads authenticate the owner; neither a quote ID nor a supplied wallet,
 payment header or idempotency key is independently an access credential.
 
-## Durable Flow
+## Proposed Payment Flow
 
 ```text
 Agent: scoped key + bounded intent + idempotency key
@@ -162,11 +214,31 @@ refund obligations or private-input cleanup.
   read-only reconciler; autonomous USDC sending is a separate gate. Core gets no
   Safe signer, and the AIPG worker payout CLI is not a USDC refund sender.
 
+## Local Qualification
+
+October 11 candidate verification uses Python 3.13, local PostgreSQL 14 and
+FFmpeg/FFprobe. The focused quote suite passes 87 tests; four skips are the
+SQLite variants of PostgreSQL-only concurrency/DDL proofs, whose PostgreSQL
+variants execute. The full Grid suite passes 2,872 tests with 32 skips and 139
+warnings. Skips include optional private captures, reviewed worker/Console
+integration and separately configured shadow Redis checks, alongside the
+SQLite variants of PostgreSQL-only tests; they are not claimed as verified.
+A separate empty database migrates from genesis through `0046`, and
+`alembic check` reports no schema drift. New Python files pass targeted Ruff;
+tracked source and full reachable HEAD history pass the existing secret and
+infrastructure scan policy without new exclusions. Exact-commit Linux/
+PostgreSQL 16 CI remains pending, as do real payment and native quote-to-funded
+job qualification. These local results do not change public serving permission.
+
 ## Build And Qualification Order
 
-1. Pure video planning and immutable quotes; schema/Alembic parity, expiry,
-   owner isolation, request conflicts and bounded capacity. No payment sender
-   or dispatch authority in this slice.
+1. Private pure planning and immutable quotes are implemented candidates.
+   Local SQLite/PostgreSQL 14 tests cover schema/Alembic parity, source
+   validation, expiry/rollback recovery, owner isolation, request conflicts,
+   duplicate inserts and retained-capacity races. They forbid quota/uploads,
+   reservations and dispatch. Required PostgreSQL 16 CI remains an exact-commit
+   gate; fixtures do not prove production or payment compatibility. Public-scale
+   preparation and replay-tombstone retention remain separate work.
 2. Exact client binding and server verifier: wrong nonce/amount/payer/domain/
    deadline, changed sources/graph and unsupported signing/account types.
 3. Attempt journal, independent chain proof and atomic prepaid hold/outbox.
@@ -182,5 +254,6 @@ refund obligations or private-input cleanup.
    Mainnet payment and a failed-job refund. Public support still requires model
    permission and all video release gates.
 
-Do not present these routes, policy values or transitions as shipped until code
-and qualification exist. This proposal changes no defaults or running workers.
+Do not present quotation as a shipped payment rail, or the proposed financial
+transitions as implemented. No production defaults, funds or running workers
+are changed by this candidate.

@@ -20,6 +20,14 @@ validator shadow-observation records.
 
 ## Local Contracts
 
+- Migration `0046` creates empty private `grid_video_quotes`, without a
+  reservation, executable job or payment signature. Quote/job UUIDs, nonce and
+  owner/request-key uniqueness bind the private immutable snapshot; amount and
+  expiry checks remain database-enforced. The service verifies its SHA-256
+  commitment and indexed fields on every recovery. Expired rows retain their
+  identity and consume fixed pilot capacity. Apply before using optional quote
+  routes; retain on rollback. Downgrade refuses any recorded quotation history.
+
 - Migration `0043` creates empty private `grid_media_jobs` request/execution
   records; no historical request is reconstructed or admitted. Each row has a
   matching reservation FK and a unique account/idempotency-hash pair. The
