@@ -78,6 +78,22 @@ class LtxVideoInputs(BaseModel):
         return value
 
 
+def normalize_timing(contract: LtxVideoContract, *, frames: int | None = None,
+                     seconds: float | None = None, fps: int = 24) -> dict:
+    """Quote duration only; this does not validate sources or authorize execution."""
+    inputs = LtxVideoInputs.model_validate({"frames": frames, "seconds": seconds, "fps": fps})
+    if frames is None:
+        frames = (121 if contract.appearance_profile else 81) if seconds is None else (
+            1 + 8 * math.floor((inputs.seconds * inputs.fps - 1) / 8 + 0.5))
+    elif seconds is not None and not math.isclose(seconds, frames / fps, abs_tol=1e-9):
+        raise ValueError("seconds and frames must describe the same duration")
+    if frames < 9 or frames > contract.max_frames or frames % 8 != 1:
+        raise ValueError(f"LTX-2.5 frames must be 8n+1 between 9 and {contract.max_frames}")
+    if contract.appearance_profile and frames != 121:
+        raise ValueError("Ingredients requires 121 frames")
+    return {"frames": frames, "fps": fps, "seconds": frames / fps}
+
+
 def normalize(contract: LtxVideoContract, values: dict) -> dict:
     """Seconds select the nearest 8n+1 clip; explicit frames are never rounded."""
     appearance = contract.appearance_profile is not None
@@ -103,13 +119,7 @@ def normalize(contract: LtxVideoContract, values: dict) -> dict:
         raise ValueError("LTX-2.5 dimensions must be multiples of 32")
     if inputs.width * inputs.height > contract.max_pixels:
         raise ValueError(f"LTX-2.5 size exceeds {contract.max_pixels} pixels")
-    frames = inputs.frames
-    if frames is None:
-        frames = 81 if inputs.seconds is None else 1 + 8 * math.floor((inputs.seconds * inputs.fps - 1) / 8 + 0.5)
-    elif inputs.seconds is not None and not math.isclose(inputs.seconds, frames / inputs.fps, abs_tol=1e-9):
-        raise ValueError("seconds and frames must describe the same duration")
-    if frames < 9 or frames > contract.max_frames or frames % 8 != 1:
-        raise ValueError(f"LTX-2.5 frames must be 8n+1 between 9 and {contract.max_frames}")
+    frames = normalize_timing(contract, frames=inputs.frames, seconds=inputs.seconds, fps=inputs.fps)["frames"]
     steps = inputs.steps if inputs.steps is not None else (8 if contract.variant == "distilled" else 40)
     cfg = inputs.cfg if inputs.cfg is not None else (1.0 if contract.variant == "distilled" else 2.0)
     if contract.variant == "distilled" and (steps != 8 or cfg != 1):

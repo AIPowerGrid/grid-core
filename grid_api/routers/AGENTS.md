@@ -155,6 +155,10 @@ transport, accounts, stats, health/metrics.
   scoped to the payout wallet), immutable deposit history/config, and deposit
   claims (USDC launch rail, bounded expiring-price AIPG, actual-USDC
   swap-receipt ETH, and operator-only buffered ETH).
+  Video quotes validate only shared exact timing, without requiring private
+  conditioning media. Ingredients quotes retain the fixed 121-frame profile
+  and unpriced status until an operator-reviewed rate exists; a quote never
+  uploads, reserves, dispatches or enables its default-dark admission.
   `GET /v1/workers/self` and `POST /v1/workers/self/canary` accept only a
   manager-issued `worker.connect`
   credential. The status route returns the exact bound rig's online/jobs/den
