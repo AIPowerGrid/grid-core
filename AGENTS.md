@@ -131,6 +131,11 @@ owning AGENTS.md and any affected parent Child DOX Index.
   uses new unfunded signatures and Core's verifier through private two-phase
   IPC. Require zero credit/hold/job effects. This is not a wallet UI, live token/
   account/facilitator, replay exclusion, received-payment or refund proof.
+- The candidate video receipt verifier additionally uses two exact HTTPS RPC
+  destinations, bounded read-only replies, actual ECDSA/official-SDK ABI checks,
+  exact USDC authorization/Transfer events and pinned block state. Fixture
+  tests are not live RPC, facilitator or purchased-payment qualification. It
+  has no runtime hook, payment attempt, cross-rail claim or economic authority.
 - Router billing/settlement coverage: `pytest grid_api/routers/`.
 - Legacy smoke tests live under `tests/` and may skip without external services.
 - For docs-only changes, run at least `git diff --check` and inspect the DOX

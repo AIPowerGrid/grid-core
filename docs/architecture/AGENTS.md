@@ -183,6 +183,10 @@ validation, worker incentives, and trust boundaries.
   Binding-v2 snapshots include the signing domain; legacy v1 identities recover
   unchanged without signing authority. Offline exact-signature checks and locked
   SDK compatibility are candidates, not HTTP acceptance or a released adapter.
+  A separate historical receipt helper now verifies direct v/r/s transfers
+  through two bounded HTTPS RPC destinations with exact authorization/transfer,
+  signature, contract-state and canonical-anchor checks. Its fixture transports
+  are not live chain proof; no attempt, claim, funding or dispatch is written.
   Remaining work includes published client/outer-envelope integration, live
   chain/account/facilitator proof, payment-before-outbox admission,
   cross-rail replay protection, separate refund obligations and real payment

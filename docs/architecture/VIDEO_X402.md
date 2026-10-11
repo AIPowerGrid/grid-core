@@ -3,8 +3,8 @@
 
 # Video x402 Build
 
-Status: **private quotation and offline signature-binding candidates implemented;
-payment collection remains a proposal**.
+Status: **private quotation, offline signature-binding and read-only historical
+receipt-verifier candidates implemented; payment collection remains a proposal**.
 Reviewed against the candidate async video code and locally locked x402 2.16.0
 SDK on October 11, 2026. The quote routes below are independently default-off
 and have no payment collection, reservation, dispatch, refund sender or
@@ -184,7 +184,8 @@ The exact SDK candidates also pass GitHub Python 3.9..3.12 and Node 18/20/22/24
 runtime/package/security matrices. The combined existing video HTTP/recovery
 and new signing qualification passes 68 cases locally on SQLite/PostgreSQL.
 Core CI now pins those exact SDK commits and runs both suites; the fresh Core
-revision's Linux/PostgreSQL 16 result remains a separate gate.
+`0019bfde` revision passes its exact Linux/PostgreSQL 16 CI gate. Later changes
+still require their own exact-revision result.
 
 Verification requires a caller-owned, authenticated SQL quote and an expected
 payer. It accepts exactly the inner `authorization` and `signature` fields with
@@ -209,6 +210,69 @@ This is an admission-time current-window check, not a historical receipt
 verifier. An already attempted payment still requires reconciliation after
 expiry; the helper's expiry refusal is never proof that funds were not sent or
 permission to discard a refund/recovery obligation. No live payment route exists.
+
+### Historical Receipt Candidate
+
+`services/video_payment_proofs.py` now provides a separate read-only verifier,
+without an HTTP route or background hook. Its caller must supply an owner-loaded
+immutable v2 quote, expected payer, original transaction, two operator-selected
+HTTPS RPC destinations and an explicit `safe` or `finalized` confirmation tag
+plus a bounded depth. Client TLS/authentication/lifecycle configuration is a
+future adapter responsibility, never a caller-supplied payment request field.
+Requests use those actual destinations, not merely asserted source labels.
+
+Both sources must prove the expected chain, a successful direct canonical-USDC
+`transferWithAuthorization` v/r/s call, exact quote fields, real recovered
+signature and exactly one matching Transfer plus AuthorizationUsed event.
+Receipt/transaction/log/block identities must match. Token domain separator,
+six decimals and consumed authorization state are read at the required-canonical
+payment block hash. The payer must have no code/delegation there; a separate
+gas-paying relayer is valid. Both sources must agree on the same payment facts
+and a re-read confirmation anchor, even if their heads advance between reads.
+Distinct RPC hostnames are defense in depth, not proven provider independence
+or a cryptographic light-client proof. `safe` is not mislabeled as finalized.
+
+The helper deliberately permits historical inspection after quote expiry. The
+transaction must have mined inside the original quote window, but late proof
+still needs the future attempt/admission/refund transaction to discharge its
+liability. An expired quote never means no transfer. Pending, unavailable or
+inconsistent evidence cannot authorize a new payment, render, charge or refund.
+The result retains no signature/calldata or funded-job flag. No SQL is written.
+
+HTTP reads have five-second limits and a thirty-second whole-proof deadline,
+two process-local active slots, 512-KiB reply bounds, duplicate-free finite JSON,
+strict JSON-RPC result identity and no redirects. Payer/contract/receipt errors
+never reflect input, endpoint errors or spending capabilities. The caller-owned
+HTTP clients must be closed by the future adapter. The initial shape rejects
+wrapped/batched transactions, `receiveWithAuthorization`, bytes overloads and
+calldata suffixes; facilitator compatibility with this shape remains unproved.
+There is no silent fallback that treats a merely matching amount as funding.
+
+The 170-case Base/Base-Sepolia suite uses fixture HTTP transports, actual newly
+generated unfunded Ethereum signatures and the locked official SDK's Web3 ABI.
+It tests expiry recovery, altered events/calldata/domains/code/anchors, provider
+disagreement, malformed/oversized responses, redirect refusal, deadlines and
+live local-capacity cancellation. It is not a live token/RPC/facilitator,
+purchased-payment, prior-attempt, shared-claim, GPU or on-chain refund proof.
+
+Separate October 11 **live read-only** checks use the new bounded HTTP reader
+against [Base's published RPC endpoints](https://docs.base.org/get-started/connect-to-base)
+and PublicNode. Each pair agrees on chain ID and the same safe block hash, and
+accepts required-canonical block-hash reads of canonical USDC code, the frozen
+EIP-712 domain separator and six decimals:
+
+| Network | Common Safe Block | Common Hash |
+| --- | --- | --- |
+| Base | `0x320de5b` | `0xf1d59507f101b88d99caeaeb6aad5c626f41e2b737e393726cff507ff10b3e3f` |
+| Base Sepolia | `0x2dc5d6a` | `0xea3a01e4adb36fdbefb3ef8377ddc79c78052dc79bf04667d7d51a340f3da134` |
+
+The exact pairs are `mainnet.base.org` / `base-rpc.publicnode.com` and
+`sepolia.base.org` / `base-sepolia-rpc.publicnode.com`. This verifies sampled
+contract-domain and RPC-selector compatibility, not provider independence,
+payer code/balance, an unused/consumed nonce, a historical transfer, facilitator
+support, economic admission or refund. No wallet, signature, transaction sender,
+money movement or production configuration is involved. Future payment proof
+must check its own actual payment block; this sample cannot substitute for it.
 
 Signed payment headers are temporary spending capabilities, not recovery tokens.
 Never put them in URLs, logs, result envelopes or ordinary evidence exports.
@@ -305,8 +369,15 @@ and shadow Redis checks, pinned video SDK/Core HTTP qualification and the
 Console/node compensation handoff. Those results do not qualify the later
 signing-domain/verifier changes. The offline verifier `0022f640` separately passes
 [exact-commit Linux/PostgreSQL 16 CI](https://github.com/AIPowerGrid/grid-core/actions/runs/38179418365).
-The later RPC domain-type completion and pinned SDK gate pass the same local
-2,942-test Grid suite, but still need fresh exact-commit CI. Real payment and
+The later RPC domain-type completion and pinned SDK gate `0019bfde` pass the same
+local 2,942-test Grid suite and their separate
+[exact-commit Linux/PostgreSQL 16 CI](https://github.com/AIPowerGrid/grid-core/actions/runs/38182266267).
+The subsequent historical receipt candidate passes a full local Core run of
+3,110 tests, with the same 32 skips and 139 warnings, in 439.78 seconds. A final
+JSON exponent-overflow guard then passes 238 targeted tests: 170 receipt cases
+plus 68 exact-signature cases. The earlier full run predates those final two
+overflow cases; fresh exact-commit Linux/PostgreSQL 16 CI remains required.
+The receipt tests have no real payment or SQL mutation. Real payment and
 native quote-to-funded job qualification remain pending. Neither
 local nor CI fixture results change public serving permission.
 
@@ -326,6 +397,9 @@ local nor CI fixture results change public serving permission.
    Finish outer-envelope integration and qualify
    live account/token/facilitator compatibility before taking payment.
 3. Attempt journal, independent chain proof and atomic prepaid hold/outbox.
+   The read-only receipt verifier is a candidate with fixture transport proofs;
+   a durable prior attempt, shared cross-rail claims, actual live compatibility
+   and the atomic funded admission transaction are not implemented yet.
    Prove duplicates, concurrency and cross-rail claims on PostgreSQL 16. Keep
    the existing text x402 contract unchanged.
 4. Integrate leased success/failure and reviewed refunds. Kill processes before/
