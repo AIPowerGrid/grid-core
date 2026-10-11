@@ -134,6 +134,11 @@ validation, worker incentives, and trust boundaries.
   network section with exact units, output timing, lost-reply recovery and
   automatic private-input deletion. These are synthetic unfunded tests, not
   the handoff's multi-pin film or quality parity.
+  Core `2ac53a96` / worker `ffc4a011` / Director `7eb81ace` also pass actual
+  managed A2V/V2V project selection/export and repeat audits, including same-job
+  V2V crash recovery. Exact Core CI and all 24 SDK/Core SQLite/PostgreSQL
+  scenarios pass; SDK fixtures alone are not native evidence. Separate private
+  Core instances do not prove shared-coordinator two-worker balancing.
   Pre-admission/ComfyUI/output retention remains separate.
   ComfyUI/orphan retention, purchased funds,
   broader faults and appearance/motion/lip-quality acceptance remain gates.
