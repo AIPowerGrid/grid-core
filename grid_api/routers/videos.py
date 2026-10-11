@@ -9,6 +9,7 @@ job_type=video and are served by media workers that support temporal models
 (e.g. LTX). den scales per frame-step on the worker side.
 """
 
+import json
 import logging
 import time
 from typing import Optional
@@ -21,6 +22,7 @@ from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
 from ..services import loras as loras_svc
 from ..services import generation_admission, media, quota, recipes, storage, video_contract, video_sources
+from ..services.video_plans import VideoInputs, stage_inputs
 from ..services import styles as styles_svc
 from .worker_ws import get_available_models
 from ._video_body import BoundedVideoRoute
@@ -59,8 +61,8 @@ class VideoRequest(BaseModel):
     progress_token: Optional[str] = None  # client id to poll live % at GET /v1/progress/{token}
 
 
-async def prepare_video(body: VideoRequest, user: dict, *, async_submission: bool = False) -> tuple[str, dict, list[int]]:
-    """Shared native ingress: validate, admit and upload; never reserve or queue."""
+async def validate_video(body: VideoRequest, user: dict, *, async_submission: bool = False) -> VideoInputs:
+    """Validate bounded inputs and admission without quota, uploads or dispatch."""
     try:
         if body.worker:
             await accounts_svc.assert_owns_worker(user, body.worker)
@@ -175,6 +177,13 @@ async def prepare_video(body: VideoRequest, user: dict, *, async_submission: boo
         decoded_pins = media.decode_video_keyframes([pin.image for pin in body.keyframes]) if body.keyframes else None
         if decoded_pins and "size" not in set_fields:
             width, height = video_contract.source_size(contract, *decoded_pins[0][2:])
+        if source_image and not decoded_pins:
+            if not recipes.supports_image(model):
+                raise HTTPException(422, detail=f"model '{model}' does not accept an input image (no img2img/img2video recipe)")
+            decoded_pins = [media.decode_source_image(source_image)]
+            if "size" not in set_fields:
+                sw, sh = decoded_pins[0][2:]
+                width, height = video_contract.source_size(contract, sw, sh) if contract else media.smart_size(sw, sh)
         # Source-bearing paths are default dark, independently of charging.
         # Check before decoding MP4s, uploads or consuming caller quota.
         generation_admission.require_media("video", {
@@ -191,27 +200,12 @@ async def prepare_video(body: VideoRequest, user: dict, *, async_submission: boo
                                                            frames=frames, width=width, height=height)
         if contract and (source_image or source_media):
             storage.private_source_bucket()
-        await quota.check_and_consume(dict(user))
 
         # Recipe knobs: pass effective dimensions/timing every time so the recipe,
         # legacy payload, ledger reward, and billing all agree on what ran.
         # Out-of-range values are rejected (422) by the resolver against the
         # model's allowed band.
         recipe_inputs: dict = {}
-
-        # img2video: decode the inline start frame, AUTO-MATCH output size to it
-        # (unless the caller pinned `size`), upload it, and let the worker load it.
-        source_image_url = None
-        source_image_urls = None
-        if decoded_pins:
-            source_image_urls = await media.upload_video_keyframes(decoded_pins)
-            source_image_url = source_image_urls[0]
-        elif source_image:
-            dims, source_image_url = await media.prepare_source_image(
-                model, source_image, size_was_set=("size" in set_fields))
-            recipe_inputs.update(dims)
-            if dims:
-                width, height = int(dims["width"]), int(dims["height"])
 
         recipe_inputs["width"], recipe_inputs["height"] = width, height
         recipe_inputs["seconds"] = effective_seconds
@@ -264,18 +258,28 @@ async def prepare_video(body: VideoRequest, user: dict, *, async_submission: boo
                 payload[k] = extra[k]
         if recipe_inputs:
             payload["recipe_inputs"] = recipe_inputs
-        if source_image_url:
-            payload["source_image_url"] = source_image_url
-        if source_image_urls:
-            payload["source_image_urls"] = source_image_urls
-        if source_media:
-            payload["source_media"] = await video_sources.upload_sources(source_media)
         if loras:
             payload["loras"] = loras
 
         if async_submission or source_features:
             payload["required_media_features"] = list(features)
-        return model, payload, seeds
+        return VideoInputs(model, json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                                             ensure_ascii=True, allow_nan=False),
+                           tuple(seeds), tuple(decoded_pins or []), tuple(source_media),
+                           bool(body.keyframes), bool(contract))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Video preparation failed")
+        raise HTTPException(status_code=503, detail="Video preparation temporarily unavailable") from None
+
+
+async def prepare_video(body: VideoRequest, user: dict, *, async_submission: bool = False) -> tuple[str, dict, list[int]]:
+    """Legacy waiting ingress: validate first, then consume quota and upload."""
+    inputs = await validate_video(body, user, async_submission=async_submission)
+    try:
+        await quota.check_and_consume(dict(user))
+        return inputs.model, await stage_inputs(inputs), list(inputs.seeds)
     except HTTPException:
         raise
     except Exception:

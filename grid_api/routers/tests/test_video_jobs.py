@@ -21,7 +21,8 @@ from PIL import Image
 from grid_api import auth, database
 from grid_api.config import GridSettings
 from grid_api.routers import video_jobs, videos, worker_ws
-from grid_api.services import accounts, credits, media_jobs, recipes
+from grid_api.services import accounts, credits, media_jobs, recipes, video_plans
+from grid_api.services.tests.test_video_sources import mp4 as mp4
 from grid_api.services.tests.test_video_sources import wav
 from grid_api.services.tests.test_media_job_journal import (
     MODEL,
@@ -386,12 +387,67 @@ async def test_audio_replay_keeps_one_hold_without_another_source_upload_or_quot
     async def forbidden(*_args, **_kwargs):
         pytest.fail("accepted replay must not decode sources, upload or prepare again")
 
-    monkeypatch.setattr(video_jobs, "prepare_video", forbidden)
+    monkeypatch.setattr(video_jobs, "validate_video", forbidden)
     replay = await post(api, key=key, body=body)
     assert replay.status_code == 202 and replay.json()["job_id"] == job
     assert len(uploaded) == 1 and quota.await_count == 0
     assert await counts() == (1, 1, 0)
     assert await credits.get_balance(aid) == OPENING - 27_500
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["generated", "audio", "video"])
+async def test_compilation_failure_rejects_before_quota_upload_or_hold(api, monkeypatch, mode, mp4):
+    _client, aid, _credential, _settings, quota, _available = api
+    before = await counts()
+    balance = await credits.get_balance(aid)
+    stream = io.BytesIO()
+    Image.new("RGB", (256, 256), "red").save(stream, "PNG")
+    body = {"frames": 9, "size": "256x256", "seed": 0,
+            "keyframes": [{"image": base64.b64encode(stream.getvalue()).decode(), "frame": 0}]}
+    if mode != "generated":
+        body["reference_audio"] = base64.b64encode(wav(9)).decode()
+    if mode == "video":
+        body["reference_video"] = base64.b64encode(mp4).decode()
+
+    def invalid(*_args, **_kwargs):
+        raise recipes.RecipeError("Synthetic invalid governed scaffold")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("compilation failure must not upload a source")
+
+    monkeypatch.setattr(recipes, "resolve_for_model", invalid)
+    monkeypatch.setattr(videos.storage, "upload_private_source", forbidden)
+    response = await post(api, body=body)
+    assert response.status_code == 422, response.text
+    quota.assert_not_awaited()
+    assert await counts() == before
+    assert await credits.get_balance(aid) == balance
+
+
+@pytest.mark.asyncio
+async def test_async_staging_does_not_resolve_recipe_after_compilation(api, monkeypatch):
+    _client, _aid, _credential, _settings, _quota, _available = api
+    calls = []
+    original = video_plans.compile_video
+
+    def compile_once(inputs):
+        result = original(inputs)
+        calls.append(result)
+        # Any recipe selection after freezing would change what this admission
+        # authorizes. Staging and reservation must consume only the snapshot.
+        monkeypatch.setattr(recipes, "resolve_for_model",
+                            lambda *_args, **_kwargs: pytest.fail("recipe re-resolved after planning"))
+        return result
+
+    monkeypatch.setattr(video_plans, "compile_video", compile_once)
+    response = await post(api, body={"frames": 9, "seed": 0})
+    assert response.status_code == 202, response.text
+    assert len(calls) == 1
+    row = await stored(response.json()["job_id"])
+    assert row["payload"]["recipe_spec"] == calls[0].payload["recipe_spec"]
+    assert row["payload"]["seed"] == 0
+    assert await counts() == (1, 1, 0)
 
 
 def test_async_settings_are_dark_and_bounded():

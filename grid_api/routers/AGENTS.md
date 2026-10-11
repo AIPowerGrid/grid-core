@@ -70,6 +70,13 @@ transport, accounts, stats, health/metrics.
   `async-video-resume-v1`; availability is not a union of unrelated workers'
   features. Released/default workers do not advertise that new capability;
   candidate opt-in startup requires matching authenticated recipe inventories.
+  Input validation is separate from staging. Async ingress compiles its private
+  immutable graph/seed/source snapshot before quota or any input upload, then
+  binds locations without re-resolving the recipe. Invalid compilation consumes
+  neither quota nor credits and uploads nothing. This in-memory execution plan
+  is not an immutable payment quote or durable x402 authority. The waiting
+  video route keeps its existing credit lifecycle and response shape; plain
+  opening images now also validate before quota, not during upload.
   This is credit-only, not x402, cancellation or worker-restart qualification.
 - `audio.py` - `POST /v1/audio/generations` governed local ACE-Step jobs.
 - `worker_enrollment.py` - dark device-style manager pairing. Public create,

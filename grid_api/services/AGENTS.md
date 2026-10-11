@@ -100,10 +100,24 @@ content sanitization, and reward settlement.
   quality, model fidelity, production R2 behavior or retention. Ambiguous
   copies may orphan unique objects; private cleanup/lifecycle is a release gate.
   Legacy synchronous image/audio/video and validator storage are unchanged.
-- `media.prepare_dispatch` freezes the same governed graph/execution units for
+- `video_plans.py` owns private in-memory validated inputs and immutable
+  `aipg.video-plan.v1` execution snapshots. Async ingress validates sources and
+  compatible-worker admission, then compiles one graph/seed/units/source digest
+  before quota or storage. Planning uses non-routable source slots; only their
+  locations change during staging. Keep source bytes out of serialized snapshots
+  and reprs. Recheck commitments before uploads and copy mutable metadata before
+  yielding. Returned dictionaries cannot mutate the snapshot. This is not a
+  durable quote, frozen tariff, payment authorization, recovery selector or
+  public graph interface. Core still prices and reserves through the existing
+  live-credit authority; x402 quote/payment/refund implementation remains absent.
+- `media.compile_dispatch` is the non-I/O governed compiler; the existing
+  async `prepare_dispatch` wrapper additionally checks compatible workers.
+  It freezes the same governed graph/execution units for
   HTTP waiting and async ingress; `bind_dispatch_recipe` attaches that exact
   snapshot without another recipe resolution. Native source validation,
-  capability admission and uploads are shared through `videos.prepare_video`.
+  capability admission are shared through `videos.validate_video` without
+  uploads/quota. The waiting `videos.prepare_video` wrapper stages those inputs;
+  async ingress stages the already compiled snapshot without recipe re-resolution.
 - `probe.py` is a retired fail-closed compatibility shim, not a sampler.
   Its old `GRID_PROBE_*` variables cannot dispatch work. Use the existing
   assignment-bound validator or manager-bound setup paths for no-DEN checks;

@@ -15,9 +15,9 @@ from pydantic import ConfigDict, Field
 from ..auth import extract_api_key
 from ..config import get_settings
 from ..ratelimit import limiter
-from ..services import accounts, media, media_jobs, video_sources
+from ..services import accounts, media, media_jobs, quota, video_plans, video_sources
 from . import _video_body
-from .videos import VideoRequest, prepare_video
+from .videos import VideoRequest, validate_video
 
 MAX_BODY_BYTES = _video_body.MAX_BODY_BYTES
 PRIVATE = {"Cache-Control": "no-store"}
@@ -124,11 +124,13 @@ async def submit_video_job(
                 raise HTTPException(503, detail="Async video admission is disabled")
             native = body.model_dump(exclude_unset=True, exclude_none=True, exclude={"max_cost_micro_usd"})
             native["model"] = body.model
-            model, payload, _seeds = await prepare_video(VideoRequest.model_validate(native), user, async_submission=True)
-            payload, recipe = await media.prepare_dispatch(model, "video", payload)
-            payload, route_models = media.bind_dispatch_recipe(model, payload, recipe)
+            inputs = await validate_video(VideoRequest.model_validate(native), user, async_submission=True)
+            plan = video_plans.compile_video(inputs)
+            plan.check_inputs()
+            await quota.check_and_consume(dict(user))
+            payload = await plan.stage()
             prepared = media_jobs.prepare(account_id=user["account_id"], idempotency_key=idempotency_key,
-                request_hash=intent, model=model, payload=payload, route_models=route_models,
+                request_hash=intent, model=plan.model, payload=payload, route_models=plan.route_models,
                 preferred_worker=body.worker or "", max_cost_micro=body.max_cost_micro_usd)
             row = await media_jobs.reserve(prepared, user=user, concurrency_limit=settings.media_async_concurrency)
         status = await media_jobs.recover(user["account_id"], row["job_id"])

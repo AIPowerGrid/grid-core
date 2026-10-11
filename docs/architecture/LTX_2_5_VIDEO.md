@@ -397,10 +397,14 @@ or deployed, and worker-restart continuation remains a promotion gate.
 Submission requires scoped `inference.submit` authentication (including
 delegation for a service acting for a user), a UUIDv4 `Idempotency-Key`, a typed
 governed video request and a positive integer `max_cost_micro_usd`. It shares
-native video preparation, validates every source and capability before quota/
-uploads, freezes one recipe graph and reserves before scheduling. Executable
+native input validation, validates every source and capability, and compiles
+one private immutable graph/seed/execution/source plan before quota or uploads.
+Staging binds only input locations to that graph; it does not resolve the recipe
+again. Invalid compilation uploads nothing and consumes no quota or credit.
+This in-memory plan is not a persisted price quote or payment authorization.
+The existing live-credit authority still prices/reserves before scheduling. Executable
 client graphs, URL source inputs, batches and base64 result envelopes are not
-accepted. The JSON body is bounded to 32 MiB plus 64 KiB before typed parsing;
+accepted. The JSON body is bounded to 64 MiB plus 64 KiB before typed parsing;
 schema-validation failures do not echo source images or request values.
 
 The `aipg.video-job.v1` response exposes only job ID, normalized `request_hash`, model, state, cost ceiling,
@@ -434,8 +438,13 @@ must still receive a positive live exact-frame quote, enforce the Core ceiling
 and handle disabled/capacity/financial errors. The local Director now saves an
 intent-bound receipt before one POST and recovers through GET only; output
 download checks committed bytes and independently decodes frame/audio/codec
-conformance. Its synthetic HTTP/MP4 tests are not a new native/funded CLI canary,
-film-wide budget, take-selection/export implementation or production release.
+conformance. Local managed budgets, immutable take selection and bounded offline
+exports are separately implemented; none is a server-wide spending authority.
+Their synthetic HTTP/MP4 tests are not a native/funded managed-film canary or
+production release. Candidate Python and JavaScript SDKs additionally provide
+one-POST async video submission and GET-only job/key recovery for all three
+source modes. SDK contract tests and synthetic Core SQL qualification do not
+qualify actual GPU execution, creative quality, paid funding or x402.
 
 A caller-generated UUIDv4 idempotency key is stored only as a hash. The account
 and normalized client-intent commitment identify one request. Intent must be

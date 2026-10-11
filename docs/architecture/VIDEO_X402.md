@@ -3,10 +3,12 @@
 
 # Video x402 Build Proposal
 
-Status: **design proposal, not implemented or enabled**. Reviewed against the
+Status: **payment design proposal, not implemented or enabled**. Reviewed against the
 candidate async video code and locally locked x402 2.16.0 SDK on October 11,
 2026. This document creates no route, payment collection, refund sender or
-production authority. Credit-backed video remains the first integration path;
+production authority. Its side-effect-free execution-planning prerequisite is
+now implemented separately, as described below; no quote/payment API follows
+from that prerequisite. Credit-backed video remains the first integration path;
 [LTX qualification](LTX_2_5_VIDEO.md) and model-use permission still gate launch.
 
 ## Current Boundary
@@ -49,9 +51,17 @@ Proposed routes, **not callable today**:
 - `GET /v1/x402/videos/quotes`: owner-only lost-reply recovery with the original
   `Idempotency-Key` header.
 
-Quotes never upload inputs, debit pockets or enqueue. Refactor source validation,
-pure compilation/quoting and upload preparation explicitly: current
-`prepare_video` is not a side-effect-free quotation API. Bound rows, decoder work,
+Quotes never upload inputs, debit pockets or enqueue. Native source validation
+now returns private `VideoInputs` without quota/uploads. The non-I/O compiler
+creates an immutable `aipg.video-plan.v1` graph/seed/units/source snapshot; async
+credit ingress binds uploaded locations to that exact graph rather than
+re-resolving it. Source validation still performs compatible-worker/ownership
+reads and bounded local decoding. The compiler itself performs none of those
+reads, storage, quota, monetary I/O or GPU work. Its in-memory snapshots are
+not persisted quotes, frozen tariffs or payment authority. `prepare_video`
+still consumes quota/uploads as the legacy waiting wrapper and must not be used
+as a quotation API. Durable price/owner/deadline/nonce binding remains to build.
+Bound rows, decoder work,
 outstanding quotes and payment exposure per account and globally. Start with a
 five-minute quote/authorization lifetime and return its exact deadline. This is
 a proposed policy value, not an existing setting.

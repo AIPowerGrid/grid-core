@@ -338,8 +338,8 @@ async def _inflight_release(account_id) -> None:
         await r.set(key, 0)
 
 
-async def prepare_dispatch(model: str, job_type: str, payload: dict) -> tuple[dict, dict | None]:
-    """Validate and freeze governed execution before either ingress moves money."""
+def compile_dispatch(model: str, job_type: str, payload: dict) -> tuple[dict, dict | None]:
+    """Compile governed execution without uploads, quota, worker I/O or money."""
     sources = payload.get("source_image_urls")
     if sources is not None and (job_type != "video" or not isinstance(sources, list)
                                or not 1 <= len(sources) <= 16
@@ -377,10 +377,6 @@ async def prepare_dispatch(model: str, job_type: str, payload: dict) -> tuple[di
             if len(urls) != len(bindings) or not all(isinstance(url, str) and url for url in urls):
                 raise HTTPException(status_code=422, detail="Video keyframe sources do not match the execution contract")
             if len(bindings) > 1:
-                from ..routers.worker_ws import get_available_models
-                available = await get_available_models(job_type="video", media_feature="recipe-image-bindings-v1")
-                if model not in available:
-                    raise HTTPException(status_code=503, detail="No compatible video keyframe worker is available")
                 payload = {**payload, "required_media_feature": "recipe-image-bindings-v1"}
         source_bindings = resolved_recipe.get("source_bindings") or []
         source_media = payload.get("source_media") or []
@@ -390,10 +386,6 @@ async def prepare_dispatch(model: str, job_type: str, payload: dict) -> tuple[di
             features = set(payload.get("required_media_features") or []) | {"recipe-media-sources-v1"}
             if len(bindings or []) > 1:
                 features.add("recipe-image-bindings-v1")
-            from ..routers.worker_ws import get_available_models
-            available = await get_available_models(job_type="video", media_features=tuple(sorted(features)))
-            if model not in available:
-                raise HTTPException(503, detail="No compatible source-conditioned video worker is available")
             payload = {**payload, "required_media_features": sorted(features)}
         execution = resolved_recipe["execution"]
         # Snapshot one validated graph before money moves. Every ingress,
@@ -403,6 +395,25 @@ async def prepare_dispatch(model: str, job_type: str, payload: dict) -> tuple[di
                    "length": execution["frames"], "video_length": execution["frames"],
                    "seed": resolved_recipe["seed"], "seeds": [resolved_recipe["seed"]]}
     return payload, resolved_recipe
+
+
+async def prepare_dispatch(model: str, job_type: str, payload: dict) -> tuple[dict, dict | None]:
+    """Freeze execution and check one worker can serve every required feature."""
+    payload, recipe = compile_dispatch(model, job_type, payload)
+    if recipe is not None:
+        from ..routers.worker_ws import get_available_models
+        if payload.get("source_media"):
+            features = set(payload.get("required_media_features") or [])
+            if payload.get("required_media_feature"):
+                features.add(payload["required_media_feature"])
+            available = await get_available_models(job_type="video", media_features=tuple(sorted(features)))
+            if model not in available:
+                raise HTTPException(503, detail="No compatible source-conditioned video worker is available")
+        elif len(recipe.get("image_bindings") or []) > 1:
+            available = await get_available_models(job_type="video", media_feature="recipe-image-bindings-v1")
+            if model not in available:
+                raise HTTPException(503, detail="No compatible video keyframe worker is available")
+    return payload, recipe
 
 
 def bind_dispatch_recipe(model: str, payload: dict, spec: dict | None) -> tuple[dict, list[str]]:
