@@ -7,6 +7,8 @@ import asyncio
 import base64
 import io
 import json
+import shutil
+import subprocess
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -396,7 +398,8 @@ async def test_audio_replay_keeps_one_hold_without_another_source_upload_or_quot
 
 
 @pytest.mark.asyncio
-async def test_ingredients_intent_retains_distinct_sources_and_one_hold_after_rollback(api, monkeypatch):
+@pytest.mark.parametrize("source_mode", ["audio", "video"])
+async def test_ingredients_intent_retains_distinct_sources_and_one_hold_after_rollback(api, monkeypatch, tmp_path, source_mode):
     from grid_api.services import pricing
 
     model = "LTX-2.5 Dev BF16 Ingredients"
@@ -417,6 +420,18 @@ async def test_ingredients_intent_retains_distinct_sources_and_one_hold_after_ro
     body = {"model": model, "seed": 0, "max_cost_micro_usd": 150_000,
             "reference_image": base64.b64encode(stream.getvalue()).decode(),
             "reference_audio": base64.b64encode(wav(121)).decode()}
+    roles = ["reference_image", "reference_audio"]
+    if source_mode == "video":
+        encoder = shutil.which("ffmpeg")
+        if not encoder or not shutil.which("ffprobe"):
+            pytest.skip("independent FFmpeg source-decoder gate unavailable")
+        motion = tmp_path / "ingredients-motion.mp4"
+        subprocess.run([encoder, "-v", "error", "-nostdin", "-f", "lavfi", "-i",
+                        "testsrc2=size=768x448:rate=24", "-frames:v", "121", "-an",
+                        "-c:v", "libx264", "-threads", "1", "-pix_fmt", "yuv420p", str(motion)],
+                       capture_output=True, timeout=15, check=True)
+        body.update(reference_video=base64.b64encode(motion.read_bytes()).decode(), size="768x448")
+        roles.append("reference_video")
     key = uuid4()
     first = await post(api, key=key, body=body)
     assert first.status_code == 202, first.text
@@ -425,19 +440,21 @@ async def test_ingredients_intent_retains_distinct_sources_and_one_hold_after_ro
     payload = row["payload"]
     assert "source_image_url" not in payload
     assert payload["appearance_profile"] == "ingredients-dev-v1"
-    assert [source["role"] for source in payload["source_media"]] == ["reference_image", "reference_audio"]
+    assert [source["role"] for source in payload["source_media"]] == roles
     assert payload["recipe_spec"]["reference_guide"]["inputs"]["latent"] == ["latent_video", 0]
-    assert len(row["source_objects"]["keys"]) == 2
+    assert len(row["source_objects"]["keys"]) == len(roles)
+    if source_mode == "video":
+        assert payload["recipe_spec"]["video_guide"]["inputs"]["positive"] == ["reference_guide", 0]
     assert "recipe-appearance-reference-v1" in payload["required_media_features"]
     assert first.json()["reserved_micro"] == 100_834
     assert await credits.get_balance(aid) == OPENING - 100_834
-    assert len(uploaded) == 2
+    assert len(uploaded) == len(roles)
     settings.media_async_enabled = False
     quota.reset_mock()
     monkeypatch.setattr(video_jobs, "validate_video", AsyncMock(side_effect=AssertionError("must not prepare accepted replay")))
     replay = await post(api, key=key, body=body)
     assert replay.status_code == 202 and replay.json()["job_id"] == job
-    assert len(uploaded) == 2 and quota.await_count == 0
+    assert len(uploaded) == len(roles) and quota.await_count == 0
     assert await counts() == (1, 1, 0)
     conflict = await post(api, key=key, body={**body, "reference_strength": 0.5})
     assert conflict.status_code == 409
