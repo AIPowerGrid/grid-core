@@ -161,8 +161,12 @@ on-chain settlement from creating a payable worker reward.
 
 The first route is deliberately non-streaming and text-only. x402's current
 FastAPI middleware buffers the full response before settlement; advertising
-streaming would turn SSE into a delayed response. Streaming, media, and
+streaming would turn SSE into a delayed response. Streaming and
 Anthropic/Responses compatibility require a separate stream-aware adapter.
+Async video instead needs payment-before-dispatch, durable owner recovery and
+refund handling; see the unimplemented
+[video x402 proposal](architecture/VIDEO_X402.md). A stream-aware text adapter
+alone would not establish those contracts.
 
 ```dotenv
 GRID_X402_ENABLED=1

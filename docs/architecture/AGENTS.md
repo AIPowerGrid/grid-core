@@ -133,6 +133,10 @@ validation, worker incentives, and trust boundaries.
   ComfyUI/orphan retention, purchased funds,
   broader faults and appearance/motion/lip-quality acceptance remain gates.
   Legacy image-source privacy is unchanged; admission stays dark.
+- `VIDEO_X402.md` - unimplemented authenticated prepaid-video proposal: exact
+  USDC quote/nonce binding, payment-before-outbox admission, cross-rail replay
+  protection, separate refund obligations and staged qualification. No route,
+  signer, payment collection or production authority is granted.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only
