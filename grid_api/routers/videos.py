@@ -146,7 +146,7 @@ async def validate_video(body: VideoRequest, user: dict, *, async_submission: bo
             if body.response_format not in ("url", "b64_json"):
                 raise HTTPException(status_code=422, detail="response_format must be url or b64_json")
             unsupported = set(extra) - {"negative_prompt", "seed", "steps", "cfg_scale", "sampler", "audio", "guide_strength",
-                                        "reference_strength", "motion_attention_strength"}
+                                        "reference_strength", "reference_attention_strength", "motion_attention_strength"}
             if unsupported:
                 raise HTTPException(status_code=422, detail="Unsupported LTX-2.5 parameter; consult the model parameter contract")
             values = {"prompt": prompt, "fps": body.fps, **media.advanced_knob_inputs(extra)}
@@ -156,7 +156,7 @@ async def validate_video(body: VideoRequest, user: dict, *, async_submission: bo
                 values["guide_strength"] = extra["guide_strength"]
             if body.reference_image:
                 values["reference_image"] = True
-            for key in ("reference_strength", "motion_attention_strength"):
+            for key in ("reference_strength", "reference_attention_strength", "motion_attention_strength"):
                 if extra.get(key) is not None:
                     values[key] = extra[key]
             if body.keyframes:
@@ -237,8 +237,9 @@ async def validate_video(body: VideoRequest, user: dict, *, async_submission: bo
             if body.reference_image:
                 recipe_inputs["reference_image"] = True
                 recipe_inputs["reference_strength"] = values["reference_strength"]
-                if "motion_attention_strength" in values:
-                    recipe_inputs["motion_attention_strength"] = values["motion_attention_strength"]
+                for key in ("reference_attention_strength", "motion_attention_strength"):
+                    if key in values:
+                        recipe_inputs[key] = values[key]
             if body.keyframes:
                 recipe_inputs["keyframes"] = values["keyframes"]
         # Director/timeline recipes (e.g. LTX Director 2.0): forward the recipe's

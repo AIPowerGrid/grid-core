@@ -26,6 +26,10 @@ content sanitization, and reward settlement.
   optional Union motion control. Standard Dev remains capped at 81 frames.
   Appearance/motion strengths are committed execution controls, not node or
   adapter selectors; no portrait-at-frame-zero or identity-fidelity promise.
+  Optional finite `reference_attention_strength` in (0, 1] changes only the
+  appearance guide to the governed Advanced node. Omission preserves its
+  original graph and intent; neither denoising nor motion attention changes.
+  Both source inventories require that node before worker advertisement.
   `normalize_timing` shares exact frame/duration validation with execution and
   non-mutating credit quotes. A quote needs no private appearance/audio bytes;
   it cannot validate sources, compile a graph or grant admission. Full
