@@ -138,7 +138,14 @@ validation, worker incentives, and trust boundaries.
   managed A2V/V2V project selection/export and repeat audits, including same-job
   V2V crash recovery. Exact Core CI and all 24 SDK/Core SQLite/PostgreSQL
   scenarios pass; SDK fixtures alone are not native evidence. Separate private
-  Core instances do not prove shared-coordinator two-worker balancing.
+  Core instances do not prove shared-coordinator two-worker balancing. A later
+  Core `1e27b003` / worker `f04a183` / Director `2ea54eb` shared private-Core
+  A2V/V2V run and separate repeat audit now pass real concurrent native work,
+  two exact test-credit charges, same-job crash recovery, cleanup and immutable
+  exports. Exact governed-node startup replaces broad plugin discovery;
+  bounded metadata-only proof records repair the observed repeat-reader bound.
+  Prior failures remain preserved; neither proof qualifies public enrollment,
+  independent operators, purchased funds or long character fidelity.
   Pre-admission/ComfyUI/output retention remains separate.
   ComfyUI/orphan retention, purchased funds,
   broader faults and appearance/motion/lip-quality acceptance remain gates.

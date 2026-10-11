@@ -14,6 +14,9 @@ Isolated native A2V and V2V now pass one 337-frame /14.041667-second network
 section with exact source commitments, one test-credit charge and automatic
 private-input cleanup. This is synthetic lifecycle evidence, not public worker
 startup, purchased-credit, multi-pin film or visual-quality qualification.
+A subsequent shared private-Core test also passes simultaneous A2V/V2V on two
+normal worker identities, same-job process-crash recovery and a repeat audit.
+It uses unfunded test credits and does not enroll public workers.
 
 Two matching native GPU-pinned ComfyUI instances have completed concurrent
 local distilled renders on the owned dual-Blackwell rig. ComfyUI remains
@@ -54,6 +57,14 @@ before declaring the existing shared source feature. A partial list cannot
 declare it. Default flags remain off/empty, older Core responses reject, and
 signed-profile/blind-trust overrides cannot bypass checks. Public release,
 paid qualification and source/appearance quality remain independent gates.
+
+Startup reads only each exact governed `/object_info/{node_class}` inventory,
+not ComfyUI's all-plugin scan. It validates node names, exact response identity,
+required weights and aggregate bounds before advertisement. Read-only transport
+failures retry at most three complete checks, with a fresh Core/node inventory
+and a 30-second deadline per attempt; invalid contracts, HTTP failures and
+missing nodes/weights fail without retry. This is bounded startup recovery,
+not a render retry or proof of weight contents.
 
 The prospective model IDs are `LTX-2.5 Distilled BF16` and `LTX-2.5 Dev BF16`.
 Each has a separate text-to-video and image-pin recipe. `_grid.videoContract`
@@ -774,20 +785,62 @@ production admission, published rates and funds were unchanged. Full
 reference-film/long appearance quality, public onboarding, purchased-credit
 proof, remaining retention scopes and model-use clearance remain gates.
 
+### Shared-Coordinator Native Fleet Qualification
+
+On October 11, Core `1e27b00333130fe1b5aefa3789ad06fb539d3666`, worker
+`f04a183708920c20eac0420962b3ff97d4785d09` and Director
+`2ea54ebabeda7d5d47c62bd275eb8bdc52bb142f` passed one actual shared
+private Core/Redis/PostgreSQL run with two normally started worker identities.
+One synthetic A2V and one V2V job ran concurrently on distinct owned GPUs.
+Only the test coordinator/workers were SIGKILLed; ComfyUI remained running.
+Same-state recovery and a separate repeat audit retained both original prompts
+and used authenticated GET, never replacement renders.
+
+Independent SQL retained two jobs, two settled reservations, two completions
+and zero held rows. Each charged 280,834 unfunded test micro-USD for 337 frames;
+shared balance and ledger sum were 438,332 from an initial 1,000,000, with
+externally funded balance zero. Worker/native identity, committed source bytes,
+frozen audio, full output decode/hashes, acknowledged/pruned worker caches,
+automatic Core private-input cleanup and independent S3 absence passed. Actual
+managed take selection and offline exports remained immutable on replay.
+The two local project journals are not server-wide multi-project budgets.
+
+Retained failures drove two narrow fixes before that successful repeat:
+
+- Full ComfyUI inventory reads timed out across all three bounded attempts
+  before admission; independent SQL confirmed no jobs/holds/completions and
+  unchanged credit. Exact governed-node inventory now avoids unrelated plugin
+  discovery. Worker 438 tests / 2 skips and exact Linux Python 3.10-3.12,
+  dependency/security and Linux/Windows manager CI passed for that revision.
+- A later native recovery completed and charged correctly, but its repeat
+  failed because the observer saved multi-megabyte inline media in proof files
+  whose reader permits 256 KiB. Director now keeps allowlisted result/request/
+  source bindings and enforces that bound on first write. The fresh run above
+  and repeat passed with 2.6-KiB records; prior failed artifacts were preserved,
+  not rewritten or labelled fixed retrospectively.
+
+Post-run health confirmed both native LTX services active with idle queues and
+unrelated services preserved. Test processes exited. This is shared-coordinator
+balancing/lifecycle evidence, not operator independence, public installation,
+purchased funds, measured appearance/motion/lip fidelity or model-use clearance.
+ComfyUI/pre-admission orphan/output retention and broader process/storage faults
+remain separate gates; no production setting, price or funds changed.
+
 ## Remaining Release Gates
 
-- Compare and execute the Core-resolved graphs through two enrolled one-job
-  media-worker identities. Verify per-GPU state, result storage and exact units.
+- Publish reviewed profiles and qualify public enrollment for two one-job
+  media-worker identities. The shared private-Core run above proves per-GPU
+  state, storage and units, not the installer or production fleet.
 - Reproduce the handoff's multi-pin/337-frame jobs through the intended network
   path before describing the candidate as the full Director contract. Promote bounded
   settings from the working baseline with separate money/storage proofs.
 - Review separate explicit rates and complete a bounded purchased-credit
   canary. Disposable PostgreSQL lifecycle tests and unfunded native canaries
   do not establish actual external funding or approve customer prices.
-- Extend the passing isolated async submit/status, worker-journal, storage and
-  crash controls to shared-Core two-worker balancing, public enrollment and
-  broader process/storage faults. Preserve original job identity throughout;
-  passing isolated recovery is not fleet-wide release approval.
+- Extend passing isolated and shared-Core two-worker submit/status, journal,
+  storage and crash controls to public enrollment and broader process/storage
+  faults. Preserve original job identity throughout; private balancing/recovery
+  is not fleet-wide release approval.
 - Add request-bound Base USDC x402 payment-before-dispatch and refunds. The
   existing text-only x402 route is not video support. The unimplemented
   [video payment proposal](VIDEO_X402.md) separates exact payment proof from
