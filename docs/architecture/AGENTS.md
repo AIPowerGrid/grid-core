@@ -177,10 +177,12 @@ validation, worker incentives, and trust boundaries.
   inspected frame thumbnail; identity/motion/lip quality and purchased/public
   acceptance remain separate. Exact `29982329` Linux/Postgres16 CI also passed;
   see `LTX_2_5_VIDEO.md` for pins and the retained private proof digest.
-- `VIDEO_X402.md` - unimplemented authenticated prepaid-video proposal: exact
-  USDC quote/nonce binding, payment-before-outbox admission, cross-rail replay
-  protection, separate refund obligations and staged qualification. No route,
-  signer, payment collection or production authority is granted.
+- `VIDEO_X402.md` - authenticated prepaid-video design and current private
+  quotation foundation. Default-off owner-bound quote POST/GET freeze one
+  source/seed/graph/tariff/deadline/nonce without money or dispatch. Remaining
+  work includes exact-signature binding, payment-before-outbox admission,
+  cross-rail replay protection, separate refund obligations and real payment
+  qualification. No signer, payment collection or production authority exists.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only

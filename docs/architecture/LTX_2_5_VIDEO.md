@@ -1091,9 +1091,11 @@ not a newer doc-only commit, public release or complete full-film workflow.
   faults. Preserve original job identity throughout; private balancing/recovery
   is not fleet-wide release approval.
 - Add request-bound Base USDC x402 payment-before-dispatch and refunds. The
-  existing text-only x402 route is not video support. The unimplemented
-  [video payment proposal](VIDEO_X402.md) separates exact payment proof from
-  async execution, GET recovery and independently confirmed refunds.
+  existing text-only x402 route is not video support. The
+  [video payment design](VIDEO_X402.md) now has default-off private immutable
+  quote creation/recovery, but no signature acceptance, collection or dispatch.
+  Exact payment proof, atomic prepaid admission and independently confirmed
+  refunds remain to build and qualify.
 - Qualify the implemented film manifests, take selection, local editing and
   local budgets against the full handoff/reftrack and purchased-credit path;
   update Gallery, SDK publication and the portable agent skill against the

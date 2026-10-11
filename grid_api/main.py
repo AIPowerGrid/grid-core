@@ -45,6 +45,7 @@ from .routers import (
     validator_compensation,
     validator_pairing,
     video_jobs,
+    video_quotes,
     videos,
     worker_enrollment,
     worker_media,
@@ -575,6 +576,7 @@ app.include_router(images.router)
 app.include_router(media_results.router)
 app.include_router(videos.router)
 app.include_router(video_jobs.router)
+app.include_router(video_quotes.router)
 app.include_router(audio.router)
 app.include_router(threed.router)
 app.include_router(worker_ws.router)
