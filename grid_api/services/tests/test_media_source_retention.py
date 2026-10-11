@@ -64,6 +64,51 @@ def test_all_sixteen_pins_and_two_media_sources_have_bounded_authority():
         retention.capture({"source_image_urls": urls + [urls[0]]})
 
 
+def appearance_payload():
+    return {"appearance_profile": "ingredients-dev-v1", "source_media": [
+        {"role": role, "url": f"{ENDPOINT}/{BUCKET}/source/{index:032x}.{ext}?synthetic=1"}
+        for index, (role, ext) in enumerate([
+            ("reference_image", "png"), ("reference_audio", "wav"), ("reference_video", "mp4"),
+        ])
+    ]}
+
+
+def test_ingredients_records_three_distinct_role_inputs_without_opening_pins(monkeypatch):
+    record = retention.capture(appearance_payload())
+    assert record == {"endpoint": ENDPOINT, "bucket": BUCKET,
+                      "keys": [f"source/{0:032x}.png", f"source/{1:032x}.wav", f"source/{2:032x}.mp4"]}
+    retention.validate(record)
+    client = Mock()
+    client.delete_object.return_value = {"ResponseMetadata": {"HTTPStatusCode": 204}}
+    monkeypatch.setattr(retention, "_client", lambda _endpoint: client)
+    retention.delete(record)
+    assert client.delete_object.call_count == 3
+    assert [call.kwargs for call in client.delete_object.call_args_list] == [
+        {"Bucket": BUCKET, "Key": key} for key in record["keys"]
+    ]
+
+
+@pytest.mark.parametrize("change", [
+    {"appearance_profile": None}, {"appearance_profile": "unknown"},
+    {"source_image_url": URL}, {"source_image_urls": [URL]},
+    {"source_media": [{"role": "reference_audio", "url": URL}] * 3},
+    {"source_media": [{"role": role, "url": URL} for role in
+                      ("reference_image", "reference_video", "reference_audio")]},
+    {"source_media": [{"role": role, "url": URL} for role in
+                      ("reference_image", "reference_audio", "reference_video", "extra")]},
+])
+def test_three_source_authority_is_exclusive_to_the_separate_ingredients_profile(change):
+    with pytest.raises(ValueError):
+        retention.capture({**appearance_payload(), **change})
+
+
+def test_ingredients_third_input_cannot_grant_foreign_deletion_authority():
+    payload = appearance_payload()
+    payload["source_media"][2]["url"] = URL.replace(ENDPOINT, "https://foreign.example")
+    with pytest.raises(ValueError):
+        retention.capture(payload)
+
+
 @pytest.mark.parametrize(
     "url",
     [

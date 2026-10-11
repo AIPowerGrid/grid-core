@@ -53,10 +53,17 @@ def capture(payload: dict[str, Any]) -> dict[str, Any] | None:
         not isinstance(images, list)
         or len(images) > 16
         or not isinstance(media, list)
-        or len(media) > 2
+        or len(media) > 3
         or any(not isinstance(item, dict) for item in media)
     ):
         raise ValueError("private source input collection is invalid")
+    if len(media) == 3 and (
+        payload.get("appearance_profile") != "ingredients-dev-v1"
+        or payload.get("source_image_url")
+        or images
+        or [item.get("role") for item in media] != ["reference_image", "reference_audio", "reference_video"]
+    ):
+        raise ValueError("three private sources require the separate Ingredients profile")
     urls.extend(images)
     urls.extend(item.get("url") for item in media)
     if not urls:

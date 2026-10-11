@@ -50,7 +50,10 @@ content sanitization, and reward settlement.
   is not object deletion. Legacy `upload_source` still uses the public output
   bucket and must not be described as private merely because its URL is signed.
 - `media_source_retention.py` records at most eighteen exact Core-uploaded
-  private input keys with the journal/hold transaction. Only a committed settled
+  private input keys with the journal/hold transaction.
+  Ingredients appearance/sound/motion may record three ordered source roles,
+  exclusively without opening pins; ordinary source collections remain capped
+  at two. The total eighteen-object authority is unchanged. Only a committed settled
   reservation (paid or refunded) permits cleanup. Historical payloads are never
   backfilled into deletion authority. A separate minute loop deletes bounded
   batches with time-limited S3 calls and retries exact keys after crashes or
@@ -934,8 +937,10 @@ content sanitization, and reward settlement.
   in an env-file-disabled child, verifies synthetic bytes and binds renamed
   inputs through mocked HTTP for audio and audio/video. No GPU, live storage,
   wallet, quality or identity proof is claimed. The async router test separately
-  exercises real scoped keys, one hold and unchanged-ID rollback recovery on
-  SQLite/disposable PostgreSQL, with a test-only price and private-upload stub.
+  exercises both appearance/audio and appearance/audio/video with real scoped
+  keys, independently decoded MP4 sources, one hold, exact two-/three-key
+  retention and unchanged-ID rollback recovery on SQLite/disposable PostgreSQL,
+  with a test-only price and private-upload stub.
 
 - `tests/test_video_output.py` uses synthetic S3/body fixtures to prove
   source-conditional copy, post-copy worker overwrite isolation, streaming
