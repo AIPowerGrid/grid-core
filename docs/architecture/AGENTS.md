@@ -109,8 +109,14 @@ validation, worker incentives, and trust boundaries.
   Core/WS/GPU/R2 path, byte commitments, optional opening image, one test-credit
   settlement and lost-reply recovery. The first source-video output-selection
   failure fully refunded; a fresh job passes with worker input-preview exclusion.
-  Purchased funds, anonymous source-access denial/expiry, broader faults and
-  appearance/motion/lip-quality acceptance remain gates; admission stays dark.
+  The first canaries' synthetic sources were anonymously reachable through
+  the output domain; they are not privacy proof. A distinct default-empty
+  private-source bucket now gates all governed LTX inputs. A new scratch bucket
+  passes signed/anonymous/expired/refreshed/deleted-object access checks and
+  configured lifecycle readback, not automatic day-boundary expiry. Native
+  generation through that bucket, ComfyUI/orphan retention, purchased funds,
+  broader faults and appearance/motion/lip-quality acceptance remain gates.
+  Legacy image-source privacy is unchanged; admission stays dark.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only

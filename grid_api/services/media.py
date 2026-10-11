@@ -281,11 +281,12 @@ async def prepare_source_image(model: str, image_value: str, *, size_was_set: bo
         )
     raw, ext, sw, sh = decode_source_image(image_value)
     dims: dict = {}
+    contract = recipes.video_contract_for_model(model, has_source=True)
     if not size_was_set:
-        contract = recipes.video_contract_for_model(model, has_source=True)
         w, h = video_contract.source_size(contract, sw, sh) if contract else smart_size(sw, sh)
         dims = {"width": w, "height": h}
-    url = await asyncio.to_thread(storage.upload_source, raw, ext)
+    uploader = storage.upload_private_source if contract else storage.upload_source
+    url = await asyncio.to_thread(uploader, raw, ext)
     return dims, url
 
 
@@ -304,7 +305,7 @@ async def upload_video_keyframes(decoded: list[tuple[bytes, str, int, int]]) -> 
     urls = []
     for raw, ext, _width, _height in decoded:
         if raw not in uploaded:
-            uploaded[raw] = await asyncio.to_thread(storage.upload_source, raw, ext)
+            uploaded[raw] = await asyncio.to_thread(storage.upload_private_source, raw, ext)
         urls.append(uploaded[raw])
     return urls
 

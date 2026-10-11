@@ -38,6 +38,7 @@ def setup(monkeypatch):
     monkeypatch.setattr(media, "submit_and_wait", submit)
     monkeypatch.setattr(videos.loras_svc, "prepare_loras", lambda *_args: [])
     monkeypatch.setattr(videos.generation_admission, "require_media", lambda *_args: None)
+    monkeypatch.setattr(storage, "private_source_bucket", lambda: "private-synthetic-source")
     app = FastAPI()
     app.include_router(videos.router)
     return app, submit, quota
@@ -89,7 +90,7 @@ async def test_http_rejects_before_quota_upload_or_dispatch(setup, monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_typed_first_frame_uses_existing_private_upload_path(setup, monkeypatch):
+async def test_typed_first_frame_uses_separate_private_upload_path(setup, monkeypatch):
     app, submit, _quota = setup
     stream = io.BytesIO()
     Image.new("RGB", (1920, 1080), "white").save(stream, "PNG")
@@ -100,7 +101,7 @@ async def test_typed_first_frame_uses_existing_private_upload_path(setup, monkey
         uploads.append((raw, ext))
         return "https://upload.invalid/grid-source.png"
 
-    monkeypatch.setattr(storage, "upload_source", upload)
+    monkeypatch.setattr(storage, "upload_private_source", upload)
     response = await post(app, {"keyframes": [{"image": image, "frame": 0}]})
     assert response.status_code == 200, response.text
     payload = submit.call_args.args[2]
@@ -118,7 +119,7 @@ async def test_timed_pins_are_uploaded_once_and_keep_their_positions(setup, monk
     Image.new("RGB", (960, 544), "white").save(stream, "PNG")
     image = base64.b64encode(stream.getvalue()).decode()
     upload = lambda *_args: "https://upload.invalid/reference.png"
-    monkeypatch.setattr(storage, "upload_source", upload)
+    monkeypatch.setattr(storage, "upload_private_source", upload)
     response = await post(app, {"frames": 337, "keyframes": [
         {"image": image, "frame": 0}, {"image": image, "frame": 281, "strength": 0.5}]})
     assert response.status_code == 200, response.text
@@ -170,7 +171,7 @@ def reference_audio(frames=9):
 @pytest.mark.asyncio
 async def test_audio_ingress_uploads_committed_source_not_executable_inputs(setup, monkeypatch):
     app, submit, _quota = setup
-    monkeypatch.setattr(storage, "upload_source", lambda *_args: "https://source.invalid/private.wav")
+    monkeypatch.setattr(storage, "upload_private_source", lambda *_args: "https://source.invalid/private.wav")
     encoded = reference_audio()
     response = await post(app, {"frames": 9, "reference_audio": encoded})
     assert response.status_code == 200, response.text
@@ -195,6 +196,31 @@ async def test_default_dark_source_path_rejects_before_decoder_or_storage(setup,
     assert response.status_code == 503
     validate.assert_not_awaited()
     quota.assert_not_awaited()
+    submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("image", [False, True])
+async def test_missing_private_storage_rejects_before_quota_or_any_upload(setup, monkeypatch, image):
+    app, submit, quota = setup
+
+    def unavailable():
+        raise videos.HTTPException(503, detail="Private video source storage is unavailable")
+
+    monkeypatch.setattr(storage, "private_source_bucket", unavailable)
+    upload = AsyncMock()
+    monkeypatch.setattr(video_sources, "upload_sources", upload)
+    monkeypatch.setattr(media, "upload_video_keyframes", upload)
+    if image:
+        stream = io.BytesIO()
+        Image.new("RGB", (256, 256), "white").save(stream, "PNG")
+        values = {"keyframes": [{"image": base64.b64encode(stream.getvalue()).decode(), "frame": 0}]}
+    else:
+        values = {"frames": 9, "reference_audio": reference_audio()}
+    response = await post(app, values)
+    assert response.status_code == 503
+    quota.assert_not_awaited()
+    upload.assert_not_awaited()
     submit.assert_not_awaited()
 
 

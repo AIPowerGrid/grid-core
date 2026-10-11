@@ -1,8 +1,12 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-import pytest
+from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
+from grid_api.config import GridSettings
 from grid_api.services import storage
 
 
@@ -45,6 +49,62 @@ def test_media_bucket_returns_configured_name(monkeypatch):
     monkeypatch.setenv("R2_TRANSIENT_BUCKET", "configured-media-bucket")
 
     assert storage.media_bucket() == "configured-media-bucket"
+
+
+@pytest.mark.parametrize("bucket", ["", "public-outputs"])
+def test_private_sources_cannot_use_missing_or_public_output_bucket(monkeypatch, bucket):
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(media_private_source_bucket=bucket))
+    monkeypatch.setattr(storage, "media_bucket", lambda: "public-outputs")
+    with pytest.raises(HTTPException) as error:
+        storage.private_source_bucket()
+    assert error.value.status_code == 503
+    if bucket:
+        assert bucket not in error.value.detail
+
+
+@pytest.mark.parametrize("bucket", ["private-source-test", "aipg-ltx-test-1234"])
+def test_private_sources_accept_separate_reviewed_bucket(monkeypatch, bucket):
+    settings = GridSettings(_env_file=None, media_private_source_bucket=bucket)
+    monkeypatch.setattr(storage, "get_settings", lambda: settings)
+    monkeypatch.setattr(storage, "media_bucket", lambda: "public-outputs")
+    assert storage.private_source_bucket() == bucket
+
+
+@pytest.mark.parametrize("bucket", ["https://private.invalid", "../public", "a", "with spaces", "UPPERCASE"])
+def test_private_bucket_config_rejects_paths_or_invalid_names(bucket):
+    with pytest.raises(ValueError):
+        GridSettings(_env_file=None, media_private_source_bucket=bucket)
+
+
+def test_private_upload_has_bounded_signed_get_and_no_public_output_bucket(monkeypatch):
+    calls = []
+
+    class Client:
+        def put_object(self, **kwargs):
+            calls.append(("put", kwargs))
+
+        def generate_presigned_url(self, operation, **kwargs):
+            calls.append((operation, kwargs))
+            return "https://private-signed.invalid/source"
+
+    monkeypatch.setattr(storage, "private_source_bucket", lambda: "private-source-test")
+    monkeypatch.setattr(storage, "_client", Client)
+    url = storage.upload_private_source(b"synthetic-wave", "wav")
+    assert url == "https://private-signed.invalid/source"
+    assert calls[0][1]["Bucket"] == calls[1][1]["Params"]["Bucket"] == "private-source-test"
+    assert calls[0][1]["Key"] == calls[1][1]["Params"]["Key"]
+    assert calls[0][1]["ContentType"] == "audio/wav"
+    assert calls[1][1]["ExpiresIn"] == 3600
+
+
+@pytest.mark.parametrize("data,ext,expires", [(b"", "wav", 3600), (b"x", "exe", 3600),
+                                              pytest.param(b"x" * (32 * 1024 * 1024 + 1), "mp4", 3600, id="oversize"),
+                                              (b"x", "wav", 3601), (b"x", "wav", 0), (b"x", "wav", True)])
+def test_invalid_private_upload_is_rejected_before_network(monkeypatch, data, ext, expires):
+    monkeypatch.setattr(storage, "private_source_bucket", lambda: "private-source-test")
+    monkeypatch.setattr(storage, "_client", lambda: pytest.fail("storage must not be called"))
+    with pytest.raises(ValueError):
+        storage.upload_private_source(data, ext, expires)
 
 
 def test_validator_output_is_copied_hashed_then_source_deleted(monkeypatch):

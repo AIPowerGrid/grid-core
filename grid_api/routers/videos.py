@@ -20,7 +20,7 @@ from ..auth import extract_api_key
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
 from ..services import loras as loras_svc
-from ..services import generation_admission, media, quota, recipes, video_contract, video_sources
+from ..services import generation_admission, media, quota, recipes, storage, video_contract, video_sources
 from ..services import styles as styles_svc
 from .worker_ws import get_available_models
 from ._video_body import BoundedVideoRoute
@@ -189,6 +189,8 @@ async def prepare_video(body: VideoRequest, user: dict, *, async_submission: boo
             raise HTTPException(413, detail="Combined video inputs exceed the encoded limit")
         source_media = await video_sources.validate_sources(body.reference_audio, body.reference_video,
                                                            frames=frames, width=width, height=height)
+        if contract and (source_image or source_media):
+            storage.private_source_bucket()
         await quota.check_and_consume(dict(user))
 
         # Recipe knobs: pass effective dimensions/timing every time so the recipe,

@@ -18,6 +18,9 @@ from uuid import uuid4
 import boto3
 from botocore.client import Config as BotoConfig
 from botocore.exceptions import ClientError
+from fastapi import HTTPException
+
+from ..config import get_settings
 
 logger = logging.getLogger("grid_api.storage")
 
@@ -62,15 +65,48 @@ def public_media_base() -> str:
 
 
 def upload_source(data: bytes, ext: str, expires: int = 3600) -> str:
-    """Store a caller-supplied source image (img2img / img2video input) and return a
-    presigned GET URL the worker fetches. Same bucket, `source/` prefix (so a
-    lifecycle rule can reap inputs quickly). Network PUT — call via asyncio.to_thread
-    from async handlers. Returns a presigned URL, not a public one (inputs aren't
-    meant to be publicly addressable)."""
+    """Legacy source-image upload in the output bucket; returns a signed GET.
+
+    A signed URL does not make this object private when the bucket has public
+    access. The source prefix is retention grouping, not an access boundary.
+    New governed video sources must use upload_private_source instead.
+    """
     key = f"source/{uuid4().hex}.{ext}"
     content_type = CONTENT_TYPES.get(ext, "application/octet-stream")
     _client().put_object(Bucket=media_bucket(), Key=key, Body=data, ContentType=content_type)
     return _client().generate_presigned_url("get_object", Params={"Bucket": media_bucket(), "Key": key}, ExpiresIn=expires)
+
+
+def private_source_bucket() -> str:
+    """Require separately reviewed private storage; never fall back to outputs."""
+    bucket = get_settings().media_private_source_bucket
+    if not bucket or bucket == media_bucket():
+        raise HTTPException(503, detail="Private video source storage is unavailable")
+    return bucket
+
+
+def upload_private_source(data: bytes, ext: str, expires: int = 3600) -> str:
+    """Upload bounded governed inputs to a separate, non-public R2 bucket.
+
+    Operator qualification must verify no custom/r2.dev public access and a
+    one-day lifecycle. URL expiry limits access, not object retention. Workers
+    receive only the one-hour GET; they receive no bucket-wide authority.
+    """
+    bucket = private_source_bucket()
+    if (
+        not isinstance(data, bytes)
+        or not 0 < len(data) <= 32 * 1024 * 1024
+        or ext not in {"png", "jpg", "webp", "wav", "mp4"}
+        or type(expires) is not int
+        or not 1 <= expires <= 3600
+    ):
+        raise ValueError("Invalid private source upload")
+    key = f"source/{uuid4().hex}.{ext}"
+    client = _client()
+    client.put_object(Bucket=bucket, Key=key, Body=data, ContentType=CONTENT_TYPES[ext])
+    return client.generate_presigned_url(
+        "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=expires,
+    )
 
 
 def presign_outputs(job_id: str, n: int, ext: str, expires: int = 900, job_type: str = "image") -> list[dict]:

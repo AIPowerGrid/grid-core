@@ -204,7 +204,7 @@ async def validate_sources(audio: str | None, video: str | None, *, frames: int,
 
 
 async def upload_sources(sources: list[Source]) -> list[dict]:
-    return [{**source.commitment, "url": await asyncio.to_thread(storage.upload_source, source.data, source.ext)}
+    return [{**source.commitment, "url": await asyncio.to_thread(storage.upload_private_source, source.data, source.ext)}
             for source in sources]
 
 

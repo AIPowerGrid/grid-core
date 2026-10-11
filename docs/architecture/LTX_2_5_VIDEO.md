@@ -126,11 +126,47 @@ new regressions and a fresh native job pass. The closed/refunded job was not
 rerendered. A separate initial audio driver failure omitted its requested source
 mode; that run is retained as a failed test, not source-conditioning evidence.
 
-Source privacy/retention (including anonymous source-access denial and expiry),
-broader crash/failure/refund cases, live ingress/body-limit checks and actual
-funded-credit qualification remain gates. Existing video pricing is only a test
-basis; source-specific rates and costs need review before admission. No public
-source admission, production worker enrollment or x402 payment was enabled.
+Those initial canaries did not qualify source privacy: an October11 read-only
+audit of their synthetic WAV/MP4 objects obtained anonymous HTTP206 through the
+public output domain. A signed source URL is not an access boundary when the
+same object has a public bucket endpoint. No private user media was probed.
+
+The follow-up candidate requires a separate `MEDIA_PRIVATE_SOURCE_BUCKET` for
+every governed LTX input: audio, video and opening/timed images. An empty value
+or the output bucket produces503 before quota, uploads, hold or dispatch;
+there is no fallback to public storage. The setting does not affect legacy
+image ingress, which still shares the output bucket and needs its own reviewed
+privacy migration. Source-free video needs no source bucket.
+
+Operators must keep both r2.dev and custom-domain access disabled for this
+bucket, review its source-only one-day expiry rule, and qualify actual access.
+The worker receives a bounded one-hour GET, never storage credentials. URL
+expiry limits access, not object retention. The configured bucket name alone
+is not proof that public access is disabled; see Cloudflare's
+[public-bucket controls](https://developers.cloudflare.com/r2/buckets/public-buckets/)
+and [presigned URL boundaries](https://developers.cloudflare.com/r2/api/s3/presigned-urls/).
+
+A separate new scratch bucket passed an actual upload through the candidate
+storage function: signed GET200 with matching bytes, anonymous S3 GET400,
+public-output-domain GET404, expired three-second GET403, refreshed GET200,
+then exact-object deletion and GET404. Its one-day `source/` lifecycle was
+written and read back; automatic day-boundary deletion was not observed.
+No production bucket, domain or policy was changed. A fresh native source job
+through this private bucket is still required; earlier public-source canaries
+must not be relabelled as privacy proof.
+
+ComfyUI/source/result/orphan retention, broader crash/failure/refund cases,
+live ingress/body-limit checks and actual funded-credit qualification remain
+gates. Existing video pricing is only a test basis; source-specific rates and
+costs need review before admission. No public source admission, production
+worker enrollment or x402 payment was enabled.
+
+The private-source/storage/typed-video/journal/billing subset passes336 tests
+with12 skips using the isolated PostgreSQL14 socket. The full Core run before
+the added oversized-storage regression passed1994 /606 skipped without the
+optional PostgreSQL URLs. Director passes316 tests, Ruff lint/format and strict
+mypy. Local Python3.13/PostgreSQL14 evidence does not replace required fresh
+Linux/Python3.12/PostgreSQL16 CI or funded qualification.
 
 These role distinctions follow the upstream
 [LTX-2.5 workflow catalogue](https://github.com/Lightricks/ComfyUI-LTXVideo/blob/master/example_workflows/2.5/README.md).

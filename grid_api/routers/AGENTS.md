@@ -40,6 +40,8 @@ transport, accounts, stats, health/metrics.
   (fully decoded exact-frame 24 fps H.264 MP4 at the explicit requested size).
   Motion references require a separate audio input; neither role is an opening
   image. Both source modes are default-dark and require compatible workers.
+  All typed LTX inputs, including optional image pins, require the separate
+  private-source bucket before quota/uploads; no output-bucket fallback.
   `_video_body.py` bounds both native video JSON routes to 64 MiB + 64 KiB
   before parsing and redacts input-bearing validation errors. The combined
   encoded source budget is 64 MiB, with stricter per-kind/image budgets.

@@ -28,6 +28,13 @@ content sanitization, and reward settlement.
   cancelled callers retain their slot until their decoder task finishes.
   FFmpeg time/individual-allocation limits are not a complete OS sandbox.
   Source retention/privacy and joint native/billing qualification remain gates.
+  Governed audio/video sources and typed LTX image pins use
+  `storage.upload_private_source`, never the output bucket. Its typed private
+  bucket must be configured separately; the native route preflights that
+  requirement before quota/uploads. Uploads return bounded one-hour GET links.
+  Private-bucket public-access/lifecycle review is an operator gate; URL expiry
+  is not object deletion. Legacy `upload_source` still uses the public output
+  bucket and must not be described as private merely because its URL is signed.
 
 - **Dispatch:** `job_queue.py` (Redis streams - the ONE live queue), `token_stream.py`
   (worker->client token relay), `media.py` (image/video job abstraction), `storage.py`
