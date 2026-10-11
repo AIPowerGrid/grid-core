@@ -5,7 +5,7 @@
 
 ## Status
 
-Candidate implementation, not a production release. Four versioned BF16 graphs
+Candidate implementation, not a production release. Five versioned BF16 graphs
 live in `recipes/qualification/`, which startup does not load. The default is
 still `LTX-2.3`; no public model advertisement, price, worker enrollment,
 generation gate or charging setting is changed by this candidate.
@@ -66,8 +66,10 @@ and a 30-second deadline per attempt; invalid contracts, HTTP failures and
 missing nodes/weights fail without retry. This is bounded startup recovery,
 not a render retry or proof of weight contents.
 
-The prospective model IDs are `LTX-2.5 Distilled BF16` and `LTX-2.5 Dev BF16`.
-Each has a separate text-to-video and image-pin recipe. `_grid.videoContract`
+The standard prospective model IDs are `LTX-2.5 Distilled BF16` and
+`LTX-2.5 Dev BF16`. Each has a separate text-to-video and image-pin recipe.
+The fixed Ingredients appearance candidate below has its own identity and
+cannot widen these standard profiles. `_grid.videoContract`
 selects the strict `aipg.ltx-video.v1` contract; clients never submit graphs or
 choose checkpoint filenames. Graphs use the installed LTX-2.5 BF16 transformer,
 Gemma4-12B projection encoder and LTX-2.5 video/audio VAEs.
@@ -113,6 +115,62 @@ The legacy video model keeps its 1..10 second, maximum-240-frame contract and
 four-second HTTP default. It does not acquire LTX-2.5 frame/keyframe authority.
 
 ### Source Conditioning Candidate
+
+#### Separate Appearance Candidate
+
+`LTX-2.5 Dev BF16 Ingredients` is a distinct, non-serving recipe in the
+qualification directory. Its `appearance_profile: ingredients-dev-v1` fixes
+execution to 768x448, 121 frames, 24 fps, 40 steps and CFG2. This does not expand
+the ordinary Dev 81-frame ceiling or relabel a distilled workload.
+
+The native routes accept `reference_image` only for that profile, together with
+exact-duration `reference_audio` and optional `reference_video`. The image must
+be an independently decoded, nonanimated 768x448 PNG under 12 MiB. Preparation
+of the appearance sheet is an explicit client operation, not a silent Core
+crop or transcode. `image` and `keyframes` remain opening/timed frame constraints
+and cannot be combined with the appearance candidate.
+
+Core repeats the reference sheet into an Ingredients guide and crops guide
+latents after sampling. It does not feed the portrait into an I2V start-frame
+node. Optional Union-Canny motion control chains from the Ingredients model
+and guide rather than replacing them. `reference_strength` defaults to 1;
+video-only `guide_strength` defaults to 0.5 and `motion_attention_strength` to
+0.25. All are finite in (0, 1] and committed with the graph/execution. The latter
+selects Core's fixed advanced control node, never a client-supplied graph.
+This layout is not proof that an output never flashes a reference, preserves
+identity, follows all motion or lip-syncs accurately.
+
+The source bindings are distinct roles: appearance PNG, frozen WAV and optional
+motion MP4. Their byte hashes, lengths and dimensions/timing are verified before
+a hold; private staging and post-closure retention use the existing source
+authority. Async intent adds the appearance byte hash and explicit strengths;
+absent new fields preserve old intent hashes. Inventory expands copies for
+each source mode without changing the canonical base recipe.
+
+New admission additionally requires default-off `appearance-to-video` and a
+single worker supporting `recipe-appearance-reference-v1` plus source/recovery
+features. Candidate worker startup requires this exact model/profile, both
+source modes and all Ingredients/advanced-motion node and weight inventories.
+Defaults and released workers do not gain that capability automatically.
+
+Core/compiler/API and worker fixture tests cover these boundaries. The profile
+has no approved price and live billing rejects it as unpriced. Joint native
+Core/WS/GPU/private-storage/recovery/financial qualification, measured appearance
+and motion quality, SDK/Director request support, and model-use clearance still
+gate promotion. Earlier local Ingredients takes and distilled network canaries
+are not execution proof for this new Grid recipe.
+
+Local verification for this addition passed the full Core suite with 2706 tests
+and 24 skipped, supplying all four disposable PostgreSQL test URLs. The isolated
+database was PostgreSQL 14 and the Core runtime Python 3.13; this does not
+replace required fresh Linux/Python 3.12/PostgreSQL 16 release CI. The worker at
+`d05464edfebdbee95017a52a2e8454b35d6b8726` passed 464 tests / 2 skipped on
+Python 3.12. All 41 appearance tests passed, including actual Core-plan to
+worker-adapter two/three-role handoffs with independent synthetic input decoding
+and mocked HTTP, not native rendering or live R2. Scoped SQLite/PostgreSQL API
+coverage retains one test-priced hold across rollback replay and changed-control
+conflicts. Tracked-tree and reachable-history secret scans were clean; no
+production configuration, tariff, funds or GPU services changed.
 
 The two distilled qualification recipes declare `source_modes: [audio, video]`.
 This is still private candidate metadata, not public capacity or admission.

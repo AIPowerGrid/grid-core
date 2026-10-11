@@ -49,6 +49,8 @@ class AsyncVideoRequest(VideoRequest):
     sampler: Literal["euler_ancestral_cfg_pp"] = "euler_ancestral_cfg_pp"
     audio: bool = True
     guide_strength: float | None = Field(default=None, gt=0, le=1)
+    reference_strength: float | None = Field(default=None, gt=0, le=1)
+    motion_attention_strength: float | None = Field(default=None, gt=0, le=1)
     response_format: Literal["url"] = "url"
     worker: str | None = Field(default=None, min_length=1, max_length=255)
     style: str | None = Field(default=None, min_length=1, max_length=128)
@@ -70,14 +72,15 @@ def request_hash(body: AsyncVideoRequest) -> str:
         intent["image"] = {"sha256": digests[0]}
     for pin, digest in zip(intent["keyframes"], digests):
         pin["image"] = {"sha256": digest}
-    for role in ("reference_audio", "reference_video"):
+    for role in ("reference_audio", "reference_video", "reference_image"):
         value = getattr(body, role)
         if value is None:
             intent.pop(role)
         else:
             intent[role] = {"sha256": hashlib.sha256(video_sources.decode_inline(value, role)).hexdigest()}
-    if body.guide_strength is None:
-        intent.pop("guide_strength")
+    for key in ("guide_strength", "reference_strength", "motion_attention_strength"):
+        if getattr(body, key) is None:
+            intent.pop(key)
     encoded = json.dumps({"schema": "aipg.video-intent.v1", "request": intent},
                          sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
     return hashlib.sha256(encoded.encode("ascii")).hexdigest()

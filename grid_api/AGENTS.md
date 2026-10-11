@@ -54,7 +54,8 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   after terminal job state. Add tests for every endpoint that moves paid work.
 - **Async video:** `MEDIA_ASYNC_ENABLED=0` closes new async admission only.
   Audio/video conditioning adds separately default-dark `audio-to-video` and
-  `video-to-video` admission. Do not infer these gates from the base video path,
+  `video-to-video` admission; Ingredients appearance adds `appearance-to-video`.
+  Do not infer these gates from the base video path,
   charging mode or health features. MP4 source verification needs FFmpeg/ffprobe;
   missing tools reject rather than bypassing validation.
   Governed LTX image/audio/video inputs require an explicit separate

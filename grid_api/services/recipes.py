@@ -93,7 +93,11 @@ def _recipe_from_workflow(
                 if "videoContract" in meta else None)
     if contract:
         for mode in contract.source_modes:
-            video_contract_svc.expand_sources(copy.deepcopy(spec), mode)
+            source_spec = copy.deepcopy(spec)
+            if contract.appearance_profile:
+                video_contract_svc.expand_appearance(source_spec)
+            video_contract_svc.expand_sources(source_spec, mode, 0.5 if contract.appearance_profile else 0.85,
+                                             0.25 if contract.appearance_profile and mode == "video" else None)
     return Recipe(
         recipe_root=recipe_root.lower(),
         recipe_id=recipe_id,
@@ -406,7 +410,20 @@ def param_schema(ref: str | int) -> Optional[dict]:
                 "description": "Inline H.264 MP4 motion guide at the explicit requested size, 24 fps and exact frame count; requires reference_audio",
             }
             params["guide_strength"] = {"type": "number", "minimum_exclusive": 0, "maximum": 1, "default": 0.85}
-        schema["video_contract"] = {**contract.model_dump(by_alias=True),
+        if contract.appearance_profile:
+            params["size"].update(default="768x448", options=["768x448"])
+            params["frames"].update(minimum=121, default=121)
+            params["seconds"].update(minimum=121 / 24, maximum=121 / 24)
+            params["steps"].update(minimum=40, maximum=40)
+            params["cfg_scale"].update(minimum=2, maximum=2)
+            params["reference_image"] = {"type": "image", "max_bytes": 12 * 1024 * 1024,
+                                         "width": 768, "height": 448, "content_type": "image/png",
+                                         "description": "Appearance guide, not an opening frame; requires source audio and Ingredients"}
+            params["reference_strength"] = {"type": "number", "minimum_exclusive": 0, "maximum": 1, "default": 1.0}
+            params["guide_strength"]["default"] = 0.5
+            params["motion_attention_strength"] = {"type": "number", "minimum_exclusive": 0, "maximum": 1, "default": 0.25,
+                                                    "description": "Video-reference attention only; requires reference_video"}
+        schema["video_contract"] = {**contract.model_dump(by_alias=True, exclude_none=True),
                                     "source_modes": source_modes,
                                     "max_keyframes": params.get("keyframes", {}).get("max_items", 0)}
     return schema
@@ -539,8 +556,9 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
             execution["keyframes"] = inputs["keyframes"]
         if inputs.get("source_mode"):
             execution["source_mode"] = inputs["source_mode"]
-        if "guide_strength" in inputs:
-            execution["guide_strength"] = inputs["guide_strength"]
+        for key in ("guide_strength", "appearance_profile", "reference_strength", "motion_attention_strength"):
+            if key in inputs:
+                execution[key] = inputs[key]
 
     spec = copy.deepcopy(r.spec)
 
@@ -588,8 +606,10 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
     source_bindings = None
     if r.video_contract is not None and inputs.get("source_mode"):
         try:
-            source_bindings = video_contract_svc.expand_sources(
-                spec, inputs["source_mode"], inputs.get("guide_strength", 0.85))
+            source_bindings = (video_contract_svc.expand_appearance(spec, inputs["reference_strength"])
+                               if r.video_contract.appearance_profile else [])
+            source_bindings.extend(video_contract_svc.expand_sources(
+                spec, inputs["source_mode"], inputs.get("guide_strength", 0.85), inputs.get("motion_attention_strength")))
         except (ValueError, KeyError):
             raise RecipeError("LTX source-conditioning scaffold is unavailable") from None
 

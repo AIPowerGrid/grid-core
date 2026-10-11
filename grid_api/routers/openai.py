@@ -858,7 +858,8 @@ async def get_model_recipe(model_id: str, apikey: Optional[str] = Header(None),
         canary: dict = {}  # minimum steps for a fast smoke test
         if "steps" in r.vars and "steps" in r.clamps:
             canary["steps"] = r.clamps["steps"][0]
-        resolved = recipes.resolve(r.recipe_root, canary)
+        resolved = ({"spec": copy.deepcopy(r.spec), "image_paths": None}
+                    if r.video_contract and r.video_contract.appearance_profile else recipes.resolve(r.recipe_root, canary))
         item = {
             "name": r.name,
             "recipe_root": r.recipe_root,
@@ -870,11 +871,14 @@ async def get_model_recipe(model_id: str, apikey: Optional[str] = Header(None),
             "spec": resolved["spec"],
         }
         if r.video_contract is not None:
-            item["video_contract"] = r.video_contract.model_dump(by_alias=True)
+            item["video_contract"] = r.video_contract.model_dump(by_alias=True, exclude_none=True)
             requirements = {}
             for mode in r.video_contract.source_modes:
                 source_spec = copy.deepcopy(resolved["spec"])
-                video_contract.expand_sources(source_spec, mode)
+                if r.video_contract.appearance_profile:
+                    video_contract.expand_appearance(source_spec)
+                video_contract.expand_sources(source_spec, mode, 0.5 if r.video_contract.appearance_profile else 0.85,
+                                              0.25 if r.video_contract.appearance_profile and mode == "video" else None)
                 requirements[mode] = {
                     "node_types": recipes.node_types(source_spec),
                     "model_files": recipes.model_files(source_spec),

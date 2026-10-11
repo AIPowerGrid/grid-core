@@ -20,11 +20,20 @@ content sanitization, and reward settlement.
   Distilled candidates may declare audio/video source modes. Core expands only
   its fixed frozen-audio/Union-Canny scaffold, independently of optional opening
   image pins. A character portrait is not identity-only conditioning.
+  The distinct `ingredients-dev-v1` appearance profile is fixed to Dev BF16,
+  768x448/121 frames/24 fps/40 steps/CFG2. It requires a separate appearance PNG
+  and exact-duration audio, rejects opening pins, and chains Ingredients before
+  optional Union motion control. Standard Dev remains capped at 81 frames.
+  Appearance/motion strengths are committed execution controls, not node or
+  adapter selectors; no portrait-at-frame-zero or identity-fidelity promise.
 - `video_sources.py` owns bounded inline WAV/MP4 input decoding, exact-duration
   audio validation and isolated FFmpeg probe/full-frame checks. It accepts no
   input URLs or filenames. Validate all inputs before quota/upload, retain
   hash/size/role/timing commitments and require them to match the compiled
-  source slots before a hold. MP4 verification has two process-local slots;
+  source slots before a hold. The Ingredients-only `reference_image` role is
+  a fully decoded, nonanimated 768x448 PNG under 12 MiB with separate byte/hash/
+  dimension commitments; it never enters the opening-image source list.
+  MP4 verification has two process-local slots;
   cancelled callers retain their slot until their decoder task finishes.
   FFmpeg time/individual-allocation limits are not a complete OS sandbox.
   Source retention/privacy and joint native/billing qualification remain gates.
@@ -130,10 +139,12 @@ content sanitization, and reward settlement.
   internal validator/setup probes retain their separate non-economic contracts.
   Typed video requests with multiple image pins also require `video-timeline`.
   The video router repeats admission before source uploads or quota consumption.
-  `audio-to-video` and `video-to-video` are new default-dark subpaths; both
+  `audio-to-video`, `video-to-video` and `appearance-to-video` are default-dark subpaths; all
   require `video`, and motion-guided video also requires `audio-to-video`.
   Source-bearing dispatch requires one worker with `recipe-media-sources-v1`
-  plus every other requested feature. The public worker does not advertise it.
+  plus every other requested feature. Appearance additionally requires
+  `recipe-appearance-reference-v1` on that same worker. Released workers do not
+  advertise the appearance feature.
   `validate_rollout` rejects global charging with an omitted admission list
   before startup touches dependencies. Dark/allowlisted deployment can retain
   defaults; an explicit empty list is a valid closed rollout. This guard forces
@@ -909,6 +920,17 @@ content sanitization, and reward settlement.
   over a newer cached block.
 
 ## Verification
+
+- `tests/test_ltx25_appearance.py` checks the separate fixed Ingredients profile,
+  nonanimated/unrotated PNG decoding, default-dark admission, committed roles/
+  controls, immutable guide chains and refusal of the unpriced live tariff.
+  Optional `MEDIA_VIDEO_WORKER_SOURCE` points to an explicitly reviewed media
+  worker checkout with a test `.venv`; its real adapter consumes the Core plan
+  in an env-file-disabled child, verifies synthetic bytes and binds renamed
+  inputs through mocked HTTP for audio and audio/video. No GPU, live storage,
+  wallet, quality or identity proof is claimed. The async router test separately
+  exercises real scoped keys, one hold and unchanged-ID rollback recovery on
+  SQLite/disposable PostgreSQL, with a test-only price and private-upload stub.
 
 - `tests/test_video_output.py` uses synthetic S3/body fixtures to prove
   source-conditional copy, post-copy worker overwrite isolation, streaming
