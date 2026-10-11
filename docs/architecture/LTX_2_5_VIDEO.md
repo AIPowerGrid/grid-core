@@ -734,6 +734,46 @@ FFmpeg. Both CI workflows now install it and explicitly require `ffmpeg` and
 required. Neither the green repetition nor CI explains the earlier dispatch
 timeout; do not label it fixed.
 
+### Managed Source Qualification
+
+On October 11, clean Core `2ac53a96`, worker `ffc4a011` and Director
+`7eb81ace` passed separate managed A2V/V2V canaries through the actual project
+clients, normal worker startup, native LTX, private PostgreSQL 14/Redis and R2.
+Both used synthetic exact-duration sources, 337 frames at 512x320/24 fps and
+no opening image. Each deliberately lost its initial accepted HTTP reply,
+retained the 400,000-micro local ceiling while uncertain, recovered by
+authenticated GET and retained one native prompt, job, hold and completion.
+V2V also recovered a planned private Core/worker SIGKILL without another render
+or interrupting ComfyUI. Each settled 280,834 unfunded test micro-USD, conserving
+its balance and ledger sum at 719,166; externally funded balance remained zero.
+
+Independent stored-byte hashing and full decoding passed. Source commitments
+and frozen audio were verified; Core's committed cleanup marker and independent
+S3 HEAD checks confirmed deletion of the V2V MP4/WAV and A2V WAV. The worker
+pruned its local output only after Core acknowledgement. Actual project take
+selection and offline export preserved spending and produced 337 decoded
+frames with matching 14.041667-second video/audio clocks. Same-state repeat
+audits preserved the exports and original financial/native identities. These
+checks do not measure source-motion, character or lip-sync fidelity, establish
+purchased-credit funding, or explain the older standalone runner timeout.
+
+Required [CI for that Core revision](https://github.com/AIPowerGrid/grid-core/actions/runs/38126793028)
+passed 2,661 full-suite tests / 24 skips, mandatory source decoding, dependency,
+restore/migration, Redis and pinned Console/node gates. Pinned SDK/Core
+qualification passed all 24 scenarios on SQLite/PostgreSQL 16, including real
+localhost JavaScript HTTP. The same SDK scenarios also passed locally on
+PostgreSQL 14 under Node 24. SDK tests use synthetic media and test balances;
+the separate native canaries supply GPU/storage evidence, not real funding.
+All exact-revision CodeQL and source/history secret/infra checks passed.
+
+Read-only post-run health confirmed both owned LTX services active with empty
+queues and pinned clean source trees; unrelated services were unchanged.
+The native cases used separate private Core instances, so they do not qualify
+shared-coordinator dual-worker load balancing. Private evidence is retained;
+production admission, published rates and funds were unchanged. Full
+reference-film/long appearance quality, public onboarding, purchased-credit
+proof, remaining retention scopes and model-use clearance remain gates.
+
 ## Remaining Release Gates
 
 - Compare and execute the Core-resolved graphs through two enrolled one-job
@@ -741,19 +781,21 @@ timeout; do not label it fixed.
 - Reproduce the handoff's multi-pin/337-frame jobs through the intended network
   path before describing the candidate as the full Director contract. Promote bounded
   settings from the working baseline with separate money/storage proofs.
-- Choose separate explicit rates and test sufficient/insufficient credit,
-  failed-job release, duplicate terminal, late success and restart recovery on
-  disposable PostgreSQL before a bounded real canary.
-- Qualify the candidate durable async submit/status, journal, concurrency and
-  outbox against real workers/storage and process faults. The candidate Core
-  lease and worker journal need their joint end-to-end qualification. Existing synchronous recovery
-  is not an async submission contract.
+- Review separate explicit rates and complete a bounded purchased-credit
+  canary. Disposable PostgreSQL lifecycle tests and unfunded native canaries
+  do not establish actual external funding or approve customer prices.
+- Extend the passing isolated async submit/status, worker-journal, storage and
+  crash controls to shared-Core two-worker balancing, public enrollment and
+  broader process/storage faults. Preserve original job identity throughout;
+  passing isolated recovery is not fleet-wide release approval.
 - Add request-bound Base USDC x402 payment-before-dispatch and refunds. The
   existing text-only x402 route is not video support. The unimplemented
   [video payment proposal](VIDEO_X402.md) separates exact payment proof from
   async execution, GET recovery and independently confirmed refunds.
-- Build film manifests, take selection, local editing and agent budgets; update
-  Gallery, SDKs and the portable agent skill against the released contract.
+- Qualify the implemented film manifests, take selection, local editing and
+  local budgets against the full handoff/reftrack and purchased-credit path;
+  update Gallery, SDK publication and the portable agent skill against the
+  released contract. A local project journal is not a server-wide budget.
 - After reviewed merge/deploy and canaries, promote only approved recipes,
   change the default, drain old jobs and retire unused MiniMax H3 paths. Never
   delete model files based only on names or an advertised replacement.
