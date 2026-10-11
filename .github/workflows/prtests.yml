@@ -160,14 +160,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: AIPowerGrid/grid-sdk-python
-          ref: 0680b5155b81cda64a3afd405c403697fcda9906
+          ref: 2f599e1a0e308decb34b045a0fbb638c7c8a71e8
           path: .integration/sdk-python
           persist-credentials: false
       - name: Checkout pinned JavaScript video SDK
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: AIPowerGrid/grid-sdk-js
-          ref: 51c04c7f27d559266f54289216ef267f6fe7a8d9
+          ref: 60547a07384845e9a0d831bfa690bc2b1ac1b043
           path: .integration/sdk-js
           persist-credentials: false
       - name: Build pinned JavaScript video SDK
@@ -179,7 +179,11 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
           AIPG_JS_VIDEO_QUALIFICATION: ${{ github.workspace }}/.integration/sdk-js/qualification/core-wire.mjs
-        run: python -m pytest .integration/sdk-python/qualification/test_core_video_jobs.py -q -rs
+          AIPG_JS_VIDEO_PAYMENTS_QUALIFICATION: ${{ github.workspace }}/.integration/sdk-js/qualification/video-payments.mjs
+        run: >-
+          python -m pytest
+          .integration/sdk-python/qualification/test_core_video_jobs.py
+          .integration/sdk-python/qualification/test_core_video_payments.py -q -rs
       - name: Build pinned Console for local consent integration
         working-directory: .integration/console
         run: |

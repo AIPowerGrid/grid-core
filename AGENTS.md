@@ -125,6 +125,12 @@ owning AGENTS.md and any affected parent Child DOX Index.
   scoped fixture keys, synthetic media and test balances never reach production.
   One POST, GET-only recovery after reply loss/rollback and 401/403/404 isolation
   are required. This does not prove GPU output, funded storage or video x402.
+- The same pinned SDK gate additionally qualifies generated/audio/video quote
+  preparation and wallet callback forwarding on both canonical Base domains.
+  Actual preview quotes must block callbacks; a test-only future-enabled copy
+  uses new unfunded signatures and Core's verifier through private two-phase
+  IPC. Require zero credit/hold/job effects. This is not a wallet UI, live token/
+  account/facilitator, replay exclusion, received-payment or refund proof.
 - Router billing/settlement coverage: `pytest grid_api/routers/`.
 - Legacy smoke tests live under `tests/` and may skip without external services.
 - For docs-only changes, run at least `git diff --check` and inspect the DOX

@@ -61,6 +61,8 @@ def test_exact_authorization_has_quote_nonce_and_domain_and_retains_no_signature
     typed = bindings.signing_request(row, payer=signer.address)["typed_data"]
     assert typed["domain"] == row["snapshot"]["payment"]["eip712_domain"]
     assert typed["primaryType"] == "TransferWithAuthorization"
+    assert [field["name"] for field in typed["types"]["EIP712Domain"]] == [
+        "name", "version", "chainId", "verifyingContract"]
     assert typed["message"]["nonce"] == row["authorization_nonce"]
 
 
