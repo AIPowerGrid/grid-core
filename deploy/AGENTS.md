@@ -83,12 +83,19 @@ executes an immutable release selected through `/home/aipg/current`.
   storage. Keep its r2.dev/custom-domain access disabled, verify anonymous
   denial and expiry, and review its one-day source lifecycle before admitting
   any governed LTX input. Legacy image sources are not migrated by this gate.
-  Apply migrations through `0044` before starting this release, even with
+  Apply migrations through `0045` before starting this release, even with
   `MEDIA_ASYNC_ENABLED=0`: the lifecycle outbox reads `grid_media_jobs`.
   Defaults are `MEDIA_ASYNC_CONCURRENCY=4`, `MEDIA_JOB_SWEEP_SECONDS=10`,
   `MEDIA_JOB_DISPATCH_LEASE_SECONDS=60`, and `MEDIA_JOB_BATCH_SIZE=10`.
-  Turning admission off preserves authenticated replay/status and drains
-  already accepted holds. Never drop journal history or restore a worker
+  Turning admission off preserves authenticated replay/status, drains existing
+  holds and continues accepted-job private-input cleanup. A separate minute loop deletes only
+  exact recorded private keys after committed financial closure; failures do
+  not block the queue or billing. Preserve the old private bucket and scoped
+  credentials until pending records drain when rotating buckets. Changing the
+  R2 account or rebinding a recorded source bucket as public output fails
+  cleanup closed. The provider one-day lifecycle still covers pre-admission
+  orphan inputs; ComfyUI and output/attempt retention remain separate gates.
+  Never drop journal history or restore a worker
   handler without the execution fence. Enablement additionally requires
   qualified `async-video-resume-v1` workers, durable prompt/result recovery,
   restart/crash proofs and supervised billing/storage canaries. The current

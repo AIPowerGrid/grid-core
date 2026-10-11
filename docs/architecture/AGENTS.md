@@ -104,7 +104,7 @@ validation, worker incentives, and trust boundaries.
   qualification. Rig-scoped terminal reads and mandatory worker preflight now
   support Core-confirmed local-cache cleanup and bounded closed history; joint
   canaries and ComfyUI/R2 retention remain separate gates. Apply migrations
-  through `0044` even with admission off.
+  through `0045` even with admission off.
   Native synthetic audio/video-source canaries now prove the isolated actual
   Core/WS/GPU/R2 path, byte commitments, optional opening image, one test-credit
   settlement and lost-reply recovery. The first source-video output-selection
@@ -116,6 +116,10 @@ validation, worker incentives, and trust boundaries.
   configured lifecycle readback, not automatic day-boundary expiry. Fresh native
   A2V/V2V through that bucket pass anonymous-denial and exact-object manual
   cleanup for their three committed inputs, not application retention.
+  The candidate now records exact private-source authority with each new
+  hold/journal and separately retries post-closure cleanup. Existing rows stay
+  NULL; no historical/public URL is adopted. Automatic R2 deletion needs its
+  fresh native canary; pre-admission/ComfyUI/output retention remains separate.
   ComfyUI/orphan retention, purchased funds,
   broader faults and appearance/motion/lip-quality acceptance remain gates.
   Legacy image-source privacy is unchanged; admission stays dark.

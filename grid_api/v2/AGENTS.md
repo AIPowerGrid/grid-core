@@ -34,6 +34,12 @@ validator shadow-observation records.
   terminal/refund authority checks the current lease under the financial job
   lock. Downgrade refuses any recorded lease, even after settlement. Apply before
   candidate startup and retain lease-aware transport/financial writers on rollback.
+  Migration `0045` adds nullable exact private-source object records and cleanup
+  attempt/completion timestamps, with a pending-cleanup index. Existing jobs stay
+  SQL NULL: payload URLs are not historical deletion authority. New records
+  commit with the hold/journal. They authorize only exact private-key cleanup
+  after financial closure, never execution, charging or payout. Apply before
+  startup; retain on rollback. Downgrade refuses any recorded retention history.
 
 - Migration `0042` adds `grid_credits.funded_balance_micro` and the append-only
   `grid_credit_ledger.funded_delta_micro`. Both default to zero: historical

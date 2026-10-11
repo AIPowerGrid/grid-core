@@ -595,12 +595,53 @@ isolated mypy with imported modules skipped. Legacy money/transport lint
 findings are unchanged, not a clean whole-repo lint or strict-type claim.
 Tracked-source and reachable-history secret scans pass without new exceptions.
 
-Apply through `0044` before starting the candidate even with admission disabled,
+Apply through `0045` before starting the candidate even with admission disabled,
 because the outbox and financial/worker paths read these columns. Preserve the
 journal, execution fence and lease-aware writers on rollback. Remaining async
 work is joint native-worker/GPU/R2 crash canaries, retained input/result and
 bounded cache lifecycle, live frozen-output verification and operational alerting.
 Do not enable public admission until those gates pass.
+
+## Private Input Cleanup
+
+Migration `0045` adds nullable private-source authority plus cleanup attempt and
+completion timestamps to the existing async journal. On a new admission, Core
+captures at most eighteen unique input keys from its compiled payload and commits
+them with the credit hold. Only the configured private R2 bucket/account and
+Core's generated `source/<uuid>.<ext>` keys qualify. Signed queries are not copied
+into this operational record. Historical jobs remain NULL; no old/public payload
+URL is retroactively authorized for deletion.
+
+A separate minute loop selects at most two financially closed jobs per pass.
+Both success and full refund commit `status=settled` with a settlement timestamp;
+held, unknown or inconsistent rows never authorize cleanup. Core validates the
+whole object record before any exact-key DELETE, uses bounded storage timeouts
+and no SDK retry, and marks completion only after every delete is confirmed.
+Partial failure or a crash retries the same keys, without charging, refunding,
+changing the paid output or appending a worker completion. A cancellation awaits
+the in-flight storage work before releasing its process-local single-flight guard.
+Attempt timestamps keep a failing oldest job from starving later closed jobs.
+Multiple Core replicas may repeat idempotent DELETEs; the completion marker has
+one conditional winner, not another financial authority.
+
+Cleanup continues after new-admission rollback and allows previously recorded
+private buckets to drain after bucket rotation. Keep their scoped permissions
+until that drain completes. A changed R2 account or source bucket rebound as
+the output bucket fails closed. Retain migration `0045` on rollback; downgrade
+refuses any stored object/cleanup history. This does not delete ComfyUI assets,
+public final outputs, attempt/copy orphans or uploads whose admission never
+committed. The reviewed provider source lifecycle remains the pre-admission
+orphan backstop, and all those other retention scopes remain release gates.
+
+The prior exact Core `28c06273` / worker `8e82c3f` / Director `fb4504cb`
+source-mode SIGKILL controls passed for both A2V and V2V. Read-only crash-state
+audits observed the original held reservation, conserved credit and no completion
+before same-state resumption. Recovery then produced one native prompt, one
+charge and one completion; their input removal was manual, not application
+retention. Core's full PostgreSQL16/Redis/cross-repo CI passed for that revision.
+Neither those checks nor the new cleanup unit tests qualify this newer revision's
+automatic R2 cleanup: its native canary must observe the application's SQL
+marker, independently prove every object absent and re-audit unchanged economics.
 
 ## Remaining Release Gates
 

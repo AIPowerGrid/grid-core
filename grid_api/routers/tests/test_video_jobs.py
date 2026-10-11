@@ -51,6 +51,8 @@ async def api(db, monkeypatch):
     monkeypatch.setattr(worker_ws, "get_available_models", available)
     monkeypatch.setattr(videos.generation_admission, "require_media", lambda *_args: None)
     monkeypatch.setattr(videos.storage, "private_source_bucket", lambda: "private-synthetic-source")
+    monkeypatch.setenv("R2_TRANSIENT_ACCOUNT", "https://" + "a" * 32 + ".r2.cloudflarestorage.com")
+    monkeypatch.setenv("R2_TRANSIENT_BUCKET", "synthetic-public-outputs")
     quota = AsyncMock()
     monkeypatch.setattr(videos.quota, "check_and_consume", quota)
     app = FastAPI()
@@ -357,7 +359,8 @@ async def test_audio_replay_keeps_one_hold_without_another_source_upload_or_quot
 
     def source_upload(raw, extension):
         uploaded.append((raw, extension))
-        return "https://" + "a" * 32 + ".r2.cloudflarestorage.com/private/source.wav"
+        return ("https://" + "a" * 32 + ".r2.cloudflarestorage.com/private-synthetic-source/source/"
+                + "b" * 32 + ".wav?X-Amz-Signature=synthetic")
 
     monkeypatch.setattr(videos.video_sources.storage, "upload_private_source", source_upload)
     body = {"frames": 33, "size": "256x256", "seed": 42,
@@ -371,6 +374,8 @@ async def test_audio_replay_keeps_one_hold_without_another_source_upload_or_quot
     assert row["payload"]["recipe_source_bindings"] == [
         {"role": "reference_audio", "path": "source_audio.inputs.audio"}]
     assert row["payload"]["source_media"][0]["samples"] == 66_000
+    assert row["source_objects"]["keys"] == ["source/" + "b" * 32 + ".wav"]
+    assert row["source_cleanup_at"] is None
     assert row["payload"]["required_media_features"] == [
         "async-video-resume-v1", "recipe-media-sources-v1"]
     assert await credits.get_balance(aid) == OPENING - 27_500

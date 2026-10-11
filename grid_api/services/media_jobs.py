@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import new_session
 from ..v2.schema import accounts, media_jobs, reservations
-from . import identities, job_queue, media_results, validator_audit_budgets
+from . import identities, job_queue, media_results, media_source_retention, validator_audit_budgets
 
 MAX_PAYLOAD_BYTES = 256 * 1024
 MAX_DISPATCH_ATTEMPTS = 6
@@ -235,7 +235,7 @@ async def insert_in_session(session, job: PreparedMediaJob) -> None:
         job_id=job.job_id, account_id=job.account_id, idempotency_hash=job.idempotency_hash,
         request_hash=job.request_hash, payload_hash=job.payload_hash, model=job.model,
         payload=job.payload, route_models=job.route_models, preferred_worker=job.preferred_worker,
-        max_cost_micro=job.max_cost_micro, created=_now(),
+        max_cost_micro=job.max_cost_micro, source_objects=media_source_retention.capture(job.payload), created=_now(),
     ))
 
 
