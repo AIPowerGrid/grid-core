@@ -720,7 +720,9 @@ timeout; do not label it fixed.
   lease and worker journal need their joint end-to-end qualification. Existing synchronous recovery
   is not an async submission contract.
 - Add request-bound Base USDC x402 payment-before-dispatch and refunds. The
-  existing text-only x402 route is not video support.
+  existing text-only x402 route is not video support. The unimplemented
+  [video payment proposal](VIDEO_X402.md) separates exact payment proof from
+  async execution, GET recovery and independently confirmed refunds.
 - Build film manifests, take selection, local editing and agent budgets; update
   Gallery, SDKs and the portable agent skill against the released contract.
 - After reviewed merge/deploy and canaries, promote only approved recipes,
