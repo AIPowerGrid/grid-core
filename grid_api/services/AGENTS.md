@@ -192,6 +192,23 @@ content sanitization, and reward settlement.
   calls it. Wrapped/batched calls, receive-authorization, bytes overloads and
   calldata suffixes are unsupported, not silently credited. Live compatibility,
   prior-attempt binding, shared claims and atomic funded admission remain gates.
+- `video_payment_attempts.py` owns optional `0047` pre-send/reconciliation state,
+  not a payment endpoint. Account/quote locks serialize one initial valid
+  authorization winner; created-time/deadline checks run after locks and again
+  before commit. It retains a canonical payload hash rather than the spending
+  signature. Replays after expiry/rollback grant no send permission. Payer and
+  safe/finalized/depth policy are immutable, as is the recorded transaction.
+  Owner-family recovery preserves the quote's original commitment; missing/
+  foreign state is hidden and mutated bindings fail closed. Network proof runs
+  outside SQL locks, then rechecks owner/quote/transaction before one committed
+  proof. Repeated proven reads retain the original anchors with no network.
+  Unavailable/pending proof leaves state unchanged; rejected proof is manual
+  review, not no-payment/refund. Commit-reply loss recovers the original row.
+  There is no facilitator, watcher, signature-retention/retry, shared cross-rail
+  claim, staged input persistence, funded hold/outbox, credit or payout write.
+  `proven` evidence alone cannot admit work. Missing-transaction recovery still
+  needs the bounded nonce watcher or reviewed manual correlation. No runtime
+  route/loop invokes this journal and normal quote views remain payment-disabled.
 - `probe.py` is a retired fail-closed compatibility shim, not a sampler.
   Its old `GRID_PROBE_*` variables cannot dispatch work. Use the existing
   assignment-bound validator or manager-bound setup paths for no-DEN checks;
@@ -1026,6 +1043,15 @@ content sanitization, and reward settlement.
   replies, redirects, read/whole deadlines and live local-capacity cancellation.
   It performs no SQL/network-chain/payment/admission and does not prove that a
   selected live RPC/facilitator supports this deliberately restricted shape.
+- `tests/test_video_payment_attempts.py` uses real SQLite and disposable
+  PostgreSQL state with synthetic unfunded signatures and fixture HTTP RPC.
+  It proves commit-before-send permission, no retained capability, alias/foreign
+  isolation, immutable reports/proofs, late recovery, pre/post-commit reply loss,
+  changed intent/policy rejection, and zero credit/hold/job/ledger effects.
+  Twenty-five PostgreSQL duplicate callers yield one winner; an observed real
+  quote-lock waiter rechecks expiry after release. DDL/schema parity and empty-
+  only downgrade are exercised on both databases. Not cross-rail ownership,
+  facilitator execution, process-SIGKILL, actual payment or funded admission proof.
 
 - `tests/test_ltx25_appearance.py` checks the separate fixed Ingredients profile,
   nonanimated/unrotated PNG decoding, default-dark admission, committed roles/

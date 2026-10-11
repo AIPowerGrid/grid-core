@@ -4,7 +4,7 @@
 # Video x402 Build
 
 Status: **private quotation, offline signature-binding and read-only historical
-receipt-verifier candidates implemented; payment collection remains a proposal**.
+receipt/attempt-journal candidates implemented; payment collection remains a proposal**.
 Reviewed against the candidate async video code and locally locked x402 2.16.0
 SDK on October 11, 2026. The quote routes below are independently default-off
 and have no payment collection, reservation, dispatch, refund sender or
@@ -274,6 +274,60 @@ support, economic admission or refund. No wallet, signature, transaction sender,
 money movement or production configuration is involved. Future payment proof
 must check its own actual payment block; this sample cannot substitute for it.
 
+### Durable Attempt Candidate
+
+Migration `0047` creates empty `grid_video_payment_attempts` with one quotation
+FK, unique authorization identity/transaction, immutable payload fingerprint,
+payer, confirmation policy and start time, plus coherent nullable receipt/review
+state. `services/video_payment_attempts.py` is non-routable; no endpoint or
+background loop invokes it. It writes no credit, reservation, executable journal,
+completion, payout or shared receipt claim. Normal quote views still return
+`payment_enabled:false`. Optional journal use requires the migration; ordinary
+quote recovery does not. Downgrade refuses any attempt or unresolved liability.
+
+`begin` locks the owned quote and current account family before verifying the
+original signature and committing `settling`. It checks the explicit admission
+deadline/quote window after locks and before commit. Exactly one caller receives
+the initial send permission; every exact replay, including after expiry or
+admission rollback, receives no permission. Changed payer, payload or confirmation
+policy conflicts. Only the canonical payload hash is retained, not a signature
+or capability that an automatic retry can spend. No facilitator call exists.
+
+`report` commits one transaction correlation, never a paid state; another hash
+cannot replace it. `reconcile` performs the prior receipt verifier outside SQL
+locks, checks its block timestamp against the committed attempt start, then
+rechecks ownership/quote/transaction before persisting the original proof.
+`proven` replay is a read of that same evidence, not another network check or
+permission to admit work. It never claims a newer confirmation policy. Pending/
+transport errors leave the row unchanged; rejected proof records `manual_review`,
+not a claim that no funds moved. Pre-/post-commit reply loss preserves the same
+attempt and cannot produce a second send permission.
+
+A crash after `begin` but before the facilitator call can therefore leave an
+unsent `settling` attempt. Likewise, a lost facilitator reply may leave the
+transaction unknown. Both need the future bounded nonce watcher/confirmed
+unspent-authorization closure or reviewed correlation; neither may be reset or
+automatically resent. Staged private input persistence is still missing from
+this journal. A proven transfer remains a recoverable liability until shared
+cross-rail ownership and funded admission/refund commit; this candidate must
+not take real payments merely because its SQL tests pass.
+
+Local SQLite/PostgreSQL 14 plus fixture-HTTP quote/signature/receipt/attempt
+verification passes 347 tests with six SQLite variants of PostgreSQL-only
+proofs skipped. PostgreSQL variants execute: 25 duplicate `begin` calls yield
+one winner and an observed blocked quote-lock contender refuses after expiry.
+Generated/audio/video intent, account aliases, altered authorization/policy,
+immutable report/proof, zero economic effects and commit/reply uncertainty are
+covered. A separate empty PostgreSQL migrates genesis through `0047`, reports
+no schema drift and passes its empty-only downgrade/re-upgrade. These are not
+actual facilitator calls, process-death injection or received/refunded funds.
+The complete local Core suite passes 3,168 tests with 34 skips and 139 warnings
+in 432.75 seconds. The two additional skips are SQLite variants of the new
+PostgreSQL duplicate/lock-expiry tests, whose PostgreSQL variants pass. Other
+optional/SQLite-only skip boundaries remain as described below. New/changed
+service and test files pass targeted Ruff; inherited schema-file lint findings
+remain outside this scope and are not claimed fixed.
+
 Signed payment headers are temporary spending capabilities, not recovery tokens.
 Never put them in URLs, logs, result envelopes or ordinary evidence exports.
 Retained authorizations need private access-controlled storage and bounded
@@ -306,6 +360,7 @@ the independently funded transaction commits.
 | quoted / verified | Quote or valid authorization only | Forbidden |
 | settling | Durable attempt; outcome may be unknown | Forbidden |
 | reported | Facilitator transaction, not independently proved | Forbidden |
+| proven | Original historical receipt stored; no shared claim/hold/outbox | Forbidden |
 | funded | Exact confirmed payment committed with held job | Existing outbox only |
 | manual_review | Ambiguous payment or inconsistent proof | Forbidden |
 | refund_due / refund_pending | Money owed back, refund not proved | Forbidden |
@@ -376,7 +431,10 @@ The subsequent historical receipt candidate passes a full local Core run of
 3,110 tests, with the same 32 skips and 139 warnings, in 439.78 seconds. A final
 JSON exponent-overflow guard then passes 238 targeted tests: 170 receipt cases
 plus 68 exact-signature cases. The earlier full run predates those final two
-overflow cases; fresh exact-commit Linux/PostgreSQL 16 CI remains required.
+overflow cases. Receipt revision `18354a8e` subsequently passes its own
+[exact-commit Linux/PostgreSQL 16 CI](https://github.com/AIPowerGrid/grid-core/actions/runs/38184190435).
+The newer `0047` attempt journal requires fresh exact-commit CI; these prior
+results do not qualify its SQL transitions or migration.
 The receipt tests have no real payment or SQL mutation. Real payment and
 native quote-to-funded job qualification remain pending. Neither
 local nor CI fixture results change public serving permission.
@@ -397,9 +455,10 @@ local nor CI fixture results change public serving permission.
    Finish outer-envelope integration and qualify
    live account/token/facilitator compatibility before taking payment.
 3. Attempt journal, independent chain proof and atomic prepaid hold/outbox.
-   The read-only receipt verifier is a candidate with fixture transport proofs;
-   a durable prior attempt, shared cross-rail claims, actual live compatibility
-   and the atomic funded admission transaction are not implemented yet.
+   The receipt verifier and durable prior-attempt journal are candidates with
+   real SQL/fixture transport proofs. Shared cross-rail claims, staged-input
+   persistence, the bounded lost-transaction watcher, actual facilitator/payer
+   compatibility and atomic funded admission are not implemented yet.
    Prove duplicates, concurrency and cross-rail claims on PostgreSQL 16. Keep
    the existing text x402 contract unchanged.
 4. Integrate leased success/failure and reviewed refunds. Kill processes before/

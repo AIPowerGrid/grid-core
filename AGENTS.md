@@ -136,6 +136,11 @@ owning AGENTS.md and any affected parent Child DOX Index.
   exact USDC authorization/Transfer events and pinned block state. Fixture
   tests are not live RPC, facilitator or purchased-payment qualification. It
   has no runtime hook, payment attempt, cross-rail claim or economic authority.
+- Private migration `0047` and the non-routable video attempt journal persist
+  one pre-send winner and immutable transaction/proof recovery per quote. No
+  spending signature is retained. SQLite/real PostgreSQL cover reply loss,
+  rollback, duplicate races and lock-delayed expiry; the journal grants no
+  shared receipt ownership, funded hold, outbox or refund authority.
 - Router billing/settlement coverage: `pytest grid_api/routers/`.
 - Legacy smoke tests live under `tests/` and may skip without external services.
 - For docs-only changes, run at least `git diff --check` and inspect the DOX
