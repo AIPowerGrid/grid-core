@@ -20,6 +20,16 @@ validator shadow-observation records.
 
 ## Local Contracts
 
+- Migration `0047` creates empty private `grid_video_payment_attempts`, keyed
+  by a quotation FK; the quote's unique job/nonce remain the execution binding.
+  It freezes quote commitment, EIP-3009 identity, payload fingerprint, payer,
+  explicit confirmation policy and start time. No spending signature is stored.
+  One authorization/transaction and coherent SQL-NULL proof/review fields are
+  database-enforced. Retained `settling`, `reported`, `proven` or `manual_review`
+  state is not a funded reservation, replay claim or executable job. Apply before
+  calling this optional service; no normal API/loop selects it. Rollback retains
+  every row, and downgrade refuses even an unresolved or reviewed attempt.
+
 - Migration `0046` creates empty private `grid_video_quotes`, without a
   reservation, executable job or payment signature. Quote/job UUIDs, nonce and
   owner/request-key uniqueness bind the private immutable snapshot; amount and

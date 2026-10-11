@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0046`
+- `versions/` - ordered migration revisions. Current source head: `0047`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -65,8 +65,17 @@ production database match the Grid-owned schema contracts without relying on
   `0046` creates empty immutable private video quotations, with owner/key,
   job UUID and derived-nonce uniqueness, positive bounded amount and expiry
   constraints. No signature, reservation, payment, dispatch or backfill exists.
+  `0047` creates empty quote-bound payment attempts and immutable receipt
+  evidence, with unique authorization/transaction and coherent review/proof
+  constraints. It stores no spending signature and grants no funded admission.
 
 ## Local Contracts
+
+- Apply `0047` before using the optional non-routable video attempt journal.
+  Normal credit/deposit/text x402 and quote routes do not query the new table.
+  Application rollback retains it; downgrade refuses any attempt, including
+  unresolved `settling` and reviewed state. No historical attempt/payment is
+  reconstructed, and no sender, reserve, outbox or API is enabled by migration.
 
 - Apply `0046` before using the optional quote routes, even for recovery after
   their creation flag is rolled back. Ordinary video/credit paths do not read

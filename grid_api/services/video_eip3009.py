@@ -107,6 +107,12 @@ def _signature(value: str) -> str:
     return value
 
 
+def _identity(domain: dict, payer: str, nonce: str) -> str:
+    identity = {"schema": "aipg.eip3009-claim.v1", "chain_id": domain["chainId"],
+                "asset": domain["verifyingContract"], "payer": payer, "nonce": nonce}
+    return hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("ascii")).hexdigest()
+
+
 def verify(row: dict, payload: dict, *, expected_payer: str) -> BoundAuthorization:
     """Check the inner exact payload against one owner-loaded immutable quote.
 
@@ -137,9 +143,7 @@ def verify(row: dict, payload: dict, *, expected_payer: str) -> BoundAuthorizati
             raise VideoAuthorizationError("authorization signer mismatch")
         snapshot = _live_quote(row)  # Cryptographic work cannot extend expiry.
         domain = snapshot["payment"]["eip712_domain"]
-        identity = {"schema": "aipg.eip3009-claim.v1", "chain_id": domain["chainId"],
-                    "asset": domain["verifyingContract"], "payer": expected["from"], "nonce": expected["nonce"]}
-        digest = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("ascii")).hexdigest()
+        digest = _identity(domain, expected["from"], expected["nonce"])
         return BoundAuthorization(quote_id=snapshot["quote_id"], job_id=snapshot["job_id"],
             payer=expected["from"], recipient=expected["to"], chain_id=domain["chainId"],
             asset=domain["verifyingContract"], amount_micro=int(expected["value"]), nonce=expected["nonce"],

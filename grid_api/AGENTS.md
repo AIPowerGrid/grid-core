@@ -89,6 +89,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   quote through two operator-selected HTTPS sources. Its explicit safe/finalized
   policy has no latest fallback; no route/background loop calls it, and its
   evidence is not a durable attempt, funding claim or admission transaction.
+  The separate `0047` attempt journal now persists a pre-send identity and
+  original receipt evidence. It has no route, facilitator or background hook,
+  no retained spending signature and no funded-job authority. Quote recovery
+  remains available without this optional journal; no startup loop reads it.
 - An enrolled worker's verified signing authority is independent of later
   account payout-preference changes. Reconnection retains the exact owned
   delegation with fresh proof, never arbitrary old wallets or another account's

@@ -187,6 +187,11 @@ validation, worker incentives, and trust boundaries.
   through two bounded HTTPS RPC destinations with exact authorization/transfer,
   signature, contract-state and canonical-anchor checks. Its fixture transports
   are not live chain proof; no attempt, claim, funding or dispatch is written.
+  The separate `0047` journal now records one pre-send winner, immutable policy/
+  transaction and original historical proof without retaining the signature.
+  It remains non-routable and has no shared transfer claim, funded hold/outbox,
+  automatic retry or refund. Real SQLite/PostgreSQL and fixture HTTP tests cover
+  duplicate/lock-expiry and commit-reply recovery; no real payment is attempted.
   Remaining work includes published client/outer-envelope integration, live
   chain/account/facilitator proof, payment-before-outbox admission,
   cross-rail replay protection, separate refund obligations and real payment

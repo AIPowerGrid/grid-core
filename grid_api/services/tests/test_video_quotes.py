@@ -27,7 +27,7 @@ from grid_api.services import video_quotes as quotes
 from grid_api.services.tests import test_media_job_journal as journal_tests
 from grid_api.services.tests import test_video_plans as plan_tests
 from grid_api.services.tests.test_video_plans import request
-from grid_api.v2.schema import account_aliases, metadata, video_quotes
+from grid_api.v2.schema import account_aliases, metadata, video_payment_attempts, video_quotes
 
 db = journal_tests.db
 owner = journal_tests.owner
@@ -309,7 +309,8 @@ def test_migration_parity_empty_downgrade_and_refusal_after_quote():
     engine = sa.create_engine("sqlite://")
     try:
         with engine.begin() as connection:
-            metadata.create_all(connection, tables=[table for table in metadata.sorted_tables if table != video_quotes])
+            metadata.create_all(connection, tables=[table for table in metadata.sorted_tables
+                                                    if table not in {video_quotes, video_payment_attempts}])
             with Operations.context(MigrationContext.configure(connection)):
                 revision.upgrade()
                 inspector = sa.inspect(connection)
@@ -343,6 +344,8 @@ async def test_real_postgres_migration_matches_schema_and_preserves_quote_histor
     quote, key = await prepared(await owner(0))
 
     def apply_and_check(connection):
+        assert connection.scalar(sa.select(sa.func.count()).select_from(video_payment_attempts)) == 0
+        video_payment_attempts.drop(connection)
         video_quotes.drop(connection)
         with Operations.context(MigrationContext.configure(connection)):
             revision.upgrade()
@@ -355,6 +358,7 @@ async def test_real_postgres_migration_matches_schema_and_preserves_quote_histor
                     c.name for c in video_quotes.constraints if isinstance(c, kind)}
             revision.downgrade()
             revision.upgrade()
+        video_payment_attempts.create(connection)
 
     async with db[0].kw["bind"].begin() as connection:
         await connection.run_sync(apply_and_check)
