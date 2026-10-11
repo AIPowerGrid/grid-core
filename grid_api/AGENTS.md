@@ -85,6 +85,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   Offline EIP-3009 matching is non-routable evidence; it grants neither live
   signer approval nor funded job authority. Current-window expiry cannot
   discard an already attempted payment's reconciliation/refund obligation.
+  The separate read-only historical receipt helper can inspect an expired
+  quote through two operator-selected HTTPS sources. Its explicit safe/finalized
+  policy has no latest fallback; no route/background loop calls it, and its
+  evidence is not a durable attempt, funding claim or admission transaction.
 - An enrolled worker's verified signing authority is independent of later
   account payout-preference changes. Reconnection retains the exact owned
   delegation with fresh proof, never arbitrary old wallets or another account's

@@ -174,6 +174,24 @@ content sanitization, and reward settlement.
   capability admission are shared through `videos.validate_video` without
   uploads/quota. The waiting `videos.prepare_video` wrapper stages those inputs;
   async ingress stages the already compiled snapshot without recipe re-resolution.
+- `video_payment_proofs.py` owns non-routable historical exact-USDC evidence.
+  Two distinct operator-selected HTTPS destinations must agree on one direct
+  canonical-token v/r/s `transferWithAuthorization`, actual recovered signature,
+  exact Transfer and AuthorizationUsed logs, payment-block code/domain/decimals/
+  consumed-nonce state, and a re-read canonical confirmation anchor. Every
+  state call uses a required-canonical block-hash selector. Payer and relayer
+  need not match; any payer code/delegation at that block rejects this EOA lane.
+  Safe/finalized and depth are explicit policy inputs, never latest fallbacks.
+  Expired quotes remain inspectable; unavailable, pending or inconsistent proof
+  never means no payment or permission to retry. Two process-local slots, five-
+  second reads, a thirty-second whole-proof deadline, 512-KiB replies, strict
+  duplicate-free JSON-RPC and no redirects bound the transport. Caller-owned
+  authenticated/TLS-verifying clients remain a future adapter contract; distinct
+  hostnames are not operator-independence or cryptographic chain proof. No
+  request/loop, attempt journal, replay claim, monetary write, sender or dispatch
+  calls it. Wrapped/batched calls, receive-authorization, bytes overloads and
+  calldata suffixes are unsupported, not silently credited. Live compatibility,
+  prior-attempt binding, shared claims and atomic funded admission remain gates.
 - `probe.py` is a retired fail-closed compatibility shim, not a sampler.
   Its old `GRID_PROBE_*` variables cannot dispatch work. Use the existing
   assignment-bound validator or manager-bound setup paths for no-DEN checks;
@@ -1000,6 +1018,14 @@ content sanitization, and reward settlement.
   changed-domain/payer/nonce/amount/expiry controls, unsupported signatures,
   immutable views and legacy refusal. Synthetic keys never hold funds. This is
   not a live facilitator/contract, published adapter or payment canary.
+- `tests/test_video_payment_proofs.py` exercises actual HTTPX request/envelope
+  handling with fixture transports on both Base domains, real synthetic ECDSA
+  and the official SDK/Web3 ABI. It covers historical recovery after expiry,
+  nonce/amount/domain/event/calldata mismatch, payer/relayer distinction, provider
+  disagreement, anchored code/delegation, moving heads/reorgs, duplicate/oversized
+  replies, redirects, read/whole deadlines and live local-capacity cancellation.
+  It performs no SQL/network-chain/payment/admission and does not prove that a
+  selected live RPC/facilitator supports this deliberately restricted shape.
 
 - `tests/test_ltx25_appearance.py` checks the separate fixed Ingredients profile,
   nonanimated/unrotated PNG decoding, default-dark admission, committed roles/
