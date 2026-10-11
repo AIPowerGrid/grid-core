@@ -27,11 +27,13 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException
+from PIL import Image
 
 from . import storage
 
 MAX_AUDIO_BYTES = 12 * 1024 * 1024
 MAX_VIDEO_BYTES = 32 * 1024 * 1024
+MAX_IMAGE_BYTES = 12 * 1024 * 1024
 MAX_ENCODED_BYTES = 64 * 1024 * 1024
 _VIDEO_CHECKS = asyncio.Semaphore(2)
 
@@ -52,9 +54,10 @@ class Source:
 
 def decode_inline(value: str, role: str) -> bytes:
     """Strict base64/data URI decoding without reflecting private source bytes."""
-    if role not in {"reference_audio", "reference_video"}:
+    if role not in {"reference_audio", "reference_video", "reference_image"}:
         raise ValueError("invalid source role")
-    limit, mime = ((MAX_AUDIO_BYTES, "audio/wav") if role == "reference_audio"
+    limit, mime = ((MAX_IMAGE_BYTES, "image/png") if role == "reference_image"
+                   else (MAX_AUDIO_BYTES, "audio/wav") if role == "reference_audio"
                    else (MAX_VIDEO_BYTES, "video/mp4"))
     if not isinstance(value, str) or not value or len(value) > 4 * ((limit + 2) // 3) + 64:
         raise HTTPException(413, detail="Video conditioning source exceeds its byte limit")
@@ -70,6 +73,24 @@ def decode_inline(value: str, role: str) -> bytes:
     if not raw or len(raw) > limit:
         raise HTTPException(413, detail="Video conditioning source exceeds its byte limit")
     return raw
+
+
+def validate_image(raw: bytes) -> Source:
+    """Require the exact, fully decoded PNG sheet; never crop/transcode silently."""
+    try:
+        if not raw or len(raw) > MAX_IMAGE_BYTES:
+            raise ValueError
+        with Image.open(io.BytesIO(raw)) as image:
+            if image.format != "PNG" or image.size != (768, 448):
+                raise ValueError
+            image.verify()
+        with Image.open(io.BytesIO(raw)) as image:
+            if image.n_frames != 1 or image.getexif().get(274, 1) != 1:
+                raise ValueError
+            image.load()
+    except (ValueError, OSError, SyntaxError, Image.DecompressionBombError):
+        raise HTTPException(422, detail="Appearance reference must be a complete single-frame 768x448 PNG") from None
+    return Source("reference_image", raw, "png", {"width": 768, "height": 448})
 
 
 def validate_audio(raw: bytes, frames: int) -> Source:
@@ -172,15 +193,17 @@ def validate_video(raw: bytes, frames: int, width: int, height: int) -> Source:
     return Source("reference_video", raw, "mp4", {"width": width, "height": height, "frames": frames, "fps": 24})
 
 
-async def validate_sources(audio: str | None, video: str | None, *, frames: int, width: int, height: int) -> list[Source]:
+async def validate_sources(audio: str | None, video: str | None, *, frames: int, width: int, height: int,
+                           image: str | None = None) -> list[Source]:
     """Bound decoder admission; validate all sources before upload or quota."""
-    if not audio and not video:
+    if not audio and not video and not image:
         return []
     if not audio:
         raise HTTPException(422, detail="Video reference requires explicit exact-duration reference_audio")
-    if sum(len(item) for item in (audio, video) if item) > MAX_ENCODED_BYTES:
+    if sum(len(item) for item in (audio, video, image) if item) > MAX_ENCODED_BYTES:
         raise HTTPException(413, detail="Combined video conditioning inputs exceed their encoded limit")
-    sources = [validate_audio(decode_inline(audio, "reference_audio"), frames)]
+    sources = [validate_image(decode_inline(image, "reference_image"))] if image else []
+    sources.append(validate_audio(decode_inline(audio, "reference_audio"), frames))
     if video:
         raw = decode_inline(video, "reference_video")
         try:
@@ -211,18 +234,24 @@ async def upload_sources(sources: list[Source]) -> list[dict]:
 def validate_commitments(sources: list[dict], bindings: list[dict], execution: dict) -> None:
     """Reject dropped, extra or mistimed source roles before reserving money."""
     expected = [{"role": "reference_audio", "path": "source_audio.inputs.audio"}]
+    if execution.get("appearance_profile") == "ingredients-dev-v1":
+        expected.insert(0, {"role": "reference_image", "path": "reference_image.inputs.image"})
     if execution.get("source_mode") == "video":
         expected.append({"role": "reference_video", "path": "source_video.inputs.file"})
     try:
-        if (execution.get("source_mode") not in {"audio", "video"} or bindings != expected
+        if (execution.get("source_mode") not in {"audio", "video"}
+                or execution.get("appearance_profile") not in {None, "ingredients-dev-v1"} or bindings != expected
                 or not isinstance(sources, list) or len(sources) != len(expected)):
             raise ValueError
         for source, binding in zip(sources, bindings):
             role = binding["role"]
-            details = ({"sample_rate": 48_000, "channels": 2, "samples": execution["frames"] * 2000}
+            details = ({"width": 768, "height": 448} if role == "reference_image"
+                       else {"sample_rate": 48_000, "channels": 2, "samples": execution["frames"] * 2000}
                        if role == "reference_audio" else {"width": execution["width"], "height": execution["height"]})
-            mime, limit = (("audio/wav", MAX_AUDIO_BYTES) if role == "reference_audio" else ("video/mp4", MAX_VIDEO_BYTES))
-            expected_keys = {"role", "sha256", "bytes", "content_type", "url", "frames", "fps", *details}
+            mime, limit = (("image/png", MAX_IMAGE_BYTES) if role == "reference_image"
+                           else ("audio/wav", MAX_AUDIO_BYTES) if role == "reference_audio" else ("video/mp4", MAX_VIDEO_BYTES))
+            units = details if role == "reference_image" else {"frames": execution["frames"], "fps": 24, **details}
+            expected_keys = {"role", "sha256", "bytes", "content_type", "url", *units}
             if not isinstance(source, dict) or set(source) != expected_keys:
                 raise ValueError
             url = urlsplit(source["url"])
@@ -233,7 +262,7 @@ def validate_commitments(sources: list[dict], bindings: list[dict], execution: d
                     or not isinstance(source["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", source["sha256"])
                     or type(source["bytes"]) is not int or not 0 < source["bytes"] <= limit
                     or any(type(source[key]) is not int or source[key] != value
-                           for key, value in {"frames": execution["frames"], "fps": 24, **details}.items())):
+                           for key, value in units.items())):
                 raise ValueError
     except (ValueError, KeyError, TypeError, AttributeError):
         raise HTTPException(422, detail="Source media does not match the governed video execution contract") from None

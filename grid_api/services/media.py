@@ -384,6 +384,8 @@ def compile_dispatch(model: str, job_type: str, payload: dict) -> tuple[dict, di
             from .video_sources import validate_commitments
             validate_commitments(source_media, source_bindings, resolved_recipe["execution"])
             features = set(payload.get("required_media_features") or []) | {"recipe-media-sources-v1"}
+            if resolved_recipe["execution"].get("appearance_profile"):
+                features.add("recipe-appearance-reference-v1")
             if len(bindings or []) > 1:
                 features.add("recipe-image-bindings-v1")
             payload = {**payload, "required_media_features": sorted(features)}
@@ -430,6 +432,8 @@ def bind_dispatch_recipe(model: str, payload: dict, spec: dict | None) -> tuple[
             payload["recipe_image_bindings"] = spec["image_bindings"]
         if spec.get("source_bindings"):
             payload["recipe_source_bindings"] = spec["source_bindings"]
+        if (spec.get("execution") or {}).get("appearance_profile"):
+            payload["appearance_profile"] = spec["execution"]["appearance_profile"]
     route_models = spec.get("required_models") if spec and spec.get("required_models") else [model]
     return payload, route_models
 

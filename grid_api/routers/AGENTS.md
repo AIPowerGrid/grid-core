@@ -52,6 +52,14 @@ transport, accounts, stats, health/metrics.
   Source byte hashes join durable normalized request identity; replay never
   reuploads, trims or regenerates a source. Input roles/bytes must match the
   governed graph before reserve. This is not character identity or lip accuracy.
+  The separate `LTX-2.5 Dev BF16 Ingredients` candidate accepts `reference_image`
+  as appearance-only PNG conditioning with source audio and optional motion
+  video, never `image`/`keyframes`. Its fixed 121-frame/768x448/40-step profile
+  cannot widen ordinary Dev. Finite `reference_strength` and video-only
+  `motion_attention_strength` join normalized intent; absent new fields preserve
+  existing request hashes. `appearance-to-video` is default-off and requires
+  `recipe-appearance-reference-v1` on the same worker as every other feature.
+  The recipe stays non-serving/unpriced; compiler tests do not qualify output.
 - `video_jobs.py` - candidate `POST /v1/videos/jobs` and owner-only
   `GET /v1/videos/jobs/{job_id}`, plus `GET /v1/videos/jobs` with the
   `Idempotency-Key` header for lost initial replies. GET never admits, uploads,
@@ -477,6 +485,10 @@ expired or out-of-scope pilots return 503 without revealing membership.
   journal tests additionally prove alias recovery and merged-key ambiguity.
   Synthetic distilled/dev normalized-intent fingerprints are pinned in Core
   and Director; neither fixtures nor matching digests prove a live paid CLI job.
+  Ingredients coverage retains appearance/audio as distinct private roles with
+  one test-priced hold, new same-worker feature and no opening-image slot.
+  Replay after admission rollback uses neither another upload nor quota/hold;
+  a changed appearance strength conflicts instead of repricing the accepted job.
 
 - `tests/test_media_resume_process.py` kills real isolated Core after WS dispatch
   or a committed settlement, erases only its private Redis database, restarts

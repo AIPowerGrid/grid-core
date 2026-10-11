@@ -29,6 +29,8 @@ def require_media(job_type: str, payload: dict) -> None:
     elif job_type == "video":
         if payload.get("source_media"):
             require_path("audio-to-video")
+            if any(source.get("role") == "reference_image" for source in payload["source_media"]):
+                require_path("appearance-to-video")
             if any(source.get("role") == "reference_video" for source in payload["source_media"]):
                 require_path("video-to-video")
         if payload.get("source_image_url"):

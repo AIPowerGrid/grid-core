@@ -76,6 +76,9 @@ executes an immutable release selected through `/home/aipg/current`.
 - Async video remains a default-off candidate, not production admission.
   Source conditioning additionally requires explicit `audio-to-video` /
   `video-to-video` allowlist entries, which are excluded from omitted defaults.
+  Ingredients also requires the default-dark `appearance-to-video` path and
+  matching appearance worker feature. Its distinct fixed profile remains
+  non-serving/unpriced; adding schema support is not activation authority.
   Core needs FFmpeg/ffprobe before MP4 source admission; package pinning,
   decoder isolation, input privacy/retention and joint qualification remain
   gates. Do not change production allowlists merely because schemas exist.

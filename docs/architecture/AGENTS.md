@@ -150,6 +150,11 @@ validation, worker incentives, and trust boundaries.
   ComfyUI/orphan retention, purchased funds,
   broader faults and appearance/motion/lip-quality acceptance remain gates.
   Legacy image-source privacy is unchanged; admission stays dark.
+  A separate fixed Ingredients Dev candidate now carries appearance PNGs as
+  their own committed source role, not a first-frame image. The Core compiler/
+  inventory and worker executor/startup support it dark; SDK/Director transport,
+  actual joint native execution, paid lifecycle and appearance-quality acceptance
+  remain gates for this new profile. It does not inherit distilled source proof.
 - `VIDEO_X402.md` - unimplemented authenticated prepaid-video proposal: exact
   USDC quote/nonce binding, payment-before-outbox admission, cross-rail replay
   protection, separate refund obligations and staged qualification. No route,

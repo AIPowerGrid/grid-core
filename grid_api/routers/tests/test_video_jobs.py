@@ -396,6 +396,57 @@ async def test_audio_replay_keeps_one_hold_without_another_source_upload_or_quot
 
 
 @pytest.mark.asyncio
+async def test_ingredients_intent_retains_distinct_sources_and_one_hold_after_rollback(api, monkeypatch):
+    from grid_api.services import pricing
+
+    model = "LTX-2.5 Dev BF16 Ingredients"
+    client, aid, credential, settings, quota, available = api
+    available.return_value = [model]
+    # Test-only tariff; the real appearance candidate stays unpriced/dark.
+    monkeypatch.setitem(pricing.PRICING, model.lower(), pricing.ModelPrice(0, 0, video_per_second=0.02))
+    uploaded = []
+
+    def source_upload(raw, extension):
+        uploaded.append((raw, extension))
+        return ("https://" + "a" * 32 + ".r2.cloudflarestorage.com/private-synthetic-source/source/"
+                + f"{len(uploaded):032x}.{extension}?X-Amz-Signature=synthetic")
+
+    monkeypatch.setattr(videos.storage, "upload_private_source", source_upload)
+    stream = io.BytesIO()
+    Image.new("RGB", (768, 448), "red").save(stream, "PNG")
+    body = {"model": model, "seed": 0, "max_cost_micro_usd": 150_000,
+            "reference_image": base64.b64encode(stream.getvalue()).decode(),
+            "reference_audio": base64.b64encode(wav(121)).decode()}
+    key = uuid4()
+    first = await post(api, key=key, body=body)
+    assert first.status_code == 202, first.text
+    job = first.json()["job_id"]
+    row = await stored(job)
+    payload = row["payload"]
+    assert "source_image_url" not in payload
+    assert payload["appearance_profile"] == "ingredients-dev-v1"
+    assert [source["role"] for source in payload["source_media"]] == ["reference_image", "reference_audio"]
+    assert payload["recipe_spec"]["reference_guide"]["inputs"]["latent"] == ["latent_video", 0]
+    assert len(row["source_objects"]["keys"]) == 2
+    assert "recipe-appearance-reference-v1" in payload["required_media_features"]
+    assert first.json()["reserved_micro"] == 100_834
+    assert await credits.get_balance(aid) == OPENING - 100_834
+    assert len(uploaded) == 2
+    settings.media_async_enabled = False
+    quota.reset_mock()
+    monkeypatch.setattr(video_jobs, "validate_video", AsyncMock(side_effect=AssertionError("must not prepare accepted replay")))
+    replay = await post(api, key=key, body=body)
+    assert replay.status_code == 202 and replay.json()["job_id"] == job
+    assert len(uploaded) == 2 and quota.await_count == 0
+    assert await counts() == (1, 1, 0)
+    conflict = await post(api, key=key, body={**body, "reference_strength": 0.5})
+    assert conflict.status_code == 409
+    assert await counts() == (1, 1, 0)
+    recovered = await client.get(first.headers["location"], headers={"apikey": credential})
+    assert recovered.status_code == 200 and recovered.json()["job_id"] == job
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["generated", "audio", "video"])
 async def test_compilation_failure_rejects_before_quota_upload_or_hold(api, monkeypatch, mode, mp4):
     _client, aid, _credential, _settings, quota, _available = api

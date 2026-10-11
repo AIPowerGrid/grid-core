@@ -11,6 +11,8 @@ make it recursive: placing a workflow here must not activate it.
 - `ltx-2.5-*-v1.json` owns the single-stage BF16 distilled/dev, text/image-pin
   qualification graphs. They mirror the locally rendered native workflows.
 - `docs/architecture/LTX_2_5_VIDEO.md` owns evidence and promotion gates.
+- `ltx-2.5-dev-bf16-ingredients-v1.json` is the separate fixed 121-frame
+  appearance/source candidate, not a replacement for standard Dev or I2V.
 
 ## Contracts
 
@@ -24,7 +26,11 @@ make it recursive: placing a workflow here must not activate it.
   validated upstream, hash-bound to roles and worker slots, never ignored.
   Opening images remain explicit/optional; no appearance-only identity claim.
   New source admission and public worker advertisement remain disabled.
-- Distilled ceiling is 337 frames; dev remains 81. Text-only graphs accept no
+- Distilled ceiling is 337 frames; standard dev remains 81. Ingredients dev is
+  fixed to 768x448/121/40 steps/CFG2 with no opening pins. Its appearance PNG
+  binds only into Core's Ingredients expansion; source audio is mandatory and
+  motion video optional. It has its own model ID, default-dark admission and
+  worker feature, with no public price or identity guarantee. Text-only graphs accept no
   pins; image graphs permit up to sixteen strictly increasing pins starting at
   zero, within the clip, with finite strengths in 0..1. These ceilings describe
   the bounded candidate, not exhaustive quality qualification.
@@ -39,6 +45,9 @@ make it recursive: placing a workflow here must not activate it.
 ## Verification
 
 - `pytest grid_api/services/tests/test_ltx25_contract.py`
+- `pytest grid_api/services/tests/test_ltx25_appearance.py`
+  Set `MEDIA_VIDEO_WORKER_SOURCE` to a reviewed checkout with a test `.venv`
+  for the optional actual worker-adapter handoff (synthetic/mocked HTTP only).
 - `pytest grid_api/services/tests/test_ltx25_billing.py`; set a disposable
   `CREDITS_TEST_DB_URL` for the PostgreSQL race cases. Each case removes only
   its own temporary schema. Required release CI uses PostgreSQL 16.

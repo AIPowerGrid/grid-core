@@ -21,16 +21,21 @@ class LtxVideoContract(BaseModel):
     max_pixels: int = Field(ge=256 * 256, le=960 * 544)
     max_keyframes: int = Field(default=0, ge=0, le=16)
     source_modes: list[Literal["audio", "video"]] = Field(default_factory=list, max_length=2)
+    appearance_profile: Literal["ingredients-dev-v1"] | None = None
 
     @model_validator(mode="after")
     def validate_capacity(self):
         if self.max_frames % 8 != 1:
             raise ValueError("max_frames must be 8n+1")
-        if self.variant == "dev" and self.max_frames > 81:
+        if self.appearance_profile is not None:
+            if (self.variant != "dev" or self.max_frames != 121 or self.max_pixels != 768 * 448
+                    or self.max_keyframes != 0 or set(self.source_modes) != {"audio", "video"}):
+                raise ValueError("Ingredients requires the separate 121-frame Dev profile")
+        elif self.variant == "dev" and self.max_frames > 81:
             raise ValueError("dev capacity above 81 frames is not qualified")
         if len(self.source_modes) != len(set(self.source_modes)):
             raise ValueError("source modes must be unique")
-        if self.source_modes and self.variant != "distilled":
+        if self.source_modes and self.variant != "distilled" and self.appearance_profile is None:
             raise ValueError("source conditioning is qualified only on the distilled scaffold")
         return self
 
@@ -61,6 +66,9 @@ class LtxVideoInputs(BaseModel):
     audio: Literal[True] = True
     source_mode: SourceMode = "generated"
     guide_strength: float | None = Field(default=None, gt=0, le=1)
+    reference_image: bool = False  # Presence only; private bytes use a separate source role.
+    reference_strength: float | None = Field(default=None, gt=0, le=1)
+    motion_attention_strength: float | None = Field(default=None, gt=0, le=1)
 
     @field_validator("fps", "audio", mode="before")
     @classmethod
@@ -72,11 +80,25 @@ class LtxVideoInputs(BaseModel):
 
 def normalize(contract: LtxVideoContract, values: dict) -> dict:
     """Seconds select the nearest 8n+1 clip; explicit frames are never rounded."""
+    appearance = contract.appearance_profile is not None
+    values = dict(values)
+    if appearance:
+        values.setdefault("width", 768)
+        values.setdefault("height", 448)
+        values.setdefault("frames", 121 if values.get("seconds") is None else None)
     inputs = LtxVideoInputs.model_validate(values)
+    if appearance:
+        if (not inputs.reference_image or inputs.source_mode == "generated" or inputs.image
+                or inputs.keyframes or (inputs.width, inputs.height) != (768, 448)):
+            raise ValueError("Ingredients requires a separate appearance image and exact-duration source audio")
+    elif inputs.reference_image or inputs.reference_strength is not None or inputs.motion_attention_strength is not None:
+        raise ValueError("recipe does not support appearance references")
     if inputs.source_mode != "generated" and inputs.source_mode not in contract.source_modes:
         raise ValueError("recipe does not support this source conditioning mode")
     if inputs.guide_strength is not None and inputs.source_mode != "video":
         raise ValueError("guide strength requires a video reference")
+    if inputs.motion_attention_strength is not None and inputs.source_mode != "video":
+        raise ValueError("motion attention requires a video reference")
     if inputs.width % 32 or inputs.height % 32:
         raise ValueError("LTX-2.5 dimensions must be multiples of 32")
     if inputs.width * inputs.height > contract.max_pixels:
@@ -92,6 +114,8 @@ def normalize(contract: LtxVideoContract, values: dict) -> dict:
     cfg = inputs.cfg if inputs.cfg is not None else (1.0 if contract.variant == "distilled" else 2.0)
     if contract.variant == "distilled" and (steps != 8 or cfg != 1):
         raise ValueError("LTX-2.5 distilled requires 8 steps and CFG 1")
+    if appearance and (frames != 121 or steps != 40 or cfg != 2):
+        raise ValueError("Ingredients requires 121 frames, 40 steps and CFG 2")
     pins = inputs.keyframes
     positions = [pin.frame for pin in pins]
     if len(pins) > contract.max_keyframes or (pins and (
@@ -102,14 +126,22 @@ def normalize(contract: LtxVideoContract, values: dict) -> dict:
               "seconds": frames / inputs.fps, "steps": steps, "cfg": cfg}
     if not pins:
         result.pop("keyframes")
+    if not inputs.reference_image:
+        result.pop("reference_image")
+    if appearance:
+        result["appearance_profile"] = contract.appearance_profile
+        result["reference_strength"] = inputs.reference_strength if inputs.reference_strength is not None else 1.0
     if inputs.source_mode == "generated":
         result.pop("source_mode")
     elif inputs.source_mode == "video":
-        result["guide_strength"] = inputs.guide_strength if inputs.guide_strength is not None else 0.85
+        result["guide_strength"] = inputs.guide_strength if inputs.guide_strength is not None else 0.5 if appearance else 0.85
+        if appearance:
+            result["motion_attention_strength"] = inputs.motion_attention_strength if inputs.motion_attention_strength is not None else 0.25
     return result
 
 
-def expand_sources(spec: dict, mode: SourceMode, guide_strength: float = 0.85) -> list[dict]:
+def expand_sources(spec: dict, mode: SourceMode, guide_strength: float = 0.85,
+                   motion_attention_strength: float | None = None) -> list[dict]:
     """Bind input roles to a fixed, Core-owned audio/Union-Control scaffold."""
     if mode == "generated":
         return []
@@ -120,6 +152,8 @@ def expand_sources(spec: dict, mode: SourceMode, guide_strength: float = 0.85) -
     added = {"source_audio", "encode_audio", "audio_mask", "source_video", "source_frames",
              "source_edges", "control_model", "video_guide"}
     if (mode not in {"audio", "video"} or not 0 < guide_strength <= 1
+            or (motion_attention_strength is not None and
+                (mode != "video" or not 0 < motion_attention_strength <= 1))
             or added.intersection(spec)
             or any(not isinstance(spec.get(name), dict)
                    or spec[name].get("class_type") != kind
@@ -143,7 +177,7 @@ def expand_sources(spec: dict, mode: SourceMode, guide_strength: float = 0.85) -
         latent = spec["av_latent"]["inputs"]["video_latent"]
         positive, negative = (spec["guider"]["inputs"][key] for key in ("positive", "negative"))
         spec["control_model"] = {"class_type": "LTXICLoRALoaderModelOnly", "inputs": {
-            "model": ["model", 0], "lora_name": "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors",
+            "model": spec["guider"]["inputs"]["model"], "lora_name": "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors",
             "strength_model": 1.0}}
         spec["source_video"] = {"class_type": "LoadVideo", "inputs": {"file": "grid_reference.mp4"}}
         spec["source_frames"] = {"class_type": "GetVideoComponents", "inputs": {"video": ["source_video", 0]}}
@@ -154,11 +188,47 @@ def expand_sources(spec: dict, mode: SourceMode, guide_strength: float = 0.85) -
             "image": ["source_edges", 0], "frame_idx": 0, "strength": guide_strength,
             "latent_downscale_factor": ["control_model", 1], "crop": "disabled",
             "use_tiled_encode": False, "tile_size": 256, "tile_overlap": 64}}
+        if motion_attention_strength is not None:
+            spec["video_guide"]["class_type"] = "LTXAddVideoICLoRAGuideAdvanced"
+            spec["video_guide"]["inputs"]["attention_strength"] = motion_attention_strength
         spec["av_latent"]["inputs"]["video_latent"] = ["video_guide", 2]
         spec["guider"]["inputs"].update(model=["control_model", 0], positive=["video_guide", 0], negative=["video_guide", 1])
         spec["crop"]["inputs"].update(positive=["video_guide", 0], negative=["video_guide", 1])
         bindings.append({"role": "reference_video", "path": "source_video.inputs.file"})
     return bindings
+
+
+def expand_appearance(spec: dict, strength: float = 1.0) -> list[dict]:
+    """Apply the fixed Ingredients guide, never a frame-zero image latent."""
+    expected = {"model": "UNETLoader", "latent_video": "EmptyLTXVLatentVideo",
+                "av_latent": "LTXVConcatAVLatent", "guider": "CFGGuider",
+                "crop": "LTXVCropGuides", "sigmas": "LTXVScheduler",
+                "conditioning": "LTXVConditioning", "video_vae": "VAELoader"}
+    added = {"reference_model", "reference_image", "reference_scale", "reference_sheet", "reference_guide"}
+    if (not 0 < strength <= 1 or added.intersection(spec)
+            or any(not isinstance(spec.get(name), dict) or spec[name].get("class_type") != kind
+                   or not isinstance(spec[name].get("inputs"), dict) for name, kind in expected.items())
+            or spec["model"]["inputs"].get("unet_name") != "ltx-2.5-22b-dev-transformer-bf16.safetensors"
+            or spec["av_latent"]["inputs"].get("video_latent") != ["latent_video", 0]
+            or spec["guider"]["inputs"].get("model") != ["model", 0]
+            or spec["latent_video"]["inputs"] != {"width": 768, "height": 448, "length": 121, "batch_size": 1}):
+        raise ValueError("recipe does not contain the governed Ingredients scaffold")
+    spec["reference_model"] = {"class_type": "LTXICLoRALoaderModelOnly", "inputs": {
+        "model": ["model", 0], "lora_name": "ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors",
+        "strength_model": 1.0}}
+    spec["reference_image"] = {"class_type": "LoadImage", "inputs": {"image": "grid_reference.png"}}
+    spec["reference_scale"] = {"class_type": "ImageScale", "inputs": {
+        "image": ["reference_image", 0], "upscale_method": "lanczos", "width": 768, "height": 448, "crop": "center"}}
+    spec["reference_sheet"] = {"class_type": "RepeatImageBatch", "inputs": {"image": ["reference_scale", 0], "amount": 121}}
+    spec["reference_guide"] = {"class_type": "LTXAddVideoICLoRAGuide", "inputs": {
+        "positive": ["conditioning", 0], "negative": ["conditioning", 1], "vae": ["video_vae", 0],
+        "latent": ["latent_video", 0], "image": ["reference_sheet", 0], "frame_idx": 0,
+        "strength": strength, "latent_downscale_factor": ["reference_model", 1], "crop": "disabled",
+        "use_tiled_encode": False, "tile_size": 256, "tile_overlap": 64}}
+    spec["av_latent"]["inputs"]["video_latent"] = ["reference_guide", 2]
+    spec["guider"]["inputs"].update(model=["reference_model", 0], positive=["reference_guide", 0], negative=["reference_guide", 1])
+    spec["crop"]["inputs"].update(positive=["reference_guide", 0], negative=["reference_guide", 1])
+    return [{"role": "reference_image", "path": "reference_image.inputs.image"}]
 
 
 def expand_keyframes(spec: dict, pins: list[dict]) -> list[dict]:
