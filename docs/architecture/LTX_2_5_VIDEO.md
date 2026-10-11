@@ -151,9 +151,24 @@ storage function: signed GET200 with matching bytes, anonymous S3 GET400,
 public-output-domain GET404, expired three-second GET403, refreshed GET200,
 then exact-object deletion and GET404. Its one-day `source/` lifecycle was
 written and read back; automatic day-boundary deletion was not observed.
-No production bucket, domain or policy was changed. A fresh native source job
-through this private bucket is still required; earlier public-source canaries
-must not be relabelled as privacy proof.
+No production bucket, domain or policy was changed. Earlier public-source
+canaries must not be relabelled as privacy proof.
+
+Two fresh native jobs through the private bucket now pass with Core `975adeaa`,
+worker `8e82c3fe` and Director `cd9d7971`: audio-to-video and source-video-to-video,
+each 512x320 / 33 frames / 24 fps with stereo 48-kHz AAC and no implicit opening
+image. Each retains one prompt/job/hold/completion, a 27,500-microdollar test charge,
+balanced test credits, lost-initial-reply GET recovery and confirmed worker-cache
+pruning. Actual input-byte hashes match both Core commitments and native
+ComfyUI inputs. Neither is a funded customer, production or quality canary.
+
+Read-only audits of those exact closed synthetic jobs verify signed input
+GET200 with matching bytes, unsigned S3 GET400 and public-output-domain GET404
+for all three uploaded WAV/MP4 objects. Each was then deleted by exact bucket/key
+and its signed GET returned404. This is operator cleanup of closed test objects,
+not implemented application retention or proof of ComfyUI input/output cleanup.
+The owned GPU queue was idle afterward. Private evidence retains media, source
+commitments, immutable revisions, economic records and access/deletion statuses.
 
 ComfyUI/source/result/orphan retention, broader crash/failure/refund cases,
 live ingress/body-limit checks and actual funded-credit qualification remain
@@ -161,12 +176,11 @@ gates. Existing video pricing is only a test basis; source-specific rates and
 costs need review before admission. No public source admission, production
 worker enrollment or x402 payment was enabled.
 
-The private-source/storage/typed-video/journal/billing subset passes336 tests
-with12 skips using the isolated PostgreSQL14 socket. The full Core run before
-the added oversized-storage regression passed1994 /606 skipped without the
-optional PostgreSQL URLs. Director passes316 tests, Ruff lint/format and strict
-mypy. Local Python3.13/PostgreSQL14 evidence does not replace required fresh
-Linux/Python3.12/PostgreSQL16 CI or funded qualification.
+The private-source/storage/typed-video/journal/billing subset passes 336 tests
+with 12 skips using the isolated PostgreSQL14 socket. The final full Core run
+passes 1995 /606 skipped without the optional PostgreSQL URLs. Director passes
+316 tests, Ruff lint/format and strict mypy. Local Python3.13/PostgreSQL14 evidence
+does not replace required fresh Linux/Python3.12/PostgreSQL16 CI or funded qualification.
 
 These role distinctions follow the upstream
 [LTX-2.5 workflow catalogue](https://github.com/Lightricks/ComfyUI-LTXVideo/blob/master/example_workflows/2.5/README.md).

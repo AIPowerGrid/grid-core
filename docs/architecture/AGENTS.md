@@ -113,8 +113,10 @@ validation, worker incentives, and trust boundaries.
   the output domain; they are not privacy proof. A distinct default-empty
   private-source bucket now gates all governed LTX inputs. A new scratch bucket
   passes signed/anonymous/expired/refreshed/deleted-object access checks and
-  configured lifecycle readback, not automatic day-boundary expiry. Native
-  generation through that bucket, ComfyUI/orphan retention, purchased funds,
+  configured lifecycle readback, not automatic day-boundary expiry. Fresh native
+  A2V/V2V through that bucket pass anonymous-denial and exact-object manual
+  cleanup for their three committed inputs, not application retention.
+  ComfyUI/orphan retention, purchased funds,
   broader faults and appearance/motion/lip-quality acceptance remain gates.
   Legacy image-source privacy is unchanged; admission stays dark.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
