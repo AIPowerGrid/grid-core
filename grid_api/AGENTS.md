@@ -57,6 +57,11 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   `video-to-video` admission. Do not infer these gates from the base video path,
   charging mode or health features. MP4 source verification needs FFmpeg/ffprobe;
   missing tools reject rather than bypassing validation.
+  Governed LTX image/audio/video inputs require an explicit separate
+  `MEDIA_PRIVATE_SOURCE_BUCKET`; missing/shared output storage rejects before
+  quota or uploads. Operators must verify no public bucket endpoint and the
+  one-day input lifecycle. Signed links alone do not make output-bucket objects
+  private. Existing legacy image ingest is not silently migrated here.
   Apply migrations through `0044` before starting this candidate even with the flag off:
   the outbox reads its journal. Typed settings bound held async concurrency,
   batch size, lease and cadence. Retain the schema and irreversible execution

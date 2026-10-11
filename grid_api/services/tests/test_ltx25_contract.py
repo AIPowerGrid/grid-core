@@ -330,7 +330,7 @@ async def test_reused_reference_image_uploads_once(monkeypatch):
     def upload(raw, ext):
         uploads.append((raw, ext))
         return f"https://source.invalid/{len(uploads)}.png"
-    monkeypatch.setattr(media.storage, "upload_source", upload)
+    monkeypatch.setattr(media.storage, "upload_private_source", upload)
     urls = await media.upload_video_keyframes([(b"a", "png", 32, 32), (b"b", "png", 32, 32), (b"a", "png", 32, 32)])
     assert urls == ["https://source.invalid/1.png", "https://source.invalid/2.png", "https://source.invalid/1.png"]
     assert len(uploads) == 2

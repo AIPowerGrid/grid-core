@@ -93,6 +93,9 @@ class GridSettings(BaseSettings):
     media_job_sweep_seconds: int = Field(default=10, ge=5, le=60)
     media_job_dispatch_lease_seconds: int = Field(default=60, ge=30, le=300)
     media_job_batch_size: int = Field(default=10, ge=1, le=50)
+    media_private_source_bucket: str = Field(
+        default="", pattern=r"^(?:[a-z0-9][a-z0-9-]{1,61}[a-z0-9])?$"
+    )
     # Native-manager device enrollment. Independently dark until the console
     # approval page and release manager are deployed together.
     worker_enrollment_enabled: bool = False

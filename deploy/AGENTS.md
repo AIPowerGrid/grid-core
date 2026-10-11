@@ -79,7 +79,11 @@ executes an immutable release selected through `/home/aipg/current`.
   Core needs FFmpeg/ffprobe before MP4 source admission; package pinning,
   decoder isolation, input privacy/retention and joint qualification remain
   gates. Do not change production allowlists merely because schemas exist.
-  Apply migration `0043` before starting this release, even with
+  `MEDIA_PRIVATE_SOURCE_BUCKET` defaults empty and must differ from output
+  storage. Keep its r2.dev/custom-domain access disabled, verify anonymous
+  denial and expiry, and review its one-day source lifecycle before admitting
+  any governed LTX input. Legacy image sources are not migrated by this gate.
+  Apply migrations through `0044` before starting this release, even with
   `MEDIA_ASYNC_ENABLED=0`: the lifecycle outbox reads `grid_media_jobs`.
   Defaults are `MEDIA_ASYNC_CONCURRENCY=4`, `MEDIA_JOB_SWEEP_SECONDS=10`,
   `MEDIA_JOB_DISPATCH_LEASE_SECONDS=60`, and `MEDIA_JOB_BATCH_SIZE=10`.
