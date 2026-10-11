@@ -35,6 +35,19 @@ content sanitization, and reward settlement.
   Private-bucket public-access/lifecycle review is an operator gate; URL expiry
   is not object deletion. Legacy `upload_source` still uses the public output
   bucket and must not be described as private merely because its URL is signed.
+- `media_source_retention.py` records at most eighteen exact Core-uploaded
+  private input keys with the journal/hold transaction. Only a committed settled
+  reservation (paid or refunded) permits cleanup. Historical payloads are never
+  backfilled into deletion authority. A separate minute loop deletes bounded
+  batches with time-limited S3 calls and retries exact keys after crashes or
+  partial failure. Cancellation retains its single-flight guard until storage
+  work finishes. Failures rotate behind other pending jobs, not starving them.
+  Cleanup markers are operational metadata; no credits, results or ledgers move.
+  It continues after admission rollback. Retain old bucket permissions until
+  their recorded jobs drain; changing the S3 account or making a recorded bucket
+  the output bucket refuses deletion. ComfyUI files, output/attempt orphans and
+  pre-admission uploads are not cleaned by this service. The provider source
+  lifecycle remains required. Apply migration `0045` before candidate startup.
 
 - **Dispatch:** `job_queue.py` (Redis streams - the ONE live queue), `token_stream.py`
   (worker->client token relay), `media.py` (image/video job abstraction), `storage.py`

@@ -103,6 +103,21 @@ async def _media_job_outbox():
         await asyncio.sleep(settings.media_job_sweep_seconds)
 
 
+async def _media_source_sweeper():
+    """Independent cleanup must not delay dispatch or any financial terminal."""
+    from .safe_logging import error_type
+    from .services import media_source_retention
+
+    while True:
+        try:
+            counts = await media_source_retention.sweep()
+            if counts["errors"]:
+                logger.warning("Private media source cleanup errors=%d", counts["errors"])
+        except Exception as exc:
+            logger.error("Private media source cleanup unavailable error_type=%s", error_type(exc))
+        await asyncio.sleep(60)
+
+
 async def _reservation_sweeper():
     """Background task: release reservations stuck in 'held' past a generous
     deadline — the safety net for a process crash between reserve and the
@@ -446,6 +461,7 @@ async def lifespan(app: FastAPI):
     recipe_sync = asyncio.create_task(_recipe_sync_loop())
     sweeper = asyncio.create_task(_reservation_sweeper())
     media_job_outbox = asyncio.create_task(_media_job_outbox())
+    media_source_sweeper = asyncio.create_task(_media_source_sweeper())
     validator_history_sweeper = asyncio.create_task(_validator_history_sweeper())
     validator_cohort_monitor = asyncio.create_task(_validator_cohort_monitor())
     validator_shadow_collector = asyncio.create_task(_validator_shadow_collector())
@@ -471,13 +487,14 @@ async def lifespan(app: FastAPI):
     recipe_sync.cancel()
     sweeper.cancel()
     media_job_outbox.cancel()
+    media_source_sweeper.cancel()
     validator_history_sweeper.cancel()
     validator_cohort_monitor.cancel()
     validator_shadow_collector.cancel()
     oauth_state_sweeper.cancel()
     validator_bond_sync.cancel()
     billing_monitor.cancel()
-    await asyncio.gather(validator_shadow_collector, media_job_outbox, return_exceptions=True)
+    await asyncio.gather(validator_shadow_collector, media_job_outbox, media_source_sweeper, return_exceptions=True)
     from .services import route_events as _route_events
     await _route_events.drain()
     await close_p2p()  # Shutdown P2P

@@ -720,12 +720,21 @@ def lease_migration():
     return revision
 
 
+def retention_migration():
+    path = ROOT / "alembic/versions/0045_media_source_retention.py"
+    spec = importlib.util.spec_from_file_location("media_retention_migration", path)
+    revision = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(revision)
+    return revision
+
+
 def test_migration_matches_schema_and_cannot_erase_execution_history():
     path = ROOT / "alembic/versions/0043_media_job_journal.py"
     spec = importlib.util.spec_from_file_location("media_journal_migration", path)
     revision = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(revision)
     leases = lease_migration()
+    retention = retention_migration()
     engine = sa.create_engine("sqlite://")
     try:
         with engine.begin() as connection:
@@ -734,6 +743,7 @@ def test_migration_matches_schema_and_cannot_erase_execution_history():
             with Operations.context(MigrationContext.configure(connection)):
                 revision.upgrade()
                 leases.upgrade()
+                retention.upgrade()
                 inspector = sa.inspect(connection)
                 actual = {column["name"]: column["nullable"] for column in inspector.get_columns(media_jobs.name)}
                 assert actual == {column.name: column.nullable for column in media_jobs.columns}
@@ -741,13 +751,15 @@ def test_migration_matches_schema_and_cannot_erase_execution_history():
                     c.name for c in media_jobs.constraints if isinstance(c, sa.CheckConstraint)}
                 assert {c["name"] for c in inspector.get_unique_constraints(media_jobs.name)} == {"uq_grid_media_jobs_owner_key"}
                 assert {c["name"] for c in inspector.get_indexes(media_jobs.name)} == {
-                    "ix_grid_media_jobs_dispatch", "ix_grid_media_jobs_resume"}
+                    "ix_grid_media_jobs_dispatch", "ix_grid_media_jobs_resume", "ix_grid_media_jobs_source_cleanup"}
                 assert {c["referred_table"] for c in inspector.get_foreign_keys(media_jobs.name)} == {
                     "grid_reservations", "grid_accounts"}
+                retention.downgrade()
                 leases.downgrade()
                 revision.downgrade()
                 revision.upgrade()
                 leases.upgrade()
+                retention.upgrade()
                 aid = uuid4()
                 job = prepared(aid)
                 connection.execute(accounts.insert().values(id=aid, flags={}))
@@ -760,6 +772,14 @@ def test_migration_matches_schema_and_cannot_erase_execution_history():
                 with pytest.raises(RuntimeError, match="refuse to discard"):
                     revision.downgrade()
                 assert connection.scalar(sa.select(sa.func.count()).select_from(media_jobs)) == 1
+                assert connection.scalar(sa.select(media_jobs.c.source_objects)) is None
+                # Old payloads never become deletion authority via migration.
+                retention.downgrade()
+                retention.upgrade()
+                assert connection.scalar(sa.select(media_jobs.c.source_objects)) is None
+                connection.execute(media_jobs.update().values(source_objects={"synthetic": "retained"}))
+                with pytest.raises(RuntimeError, match="refuse to discard"):
+                    retention.downgrade()
                 connection.execute(media_jobs.update().values(execution_worker_id=uuid4(), execution_started=datetime.now(UTC),
                     execution_model=MODEL, execution_token=str(uuid4()), execution_deadline=datetime.now(UTC)))
                 with pytest.raises(RuntimeError, match="refuse to discard"):
@@ -777,11 +797,13 @@ async def test_migration_matches_actual_postgres_table_contract(db):
     revision = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(revision)
     leases = lease_migration()
+    retention = retention_migration()
     def migrated(connection):
         media_jobs.drop(connection)
         with Operations.context(MigrationContext.configure(connection)):
             revision.upgrade()
             leases.upgrade()
+            retention.upgrade()
             inspector = sa.inspect(connection)
             assert {c["name"]: c["nullable"] for c in inspector.get_columns(media_jobs.name)} == {
                 column.name: column.nullable for column in media_jobs.columns}
@@ -790,10 +812,14 @@ async def test_migration_matches_actual_postgres_table_contract(db):
             assert {c["name"] for c in inspector.get_unique_constraints(media_jobs.name)} == {"uq_grid_media_jobs_owner_key"}
             assert {c["referred_table"] for c in inspector.get_foreign_keys(media_jobs.name)} == {
                 "grid_reservations", "grid_accounts"}
+            assert {c["name"] for c in inspector.get_indexes(media_jobs.name) if not c.get("duplicates_constraint")} == {
+                "ix_grid_media_jobs_dispatch", "ix_grid_media_jobs_resume", "ix_grid_media_jobs_source_cleanup"}
+            retention.downgrade()
             leases.downgrade()
             revision.downgrade()
             revision.upgrade()
             leases.upgrade()
+            retention.upgrade()
     async with db[0].kw["bind"].begin() as connection:
         await connection.run_sync(migrated)
 
