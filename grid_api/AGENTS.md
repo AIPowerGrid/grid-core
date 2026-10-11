@@ -18,7 +18,7 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   and worker structures.
 - `abis/` / `_abi.py` - local contract ABI loaders used by background sync.
 - `main.py` - lifecycle: DB/Redis init, stale-job reclaimer, bounded async-media
-  outbox (continues draining accepted jobs when new admission is disabled), reservation and
+  outbox and exact private-input cleanup (both continue after admission rollback), reservation and
   billing invariant monitors, OAuth operational-state retention, validator operational-history pruning,
   disabled-by-default validator shadow outbox collection,
   default-off read-only treasury balance warnings through the billing monitor,
@@ -62,7 +62,7 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   quota or uploads. Operators must verify no public bucket endpoint and the
   one-day input lifecycle. Signed links alone do not make output-bucket objects
   private. Existing legacy image ingest is not silently migrated here.
-  Apply migrations through `0044` before starting this candidate even with the flag off:
+  Apply migrations through `0045` before starting this candidate even with the flag off:
   the outbox reads its journal. Typed settings bound held async concurrency,
   batch size, lease and cadence. Retain the schema and irreversible execution
   fence on rollback; never rerender a claimed job based on queue loss alone.

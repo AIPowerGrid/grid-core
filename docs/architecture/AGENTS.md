@@ -118,8 +118,13 @@ validation, worker incentives, and trust boundaries.
   cleanup for their three committed inputs, not application retention.
   The candidate now records exact private-source authority with each new
   hold/journal and separately retries post-closure cleanup. Existing rows stay
-  NULL; no historical/public URL is adopted. Automatic R2 deletion needs its
-  fresh native canary; pre-admission/ComfyUI/output retention remains separate.
+  NULL; no historical/public URL is adopted. Fresh native A2V crash recovery
+  and V2V now verify application cleanup by committed SQL marker, independent
+  S3 absence and unchanged economics. Both source modes also pass one 337-frame
+  network section with exact units, output timing, lost-reply recovery and
+  automatic private-input deletion. These are synthetic unfunded tests, not
+  the handoff's multi-pin film or quality parity.
+  Pre-admission/ComfyUI/output retention remains separate.
   ComfyUI/orphan retention, purchased funds,
   broader faults and appearance/motion/lip-quality acceptance remain gates.
   Legacy image-source privacy is unchanged; admission stays dark.

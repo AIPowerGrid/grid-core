@@ -110,6 +110,10 @@ owning AGENTS.md and any affected parent Child DOX Index.
 - PR and main CI also start an isolated Unix-socket Redis for the shadow-outbox
   reclaim tests. Rejected-event acknowledgement must wait for durable observer
   error recording; Redis retries and SQL/report behavior have separate proofs.
+- PR and main CI install FFmpeg and require both `ffmpeg` and `ffprobe` before
+  the dedicated media-source decoder tests. Missing executables must fail the
+  job, not silently skip MP4 validation. Record decoder versions in the log;
+  this gate does not qualify production packaging or an OS decoder sandbox.
 - Service units: `pytest grid_api/services/`.
 - Required PR/main tests additionally build pinned, reviewed validator/Console
   commits and run the real PostgreSQL/Core/Console/node compensation handoff.

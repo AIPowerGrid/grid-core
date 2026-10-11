@@ -10,6 +10,11 @@ live in `recipes/qualification/`, which startup does not load. The default is
 still `LTX-2.3`; no public model advertisement, price, worker enrollment,
 generation gate or charging setting is changed by this candidate.
 
+Isolated native A2V and V2V now pass one 337-frame /14.041667-second network
+section with exact source commitments, one test-credit charge and automatic
+private-input cleanup. This is synthetic lifecycle evidence, not public worker
+startup, purchased-credit, multi-pin film or visual-quality qualification.
+
 Two matching native GPU-pinned ComfyUI instances have completed concurrent
 local distilled renders on the owned dual-Blackwell rig. ComfyUI remains
 loopback-only, and each GPU has separate writable state. The stopped VLO
@@ -487,10 +492,11 @@ worker must recover its saved prompt/cache; missing local state must refuse
 instead of submitting another Comfy prompt. Successful worker messages must
 carry that same job ID. Admission-off and Redis loss do not block SQL recovery.
 No current public worker release advertises this capability. The candidate
-worker journal passed a separate native Comfy process-crash proof, not yet
-this combined Core/worker/GPU/R2 lifecycle. The candidate local-cache retention
-contract below and live storage verification still need joint qualification; ordinary HEAD checks
-and worker-reported hashes are not proof of video content or fidelity.
+worker journal's initial separate native Comfy process-crash proof has now been
+followed by combined isolated Core/worker/GPU/R2 recovery and local-cache
+retention controls, recorded below. These use synthetic unfunded credits;
+purchased-credit and broader fault qualification remain separate. Ordinary HEAD
+checks and worker-reported hashes are not proof of video content or fidelity.
 
 The dedicated worker credential can read `POST /v1/workers/self/media-jobs`
 without account-management or inference scope. It accepts at most 32 unique
@@ -639,9 +645,46 @@ audits observed the original held reservation, conserved credit and no completio
 before same-state resumption. Recovery then produced one native prompt, one
 charge and one completion; their input removal was manual, not application
 retention. Core's full PostgreSQL16/Redis/cross-repo CI passed for that revision.
-Neither those checks nor the new cleanup unit tests qualify this newer revision's
-automatic R2 cleanup: its native canary must observe the application's SQL
-marker, independently prove every object absent and re-audit unchanged economics.
+Those older manual proofs are not automatic-retention evidence. Fresh native
+V2V and A2V crash recovery now pass at Core `660b332d`, worker `8e82c3fe` and
+Director `5e150dd8`. Both retain one 33-frame 512x320 result, prompt, hold,
+27,500-micro test charge and completion under initial-reply loss. The V2V case
+independently confirms both private inputs absent after Core's cleanup marker.
+The A2V case first proves its held WAV survives private Core/worker SIGKILL
+with no cleanup attempt; same-state recovery then completes once and Core
+removes it. The verifier only reads SQL and HEADs exact objects, then re-audits
+unchanged economics. It cannot delete objects or manufacture cleanup markers.
+No production admission, service, storage policy or funds changed.
+
+### Full-Section Native Follow-Up
+
+Both source modes subsequently passed at the same Core/worker commits and
+Director `e1423401` using 337 frames, 512x320 and 24 fps. Independent decoding
+reports 14.041667 seconds of H.264 video and stereo 48-kHz AAC audio. Each
+retains one native prompt, job, hold, completion and 280,834-micro unfunded test
+charge; its scratch balance falls from 1,000,000 to 719,166 with conserved
+ledger sums. Initial accepted-response loss recovers by authenticated GET only,
+terminal replay is identical and changed-intent replay is rejected. Native
+input bytes match committed hashes, no portrait is inserted at frame zero,
+and the worker cache closes only after Core confirmation. Core automatically
+removes the V2V MP4/WAV and the A2V WAV; independent S3 absence and unchanged
+financial records follow the committed cleanup marker.
+
+The runner binds `--frames 337 --director-video` and its 400,000-micro ceiling
+to saved state, refusing changed duration/ceiling on resume. These are longer
+synthetic single-section tests, not the handoff's multi-pin shots, dual-worker
+load balancing, real source-motion/lip/identity acceptance or purchased funds.
+Director passes 334 hermetic tests, Ruff lint/format and strict mypy. Core's
+earlier full PostgreSQL14 run had one initial-dispatch timeout despite passing
+isolated repetitions. An unchanged fresh full run with retained logs passed
+2,622 tests / 24 skipped. Required Linux/Python3.12/PostgreSQL16 CI passed for
+Core `660b332d` in run `38112659508`, including restore/parity, dependency,
+Redis and pinned cross-repo gates; its full suite passed 2,616 / 30 skipped.
+The six additional skips were source-MP4 decoder tests: that runner lacked
+FFmpeg. Both CI workflows now install it and explicitly require `ffmpeg` and
+`ffprobe` before a dedicated decoder proof. Fresh CI for that change is still
+required. Neither the green repetition nor CI explains the earlier dispatch
+timeout; do not label it fixed.
 
 ## Remaining Release Gates
 
