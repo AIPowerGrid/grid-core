@@ -94,7 +94,7 @@ cannot provide graph nodes, adapter filenames, storage URLs or executable paths.
 Both video routes bound the JSON body to 64 MiB plus 64 KiB before parsing;
 combined encoded sources are at most 64 MiB, while the existing image sublimit
 remains unchanged. Validation errors do not echo source bodies. Only hash-bound
-private R2 inputs go into dispatch; roles, timing and declared loader slots are
+presigned R2 inputs go into dispatch; roles, timing and declared loader slots are
 checked again before a monetary hold. The worker accepts only HTTPS R2 origins,
 downloads without Grid credentials/redirects, verifies size/hash, and uploads
 to loopback ComfyUI under collision-safe names. Registration does not yet
@@ -110,10 +110,27 @@ hashes and explicit video guide strength. Older source-free digests do not
 change. Accepted replays recover the original hold without new uploads/quota.
 
 Director has the matching candidate client and separate local control tool.
-Neither capability is production-qualified. Joint native Core/WS/R2/GPU success,
-failure/refund, response-loss recovery, source privacy/retention and edge body
-limits still require evidence. Existing video pricing is only a test basis;
-source-specific rates and costs need review before admission.
+Neither capability is production-qualified. Isolated native audio/video source
+canaries now pass the actual Core/WS/R2/GPU path, including source-byte
+commitments, no implicit opening image, exact-frame decode, lost initial reply
+recovery and one test-credit settlement. They used 512x320 / 33 frames at 24 fps
+and synthetic sources, not purchased funds or character/lip-quality tests.
+The pinned Core is `9bc40985`; Director is `a00357fb`. The audio run used worker
+`3ad62a3f`; the successful video run used `8e82c3fe`.
+
+The first source-video render completed in ComfyUI but the worker counted its
+`LoadVideo` input preview as another generated output. The scratch reservation
+was fully refunded with no completion ledger row. Worker `8e82c3fe` excludes
+explicit input previews and preserves exactly-one real output validation; eight
+new regressions and a fresh native job pass. The closed/refunded job was not
+rerendered. A separate initial audio driver failure omitted its requested source
+mode; that run is retained as a failed test, not source-conditioning evidence.
+
+Source privacy/retention (including anonymous source-access denial and expiry),
+broader crash/failure/refund cases, live ingress/body-limit checks and actual
+funded-credit qualification remain gates. Existing video pricing is only a test
+basis; source-specific rates and costs need review before admission. No public
+source admission, production worker enrollment or x402 payment was enabled.
 
 These role distinctions follow the upstream
 [LTX-2.5 workflow catalogue](https://github.com/Lightricks/ComfyUI-LTXVideo/blob/master/example_workflows/2.5/README.md).

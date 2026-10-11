@@ -105,6 +105,12 @@ validation, worker incentives, and trust boundaries.
   support Core-confirmed local-cache cleanup and bounded closed history; joint
   canaries and ComfyUI/R2 retention remain separate gates. Apply migrations
   through `0044` even with admission off.
+  Native synthetic audio/video-source canaries now prove the isolated actual
+  Core/WS/GPU/R2 path, byte commitments, optional opening image, one test-credit
+  settlement and lost-reply recovery. The first source-video output-selection
+  failure fully refunded; a fresh job passes with worker input-preview exclusion.
+  Purchased funds, anonymous source-access denial/expiry, broader faults and
+  appearance/motion/lip-quality acceptance remain gates; admission stays dark.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only
