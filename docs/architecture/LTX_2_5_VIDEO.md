@@ -79,16 +79,25 @@ queue deliveries use the existing unstarted-only async release guard and
 cannot refund an already-running worker's hold. Async outbox and execution
 lease budgets are separate and unchanged. Hard-target bindings never fall
 back to unrelated peers, and existing affinity policies remain unchanged.
+Because the WS poller can prefetch while a previous render runs, Redis checks
+the original pending owner and queue deadline again when dispatch begins.
+Superseded local deliveries neither dispatch nor acknowledge/refund the new
+owner's job; local-buffer wait cannot bypass the same expiry limit.
 
-Focused local qualification passes 128 tests against disposable Redis and
+Focused local qualification passes 137 tests against disposable Redis and
 SQLite/local PostgreSQL 14, including queue-process death around handoff,
 notification replay, stale registry/legacy receiver exclusion, busy-peer
-reservation preservation and expiry refunds across six formats. The full local
-Core suite passes 2,769 tests with 28 skips on that candidate; those skips do
-not establish the optional cross-repo or other environment-dependent gates.
-This is not PostgreSQL 16 CI, full Uvicorn/native-GPU restart, purchased funding, stream
-overload or full-film acceptance. The earlier failed film and its source pins
-remain immutable; another run needs a separately committed/reviewed candidate.
+reservation preservation, local-prefetch deadline checks and expiry refunds
+across six formats. The full local Core suite passes 2,785 tests with 28 skips;
+those skips do not establish optional cross-repo or environment-dependent gates.
+The initial routing commit `eadf0129` separately passes required Linux/Python
+3.12/PostgreSQL 16 CI in run `38171307901`, including restore/migration and
+pinned SDK/Console/node gates, with 2,769 full-suite passes and 28 skips. That
+result does not qualify the subsequent dispatch-time prefetch follow-up, which
+needs fresh exact-commit CI. Neither set of tests proves full Uvicorn/native-GPU
+restart, purchased funding, stream overload or full-film acceptance. The earlier
+failed film and its source pins remain immutable; another run needs a separately
+committed/reviewed candidate.
 
 ### Worker Startup Inventory
 

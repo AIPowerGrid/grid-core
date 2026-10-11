@@ -240,6 +240,43 @@ return {}
 """
 
 
+_ROUTED_DISPATCH = """
+local pending = redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[2], ARGV[2], 1)
+if #pending == 0 or pending[1][2] ~= ARGV[4] then return 'superseded' end
+local source = redis.call('XRANGE', KEYS[1], ARGV[2], ARGV[2])
+if #source == 0 then return redis.error_reply('pending source missing') end
+local job_id, queued_at = '', string.match(ARGV[2], '^(%d+)-')
+local fields = source[1][2]
+for i = 1, #fields, 2 do
+    if fields[i] == 'job_id' then job_id = fields[i + 1] end
+    if fields[i] == 'queued_at_ms' then queued_at = fields[i + 1] end
+end
+if job_id ~= ARGV[3] then return redis.error_reply('pending job mismatch') end
+local start, budget = tonumber(queued_at), tonumber(ARGV[5])
+if not start or start < 0 or not budget or budget <= 0 then
+    return redis.error_reply('invalid dispatch deadline')
+end
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+if now >= start + budget then
+    redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+    return 'closed'
+end
+return 'ready'
+"""
+
+
+async def routed_dispatch_status(job: dict) -> str:
+    """Recheck original ownership/deadline after a routed job's local prefetch."""
+    if not job.get("routed_dispatch") or not job.get("stream_id") or not job.get("worker_id"):
+        raise ValueError("routed dispatch requires an owned pending delivery")
+    stream = job.get("stream") or _stream_for(job.get("job_type", "text"))
+    return await get_redis().eval(
+        _ROUTED_DISPATCH, 1, stream, CONSUMER_GROUP, job["stream_id"], job["job_id"], job["worker_id"],
+        _dispatch_wait_ms_for(stream),
+    )
+
+
 async def route_to_worker(job: dict, worker_id: str, status_snapshot: str) -> str:
     """Move one owned pending delivery to a still-compatible live peer.
 
@@ -328,6 +365,7 @@ async def pop_job(worker_id: str, timeout_ms: int = 5000, job_types: list[str] |
     r = get_redis()
     streams = sorted({_stream_for(t) for t in (job_types or ["text"])})
     expired = False
+    from_inbox = False
     for stream_name in streams:
         routed = await r.eval(
             _TAKE_ROUTED, 2, stream_name, _routing_inbox(stream_name, worker_id),
@@ -337,6 +375,7 @@ async def pop_job(worker_id: str, timeout_ms: int = 5000, job_types: list[str] |
             message_id, flat_fields, state = routed
             fields = dict(zip(flat_fields[::2], flat_fields[1::2]))
             expired = state == "expired"
+            from_inbox = True
             break
     else:
         try:
@@ -369,6 +408,7 @@ async def pop_job(worker_id: str, timeout_ms: int = 5000, job_types: list[str] |
         "affinity_passes": int(fields.get("affinity_passes", 0)),
         "progress_token": fields.get("progress_token", ""),
         "worker_id": worker_id,
+        "routed_dispatch": from_inbox,
         "dispatch_deadline_expired": expired,
     }
 

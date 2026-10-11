@@ -110,7 +110,9 @@ transport, accounts, stats, health/metrics.
   registry adds its own inbox-protocol marker; worker claims cannot opt an older
   coordinator into receiving it. Exact fresh snapshots and consumer ownership
   fence the handoff. No-peer search keeps the existing bounce cap; busy-peer
-  wait has a separate bounded deadline. Expiry sends no backend job/DONE or
+  wait has a separate bounded deadline, checked again at dispatch after local
+  prefetch. Superseded pending owners cannot dispatch or refund that delivery.
+  Expiry sends no backend job/DONE or
   worker payout and uses the same unstarted-only async release guard. Hard
   targeting and soft-affinity policies are not relaxed by this candidate.
   Candidate original-worker reconnect uses SQL, not Redis/model routing: the

@@ -64,6 +64,7 @@ async def test_busy_compatible_peer_receives_original_job_without_bounces_or_ref
     received = await job_queue.pop_job(correct, timeout_ms=1, job_types=["video"])
     assert received["stream_id"] == queued["stream_id"] and received["payload"] == queued["payload"]
     assert received["requeue_count"] == job_queue.MAX_REQUEUE and not received["dispatch_deadline_expired"]
+    assert received["routed_dispatch"] and await job_queue.routed_dispatch_status(received) == "ready"
     assert await media_jobs.claim_execution(
         job_id=job.job_id, payload=received["payload"], route_models=received["models"],
         preferred_worker="", selected_model=MODEL, worker_id=correct, job_type="video",
@@ -187,4 +188,38 @@ async def test_expired_duplicate_cannot_refund_an_existing_execution(db, redis, 
     assert await credits.get_balance(job.account_id) == balance
     journal, hold, _ = await snapshot(job)
     assert journal["execution_started"] is not None and hold["status"] == "held"
+    assert await counts() == (1, 1, 0)
+
+
+@pytest.mark.asyncio
+async def test_routed_prefetch_wait_is_included_in_dispatch_deadline(db, redis, monkeypatch):
+    correct, state = await peer(monkeypatch, redis)
+    job, queued = await reserved_delivery()
+    assert await job_queue.route_to_worker(queued, correct, state) == "routed"
+    received = await job_queue.pop_job(correct, timeout_ms=1, job_types=["video"])
+    assert received["routed_dispatch"] and not received["dispatch_deadline_expired"]
+    monkeypatch.setattr(job_queue, "DISPATCH_WAIT_MS_MEDIA", 1)
+    await asyncio.sleep(0.01)
+    assert await job_queue.routed_dispatch_status(received) == "closed"
+    assert (await redis.xpending(job_queue.MEDIA_STREAM_KEY, job_queue.CONSUMER_GROUP))["pending"] == 0
+    await worker_ws._release_undispatched_job(received)
+    assert await credits.get_balance(job.account_id) == OPENING
+    assert await job_queue.routed_dispatch_status(received) == "superseded"
+    assert (await snapshot(job))[0]["execution_started"] is None
+
+
+@pytest.mark.asyncio
+async def test_superseded_prefetch_cannot_close_the_new_pending_owner(db, redis, monkeypatch):
+    first, first_state = await peer(monkeypatch, redis)
+    second, second_state = await peer(monkeypatch, redis)
+    job, queued = await reserved_delivery()
+    assert await job_queue.route_to_worker(queued, first, first_state) == "routed"
+    received = await job_queue.pop_job(first, timeout_ms=1, job_types=["video"])
+    assert await job_queue.route_to_worker(received, second, second_state) == "routed"
+    monkeypatch.setattr(job_queue, "DISPATCH_WAIT_MS_MEDIA", 1)
+    await asyncio.sleep(0.01)
+    assert await job_queue.routed_dispatch_status(received) == "superseded"
+    pending = await redis.xpending_range(job_queue.MEDIA_STREAM_KEY, job_queue.CONSUMER_GROUP, "-", "+", 10)
+    assert len(pending) == 1 and pending[0]["consumer"] == second
+    assert (await snapshot(job))[1]["status"] == "held"
     assert await counts() == (1, 1, 0)
