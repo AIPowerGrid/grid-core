@@ -154,11 +154,15 @@ source modes and all Ingredients/advanced-motion node and weight inventories.
 Defaults and released workers do not gain that capability automatically.
 
 Core/compiler/API and worker fixture tests cover these boundaries. The profile
-has no approved price and live billing rejects it as unpriced. Joint native
-Core/WS/GPU/private-storage/recovery/financial qualification, measured appearance
-and motion quality, SDK/Director request support, and model-use clearance still
-gate promotion. Earlier local Ingredients takes and distilled network canaries
-are not execution proof for this new Grid recipe.
+has no approved price and live billing rejects it as unpriced. Candidate
+SDK/Director requests and separate native Core/WS/GPU/private-storage tests now
+exist. The latter pass two exact unfunded test-credit settlements and cleanup,
+not purchased funding or public release. The stopped observer required explicit
+reviewed client/worker fixes; original submission pins and failures were retained.
+Audio-only appearance output shows the reference sheet early, while six
+motion-guided samples look promising. Measured appearance/motion/lip quality,
+funded/public acceptance and model-use clearance still gate promotion. Earlier
+local Ingredients takes and distilled runs alone are not proof for this recipe.
 
 Local verification for this addition passed the full Core suite with 2706 tests
 and 24 skipped, supplying all four disposable PostgreSQL test URLs. The isolated
@@ -883,6 +887,49 @@ balancing/lifecycle evidence, not operator independence, public installation,
 purchased funds, measured appearance/motion/lip fidelity or model-use clearance.
 ComfyUI/pre-admission orphan/output retention and broader process/storage faults
 remain separate gates; no production setting, price or funds changed.
+
+### Native Appearance Lifecycle Follow-Up
+
+The two original 768x448 / 121-frame / 24-fps Ingredients jobs submitted at Core
+`31ddb88f78dca41bc9e8d1892ff0b207490cda64`, worker
+`d05464edfebdbee95017a52a2e8454b35d6b8726` and Director
+`dfb671bd2fb9a0378ce239e1dd695ef3d877d8c9` now pass the shared private-Core
+native lifecycle. The Director expected the ordinary dev model when reconciling
+the completed Ingredients receipt; fix `dc50ceca` uses the same spec-to-model
+mapping as submission without loosening seed/charge checks. The stopped video
+observer then exposed an expired-history deadline guard. Worker `1332fa20`
+permits one history read for a previously armed/submitted prompt even after its
+original observation deadline, while preserving exact marker/graph/binding
+checks and the WS Core-held authorization. Prepared work cannot POST after
+expiry; absent, incomplete, unavailable or mismatched history stays uncertain
+without more polling. Closed/unknown Core state still prevents output recovery.
+
+Recovery kept Core unchanged, new admission off, original submission records,
+native prompt/job/source/request identities and all economic rows. The explicit
+reviewed client/worker compatibility transitions are recorded privately; this
+is not an unchanged-revision or intentional SIGKILL test. Both jobs settled once,
+with one completion per distinct GPU worker and 100,834 unfunded test micro-USD
+charged per job. Shared balance and ledger sum are 798,332, funded balance zero.
+Both worker journals acknowledged/pruned their outputs. Core committed removal
+of all five private input objects; independent S3 checks confirm absence.
+Repeated observation preserves proof SHA-256
+`c098f814da910aad2773113fe16daa3c8abf70d06f4768dfae2a65f579d0b6ac`.
+
+Both outputs fully decode 121 frames with exact picture/audio clocks and pass
+the unchanged aligned-source WAV cosine/RMS checks. Six sampled pictures reveal
+mixed quality: the audio-only output shows the reference layout at frames 0 and
+24; the motion-guided output shows a coherent woman/car scene without visible
+layout in those samples. Neither is measured identity, motion, lip-sync or
+long-shot proof, and the absence of an opening-image graph node does not prove
+no reference leakage. No price, public admission, production service or real
+funds changed. The profile remains unpriced and dark pending quality fixes,
+model-use permission and funded/public qualification.
+
+Worker `1332fa20` passes 474 local tests / 2 skips and all PR #32 CI gates.
+Director `dc50ceca` passes 689 Mac tests / 1 unavailable Rubber Band skip,
+Ruff lint/format and strict mypy. Core `31ddb88f` passed required Linux/Python
+3.12/PostgreSQL 16 CI. These exact historical pins qualify the private test,
+not a newer doc-only commit, public release or complete full-film workflow.
 
 ## Remaining Release Gates
 

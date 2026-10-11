@@ -98,6 +98,11 @@ validation, worker incentives, and trust boundaries.
   baseline; synthetic guide-test failures do not invalidate that production.
   The dark candidate now carries sixteen timed pins and the 337-frame distilled
   ceiling; network storage, money and full film/export parity remain separate gates.
+  A separate native Ingredients comparison passes unfunded transport/settlement,
+  same-job recovery after explicit client/worker fixes and private-input cleanup.
+  Audio-only output leaks the reference sheet early; motion-guided samples are
+  promising, not measured identity/lip/motion qualification. Keep public/funded
+  promotion separate from private execution evidence.
   Default-off async submit/status and the bounded SQL/Redis outbox are candidate
   code. Owner-only key-header GET recovery now handles a lost initial reply
   without another admission/upload; the stored normalized intent digest binds
@@ -152,9 +157,10 @@ validation, worker incentives, and trust boundaries.
   Legacy image-source privacy is unchanged; admission stays dark.
   A separate fixed Ingredients Dev candidate now carries appearance PNGs as
   their own committed source role, not a first-frame image. The Core compiler/
-  inventory and worker executor/startup support it dark; SDK/Director transport,
-  actual joint native execution, paid lifecycle and appearance-quality acceptance
-  remain gates for this new profile. It does not inherit distilled source proof.
+  inventory, worker executor/startup and SDK/Director transport support it dark.
+  Its separate native joint execution/recovery/cleanup proof uses unfunded test
+  credits; funded/public acceptance and measured appearance quality remain gates.
+  It does not inherit distilled source proof or promote its mixed visual results.
 - `VIDEO_X402.md` - unimplemented authenticated prepaid-video proposal: exact
   USDC quote/nonce binding, payment-before-outbox admission, cross-rail replay
   protection, separate refund obligations and staged qualification. No route,
