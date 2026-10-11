@@ -26,6 +26,11 @@ content sanitization, and reward settlement.
   optional Union motion control. Standard Dev remains capped at 81 frames.
   Appearance/motion strengths are committed execution controls, not node or
   adapter selectors; no portrait-at-frame-zero or identity-fidelity promise.
+  `normalize_timing` shares exact frame/duration validation with execution and
+  non-mutating credit quotes. A quote needs no private appearance/audio bytes;
+  it cannot validate sources, compile a graph or grant admission. Full
+  `normalize` still rejects missing appearance/audio inputs. Ordinary Dev's
+  frame limit and the fixed Ingredients bucket remain unchanged.
 - `video_sources.py` owns bounded inline WAV/MP4 input decoding, exact-duration
   audio validation and isolated FFmpeg probe/full-frame checks. It accepts no
   input URLs or filenames. Validate all inputs before quota/upload, retain

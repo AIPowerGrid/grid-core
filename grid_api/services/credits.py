@@ -324,7 +324,7 @@ async def quote_for_account(
         if frames is not None:
             values["frames"] = frames
         try:
-            execution = video_contract.normalize(contract, values)
+            execution = video_contract.normalize_timing(contract, **values)
         except ValueError:
             raise HTTPException(status_code=422, detail="Invalid LTX-2.5 timing; consult the model parameter contract") from None
         if n != 1:
