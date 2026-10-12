@@ -85,8 +85,8 @@ class RefundRPC:
                     "0x" + "0" * 24 + intent["safe_address"][2:], "0x" + "0" * 24 + intent["payer"][2:]],
                  "data": "0x" + encode(["uint256"], [intent["amount_micro"]]).hex()},
                 {**log, "address": intent["safe_address"], "logIndex": "0x5",
-                 "topics": ["0x" + keccak(text="ExecutionSuccess(bytes32,uint256)").hex()],
-                 "data": "0x" + encode(["bytes32", "uint256"], [bytes.fromhex(self.hash[2:]), 0]).hex()},
+                 "topics": ["0x" + keccak(text="ExecutionSuccess(bytes32,uint256)").hex(), self.hash],
+                 "data": "0x" + encode(["uint256"], [0]).hex()},
             ]}
 
     async def read(self, method, params):
@@ -152,7 +152,8 @@ async def test_exact_refund_sdk_abi_solidity_hash_and_two_anchors(prepared, tag)
 
 
 @pytest.mark.parametrize("fault", ["amount", "payer", "sender", "token", "no-transfer", "failure", "wrong-safe-hash",
-    "execution-payment", "duplicate", "removed", "reordered", "calldata", "delegatecall", "gas-reimbursement",
+    "execution-payment", "non-indexed-hash", "missing-hash-topic", "extra-hash-topic", "execution-data-suffix",
+    "duplicate", "removed", "reordered", "calldata", "delegatecall", "gas-reimbursement",
     "suffix", "reverted", "wrong-safe", "wrong-chain", "early", "version", "decimals", "nonce", "hash-view",
     "missing-code", "reorg", "anchor", "unconfirmed"])
 async def test_wrong_or_ambiguous_refund_never_passes(prepared, fault):
@@ -162,8 +163,7 @@ async def test_wrong_or_ambiguous_refund_never_passes(prepared, fault):
     transfer, execution = one.receipt["logs"]
     if fault in {"amount", "execution-payment"}:
         target = transfer if fault == "amount" else execution
-        target["data"] = "0x" + encode(["uint256"], [1]).hex() if fault == "amount" else (
-            "0x" + encode(["bytes32", "uint256"], [bytes.fromhex(one.hash[2:]), 1]).hex())
+        target["data"] = "0x" + encode(["uint256"], [1]).hex()
     elif fault in {"payer", "sender"}:
         transfer["topics"][2 if fault == "payer" else 1] = "0x" + "0" * 24 + "3" * 40
     elif fault == "token":
@@ -171,9 +171,18 @@ async def test_wrong_or_ambiguous_refund_never_passes(prepared, fault):
     elif fault == "no-transfer":
         one.receipt["logs"].pop(0)
     elif fault == "failure":
-        execution["topics"] = ["0x" + keccak(text="ExecutionFailure(bytes32,uint256)").hex()]
+        execution["topics"][0] = "0x" + keccak(text="ExecutionFailure(bytes32,uint256)").hex()
     elif fault == "wrong-safe-hash":
-        execution["data"] = "0x" + encode(["bytes32", "uint256"], [b"\x01" * 32, 0]).hex()
+        execution["topics"][1] = "0x" + "01" * 32
+    elif fault == "non-indexed-hash":
+        execution["topics"].pop()
+        execution["data"] = "0x" + encode(["bytes32", "uint256"], [bytes.fromhex(one.hash[2:]), 0]).hex()
+    elif fault == "missing-hash-topic":
+        execution["topics"].pop()
+    elif fault == "extra-hash-topic":
+        execution["topics"].append(one.hash)
+    elif fault == "execution-data-suffix":
+        execution["data"] += "00"
     elif fault == "duplicate":
         extra = copy.deepcopy(transfer)
         extra["logIndex"] = "0x6"

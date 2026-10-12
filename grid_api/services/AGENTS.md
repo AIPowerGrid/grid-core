@@ -23,6 +23,7 @@ content sanitization, and reward settlement.
   read-only dual-source proof. Freeze Call-only canonical USDC transfer, zero
   native value/gas reimbursement, original payer/amount, Safe nonce and EIP-712
   hash. Require exact direct execution calldata, one matching ExecutionSuccess
+  with the transaction hash in its indexed topic and zero payment in data
   after one exact Transfer, status, code/version/decimals/hash/consumed-nonce
   views at the required-canonical block and re-read confirmation anchors.
   Unknown versions, modules, batches, delegatecall and gas-token reimbursement
@@ -31,6 +32,16 @@ content sanitization, and reward settlement.
   actual treasury proxy/singleton/guard/modules, pending nonce coordination,
   Safe UI and real token/refund qualification remain gates. Sources must be
   operator-selected TLS-verifying clients; two hosts are not chain proof.
+- `tests/video_fork_support.py` and `tests/test_video_payment_fork.py` own
+  opt-in local Anvil/Base contract-execution qualification. Writes require
+  a literal loopback URL and repeatedly checked Anvil/pinned-fork identity.
+  Fresh payer keys and local owner impersonation never access production keys
+  or submit to the upstream fork source. Real Safe/USDC code, SQL admission,
+  failure obligation/refund closure, consumed authorization and both replay
+  reverts are exercised; provider failures cannot count as replay rejection.
+  Snapshot rollback runs in finally. Two logical proof adapters share one
+  fork, not independent providers; this is neither actual Base payment nor
+  GPU/storage/customer-funded qualification. Inputs/prices remain synthetic.
 
 - `video_prepaid.py` owns private `0051` proved-receipt admission. Actual shared
   ownership, proof, ready original inputs and account/quote/job locks precede
