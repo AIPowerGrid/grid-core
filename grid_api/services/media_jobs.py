@@ -55,6 +55,10 @@ class MediaJobCapacityExceeded(MediaJobError):
     """The canonical account already holds its allowed async work."""
 
 
+class MediaJobAdmissionClosed(MediaJobError):
+    """A captured pilot cannot authorize a new hold after its deadline."""
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -139,6 +143,7 @@ class PreparedMediaJob:
     preferred_worker: str
     max_cost_micro: int
     seconds: float
+    admission_deadline: datetime | None = None
 
     @property
     def payload(self) -> dict:
@@ -155,11 +160,12 @@ class PreparedMediaJob:
                 or seconds != self.seconds):
             raise MediaJobError("reservation does not match prepared video job")
         _validate_prepared(self)
+        _require_admission_deadline(self)
 
 
 def prepare(*, account_id, idempotency_key: str, request_hash: str, model: str,
             payload: dict, route_models: list[str], max_cost_micro: int,
-            preferred_worker: str = "") -> PreparedMediaJob:
+            preferred_worker: str = "", admission_deadline: datetime | None = None) -> PreparedMediaJob:
     """Bind a previously validated request to one fully compiled governed graph.
 
     Fingerprint the normalized client intent BEFORE choosing an omitted seed or
@@ -178,7 +184,7 @@ def prepare(*, account_id, idempotency_key: str, request_hash: str, model: str,
         payload_hash=_payload_hash(frozen, route_models, model, preferred_worker),
         model=model, payload_json=_json(frozen), route_json=_json(route_models),
         preferred_worker=preferred_worker, max_cost_micro=max_cost_micro,
-        seconds=float(seconds),
+        seconds=float(seconds), admission_deadline=admission_deadline,
     )
     _validate_prepared(job)
     return job
@@ -187,6 +193,10 @@ def prepare(*, account_id, idempotency_key: str, request_hash: str, model: str,
 def _validate_prepared(job: PreparedMediaJob) -> None:
     if not isinstance(job, PreparedMediaJob):
         raise MediaJobError("prepared video job required")
+    if job.admission_deadline is not None and (
+        not isinstance(job.admission_deadline, datetime) or job.admission_deadline.tzinfo is None
+    ):
+        raise MediaJobError("timezone-aware async admission deadline required")
     _uuid(job.job_id)
     _uuid(job.account_id)
     for digest in (job.idempotency_hash, job.request_hash, job.payload_hash):
@@ -222,9 +232,15 @@ def _validate_prepared(job: PreparedMediaJob) -> None:
         raise MediaJobError("prepared video commitment mismatch")
 
 
+def _require_admission_deadline(job: PreparedMediaJob) -> None:
+    if job.admission_deadline is not None and job.admission_deadline <= _now():
+        raise MediaJobAdmissionClosed("async admission deadline expired")
+
+
 async def insert_in_session(session, job: PreparedMediaJob) -> None:
     """Called only inside the credit debit/reservation transaction."""
     _validate_prepared(job)
+    _require_admission_deadline(job)
     hold = (await session.execute(sa.select(reservations).where(
         reservations.c.job_id == job.job_id))).mappings().one_or_none()
     if (hold is None or hold["account_id"] != job.account_id or hold["model"] != job.model
@@ -237,6 +253,7 @@ async def insert_in_session(session, job: PreparedMediaJob) -> None:
         payload=job.payload, route_models=job.route_models, preferred_worker=job.preferred_worker,
         max_cost_micro=job.max_cost_micro, source_objects=media_source_retention.capture(job.payload), created=_now(),
     ))
+    _require_admission_deadline(job)
 
 
 async def _lookup(session, account_id, key_hash: str, request_hash: str) -> dict | None:
@@ -286,6 +303,7 @@ async def reserve(job: PreparedMediaJob, *, user: dict | None = None, concurrenc
         existing = await _lookup(session, canonical, job.idempotency_hash, job.request_hash)
         if existing is not None:
             return existing
+        _require_admission_deadline(job)
         if canonical != job.account_id:
             raise MediaJobConflict("new video requests require the current canonical account")
         if concurrency_limit is not None:

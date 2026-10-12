@@ -88,6 +88,14 @@ executes an immutable release selected through `/home/aipg/current`.
   any governed LTX input. Legacy image sources are not migrated by this gate.
   Apply migrations through `0045` before starting this release, even with
   `MEDIA_ASYNC_ENABLED=0`: the lifecycle outbox reads `grid_media_jobs`.
+  `MEDIA_ASYNC_ADMISSION_MODE=pilot` is the default. A reviewed enabled pilot
+  requires one to ten distinct private account UUIDs in
+  `MEDIA_ASYNC_CANARY_ACCOUNTS` and an aware `MEDIA_ASYNC_CANARY_UNTIL` no more
+  than 24 hours ahead at startup. Expired metadata may remain only with new
+  admission disabled, preserving restart/recovery. Public `open` requires both
+  pilot fields cleared and separate approval; it cannot silently ignore a cohort.
+  Contract-backed waiting/chat video is closed in pilot mode. These admission
+  controls do not change global charging, tariffs or model-use clearance.
   Defaults are `MEDIA_ASYNC_CONCURRENCY=4`, `MEDIA_JOB_SWEEP_SECONDS=10`,
   `MEDIA_JOB_DISPATCH_LEASE_SECONDS=60`, and `MEDIA_JOB_BATCH_SIZE=10`.
   Turning admission off preserves authenticated replay/status, drains existing

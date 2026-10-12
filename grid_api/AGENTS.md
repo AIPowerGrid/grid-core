@@ -57,6 +57,14 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
 - **Async video:** `MEDIA_ASYNC_ENABLED=0` closes new async admission only.
+  Admission defaults to `pilot`: enabling requires one to ten distinct private
+  account UUIDs and an aware expiry within 24 hours. New holds recheck the
+  captured deadline after account/balance locks and journal insertion; expiry
+  rolls back paid writes and restores separately drawn pockets. Existing
+  replay/status/outbox work survives expiry or cohort removal. Contract-backed
+  waiting/chat video routes reject in pilot mode, even when async is disabled.
+  Explicit `open` mode requires clearing both cohort and expiry; it does not
+  bypass recipe, feature, pricing, credit, worker or model-permission gates.
   Audio/video conditioning adds separately default-dark `audio-to-video` and
   `video-to-video` admission; Ingredients appearance adds `appearance-to-video`.
   Do not infer these gates from the base video path,
