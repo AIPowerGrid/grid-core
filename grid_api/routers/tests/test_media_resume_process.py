@@ -54,7 +54,8 @@ async def test_real_core_restart_preserves_one_job_charge_and_original_worker(ri
         await connection.execute(tables.api_keys.update().where(
             tables.api_keys.c.hash == hashlib.sha256((core.env["GRID_SALT"] + worker_key).encode()).hexdigest(),
         ).values(key_kind="worker", label="worker:resume-fixture"))
-    core.env.update(TEST_ASYNC_VIDEO="1", MEDIA_ASYNC_ENABLED="1", MEDIA_JOB_SWEEP_SECONDS="5")
+    core.env.update(TEST_ASYNC_VIDEO="1", MEDIA_ASYNC_ENABLED="1",
+                    MEDIA_ASYNC_ADMISSION_MODE="open", MEDIA_JOB_SWEEP_SECONDS="5")
     await core.start("committed" if phase == "committed" else "none")
     first, worker_id = await registered(core, worker_key)
     idempotency = str(uuid4())

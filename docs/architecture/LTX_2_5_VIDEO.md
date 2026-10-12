@@ -622,6 +622,49 @@ bounded queue dispatch, an irrevocable worker execution claim and owner-only
 SQL status/result recovery. New admission defaults off. The API is not released
 or deployed, and worker-restart continuation remains a promotion gate.
 
+### Expiring Credit Pilot
+
+`MEDIA_ASYNC_ADMISSION_MODE` defaults to `pilot`, independently of global
+charging. Enabling async admission requires one to ten distinct private account
+UUIDs in `MEDIA_ASYNC_CANARY_ACCOUNTS` and an aware
+`MEDIA_ASYNC_CANARY_UNTIL` strictly in the future and at most 24 hours ahead at
+startup. Defaults remain disabled, empty and without an expiry. Public `open`
+mode is a separate release choice and rejects configured cohort/expiry fields;
+it cannot silently discard those restrictions. None of these controls promotes
+recipes, creates tariffs, grants credits or resolves model-use permission.
+
+Fresh outside-cohort/expired requests return a uniform 503 before private source
+decoding, quota or staging. Admission is rechecked after source staging; the
+earlier deadline follows the server-prepared job into financial authorization.
+Actual account/balance lock waits cannot authorize an expired hold. The debit,
+hold and journal roll back together, with independent promo/free/service draws
+released. Deadline metadata is not client-selectable or part of durable intent.
+Real PostgreSQL lock-observation tests cover both waits; mocked nonzero pocket
+draws verify release calls, not a new external-money purchase/refund proof.
+
+Existing accepted request keys still replay with original-intent validation
+after cohort removal, expiry or admission shutdown. Authenticated GET recovery,
+outbox work and terminal settlement continue; no new upload or hold is needed.
+Contract-backed legacy waiting-video and chat-media ingress reject in pilot
+mode, preventing a cohort bypass. Existing non-governed models are unchanged.
+In explicit public `open` mode those older routes retain their own lifecycle;
+the async switch alone does not close them.
+
+Source staging can still leave pre-admission private objects if admission
+expires or reserve fails. The provider's verified one-day input lifecycle
+remains required; accepted-job cleanup is not orphan cleanup. Broader retention,
+actual purchased-credit canaries, model-use clearance, fresh exact-revision CI
+and reviewed deployment remain release gates. These controls are not deployed.
+
+The corrected local full Core suite passes 2,823 tests with 30 skips and 139
+existing deprecation warnings on Python3.13/PostgreSQL14. The ten earlier
+fixture failures are preserved as failed evidence, then rerun successfully
+after explicit isolated open-mode configuration. Skips do not qualify missing
+gates, and this local result does not replace new exact-source Linux/PostgreSQL16
+CI or actual purchased-credit/native acceptance.
+
+### Submission and Recovery
+
 Submission requires scoped `inference.submit` authentication (including
 delegation for a service acting for a user), a UUIDv4 `Idempotency-Key`, a typed
 governed video request and a positive integer `max_cost_micro_usd`. It shares

@@ -91,6 +91,9 @@ class GridSettings(BaseSettings):
     # New async admission is independently dark. The outbox still drains old
     # journaled holds when admission is disabled; never roll back its schema/fence.
     media_async_enabled: bool = False
+    media_async_admission_mode: Literal["pilot", "open"] = "pilot"
+    media_async_canary_accounts: list[UUID] = Field(default_factory=list, max_length=10, repr=False)
+    media_async_canary_until: AwareDatetime | None = Field(default=None, repr=False)
     media_async_concurrency: int = Field(default=4, ge=1, le=16)
     media_job_sweep_seconds: int = Field(default=10, ge=5, le=60)
     media_job_dispatch_lease_seconds: int = Field(default=60, ge=30, le=300)
@@ -223,6 +226,20 @@ class GridSettings(BaseSettings):
     grid_treasury_monitor_token: str = Field(default="", pattern=r"^(?:0x[0-9a-fA-F]{40})?$")
     grid_treasury_min_eth_wei: int = Field(default=0, ge=0, le=2**256 - 1)
     grid_treasury_min_token_raw: int = Field(default=0, ge=0, le=2**256 - 1)
+
+    @model_validator(mode="after")
+    def validate_media_async_admission(self):
+        cohort, until = self.media_async_canary_accounts, self.media_async_canary_until
+        if len(cohort) != len(set(cohort)):
+            raise ValueError("Async video pilot accounts must be distinct")
+        if self.media_async_admission_mode == "open":
+            if cohort or until is not None:
+                raise ValueError("Open async admission cannot ignore configured pilot restrictions")
+        elif self.media_async_enabled:
+            now = datetime.now(UTC)
+            if not cohort or until is None or not now < until <= now + timedelta(hours=24):
+                raise ValueError("Async video pilot requires accounts and an expiry within 24 hours")
+        return self
 
     @model_validator(mode="after")
     def validate_worker_reward_demand(self):

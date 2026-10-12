@@ -79,6 +79,14 @@ content sanitization, and reward settlement.
   immutable compiled graph. PostgreSQL serializes pocket draws; the existing
   credit hold and journal insert commit together. Live positive credit holds and
   explicit cost caps are required; dry-run never writes an async job.
+  `generation_admission.py` owns the default-empty, expiring async-video cohort.
+  It never changes global charging or approves a model. Captured pilot deadlines
+  are transient server-only preparation metadata, not client intent or schema.
+  Recheck after canonical-account locking, before hold insertion and after the
+  awaited journal insert in the debit transaction. Expiry restores independent
+  promo/free/service draws and returns admission-closed, not paid success.
+  Existing committed replay must precede deadline checks; recovery/outbox and
+  terminal settlement do not depend on continued pilot membership.
   The canonical-account lock also serializes the held async-job cap (default
   four, at most sixteen), including proved aliases. This is separate from the
   synchronous media/text concurrency limits; replay does not consume a slot.

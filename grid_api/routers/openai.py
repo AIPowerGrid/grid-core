@@ -247,6 +247,8 @@ async def _chat_media(request: ChatCompletionRequest, kind: str, account_id=None
     /v1/images|videos endpoints remain for advanced control (size, seed, n…).
     """
     model = request.model
+    if kind == "video":
+        generation_admission.require_waiting_video(model)
     prompt = _last_user_prompt(request.messages)
 
     # img2img / img2video from a pasted image in the turn. Chat has no `size`, so a

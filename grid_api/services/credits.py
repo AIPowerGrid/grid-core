@@ -1240,6 +1240,11 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                         "reason": "billing reservation failed"}
             except Exception as exc:
                 await s.rollback()
+                if prepared_media_job is not None and isinstance(exc, media_jobs.MediaJobAdmissionClosed):
+                    await _promo_release(account_id, ref)
+                    await free_credits.release(account_id, ref)
+                    await service_limits.release((user or {}).get("service_id"), ref)
+                    raise
                 logger.error(
                     "media reservation insert failed job=%s account=%s error_type=%s",
                     opaque_id(job_id),

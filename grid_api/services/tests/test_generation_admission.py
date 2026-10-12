@@ -1,8 +1,11 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import json
+from datetime import UTC, datetime, timedelta
 from typing import get_args
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -23,6 +26,76 @@ def test_default_preserves_known_paths():
     assert GridSettings(_env_file=None).generation_enabled_paths == frozenset(get_args(GenerationPath)) - {
         "audio-to-video", "video-to-video", "appearance-to-video",
     }
+
+
+def test_async_admission_defaults_to_disabled_private_pilot():
+    settings = GridSettings(_env_file=None)
+    assert not settings.media_async_enabled and settings.media_async_admission_mode == "pilot"
+    assert not settings.media_async_canary_accounts and settings.media_async_canary_until is None
+    with pytest.raises(HTTPException) as error:
+        generation_admission.require_async_video(settings, uuid4())
+    assert error.value.status_code == 503
+
+
+@pytest.mark.parametrize("changes", [
+    {}, {"media_async_canary_accounts": []},
+    {"media_async_canary_until": None},
+    {"media_async_canary_until": datetime.now(UTC) - timedelta(seconds=1)},
+    {"media_async_canary_until": datetime.now(UTC) + timedelta(hours=25)},
+    {"media_async_canary_until": datetime.now().replace(tzinfo=None)},
+    {"media_async_canary_accounts": [uuid4() for _ in range(11)]},
+    {"media_async_admission_mode": "typo"},
+])
+def test_enabled_pilot_requires_bounded_explicit_cohort_and_expiry(changes):
+    values = {"media_async_enabled": True}
+    if changes:
+        values.update(media_async_canary_accounts=[uuid4()],
+                      media_async_canary_until=datetime.now(UTC) + timedelta(minutes=15))
+    with pytest.raises(ValidationError):
+        GridSettings(_env_file=None, **{**values, **changes})
+
+
+def test_pilot_rejects_duplicate_cohort_and_open_mode_cannot_ignore_restrictions():
+    account, until = uuid4(), datetime.now(UTC) + timedelta(minutes=15)
+    for values in (
+        {"media_async_canary_accounts": [account, account], "media_async_canary_until": until},
+        {"media_async_admission_mode": "open", "media_async_canary_accounts": [account]},
+        {"media_async_admission_mode": "open", "media_async_canary_until": until},
+    ):
+        with pytest.raises(ValidationError):
+            GridSettings(_env_file=None, **values)
+
+
+def test_async_pilot_environment_parses_private_ids_and_aware_expiry(monkeypatch):
+    account = uuid4()
+    until = datetime.now(UTC) + timedelta(minutes=15)
+    monkeypatch.setenv("MEDIA_ASYNC_ENABLED", "1")
+    monkeypatch.setenv("MEDIA_ASYNC_ADMISSION_MODE", "pilot")
+    monkeypatch.setenv("MEDIA_ASYNC_CANARY_ACCOUNTS", json.dumps([str(account)]))
+    monkeypatch.setenv("MEDIA_ASYNC_CANARY_UNTIL", until.isoformat())
+    settings = GridSettings(_env_file=None)
+    assert settings.media_async_canary_accounts == [account]
+    assert generation_admission.require_async_video(settings, account) == until
+
+
+def test_pilot_checks_exact_account_and_runtime_expiry_without_changing_charging():
+    account, until = uuid4(), datetime.now(UTC) + timedelta(minutes=15)
+    settings = GridSettings(_env_file=None, media_async_enabled=True,
+                            media_async_canary_accounts=[account], media_async_canary_until=until)
+    assert generation_admission.require_async_video(settings, str(account)) == until
+    assert str(account) not in repr(settings)
+    for other in (uuid4(), "invalid", None):
+        with pytest.raises(HTTPException) as error:
+            generation_admission.require_async_video(settings, other)
+        assert error.value.status_code == 503 and str(account) not in str(error.value.detail)
+    settings.media_async_canary_until = datetime.now(UTC) - timedelta(seconds=1)
+    with pytest.raises(HTTPException):
+        generation_admission.require_async_video(settings, account)
+    settings.media_async_enabled = False
+    assert GridSettings(_env_file=None, media_async_canary_accounts=[account],
+                        media_async_canary_until=settings.media_async_canary_until)
+    opened = GridSettings(_env_file=None, media_async_enabled=True, media_async_admission_mode="open")
+    assert generation_admission.require_async_video(opened, uuid4()) is None
 
 
 def test_unknown_path_configuration_rejected():

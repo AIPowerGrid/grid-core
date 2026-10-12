@@ -9,6 +9,7 @@ import io
 import json
 import shutil
 import subprocess
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -46,7 +47,9 @@ async def api(db, monkeypatch):
     monkeypatch.setattr(auth, "_API_KEY_SALT", uuid4().hex)
     aid = await owner()
     key = await accounts.issue_key(aid, scopes=["inference.submit"])
-    settings = SimpleNamespace(media_async_enabled=True, media_async_concurrency=4)
+    settings = SimpleNamespace(media_async_enabled=True, media_async_concurrency=4,
+                               media_async_admission_mode="open", media_async_canary_accounts=[],
+                               media_async_canary_until=None)
     monkeypatch.setattr(video_jobs, "get_settings", lambda: settings)
     monkeypatch.setattr(video_jobs.limiter, "enabled", False)
     available = AsyncMock(return_value=[MODEL])
@@ -75,6 +78,141 @@ async def post(api, *, key=None, body=None, credential=None):
 async def stored(job_id):
     async with await database.new_session() as session:
         return dict((await session.execute(sa.select(journal).where(journal.c.job_id == job_id))).mappings().one())
+
+
+@pytest.mark.asyncio
+async def test_pilot_rejects_fresh_keys_before_input_work_without_bill_or_quota(api, monkeypatch):
+    _client, aid, _key, settings, quota, available = api
+    settings.media_async_admission_mode = "pilot"
+    settings.media_async_canary_accounts = [uuid4()]
+    settings.media_async_canary_until = datetime.now(UTC) + timedelta(minutes=15)
+
+    def forbidden(_body):
+        pytest.fail("outside-cohort requests must not decode or hash private input")
+
+    monkeypatch.setattr(video_jobs, "request_hash", forbidden)
+    response = await post(api, body={"image": "invalid-inline-data"})
+    assert response.status_code == 503 and response.headers["cache-control"] == "no-store"
+    assert await counts() == (0, 0, 0) and await credits.get_balance(aid) == OPENING
+    quota.assert_not_awaited()
+    available.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_expired_removed_pilot_retains_replay_and_get_recovery(api):
+    client, aid, key, settings, quota, _available = api
+    settings.media_async_admission_mode = "pilot"
+    settings.media_async_canary_accounts = [aid]
+    settings.media_async_canary_until = datetime.now(UTC) + timedelta(minutes=15)
+    request_key = uuid4()
+    accepted = await post(api, key=request_key)
+    assert accepted.status_code == 202, accepted.text
+    balance = await credits.get_balance(aid)
+    settings.media_async_canary_until = datetime.now(UTC) - timedelta(seconds=1)
+    settings.media_async_canary_accounts = []
+    assert (await post(api)).status_code == 503
+    replay = await post(api, key=request_key)
+    assert replay.status_code == 202 and replay.json() == accepted.json()
+    status = await client.get(accepted.headers["location"], headers={"apikey": key})
+    assert status.status_code == 200 and status.json() == accepted.json()
+    changed = await post(api, key=request_key, body={"prompt": "a different synthetic intent"})
+    assert changed.status_code == 409
+    assert await counts() == (1, 1, 0) and await credits.get_balance(aid) == balance
+    quota.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("closure", ["expiry", "removed", "disabled"])
+async def test_pilot_rechecked_after_staging_without_new_hold(api, monkeypatch, closure):
+    _client, aid, _key, settings, _quota, _available = api
+    settings.media_async_admission_mode = "pilot"
+    settings.media_async_canary_accounts = [aid]
+    settings.media_async_canary_until = datetime.now(UTC) + timedelta(minutes=15)
+    stage = video_plans.FrozenVideoPlan.stage
+
+    async def staged(plan):
+        result = await stage(plan)
+        if closure == "expiry":
+            settings.media_async_canary_until = datetime.now(UTC) - timedelta(seconds=1)
+        elif closure == "removed":
+            settings.media_async_canary_accounts = []
+        else:
+            settings.media_async_enabled = False
+        return result
+
+    monkeypatch.setattr(video_plans.FrozenVideoPlan, "stage", staged)
+    response = await post(api)
+    assert response.status_code == 503, response.text
+    assert await counts() == (0, 0, 0) and await credits.get_balance(aid) == OPENING
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["extend", "shorten", "open"])
+async def test_captured_pilot_deadline_can_only_be_shortened(api, monkeypatch, change):
+    _client, aid, _key, settings, _quota, _available = api
+    settings.media_async_admission_mode = "pilot"
+    settings.media_async_canary_accounts = [aid]
+    original_deadline = datetime.now(UTC) + timedelta(minutes=15)
+    settings.media_async_canary_until = original_deadline
+    stage = video_plans.FrozenVideoPlan.stage
+    expected = original_deadline - timedelta(minutes=5) if change == "shorten" else original_deadline
+
+    async def staged(plan):
+        result = await stage(plan)
+        if change == "open":
+            settings.media_async_admission_mode = "open"
+        else:
+            settings.media_async_canary_until = expected if change == "shorten" else original_deadline + timedelta(hours=1)
+        return result
+
+    async def reserve(job, **_kwargs):
+        assert job.admission_deadline == expected
+        raise media_jobs.MediaJobAdmissionClosed("synthetic admission close")
+
+    monkeypatch.setattr(video_plans.FrozenVideoPlan, "stage", staged)
+    monkeypatch.setattr(media_jobs, "reserve", reserve)
+    response = await post(api)
+    assert response.status_code == 503
+    assert await counts() == (0, 0, 0) and await credits.get_balance(aid) == OPENING
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("point", ["before_insert", "after_insert"])
+async def test_expiry_inside_credit_transaction_rolls_back_debit_hold_and_job(api, monkeypatch, point):
+    _client, aid, _key, settings, _quota, _available = api
+    settings.media_async_admission_mode = "pilot"
+    settings.media_async_canary_accounts = [aid]
+    deadline = settings.media_async_canary_until = datetime.now(UTC) + timedelta(minutes=15)
+    original = media_jobs.insert_in_session
+    original_capture = media_jobs.media_source_retention.capture
+
+    async def insert(session, job):
+        from grid_api.v2.schema import credits as balances
+
+        assert await session.scalar(sa.select(balances.c.balance_micro).where(
+            balances.c.account_id == aid)) == OPENING - 67500
+        if point == "before_insert":
+            monkeypatch.setattr(media_jobs, "_now", lambda: deadline + timedelta(seconds=1))
+        await original(session, job)
+
+    def capture(payload):
+        result = original_capture(payload)
+        if point == "after_insert":
+            monkeypatch.setattr(media_jobs, "_now", lambda: deadline + timedelta(seconds=1))
+        return result
+
+    monkeypatch.setattr(media_jobs, "insert_in_session", insert)
+    monkeypatch.setattr(media_jobs.media_source_retention, "capture", capture)
+    response = await post(api)
+    assert response.status_code == 503, response.text
+    assert await counts() == (0, 0, 0) and await credits.get_balance(aid) == OPENING
+    from grid_api.v2.schema import credit_ledger
+    from grid_api.v2.schema import credits as balances
+    async with await database.new_session() as session:
+        assert await session.scalar(sa.select(balances.c.funded_balance_micro).where(
+            balances.c.account_id == aid)) == OPENING
+        assert await session.scalar(sa.select(sa.func.count()).select_from(credit_ledger).where(
+            credit_ledger.c.reason == "reserve:video")) == 0
 
 
 @pytest.mark.asyncio
