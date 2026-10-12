@@ -450,6 +450,7 @@ async def reconcile_transaction(job_id: str, tx_hash: str) -> dict:
             await session.execute(
                 sa.select(
                     payments_t.c.payer,
+                    payments_t.c.network,
                     payments_t.c.asset,
                     payments_t.c.pay_to,
                     payments_t.c.authorized_micro,
@@ -489,6 +490,8 @@ async def reconcile_transaction(job_id: str, tx_hash: str) -> dict:
         raise RuntimeError("x402 payment has no durable settlement attempt")
     if attempted_at.tzinfo is None:
         attempted_at = attempted_at.replace(tzinfo=UTC)
+    if row["network"] != f"eip155:{deposits.CHAIN_ID}":
+        raise RuntimeError("x402 reconciliation RPC does not match the recorded payment chain")
 
     _tx, receipt, block_number = await deposits._confirmed_transaction(
         tx_hash,
@@ -510,6 +513,13 @@ async def reconcile_transaction(job_id: str, tx_hash: str) -> dict:
 
     async with await new_session() as session:
         try:
+            from . import payment_receipt_claims as receipt_claims
+
+            await receipt_claims.claim_in_session(session, chain_id=deposits.CHAIN_ID, asset=str(row["asset"]).lower(),
+                transaction_hash=tx_hash, owner_kind="text_x402", owner_ref=job_id,
+                observed_nonces=receipt_claims.observed_authorizations(receipt, str(row["asset"]).lower()),
+                purpose={"schema": "aipg.text-receipt.v1", "payer": str(row["payer"]).lower(),
+                         "recipient": str(row["pay_to"]).lower(), "amount_micro": actual})
             updated = await session.execute(
                 sa.update(payments_t)
                 .where(

@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0047`
+- `versions/` - ordered migration revisions. Current source head: `0048`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -68,8 +68,18 @@ production database match the Grid-owned schema contracts without relying on
   `0047` creates empty quote-bound payment attempts and immutable receipt
   evidence, with unique authorization/transaction and coherent review/proof
   constraints. It stores no spending signature and grants no funded admission.
+  `0048` creates empty shared asset/transaction and economic-reference claims.
+  It invents no historical receipt/token provenance and enables no video API.
 
 ## Local Contracts
+
+- Apply `0048` before any updated deposit or text-x402 reconciliation writer,
+  even with video disabled. Quiesce all financial writers before the migration/
+  release switch and upgrade every replica/offline runner before resuming.
+  Older writers can bypass these claims, so a rolling mixed-writer deployment
+  is unsafe. Historical books are exclusion evidence, not fabricated backfills.
+  Rollback retains this table and claim-aware writers; downgrade refuses any
+  retained ownership. Shared ownership alone grants no funded video admission.
 
 - Apply `0047` before using the optional non-routable video attempt journal.
   Normal credit/deposit/text x402 and quote routes do not query the new table.

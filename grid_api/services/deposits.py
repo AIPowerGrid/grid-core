@@ -565,7 +565,15 @@ async def _record_and_credit(
     price_block: int | None,
     credited_micro: int,
     caps: tuple[int, int, int] | None = None,
+    receipt_asset: str | None = None,
+    receipt_authorizations: tuple = (),
 ) -> tuple[bool, dict, int]:
+    from . import payment_receipt_claims as receipt_claims
+
+    converted = asset == "ETH" and price_source == "swap:actual-base-usdc-proceeds"
+    physical_asset = receipt_asset if converted else (token_address or "native")
+    if physical_asset is None or (not converted and receipt_asset not in (None, physical_asset)):
+        raise HTTPException(503, detail="Funding receipt asset is unavailable.")
     ref = f"base:{CHAIN_ID}:{asset.lower()}:{tx_hash}"
     async with await new_session() as session:
         canonical_id = await credits._locked_canonical_account(session, account["account_id"])
@@ -620,6 +628,13 @@ async def _record_and_credit(
             "created": _now(),
         }
         try:
+            await receipt_claims.claim_in_session(session, chain_id=CHAIN_ID, asset=physical_asset,
+                transaction_hash=tx_hash, owner_kind="deposit", owner_ref=ref,
+                observed_nonces=receipt_authorizations,
+                purpose={"schema": "aipg.deposit-receipt.v1", "account_id": str(canonical_id),
+                         "input_asset": asset, "sender": sender, "treasury": treasury,
+                         "amount_raw": str(amount_raw), "credited_micro": credited_micro,
+                         "price_source": price_source})
             inserted = (
                 await session.execute(sa.insert(deposits_t).values(**values).returning(deposits_t))
             ).mappings().one()
@@ -638,6 +653,12 @@ async def _record_and_credit(
             ).scalar_one()
             await session.commit()
             return True, dict(inserted), int(balance)
+        except receipt_claims.ReceiptClaimConflict:
+            await session.rollback()
+            raise HTTPException(409, detail="This transaction was already used for another Grid payment.") from None
+        except receipt_claims.ReceiptClaimError:
+            await session.rollback()
+            raise HTTPException(503, detail="Funding receipt ownership could not be verified.") from None
         except IntegrityError:
             await session.rollback()
 
@@ -676,6 +697,8 @@ async def verify_and_credit(tx_hash: str, account: dict) -> dict:
     """Verify and atomically credit a direct USDC transfer on Base."""
     if not is_configured():
         raise HTTPException(503, detail="USDC deposits are not enabled on this grid yet.")
+    from . import payment_receipt_claims as receipt_claims
+
     tx_hash = _normalize_tx_hash(tx_hash)
     tx, receipt, block_number = await _confirmed_transaction(tx_hash, "USDC")
     sender = await _linked_sender(tx, account, "USDC")
@@ -700,6 +723,7 @@ async def verify_and_credit(tx_hash: str, account: dict) -> dict:
         price_timestamp=block_timestamp,
         price_block=block_number,
         credited_micro=amount_raw,
+        receipt_authorizations=receipt_claims.observed_authorizations(receipt, USDC),
         caps=(
             USDC_MAX_DEPOSIT_MICRO,
             USDC_ACCOUNT_DAILY_MICRO,
@@ -724,6 +748,8 @@ async def verify_and_credit(tx_hash: str, account: dict) -> dict:
 
 async def verify_and_credit_aipg(tx_hash: str, account: dict) -> dict:
     """Credit a direct AIPG transfer under a bounded, expiring price epoch."""
+    from . import payment_receipt_claims as receipt_claims
+
     epoch = _aipg_price_epoch()
     if not aipg_is_configured() or epoch is None:
         raise HTTPException(503, detail="AIPG deposits do not have a valid funding price right now.")
@@ -759,6 +785,7 @@ async def verify_and_credit_aipg(tx_hash: str, account: dict) -> dict:
         price_timestamp=epoch[0],
         price_block=AIPG_PRICE_BLOCK or None,
         credited_micro=credited_micro,
+        receipt_authorizations=receipt_claims.observed_authorizations(receipt, AIPG_TOKEN),
         caps=(AIPG_MAX_DEPOSIT_MICRO, AIPG_ACCOUNT_DAILY_MICRO, AIPG_NETWORK_DAILY_MICRO),
     )
     if applied:
@@ -857,6 +884,8 @@ async def verify_and_credit_converted_eth(tx_hash: str, account: dict) -> dict:
     USDC treasury. Credit equals those actual six-decimal USDC proceeds, so the
     Grid never books a fixed-dollar liability against ETH inventory.
     """
+    from . import payment_receipt_claims as receipt_claims
+
     if not eth_swap_receipt_is_configured():
         raise HTTPException(
             503,
@@ -899,6 +928,8 @@ async def verify_and_credit_converted_eth(tx_hash: str, account: dict) -> dict:
         price_timestamp=block_timestamp,
         price_block=block_number,
         credited_micro=usdc_received,
+        receipt_asset=USDC,
+        receipt_authorizations=receipt_claims.observed_authorizations(receipt, USDC),
         caps=(
             ETH_MAX_DEPOSIT_MICRO,
             ETH_ACCOUNT_DAILY_MICRO,
