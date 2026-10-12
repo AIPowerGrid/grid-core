@@ -7,6 +7,19 @@ content sanitization, and reward settlement.
 
 ## Ownership
 
+- `video_payment_envelope.py` owns the private strict x402 v2 outer boundary.
+  Derive exact amount/asset/network/payTo/domain/timeout/EIP-3009 method from
+  the immutable live quote, never client requirements. Freeze quote/envelope
+  inputs before validation/serialization so caller mutation cannot rebind them.
+  Validate primitive types and exact fields before SDK construction; reject v1, extensions,
+  coercion and client-selected resource metadata. Optional HTTPS descriptor
+  must match an operator-controlled URL, never Host/request authority. Bounded
+  canonical PAYMENT-SIGNATURE decoding rejects duplicate JSON, floats/nonfinite
+  numbers, invalid UTF-8 and deep/oversized input. Original inner cryptographic
+  binding still applies. The SDK-shaped facilitator body contains a spending
+  capability: do not log/persist it, or send without the winning committed
+  attempt and ready inputs. No route, client, signer, SQL or admission calls
+  this helper; validation never proves revenue or grants generation.
 - `video_refunds.py` owns private `0052` reviewed Safe refund intent/recovery.
   Only an owned proved receipt with a committed refund obligation can prepare
   one nonce/amount/payer. Active and completed paid jobs cannot refund. Existing
@@ -235,7 +248,7 @@ content sanitization, and reward settlement.
   signs or takes private keys; the bound result contains no signature or
   funded state. No database, RPC, replay claim, balance/code check, facilitator,
   upload or dispatch occurs. Live signer classification/token-domain checks,
-  outer-envelope validation and durable financial admission remain required.
+  routed outer-envelope validation and durable financial admission remain required.
   Do not use its current-window check to abandon recovery of an earlier payment
   attempt after expiry. No real-wallet prompting or published client exists.
   Separate MIT SDK candidates now supply dependency-free policy/preparation and

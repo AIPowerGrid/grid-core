@@ -96,6 +96,17 @@ owning AGENTS.md and any affected parent Child DOX Index.
 
 ## Verification
 
+- Private v2 video-envelope qualification uses the locked x402 SDK's real
+  header encoder and verify/settle request shapes, plus actual offline ECDSA
+  on both Base domains. The envelope-only matrix passes 136 cases; combined
+  envelope/signature/journal coverage passes 281 with three explicit SQLite
+  skips and real PostgreSQL counterparts. Headers/types/requirements/resource
+  ambiguity, mutation, expiry and redacted failures reject. No route, sender,
+  SQL, funding or dispatch authority is introduced. The finalized full local
+  suite passes 3,739 with 43 explicit skips; its 141 warnings include the 139
+  inherited warnings plus two JUnit/optional-fork compatibility warnings.
+  Exact-source Linux/PostgreSQL 16 CI remains required for the new candidate.
+
 - Private `0052` adds reviewed, unsigned Safe refund intents and atomic
   confirmed-refund receipt closure. Nonces are unique by chain/Safe, never
   automatically replaced; outgoing receipts use the existing `video_x402`
