@@ -237,8 +237,9 @@ class GridSettings(BaseSettings):
                 raise ValueError("Open async admission cannot ignore configured pilot restrictions")
         elif self.media_async_enabled:
             now = datetime.now(UTC)
-            if not cohort or until is None or not now < until <= now + timedelta(hours=24):
-                raise ValueError("Async video pilot requires accounts and an expiry within 24 hours")
+            # Normal expiry closes new jobs, not Core startup or old-job recovery.
+            if not cohort or until is None or until > now + timedelta(hours=24):
+                raise ValueError("Async video pilot requires accounts and an expiry no more than 24 hours ahead")
         return self
 
     @model_validator(mode="after")

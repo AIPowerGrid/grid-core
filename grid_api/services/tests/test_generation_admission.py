@@ -40,7 +40,6 @@ def test_async_admission_defaults_to_disabled_private_pilot():
 @pytest.mark.parametrize("changes", [
     {}, {"media_async_canary_accounts": []},
     {"media_async_canary_until": None},
-    {"media_async_canary_until": datetime.now(UTC) - timedelta(seconds=1)},
     {"media_async_canary_until": datetime.now(UTC) + timedelta(hours=25)},
     {"media_async_canary_until": datetime.now().replace(tzinfo=None)},
     {"media_async_canary_accounts": [uuid4() for _ in range(11)]},
@@ -76,6 +75,17 @@ def test_async_pilot_environment_parses_private_ids_and_aware_expiry(monkeypatch
     settings = GridSettings(_env_file=None)
     assert settings.media_async_canary_accounts == [account]
     assert generation_admission.require_async_video(settings, account) == until
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_expired_pilot_allows_core_restart_but_never_new_admission(enabled):
+    account = uuid4()
+    settings = GridSettings(_env_file=None, media_async_enabled=enabled,
+                            media_async_canary_accounts=[account],
+                            media_async_canary_until=datetime.now(UTC) - timedelta(days=1))
+    with pytest.raises(HTTPException) as denied:
+        generation_admission.require_async_video(settings, account)
+    assert denied.value.status_code == 503
 
 
 def test_pilot_checks_exact_account_and_runtime_expiry_without_changing_charging():
