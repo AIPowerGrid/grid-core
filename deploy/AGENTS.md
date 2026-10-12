@@ -73,6 +73,17 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- The owner approved the credit-first LTX-2.5 rollout on 2026-10-12.
+  PR217 stops at 0045; do not pull the later x402/refund migration stack into
+  this release. Distilled alone is priced at USD 0.020/output-second, with a
+  USD 1.00 total funded owner canary ceiling and an expiring account pilot.
+  Preserve global charging, payouts, other model services and the protected
+  client GPT backend. No broad opening follows from the approval or tariff
+  commit; current-source CI, restore proof and actual canary must pass first.
+  Production currently lacks FFmpeg/ffprobe and a private-source bucket.
+  Verify those prerequisites before source-video admission, rather than
+  bypassing input validation or using the public output bucket.
+
 - Async video remains a default-off candidate, not production admission.
   Source conditioning additionally requires explicit `audio-to-video` /
   `video-to-video` allowlist entries, which are excluded from omitted defaults.

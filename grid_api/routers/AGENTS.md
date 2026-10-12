@@ -38,7 +38,8 @@ transport, accounts, stats, health/metrics.
   sixteen ordered image pins, starting at frame zero. All images validate before
   quota/upload; multi-pin jobs additionally require `video-timeline` admission
   and the `recipe-image-bindings-v1` worker feature. Unsupported settings reject before quota/upload; the
-  candidates are not loaded or deployed. See `LTX_2_5_VIDEO.md` for gates.
+  Distilled recipes are promoted for a bounded pilot; deployment/canary evidence
+  is still required. Dev/Ingredients remain non-serving. See `LTX_2_5_VIDEO.md`.
   Distilled candidates additionally accept explicit inline `reference_audio`
   (complete exact-duration 48 kHz stereo PCM16 WAV) and `reference_video`
   (fully decoded exact-frame 24 fps H.264 MP4 at the explicit requested size).

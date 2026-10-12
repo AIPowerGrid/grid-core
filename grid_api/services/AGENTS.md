@@ -7,6 +7,12 @@ content sanitization, and reward settlement.
 
 ## Ownership
 
+- The owner-approved credit-first tariff is USD 0.020 per effective output
+  second for `LTX-2.5 Distilled BF16` in book `2026-10-12-a`. Dev and
+  Ingredients remain unpriced. Pricing never grants admission, validates a
+  worker's model claim or changes rewards. Exact frames/FPS determine the hold;
+  positive fractions round up to one micro-USD. No legacy model is relabeled.
+
 - `video_contract.py` owns the candidate strict LTX-2.5 execution/timing
   contract. Only recipes declaring `_grid.videoContract` use it. Qualified
   graphs are snapshotted before reserve; steps/frames/duration and quote units

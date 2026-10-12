@@ -5,10 +5,37 @@
 
 ## Status
 
-Candidate implementation, not a production release. Five versioned BF16 graphs
-live in `recipes/qualification/`, which startup does not load. The default is
-still `LTX-2.3`; no public model advertisement, price, worker enrollment,
-generation gate or charging setting is changed by this candidate.
+### Owner-Approved Credit Pilot - 2026-10-12 UTC
+
+The owner confirmed model use, pricing and launch approval in this task.
+Record this as an owner assertion/decision, not an independently verified
+licensor permission or legal opinion; upstream restrictions still apply.
+The first SKU is `LTX-2.5 Distilled BF16`, USD 0.020 per effective output
+second in price book `2026-10-12-a`. Separately generated images/text have
+their own charges. Dev/Ingredients remain unpriced/non-serving.
+
+Only the two reviewed Distilled text/image graphs are copied into the startup
+recipe directory. Their frames, sigma schedule, source modes and graph bytes
+are unchanged. The current default remains LTX-2.3 until the canary passes.
+No public admission, x402 collector, wallet sender or refund rail is enabled.
+Credit-only migration stops at 0045; later payment branches remain separate.
+
+Rollout uses a single owner-account cohort with an explicit expiry no more
+than 24 hours ahead, no more than USD 1.00 total canary holds, and positive
+per-job ceilings. Use the existing funded balance, never manufacture test
+credits as purchased funding. Preserve all original job/request identities
+after unknown replies and recover with GET only. Confirm actual charges,
+immutable output bytes, failure release and input cleanup before widening.
+Retain the private source bucket's anonymous-denial/lifecycle proof and all
+prior failed evidence. Broad release/worker enrollment is not established by
+this source change. Current-source CI and production backup/restore precede
+cutover; no later payment history may be discarded on rollback.
+
+The following historical candidate evidence predates this approval/promotion.
+
+Five versioned BF16 graphs were initially confined to the non-serving
+`recipes/qualification/` directory. Only the Distilled copies above are now
+promoted; Dev/Ingredients remain there. This is still not deployment proof.
 
 Isolated native A2V and V2V now pass one 337-frame /14.041667-second network
 section with exact source commitments, one test-credit charge and automatic

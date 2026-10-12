@@ -6,6 +6,11 @@ Versioned media candidates retained for testing, not startup advertisement.
 `load_local_recipes()` reads only the direct `recipes/*.json` children. Never
 make it recursive: placing a workflow here must not activate it.
 
+The two Distilled graphs now also have exact promoted copies in `recipes/`
+for the bounded credit pilot. Keep those copies byte-semantically identical;
+no Dev/Ingredients promotion follows. The retained candidates are not loaded
+recursively, and inventory alone does not enable job admission.
+
 ## Ownership
 
 - `ltx-2.5-*-v1.json` owns the single-stage BF16 distilled/dev, text/image-pin
