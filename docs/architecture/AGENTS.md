@@ -325,6 +325,10 @@ validation, worker incentives, and trust boundaries.
   capability after the winning journal commit. Wrong/absent flow cannot create
   an attempt or transfer. This remains loopback simulation, not a collector,
   live facilitator, independent RPC or purchased/GPU acceptance.
+  The local integrated branch additionally retains the credit-first account/
+  deadline guards without removing prepaid/refund history. Quote and credit
+  cohorts remain independent; neither quote nor expired metadata grants a job.
+  Normally expired pilots must preserve startup and existing authorized recovery.
 
 - Keep the live/dry-run/stub status explicit. If a checklist marks an item done,
   code and tests must support that claim.

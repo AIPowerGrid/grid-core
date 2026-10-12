@@ -107,8 +107,10 @@ executes an immutable release selected through `/home/aipg/current`.
   credits/uploads/quota/dispatch. Apply `0046` before using this optional API.
   Default retained caps are eight/account and 256 globally, including expired
   identities; saturation holds new quotes rather than deleting/repricing them.
-  GET and matching replay remain available after rollback. A distributed
-  decoder-work lease and bounded replay tombstone retention remain public
+  GET and matching replay remain available after rollback.
+  Quote-pilot expiry also preserves Core startup with its enable flag still
+  set; new quotes reject at runtime and prior quotes/attempts remain recoverable.
+  A distributed decoder-work lease and bounded replay tombstone retention remain public
   scale gates. No `/pay` endpoint, facilitator or refund sender exists.
 
 - Async video remains a default-off candidate, not production admission.
@@ -126,6 +128,15 @@ executes an immutable release selected through `/home/aipg/current`.
   any governed LTX input. Legacy image sources are not migrated by this gate.
   Apply migrations through `0045` before starting this release, even with
   `MEDIA_ASYNC_ENABLED=0`: the lifecycle outbox reads `grid_media_jobs`.
+  `MEDIA_ASYNC_ADMISSION_MODE=pilot` is the default. A reviewed enabled pilot
+  requires one to ten distinct private account UUIDs in
+  `MEDIA_ASYNC_CANARY_ACCOUNTS` and an aware `MEDIA_ASYNC_CANARY_UNTIL` no more
+  than 24 hours ahead at startup. Normal expiry closes new jobs, not Core
+  startup: recovery continues even if the enable flag remains set. Use a future
+  expiry for a new pilot. Public `open` requires both
+  pilot fields cleared and separate approval; it cannot silently ignore a cohort.
+  Contract-backed waiting/chat video is closed in pilot mode. These admission
+  controls do not change global charging, tariffs or model-use clearance.
   Defaults are `MEDIA_ASYNC_CONCURRENCY=4`, `MEDIA_JOB_SWEEP_SECONDS=10`,
   `MEDIA_JOB_DISPATCH_LEASE_SECONDS=60`, and `MEDIA_JOB_BATCH_SIZE=10`.
   Turning admission off preserves authenticated replay/status, drains existing

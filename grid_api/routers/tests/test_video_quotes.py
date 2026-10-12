@@ -98,6 +98,22 @@ async def test_quote_replay_freezes_one_random_seed_price_and_graph_without_fina
 
 
 @pytest.mark.asyncio
+async def test_quote_and_credit_pilot_cohorts_are_independent_without_execution_authority(quote_api):
+    client, aid, credential, settings, quota, _available = quote_api
+    settings.media_async_enabled = True
+    settings.media_async_admission_mode = "pilot"
+    settings.media_async_canary_accounts = [uuid4()]
+    settings.media_async_canary_until = datetime.now(UTC) + timedelta(minutes=5)
+    first = await post(quote_api)
+    assert first.status_code == 201 and not first.json()["payment_enabled"]
+    credit = await video_tests.post(quote_api)
+    assert credit.status_code == 503
+    assert await rows() == 1 and await credits.get_balance(aid) == OPENING and await counts() == (0, 0, 0)
+    quota.assert_not_awaited()
+    assert (await client.get(first.headers["location"], headers={"apikey": credential})).status_code == 200
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["audio", "video"])
 async def test_inline_audio_video_are_validated_committed_not_uploaded_and_changed_bytes_conflict(quote_api, mp4, mode):
     key = uuid4()

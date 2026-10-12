@@ -95,6 +95,9 @@ async def test_startup_recipe_inventory_includes_governed_source_requirements(
 
 @pytest.fixture
 def setup(monkeypatch):
+    from grid_api.config import GridSettings
+    monkeypatch.setattr(videos.generation_admission, "get_settings", lambda: GridSettings(
+        _env_file=None, media_async_admission_mode="open"))
     monkeypatch.setattr(videos.limiter, "enabled", False)
     for name in ("_BY_ROOT", "_BY_NAME", "_BY_ID", "_BY_MODEL", "_LOCAL_RECIPES", "_ONCHAIN_RECIPES"):
         monkeypatch.setattr(recipes, name, {})
@@ -119,6 +122,33 @@ def setup(monkeypatch):
 async def post(app, payload):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         return await client.post("/v1/videos/generations", json={"prompt": "a red ball", "model": MODEL, **payload}, headers={"apikey": "test-key"})
+
+
+@pytest.mark.asyncio
+async def test_pilot_cannot_bypass_async_admission_through_waiting_route(setup, monkeypatch):
+    from grid_api.config import GridSettings
+    app, submit, quota = setup
+    monkeypatch.setattr(videos.generation_admission, "get_settings", lambda: GridSettings(_env_file=None))
+    response = await post(app, {"image": "invalid-inline-data"})
+    assert response.status_code == 503
+    submit.assert_not_awaited()
+    quota.assert_not_awaited()
+    # Ordinary LTX-2.3 does not acquire the new governed-pilot restriction.
+    response = await post(app, {"model": "LTX-2.3"})
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_pilot_chat_and_shared_waiter_reject_before_upload_or_credit(setup, monkeypatch):
+    from grid_api.config import GridSettings
+    monkeypatch.setattr(videos.generation_admission, "get_settings", lambda: GridSettings(_env_file=None))
+    source = AsyncMock()
+    monkeypatch.setattr(media, "prepare_source_image", source)
+    body = ChatCompletionRequest(model=MODEL, messages=[{"role": "user", "content": "synthetic"}])
+    with pytest.raises(HTTPException) as denied:
+        await openai._chat_media(body, "video", account_id="test")
+    assert denied.value.status_code == 503
+    source.assert_not_awaited()
 
 
 @pytest.mark.asyncio
