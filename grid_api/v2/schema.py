@@ -788,6 +788,216 @@ sa.Index("ix_grid_reservations_media_owner_ref", reservations.c.account_id,
          reservations.c.media_client_ref)
 
 
+# Private async media journal. Financial terminal state remains authoritative in
+# reservations; a durable execution claim is never cleared for an automatic retry.
+media_jobs = sa.Table(
+    "grid_media_jobs",
+    metadata,
+    sa.Column("job_id", sa.String(64), sa.ForeignKey("grid_reservations.job_id"), primary_key=True),
+    sa.Column("account_id", sa.Uuid, sa.ForeignKey("grid_accounts.id"), nullable=False),
+    sa.Column("idempotency_hash", sa.String(64), nullable=False),
+    sa.Column("request_hash", sa.String(64), nullable=False),
+    sa.Column("payload_hash", sa.String(64), nullable=False),
+    sa.Column("model", sa.String(255), nullable=False),
+    sa.Column("payload", sa.JSON, nullable=False),
+    sa.Column("route_models", sa.JSON, nullable=False),
+    sa.Column("preferred_worker", sa.String(255), nullable=False, server_default=""),
+    sa.Column("max_cost_micro", sa.BigInteger, nullable=False),
+    sa.Column("dispatch_state", sa.String(16), nullable=False, server_default="ready"),
+    sa.Column("dispatch_token", sa.String(36), nullable=True),
+    sa.Column("dispatch_deadline", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("dispatch_attempts", sa.Integer, nullable=False, server_default="0"),
+    sa.Column("queue_message_id", sa.String(64), nullable=True),
+    sa.Column("execution_worker_id", sa.Uuid, nullable=True),
+    sa.Column("execution_started", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("execution_model", sa.String(255), nullable=True),
+    sa.Column("execution_token", sa.String(36), nullable=True),
+    sa.Column("execution_deadline", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("source_objects", sa.JSON(none_as_null=True), nullable=True),
+    sa.Column("source_cleanup_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("source_cleanup_attempted_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.UniqueConstraint("account_id", "idempotency_hash", name="uq_grid_media_jobs_owner_key"),
+    sa.CheckConstraint("length(idempotency_hash) = 64 AND length(request_hash) = 64 AND length(payload_hash) = 64",
+                       name="ck_grid_media_jobs_hashes"),
+    sa.CheckConstraint("max_cost_micro > 0 AND dispatch_attempts >= 0", name="ck_grid_media_jobs_bounds"),
+    sa.CheckConstraint("dispatch_state IN ('ready', 'dispatching', 'queued')", name="ck_grid_media_jobs_dispatch"),
+    sa.CheckConstraint("(dispatch_token IS NULL AND dispatch_deadline IS NULL) OR "
+                       "(dispatch_token IS NOT NULL AND dispatch_deadline IS NOT NULL)",
+                       name="ck_grid_media_jobs_lease"),
+    sa.CheckConstraint("(execution_worker_id IS NULL AND execution_started IS NULL) OR "
+                       "(execution_worker_id IS NOT NULL AND execution_started IS NOT NULL)",
+                       name="ck_grid_media_jobs_execution"),
+    sa.CheckConstraint("(execution_model IS NULL AND execution_token IS NULL AND execution_deadline IS NULL) OR "
+                       "(execution_model IS NOT NULL AND length(execution_model) > 0 AND "
+                       "execution_token IS NOT NULL AND length(execution_token) = 36 AND "
+                       "execution_deadline IS NOT NULL AND execution_started IS NOT NULL)",
+                       name="ck_grid_media_jobs_execution_lease"),
+    sa.CheckConstraint("source_cleanup_at IS NULL OR source_objects IS NOT NULL",
+                       name="ck_grid_media_jobs_source_cleanup"),
+)
+sa.Index("ix_grid_media_jobs_dispatch", media_jobs.c.dispatch_state, media_jobs.c.dispatch_deadline,
+         media_jobs.c.created)
+sa.Index("ix_grid_media_jobs_resume", media_jobs.c.execution_worker_id, media_jobs.c.execution_deadline,
+         media_jobs.c.created)
+sa.Index("ix_grid_media_jobs_source_cleanup", media_jobs.c.source_cleanup_attempted_at,
+         media_jobs.c.created, media_jobs.c.job_id,
+         postgresql_where=sa.text("source_objects IS NOT NULL AND source_cleanup_at IS NULL"),
+         sqlite_where=sa.text("source_objects IS NOT NULL AND source_cleanup_at IS NULL"))
+
+
+# Immutable, private video quotation only. No reservation FK, outbox state,
+# payment signature or settlement authority exists in this table.
+video_quotes = sa.Table(
+    "grid_video_quotes",
+    metadata,
+    sa.Column("id", sa.Uuid, primary_key=True),
+    sa.Column("job_id", sa.Uuid, nullable=False),
+    sa.Column("account_id", sa.Uuid, sa.ForeignKey("grid_accounts.id"), nullable=False),
+    sa.Column("idempotency_hash", sa.String(64), nullable=False),
+    sa.Column("request_hash", sa.String(64), nullable=False),
+    sa.Column("plan_hash", sa.String(64), nullable=False),
+    sa.Column("commitment", sa.String(64), nullable=False),
+    sa.Column("authorization_nonce", sa.String(66), nullable=False),
+    sa.Column("snapshot", sa.JSON, nullable=False),
+    sa.Column("amount_micro", sa.BigInteger, nullable=False),
+    sa.Column("max_cost_micro", sa.BigInteger, nullable=False),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("expires", sa.DateTime(timezone=True), nullable=False),
+    sa.UniqueConstraint("account_id", "idempotency_hash", name="uq_grid_video_quotes_owner_key"),
+    sa.UniqueConstraint("job_id", name="uq_grid_video_quotes_job"),
+    sa.UniqueConstraint("authorization_nonce", name="uq_grid_video_quotes_nonce"),
+    sa.CheckConstraint("length(idempotency_hash) = 64 AND length(request_hash) = 64 AND "
+                       "length(plan_hash) = 64 AND length(commitment) = 64 AND length(authorization_nonce) = 66",
+                       name="ck_grid_video_quotes_hashes"),
+    sa.CheckConstraint("amount_micro > 0 AND max_cost_micro >= amount_micro", name="ck_grid_video_quotes_amount"),
+    sa.CheckConstraint("expires > created", name="ck_grid_video_quotes_expiry"),
+)
+
+
+# One immutable authorization attempt per quote. Signatures are not retained;
+# proved receipts are evidence only until funded admission claims the transfer.
+video_payment_attempts = sa.Table(
+    "grid_video_payment_attempts",
+    metadata,
+    sa.Column("quote_id", sa.Uuid, sa.ForeignKey("grid_video_quotes.id"), primary_key=True),
+    sa.Column("quote_commitment", sa.String(64), nullable=False),
+    sa.Column("authorization_identity", sa.String(64), nullable=False),
+    sa.Column("payload_hash", sa.String(64), nullable=False),
+    sa.Column("payer", sa.String(42), nullable=False),
+    sa.Column("confirmation_tag", sa.String(16), nullable=False),
+    sa.Column("min_confirmations", sa.Integer, nullable=False),
+    sa.Column("status", sa.String(16), nullable=False),
+    sa.Column("transaction_hash", sa.String(66), nullable=True),
+    sa.Column("proof", sa.JSON(none_as_null=True), nullable=True),
+    sa.Column("proof_hash", sa.String(64), nullable=True),
+    sa.Column("proven_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("review_code", sa.String(32), nullable=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.UniqueConstraint("authorization_identity", name="uq_grid_video_attempt_authorization"),
+    sa.UniqueConstraint("transaction_hash", name="uq_grid_video_attempt_transaction"),
+    sa.CheckConstraint("length(quote_commitment) = 64 AND length(authorization_identity) = 64 AND "
+                       "length(payload_hash) = 64 AND length(payer) = 42 AND payer = lower(payer)",
+                       name="ck_grid_video_attempt_binding"),
+    sa.CheckConstraint("status IN ('settling', 'reported', 'proven', 'manual_review')",
+                       name="ck_grid_video_attempt_status"),
+    sa.CheckConstraint("confirmation_tag IN ('safe', 'finalized') AND min_confirmations >= 1 AND min_confirmations <= 256",
+                       name="ck_grid_video_attempt_policy"),
+    sa.CheckConstraint("(status = 'settling' AND transaction_hash IS NULL) OR "
+                       "(status IN ('reported', 'proven') AND transaction_hash IS NOT NULL) OR status = 'manual_review'",
+                       name="ck_grid_video_attempt_transaction"),
+    sa.CheckConstraint("transaction_hash IS NULL OR length(transaction_hash) = 66", name="ck_grid_video_attempt_tx_hash"),
+    sa.CheckConstraint("(proof IS NULL AND proof_hash IS NULL AND proven_at IS NULL AND status != 'proven') OR "
+                       "(proof IS NOT NULL AND proof_hash IS NOT NULL AND length(proof_hash) = 64 AND "
+                       "proven_at IS NOT NULL AND status IN ('proven', 'manual_review'))",
+                       name="ck_grid_video_attempt_proof"),
+    sa.CheckConstraint("(status = 'manual_review' AND review_code IS NOT NULL AND length(review_code) > 0) OR "
+                       "(status != 'manual_review' AND review_code IS NULL)", name="ck_grid_video_attempt_review"),
+)
+sa.Index("ix_grid_video_attempt_reconcile", video_payment_attempts.c.status, video_payment_attempts.c.created)
+
+
+# Private quote inputs are allocated before uploads and verified before payment.
+video_quote_staging = sa.Table(
+    "grid_video_quote_staging", metadata,
+    sa.Column("quote_id", sa.Uuid, sa.ForeignKey("grid_video_quotes.id"), primary_key=True),
+    sa.Column("quote_commitment", sa.String(64), nullable=False),
+    sa.Column("manifest", sa.JSON(none_as_null=True), nullable=False),
+    sa.Column("manifest_hash", sa.String(64), nullable=False),
+    sa.Column("status", sa.String(16), nullable=False),
+    sa.Column("lease_token", sa.Uuid, nullable=False),
+    sa.Column("lease_until", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("ready_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("proof", sa.JSON(none_as_null=True), nullable=True),
+    sa.Column("proof_hash", sa.String(64), nullable=True),
+    sa.Column("abandoned_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("cleanup_attempted_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("cleanup_ack_at", sa.DateTime(timezone=True), nullable=True),
+    sa.CheckConstraint("length(quote_commitment) = 64 AND length(manifest_hash) = 64 AND lease_until > created",
+                       name="ck_grid_video_stage_binding"),
+    sa.CheckConstraint("(status IN ('staging', 'abandoned') AND ready_at IS NULL AND proof IS NULL AND proof_hash IS NULL) OR "
+                       "(status IN ('ready', 'abandoned') AND ready_at IS NOT NULL AND proof IS NOT NULL "
+                       "AND proof_hash IS NOT NULL AND length(proof_hash) = 64)",
+                       name="ck_grid_video_stage_state"),
+    sa.CheckConstraint("((status = 'abandoned' AND abandoned_at IS NOT NULL) OR "
+                       "(status != 'abandoned' AND abandoned_at IS NULL)) AND "
+                       "(cleanup_ack_at IS NULL OR (status = 'abandoned' AND cleanup_attempted_at IS NOT NULL "
+                       "AND cleanup_ack_at >= cleanup_attempted_at))", name="ck_grid_video_stage_cleanup"),
+)
+sa.Index("ix_grid_video_stage_cleanup", video_quote_staging.c.cleanup_attempted_at, video_quote_staging.c.lease_until)
+
+
+video_prepaid_payments = sa.Table(
+    "grid_video_prepaid_payments", metadata,
+    sa.Column("quote_id", sa.Uuid, sa.ForeignKey("grid_video_payment_attempts.quote_id"), primary_key=True),
+    sa.Column("job_id", sa.String(64), nullable=False, unique=True),
+    sa.Column("receipt_claim_key", sa.String(64), sa.ForeignKey("grid_payment_receipt_claims.claim_key"), nullable=False, unique=True),
+    sa.Column("quote_commitment", sa.String(64), nullable=False),
+    sa.Column("proof_hash", sa.String(64), nullable=False),
+    sa.Column("amount_micro", sa.BigInteger, nullable=False),
+    sa.Column("manifest_hash", sa.String(64), nullable=True),
+    sa.Column("admitted_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("refund_due_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("refund_reason", sa.String(32), nullable=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint("length(quote_commitment) = 64 AND length(proof_hash) = 64 AND amount_micro > 0",
+                       name="ck_grid_video_prepaid_binding"),
+    sa.CheckConstraint("(admitted_at IS NOT NULL AND manifest_hash IS NOT NULL AND length(manifest_hash) = 64) OR "
+                       "(admitted_at IS NULL AND manifest_hash IS NULL AND refund_due_at IS NOT NULL)",
+                       name="ck_grid_video_prepaid_admission"),
+    sa.CheckConstraint("(refund_due_at IS NULL AND refund_reason IS NULL) OR "
+                       "(refund_due_at IS NOT NULL AND refund_reason IN "
+                       "('quote_expired', 'admission_closed', 'capacity_exceeded', 'execution_failed'))",
+                       name="ck_grid_video_prepaid_refund"),
+)
+sa.Index("ix_grid_video_prepaid_refunds", video_prepaid_payments.c.refund_due_at)
+
+
+# Cross-rail receipt ownership. The initial unit is one token/transaction:
+# legacy deposit sums and text x402 already cannot split that unit into jobs.
+payment_receipt_claims = sa.Table(
+    "grid_payment_receipt_claims", metadata,
+    sa.Column("claim_key", sa.String(64), primary_key=True),
+    sa.Column("chain_id", sa.Integer, nullable=False),
+    sa.Column("asset", sa.String(42), nullable=False),
+    sa.Column("transaction_hash", sa.String(66), nullable=False),
+    sa.Column("owner_kind", sa.String(16), nullable=False),
+    sa.Column("owner_ref", sa.String(128), nullable=False),
+    sa.Column("purpose", sa.JSON(none_as_null=True), nullable=False),
+    sa.Column("purpose_hash", sa.String(64), nullable=False),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.UniqueConstraint("chain_id", "asset", "transaction_hash", name="uq_grid_receipt_chain_asset_tx"),
+    sa.UniqueConstraint("owner_kind", "owner_ref", name="uq_grid_receipt_owner"),
+    sa.CheckConstraint("chain_id > 0 AND length(claim_key) = 64 AND length(transaction_hash) = 66 AND length(purpose_hash) = 64",
+                       name="ck_grid_receipt_identity"),
+    sa.CheckConstraint("asset = lower(asset) AND (asset = 'native' OR (length(asset) = 42 AND substr(asset, 1, 2) = '0x'))",
+                       name="ck_grid_receipt_asset"),
+    sa.CheckConstraint("owner_kind IN ('deposit', 'text_x402', 'video_x402') AND length(owner_ref) > 0",
+                       name="ck_grid_receipt_owner"),
+)
+
+
 # x402 is a post-response on-chain settlement rail. A verified authorization is
 # recorded before dispatch. The before-settle hook durably records the exact
 # attempted amount before the facilitator can touch chain. Facilitator success

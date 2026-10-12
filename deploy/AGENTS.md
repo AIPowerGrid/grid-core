@@ -73,6 +73,75 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Candidate `0051` must precede updated financial/worker-backing readers even
+  with video payment dark. It creates no enabled endpoint or sender. Retain
+  prepaid-aware release/terminal/reward handlers and funded/refund history after
+  first use; old code could incorrectly restore account credit. `refund_due`
+  means USDC owed, not sent. No production switch is made by these fixtures.
+
+- Apply `0050` before current optional quote staging/first-payment-attempt use
+  or enabling `VIDEO_UNPAID_CLEANUP_ENABLED`. Its default is off and ordinary
+  startup does not query staging. Keep cleanup enabled independently after
+  quote-creation rollback to drain expired, attempt-free input keys. Its bounded
+  interval is 30-3600 seconds (default 60); ACKs are revisited, not permanent
+  absence proof. Every recorded payment attempt is excluded, not refunded.
+  Retain abandonment-aware code/history on rollback. Provider lifecycle, actual
+  R2 behavior and paid-job retention transfer are separate gates; no production
+  deployment or public LTX/payment permission is implied.
+
+- Shared receipt candidate `0048` is a migration-first all-writer cutover, not
+  a video flag. Quiesce deposit claims and text-x402 reconciliation/senders,
+  require exact-release backup/restore/schema proof, apply the migration, then
+  upgrade every Core replica and offline financial runner before resuming.
+  Old writers do not consult shared ownership. After its first use, rollback
+  retains the table and claim-aware writers, never restores an older financial
+  writer or deletes ownership. Video/public/model/funding gates stay independent;
+  this candidate still enables no `/pay` route, funded outbox or refund sender.
+
+- Private video quotation is separate from async generation and text x402.
+  `VIDEO_X402_QUOTES_ENABLED=0` is the default; enabling additionally requires
+  at most ten explicit `VIDEO_X402_QUOTE_ACCOUNTS`, a nonzero
+  `VIDEO_X402_QUOTE_PAY_TO` and `VIDEO_X402_QUOTES_UNTIL` within 24 hours.
+  The network defaults to Base Sepolia. Each immutable quote lasts five minutes
+  and uses undiscounted price-book rates; it never collects payment or touches
+  credits/uploads/quota/dispatch. Apply `0046` before using this optional API.
+  Default retained caps are eight/account and 256 globally, including expired
+  identities; saturation holds new quotes rather than deleting/repricing them.
+  GET and matching replay remain available after rollback. A distributed
+  decoder-work lease and bounded replay tombstone retention remain public
+  scale gates. No `/pay` endpoint, facilitator or refund sender exists.
+
+- Async video remains a default-off candidate, not production admission.
+  Source conditioning additionally requires explicit `audio-to-video` /
+  `video-to-video` allowlist entries, which are excluded from omitted defaults.
+  Ingredients also requires the default-dark `appearance-to-video` path and
+  matching appearance worker feature. Its distinct fixed profile remains
+  non-serving/unpriced; adding schema support is not activation authority.
+  Core needs FFmpeg/ffprobe before MP4 source admission; package pinning,
+  decoder isolation, input privacy/retention and joint qualification remain
+  gates. Do not change production allowlists merely because schemas exist.
+  `MEDIA_PRIVATE_SOURCE_BUCKET` defaults empty and must differ from output
+  storage. Keep its r2.dev/custom-domain access disabled, verify anonymous
+  denial and expiry, and review its one-day source lifecycle before admitting
+  any governed LTX input. Legacy image sources are not migrated by this gate.
+  Apply migrations through `0045` before starting this release, even with
+  `MEDIA_ASYNC_ENABLED=0`: the lifecycle outbox reads `grid_media_jobs`.
+  Defaults are `MEDIA_ASYNC_CONCURRENCY=4`, `MEDIA_JOB_SWEEP_SECONDS=10`,
+  `MEDIA_JOB_DISPATCH_LEASE_SECONDS=60`, and `MEDIA_JOB_BATCH_SIZE=10`.
+  Turning admission off preserves authenticated replay/status, drains existing
+  holds and continues accepted-job private-input cleanup. A separate minute loop deletes only
+  exact recorded private keys after committed financial closure; failures do
+  not block the queue or billing. Preserve the old private bucket and scoped
+  credentials until pending records drain when rotating buckets. Changing the
+  R2 account or rebinding a recorded source bucket as public output fails
+  cleanup closed. The provider one-day lifecycle still covers pre-admission
+  orphan inputs; ComfyUI and output/attempt retention remain separate gates.
+  Never drop journal history or restore a worker
+  handler without the execution fence. Enablement additionally requires
+  qualified `async-video-resume-v1` workers, durable prompt/result recovery,
+  restart/crash proofs and supervised billing/storage canaries. The current
+  media-worker candidate does not advertise that capability; do not add it by
+  hand merely to bypass the gate. See `docs/architecture/LTX_2_5_VIDEO.md`.
 - Core `ca1f2a12` / Alembic `0042` was selected September28 at 19:00:18 UTC.
   PR/main CI, production backup/restore, drained cutover and authenticated
   reduced-account response checks passed; all six workers returned. Billing,

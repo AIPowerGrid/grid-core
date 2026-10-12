@@ -40,6 +40,31 @@ ledger reference are unique, so retries cannot double-credit. The transaction
 sender must be the authenticated account's linked wallet and the ERC-20
 transfer must be a direct transfer from that wallet to the configured treasury.
 
+### Shared Receipt Candidate
+
+The undeployed `0048` candidate additionally commits one immutable
+`grid_payment_receipt_claims` ownership row with a new deposit/credit write.
+The shared unit is chain plus actual asset plus transaction; existing deposit
+sums and text x402 do not split a token/transaction into multiple jobs. Another
+rail/reference cannot consume it, while different tokens retain distinct value.
+The text reconciler takes ownership only with its independently proved terminal
+payment and verifies its configured RPC chain matches the recorded network.
+Video proof takes ownership but grants no credit, funded hold or executable job.
+
+ETH conversion claims actual received USDC, not native input. Historical books
+are exclusion evidence without invented token/log provenance or backfill. An
+old conversion missing its USDC token identity rejects ambiguous reuse for
+review. New spent AuthorizationUsed nonce witnesses also protect an original
+video attempt when its facilitator transaction reply was lost. Claim conflict
+never authorizes an automatic refund or second credit.
+
+Before this candidate runs: quiesce financial writers, prove exact-release
+backup/restore, apply `0048`, then upgrade every deposit/text-x402 replica and
+offline runner together. Resume only after controlled claim/replay canaries.
+Mixed old/new financial writers are unsafe. After first use, retain claim-aware
+writers and ownership on rollback; downgrade refuses retained claims. This does
+not enable video payments or supersede existing production launch evidence.
+
 ## API
 
 - `GET /v1/account/deposits/config` - signed-in wallet, enabled assets,
@@ -161,8 +186,13 @@ on-chain settlement from creating a payable worker reward.
 
 The first route is deliberately non-streaming and text-only. x402's current
 FastAPI middleware buffers the full response before settlement; advertising
-streaming would turn SSE into a delayed response. Streaming, media, and
+streaming would turn SSE into a delayed response. Streaming and
 Anthropic/Responses compatibility require a separate stream-aware adapter.
+Async video instead needs payment-before-dispatch, durable owner recovery and
+refund handling; see the
+[video x402 design](architecture/VIDEO_X402.md). Its default-off private quote
+foundation does not collect payments, reserve credits or dispatch jobs. A
+stream-aware text adapter alone would not establish those contracts.
 
 ```dotenv
 GRID_X402_ENABLED=1
@@ -200,6 +230,10 @@ and request-bound JWT authentication documented by
 [Coinbase CDP](https://docs.cdp.coinbase.com/api-reference/v2/authentication).
 
 ## Rollout order
+
+The list below is the original funding bootstrap sequence, not an approval to
+deploy current code before its schema. Current candidates require the exact
+source head and all-writer migration-first boundary described above.
 
 1. Deploy code with `GRID_DEPOSITS_ENABLED=0`,
    `GRID_AIPG_DEPOSITS_ENABLED=0`, `GRID_ETH_CONVERSION_MODE=disabled`, and

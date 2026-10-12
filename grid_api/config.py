@@ -16,7 +16,7 @@ ReviewedValidatorVersion = Annotated[
 
 GenerationPath = Literal[
     "openai-chat", "openai-responses", "anthropic", "image", "image-to-image",
-    "image-batch", "video", "image-to-video", "video-timeline", "audio", "3d",
+    "image-batch", "video", "image-to-video", "video-timeline", "audio-to-video", "video-to-video", "appearance-to-video", "audio", "3d",
 ]
 
 
@@ -58,7 +58,9 @@ class GridSettings(BaseSettings):
 
     # Explicit JSON allowlist for new public inference. [] closes every path.
     # Existing holds still finalize; omission is permitted only before global charging.
-    generation_enabled_paths: frozenset[GenerationPath] = frozenset(get_args(GenerationPath))
+    generation_enabled_paths: frozenset[GenerationPath] = frozenset(get_args(GenerationPath)) - {
+        "audio-to-video", "video-to-video", "appearance-to-video",
+    }
 
     # Exact direct-service IDs only; never delegated users. Empty is dark.
     grid_charging_all_model_services: list[str] = Field(default_factory=list, max_length=20)
@@ -86,6 +88,28 @@ class GridSettings(BaseSettings):
     # private pilot may enable this after its exact-hardware canary; public
     # manager publication remains a separate, broader qualification gate.
     audio_enabled: bool = False
+    # New async admission is independently dark. The outbox still drains old
+    # journaled holds when admission is disabled; never roll back its schema/fence.
+    media_async_enabled: bool = False
+    media_async_concurrency: int = Field(default=4, ge=1, le=16)
+    media_job_sweep_seconds: int = Field(default=10, ge=5, le=60)
+    media_job_dispatch_lease_seconds: int = Field(default=60, ge=30, le=300)
+    media_job_batch_size: int = Field(default=10, ge=1, le=50)
+    media_private_source_bucket: str = Field(
+        default="", pattern=r"^(?:[a-z0-9][a-z0-9-]{1,61}[a-z0-9])?$",
+    )
+    # Private quotation pilot only; no payment verifier/sender or dispatch.
+    video_x402_quotes_enabled: bool = False
+    video_x402_quote_accounts: list[UUID] = Field(default_factory=list, max_length=10, repr=False)
+    video_x402_quotes_until: AwareDatetime | None = None
+    video_x402_quote_network: Literal["eip155:8453", "eip155:84532"] = "eip155:84532"
+    video_x402_quote_pay_to: str = Field(default="", pattern=r"^(?:0x[0-9a-fA-F]{40})?$")
+    video_x402_quote_max_micro: int = Field(default=1_000_000, ge=1, le=1_000_000_000)
+    video_x402_quote_per_account: int = Field(default=8, ge=1, le=32)
+    video_x402_quote_capacity: int = Field(default=256, ge=1, le=4096)
+    # Independent of quote creation: keep cleanup on after admission rollback.
+    video_unpaid_cleanup_enabled: bool = False
+    video_unpaid_cleanup_seconds: int = Field(default=60, ge=30, le=3600)
     # Native-manager device enrollment. Independently dark until the console
     # approval page and release manager are deployed together.
     worker_enrollment_enabled: bool = False
@@ -211,6 +235,21 @@ class GridSettings(BaseSettings):
     grid_treasury_monitor_token: str = Field(default="", pattern=r"^(?:0x[0-9a-fA-F]{40})?$")
     grid_treasury_min_eth_wei: int = Field(default=0, ge=0, le=2**256 - 1)
     grid_treasury_min_token_raw: int = Field(default=0, ge=0, le=2**256 - 1)
+
+    @model_validator(mode="after")
+    def validate_video_quote_pilot(self):
+        if self.video_x402_quote_capacity < self.video_x402_quote_per_account:
+            raise ValueError("Video quote capacity must cover the account limit")
+        if len(set(self.video_x402_quote_accounts)) != len(self.video_x402_quote_accounts):
+            raise ValueError("Video quote pilot accounts must be distinct")
+        if self.video_x402_quotes_enabled:
+            now = datetime.now(UTC)
+            if (not self.video_x402_quote_accounts or not self.video_x402_quote_pay_to
+                    or int(self.video_x402_quote_pay_to[2:], 16) == 0
+                    or self.video_x402_quotes_until is None
+                    or not now < self.video_x402_quotes_until <= now + timedelta(hours=24)):
+                raise ValueError("Video quote pilot requires accounts, nonzero recipient and an expiry within 24 hours")
+        return self
 
     @model_validator(mode="after")
     def validate_worker_reward_demand(self):

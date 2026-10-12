@@ -8,6 +8,7 @@ The only difference from the Anthropic endpoint is the JSON envelope.
 """
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -266,7 +267,15 @@ async def _chat_media(request: ChatCompletionRequest, kind: str, account_id=None
     seeds = media.seeds_for_outputs(seed, 1)
     if kind == "video":
         width, height = int(recipe_inputs.get("width", 768)), int(recipe_inputs.get("height", 512))
-        frames, effective_seconds = media.normalize_video_timing(4.0, 24)
+        contract = recipes.video_contract_for_model(model, has_source=bool(source_image_url))
+        if contract:
+            from ..services import video_contract
+            values = video_contract.normalize(contract, recipe_inputs)
+            width, height, frames = values["width"], values["height"], values["frames"]
+            effective_seconds = values["seconds"]
+            steps, cfg_scale, sampler = values["steps"], values["cfg"], values["sampler"]
+        else:
+            frames, effective_seconds = media.normalize_video_timing(4.0, 24)
         recipe_inputs.update({"width": width, "height": height, "seconds": effective_seconds, "fps": 24, "frames": frames})
         payload = {
             "prompt": prompt, "n": 1, "width": width, "height": height,
@@ -832,13 +841,13 @@ def _text_param_schema(model_id: str) -> dict:
 @router.get("/v1/models/{model_id}/recipe")
 async def get_model_recipe(model_id: str, apikey: Optional[str] = Header(None),
                            authorization: Optional[str] = Header(None)):
-    """Worker preflight: the canary-resolved recipe(s) for a media model, plus the
-    node types + model files a worker must have to run it. A worker fetches this at
-    startup, checks nodes/files against its ComfyUI /object_info, then smoke-runs the
-    `spec` — advertising the model only if it produces a real output. Authed (workers
-    hold a grid key); recipe graphs aren't secret but we don't serve them anonymously.
+    """Authenticated worker inventory: canary-resolved media recipes and files.
+
+    Governed video recipes also publish their contract and separately expanded
+    source requirements. Reading/checking inventory does not submit a smoke job,
+    enable admission or prove GPU execution/model fidelity.
     """
-    from ..services import accounts as accounts_svc, recipes
+    from ..services import accounts as accounts_svc, recipes, video_contract
     await accounts_svc.authenticate(extract_api_key(apikey, authorization))
 
     recs = recipes.recipes_for_model(model_id)
@@ -849,8 +858,9 @@ async def get_model_recipe(model_id: str, apikey: Optional[str] = Header(None),
         canary: dict = {}  # minimum steps for a fast smoke test
         if "steps" in r.vars and "steps" in r.clamps:
             canary["steps"] = r.clamps["steps"][0]
-        resolved = recipes.resolve(r.recipe_root, canary)
-        out.append({
+        resolved = ({"spec": copy.deepcopy(r.spec), "image_paths": None}
+                    if r.video_contract and r.video_contract.appearance_profile else recipes.resolve(r.recipe_root, canary))
+        item = {
             "name": r.name,
             "recipe_root": r.recipe_root,
             "job_type": r.job_type,
@@ -859,7 +869,25 @@ async def get_model_recipe(model_id: str, apikey: Optional[str] = Header(None),
             "model_files": recipes.model_files(resolved["spec"]),
             "image_paths": resolved.get("image_paths"),
             "spec": resolved["spec"],
-        })
+        }
+        if r.video_contract is not None:
+            item["video_contract"] = r.video_contract.model_dump(by_alias=True, exclude_none=True)
+            requirements = {}
+            for mode in r.video_contract.source_modes:
+                source_spec = copy.deepcopy(resolved["spec"])
+                if r.video_contract.appearance_profile:
+                    video_contract.expand_appearance(source_spec)
+                video_contract.expand_sources(source_spec, mode, 0.5 if r.video_contract.appearance_profile else 0.85,
+                                              0.25 if r.video_contract.appearance_profile and mode == "video" else None)
+                requirements[mode] = {
+                    "node_types": recipes.node_types(source_spec),
+                    "model_files": recipes.model_files(source_spec),
+                }
+                if r.video_contract.appearance_profile:
+                    requirements[mode]["node_types"] = sorted(set(requirements[mode]["node_types"]) |
+                                                              {"LTXAddVideoICLoRAGuideAdvanced"})
+            item["source_requirements"] = requirements
+        out.append(item)
     return {"model": model_id, "recipes": out}
 
 
@@ -883,7 +911,8 @@ async def get_model_params(model_id: str):
         p.setdefault("size", {"type": "size", "minimum": media.MIN_DIM, "maximum": media.MAX_DIM,
                               "multiple_of": 64,
                               "description": "WIDTHxHEIGHT; img2img auto-matches the source if omitted"})
-        p["n"] = {"type": "integer", "minimum": 1, "maximum": 2 if jt == "video" else 4}
+        p["n"] = {"type": "integer", "minimum": 1,
+                  "maximum": 1 if sch.get("video_contract") else 2 if jt == "video" else 4}
         if jt == "video":
             p.setdefault("seconds", {"type": "number", "minimum": 1, "maximum": 10})
             p.setdefault("fps", {"type": "integer", "minimum": 8, "maximum": 30})

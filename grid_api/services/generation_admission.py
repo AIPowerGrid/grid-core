@@ -27,7 +27,14 @@ def require_media(job_type: str, payload: dict) -> None:
         if int(payload.get("n", 1) or 1) > 1:
             require_path("image-batch")
     elif job_type == "video":
+        if payload.get("source_media"):
+            require_path("audio-to-video")
+            if any(source.get("role") == "reference_image" for source in payload["source_media"]):
+                require_path("appearance-to-video")
+            if any(source.get("role") == "reference_video" for source in payload["source_media"]):
+                require_path("video-to-video")
         if payload.get("source_image_url"):
             require_path("image-to-video")
-        if payload.get("timeline") or (payload.get("recipe_inputs") or {}).get("timeline"):
+        if (payload.get("timeline") or (payload.get("recipe_inputs") or {}).get("timeline")
+                or len((payload.get("recipe_inputs") or {}).get("keyframes") or []) > 1):
             require_path("video-timeline")

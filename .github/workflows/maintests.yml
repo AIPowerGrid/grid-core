@@ -79,8 +79,16 @@ jobs:
             fi
           done
           sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client shellcheck redis-server
+          sudo apt-get install -y -qq postgresql-client shellcheck redis-server ffmpeg
           shellcheck -x scripts/backup_postgres.sh scripts/prove_postgres_restore.sh deploy/bootstrap.sh
+      - name: Media source decoder proof
+        run: |
+          set -euo pipefail
+          command -v ffmpeg
+          command -v ffprobe
+          ffmpeg -version
+          ffprobe -version
+          python -m pytest grid_api/services/tests/test_video_sources.py -q -rs
       - name: Shadow outbox Redis proof
         run: |
           set -euo pipefail
@@ -148,6 +156,34 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
+      - name: Checkout pinned Python video SDK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: AIPowerGrid/grid-sdk-python
+          ref: 2f599e1a0e308decb34b045a0fbb638c7c8a71e8
+          path: .integration/sdk-python
+          persist-credentials: false
+      - name: Checkout pinned JavaScript video SDK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: AIPowerGrid/grid-sdk-js
+          ref: 60547a07384845e9a0d831bfa690bc2b1ac1b043
+          path: .integration/sdk-js
+          persist-credentials: false
+      - name: Build pinned JavaScript video SDK
+        working-directory: .integration/sdk-js
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+      - name: PostgreSQL Core and real HTTP video SDK qualification
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          AIPG_JS_VIDEO_QUALIFICATION: ${{ github.workspace }}/.integration/sdk-js/qualification/core-wire.mjs
+          AIPG_JS_VIDEO_PAYMENTS_QUALIFICATION: ${{ github.workspace }}/.integration/sdk-js/qualification/video-payments.mjs
+        run: >-
+          python -m pytest
+          .integration/sdk-python/qualification/test_core_video_jobs.py
+          .integration/sdk-python/qualification/test_core_video_payments.py -q -rs
       - name: Build pinned Console for local consent integration
         working-directory: .integration/console
         run: |

@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0042`
+- `versions/` - ordered migration revisions. Current source head: `0051`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -55,8 +55,86 @@ production database match the Grid-owned schema contracts without relying on
   changing historical credit, completion, reward, or identity records.
   `0041` adds empty immutable hourly worker payout plans. It adopts no historical
   payout row and does not enable any sender or timer.
+  `0042` adds zero-default externally funded credit lineage.
+  `0043` adds empty private async media request/execution journals. Candidate
+  submission defaults off; the bounded outbox still drains accepted work.
+  `0044` adds nullable original-model/session leases and an original-worker
+  recovery index without reconstructing any historical execution authority.
+  `0045` adds nullable exact private-source retention authority and cleanup
+  timestamps, without adopting historical URLs or changing economic records.
+  `0046` creates empty immutable private video quotations, with owner/key,
+  job UUID and derived-nonce uniqueness, positive bounded amount and expiry
+  constraints. No signature, reservation, payment, dispatch or backfill exists.
+  `0047` creates empty quote-bound payment attempts and immutable receipt
+  evidence, with unique authorization/transaction and coherent review/proof
+  constraints. It stores no spending signature and grants no funded admission.
+  `0048` creates empty shared asset/transaction and economic-reference claims.
+  It invents no historical receipt/token provenance and enables no video API.
+  `0049` creates empty private quote-input staging with exact object authority,
+  lease fencing and stored-byte proof. No payment, outbox or public route exists.
+  `0050` adds nullable abandonment and repeatable cleanup-attempt/ACK metadata,
+  with coherent state constraints and a rotation index. No history is closed
+  automatically and no historical URL becomes deletion authority.
+  `0051` creates empty quote/receipt-bound prepaid video funding and unsent
+  refund obligations. No historical payment, hold or job is admitted.
 
 ## Local Contracts
+
+- Apply `0051` before candidate financial/backing readers start, even with
+  video payment dark. Retain new `video_prepaid` terminal/reward handlers and
+  every payment/refund row on rollback; older release code could restore credit
+  instead of recording USDC owed. Downgrade refuses all nonempty history.
+  Migration creates no payment sender or enabled admission API.
+
+- Apply `0050` before using the updated optional staging/first-attempt service
+  or enabling `VIDEO_UNPAID_CLEANUP_ENABLED`; default-off startup does not read
+  this table. Keep abandonment-aware code and retained metadata on rollback;
+  downgrade refuses any cleanup history, including unsuccessful rotation.
+  Every recorded payment attempt excludes its inputs from this cleanup.
+
+- Apply `0049` before calling optional private quote staging. Keys commit before
+  storage I/O; no historical inputs are adopted. Retain rows on rollback;
+  downgrade refuses even a partial allocation. Candidate `0050` adds repeatable
+  attempt-free cleanup; transfer to funded-job retention is still unimplemented.
+  Provider lifecycle remains a backstop, not application cleanup proof.
+
+- Apply `0048` before any updated deposit or text-x402 reconciliation writer,
+  even with video disabled. Quiesce all financial writers before the migration/
+  release switch and upgrade every replica/offline runner before resuming.
+  Older writers can bypass these claims, so a rolling mixed-writer deployment
+  is unsafe. Historical books are exclusion evidence, not fabricated backfills.
+  Rollback retains this table and claim-aware writers; downgrade refuses any
+  retained ownership. Shared ownership alone grants no funded video admission.
+
+- Apply `0047` before using the optional non-routable video attempt journal.
+  New initial `begin` calls now additionally require current ready staging
+  through `0050`;
+  historical attempt reads acquire no new staging or send authority.
+  Normal credit/deposit/text x402 and quote routes do not query the new table.
+  Application rollback retains it; downgrade refuses any attempt, including
+  unresolved `settling` and reviewed state. No historical attempt/payment is
+  reconstructed, and no sender, reserve, outbox or API is enabled by migration.
+
+- Apply `0046` before using the optional quote routes, even for recovery after
+  their creation flag is rolled back. Ordinary video/credit paths do not read
+  this new table. Retain it on rollback; downgrade refuses any quotation,
+  including expired state, rather than silently freeing a reused request key.
+
+- Apply through `0045` before starting this candidate, even with admission off.
+  Ordinary journal reads and the independent source-cleanup loop select the new
+  columns. Retain them on application rollback. Downgrade refuses recorded
+  source authority or cleanup history, including completed/refunded jobs.
+
+- Apply through `0044` before starting this candidate, even dark. Downgrade
+  refuses any stored lease, including terminal jobs. Retain both lease-aware
+  financial and worker transport code on rollback after first use; older writers
+  could let a replaced connection charge or refund its successor. Existing NULL
+  lease rows stay uncertain until the existing financial backstop closes them.
+
+- Apply `0043` before creating any async media job. No history is backfilled,
+  paid job is queued or API is enabled by migration. Retain the table and
+  execution-fence-aware worker transport on rollback after its first use;
+  downgrade refuses any stored identity, including refunded or completed jobs.
 
 - `0042` adds zero-default funded balance/ledger metadata and the funded-subset
   constraint without changing spendable balances. Drain holds and pause credit

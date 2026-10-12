@@ -84,6 +84,132 @@ validation, worker incentives, and trust boundaries.
 - `RECIPE_DISPATCH.md` - how to add a media workflow: recipe = governed ComfyUI
   graph (`_grid` node map), the importer CLI, authoring steps, dispatch flow, and
   the coordinator/worker split. Start here to add an image/video model.
+- `LTX_2_5_VIDEO.md` - non-serving BF16 distilled/dev candidates, typed frame
+  and bounded image-pin contract, exact execution/quote/reward units, owned-rig
+  observations, reference-film recreation/audio-preservation benchmark and
+  outstanding financial/async/x402/promotion gates. Native multi-shot and
+  character-reference parity are measured gates, not inferred from a model swap.
+  Public service additionally requires model-use clearance for the actual
+  installed revisions; code licensing and private canaries do not resolve the
+  official weight license's competing-service restriction. Pure execution plans
+  are not durable price quotes. Pinned SDK/Core SQLite/PostgreSQL HTTP tests
+  prove protocol/auth/SQL behavior, not native output or purchased funding.
+  The maintainer's completed LTX handoff and retained rig takes are the film
+  baseline; synthetic guide-test failures do not invalidate that production.
+  The dark candidate now carries sixteen timed pins and the 337-frame distilled
+  ceiling; network storage, money and full film/export parity remain separate gates.
+  The first native managed five-shot run completed four and refunded one
+  unstarted opener after an incompatible reader exhausted mismatch retries
+  while its compatible peer was busy. Its read-only failure audit is retained.
+  A candidate original-delivery/one-use-inbox routing fix has real Redis/SQL
+  regressions, exact-revision PostgreSQL16 CI and a separate passing native
+  five-shot mix run on both GPUs, including reply-loss/SIGKILL recovery,
+  immutable repeat, exact test-credit settlement and private-input cleanup.
+  The missing source soundtrack/reference-cut parity, purchased funding and
+  public release remain gates; preserve the earlier failed film unchanged.
+  A separate native Ingredients comparison passes unfunded transport/settlement,
+  same-job recovery after explicit client/worker fixes and private-input cleanup.
+  Audio-only output leaks the reference sheet early; motion-guided samples are
+  promising, not measured identity/lip/motion qualification. Keep public/funded
+  promotion separate from private execution evidence.
+  Default-off async submit/status and the bounded SQL/Redis outbox are candidate
+  code. Owner-only key-header GET recovery now handles a lost initial reply
+  without another admission/upload; the stored normalized intent digest binds
+  client recovery and merged keys remain ambiguous. This contract is not
+  public admission or a funded CLI canary. Original-worker leased resumption has isolated PostgreSQL/Core crash
+  coverage; joint native-worker/GPU/storage recovery and private retention
+  remain promotion gates. Candidate async outputs are source-conditionally copied
+  and Core-hashed before settlement; fixture tests are not live R2/video quality
+  qualification. Rig-scoped terminal reads and mandatory worker preflight now
+  support Core-confirmed local-cache cleanup and bounded closed history; joint
+  canaries and ComfyUI/R2 retention remain separate gates. Apply migrations
+  through `0045` even with admission off.
+  Authenticated startup recipe inventory now includes the governed video
+  contract and per-mode expanded node/file requirements without changing base
+  graphs or legacy responses. Candidate opt-in normal worker startup checks
+  these before recovery/source advertisement; default release/admission remain
+  dark and inventory is not GPU fidelity or financial qualification.
+  Native synthetic audio/video-source canaries now prove the isolated actual
+  Core/WS/GPU/R2 path, byte commitments, optional opening image, one test-credit
+  settlement and lost-reply recovery. The first source-video output-selection
+  failure fully refunded; a fresh job passes with worker input-preview exclusion.
+  The first canaries' synthetic sources were anonymously reachable through
+  the output domain; they are not privacy proof. A distinct default-empty
+  private-source bucket now gates all governed LTX inputs. A new scratch bucket
+  passes signed/anonymous/expired/refreshed/deleted-object access checks and
+  configured lifecycle readback, not automatic day-boundary expiry. Fresh native
+  A2V/V2V through that bucket pass anonymous-denial and exact-object manual
+  cleanup for their three committed inputs, not application retention.
+  The candidate now records exact private-source authority with each new
+  hold/journal and separately retries post-closure cleanup. Existing rows stay
+  NULL; no historical/public URL is adopted. Fresh native A2V crash recovery
+  and V2V now verify application cleanup by committed SQL marker, independent
+  S3 absence and unchanged economics. Both source modes also pass one 337-frame
+  network section with exact units, output timing, lost-reply recovery and
+  automatic private-input deletion. These are synthetic unfunded tests, not
+  the handoff's multi-pin film or quality parity.
+  Core `2ac53a96` / worker `ffc4a011` / Director `7eb81ace` also pass actual
+  managed A2V/V2V project selection/export and repeat audits, including same-job
+  V2V crash recovery. Exact Core CI and all 24 SDK/Core SQLite/PostgreSQL
+  scenarios pass; SDK fixtures alone are not native evidence. Separate private
+  Core instances do not prove shared-coordinator two-worker balancing. A later
+  Core `1e27b003` / worker `f04a183` / Director `2ea54eb` shared private-Core
+  A2V/V2V run and separate repeat audit now pass real concurrent native work,
+  two exact test-credit charges, same-job crash recovery, cleanup and immutable
+  exports. Exact governed-node startup replaces broad plugin discovery;
+  bounded metadata-only proof records repair the observed repeat-reader bound.
+  Prior failures remain preserved; neither proof qualifies public enrollment,
+  independent operators, purchased funds or long character fidelity.
+  Pre-admission/ComfyUI/output retention remains separate.
+  ComfyUI/orphan retention, purchased funds,
+  broader faults and appearance/motion/lip-quality acceptance remain gates.
+  Legacy image-source privacy is unchanged; admission stays dark.
+  A separate fixed Ingredients Dev candidate now carries appearance PNGs as
+  their own committed source role, not a first-frame image. The Core compiler/
+  inventory, worker executor/startup and SDK/Director transport support it dark.
+  Its separate native joint execution/recovery/cleanup proof uses unfunded test
+  credits; funded/public acceptance and measured appearance quality remain gates.
+  It does not inherit distilled source proof or promote its mixed visual results.
+  A separate attention-0.25 canary now passes concurrent native execution,
+  same-pin planned Core/worker crash recovery, unchanged repeat observation,
+  two exact test-credit settlements and all five private-input deletions.
+  Outputs equal the matched local comparison, with no sheet flash in every
+  inspected frame thumbnail; identity/motion/lip quality and purchased/public
+  acceptance remain separate. Exact `29982329` Linux/Postgres16 CI also passed;
+  see `LTX_2_5_VIDEO.md` for pins and the retained private proof digest.
+- `VIDEO_X402.md` - authenticated prepaid-video design and current private
+  quotation foundation. Default-off owner-bound quote POST/GET freeze one
+  source/seed/graph/tariff/deadline/nonce without money or dispatch.
+  Binding-v2 snapshots include the signing domain; legacy v1 identities recover
+  unchanged without signing authority. Offline exact-signature checks and locked
+  SDK compatibility are candidates, not HTTP acceptance or a released adapter.
+  A separate historical receipt helper now verifies direct v/r/s transfers
+  through two bounded HTTPS RPC destinations with exact authorization/transfer,
+  signature, contract-state and canonical-anchor checks. Its fixture transports
+  are not live chain proof; no attempt, claim, funding or dispatch is written.
+  The separate `0047` journal now records one pre-send winner, immutable policy/
+  transaction and original historical proof without retaining the signature.
+  The `0048` candidate now commits shared receipt ownership with new video
+  evidence, deposit/credit writes and independently settled text x402. Known
+  spent nonces protect video attempts even after lost transaction replies;
+  conflicts retain proof for review. All writers require synchronized migration-
+  first upgrade and claim-aware rollback.
+  The private `0049` staging journal now allocates source keys before storage,
+  verifies actual stored bytes and fences ready state. First attempt permission
+  requires ready inputs; existing attempts stay observation-only. Recovery
+  refreshes locations, not source/graph/seed/price. Synthetic storage and real
+  SQL/SDK tests do not qualify live R2 or retention transfer. Candidate `0050`
+  now adds default-off, repeatable exact-key cleanup for expired attempt-free
+  stages, with irreversible abandonment and exclusion of all payment attempts.
+  Synthetic cleanup, corruption/rotation/cancellation and actual SQL/migration
+  tests do not qualify live deletion or funded-job authority transfer.
+  Video remains non-routable without a
+  funded hold/outbox, automatic retry or refund. Real SQLite/PostgreSQL and fixture HTTP tests cover
+  duplicate/lock-expiry and commit-reply recovery; no real payment is attempted.
+  Remaining work includes published client/outer-envelope integration, live
+  chain/account/facilitator proof, payment-before-outbox admission,
+  live shared-ownership rollout, separate refund obligations and real payment
+  qualification. No signer, payment collection or production authority exists.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.
 - `VALIDATOR_V0.md` - core-side validator V0 endpoint contract, evidence-only
@@ -164,6 +290,12 @@ validation, worker incentives, and trust boundaries.
   code/schema-divergent production checkout; reconciliation requirements.
 
 ## Local Contracts
+
+- `VIDEO_X402.md` now distinguishes the private `0051` proved-receipt hold/
+  outbox/refund-obligation candidate from still-missing HTTP payment collection.
+  Admitted source authority transfers to existing cleanup; uncertain or
+  unadmitted payment retention remains a gate. `refund_due` is not a sent
+  refund. SQL/Redis fixtures are not live payment/GPU/storage/model permission.
 
 - Keep the live/dry-run/stub status explicit. If a checklist marks an item done,
   code and tests must support that claim.

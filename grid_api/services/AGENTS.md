@@ -7,9 +7,276 @@ content sanitization, and reward settlement.
 
 ## Ownership
 
+- `video_prepaid.py` owns private `0051` proved-receipt admission. Actual shared
+  ownership, proof, ready original inputs and account/quote/job locks precede
+  one exact external hold plus frozen outbox/input-authority transaction.
+  Closed/expired/capacity-rejected admission instead records an unsent USDC
+  refund obligation without an executable job. Neither outcome draws credit.
+  Existing worker terminal/release/sweep/fence/backing code recognizes this
+  distinct source; failed jobs owe USDC, never restored credit. Only a committed
+  verified result earns exact backed worker consumption. Replay/read recover
+  one immutable decision; altered graph/source/receipt bindings fail closed.
+  Admitted inputs use existing post-closure cleanup, not inferred URL authority.
+  Unadmitted/uncertain-payment input cleanup, live storage/chain/GPU and actual
+  reviewed refunds remain gates. No endpoint, facilitator, signer or loop
+  invokes this admission. Apply `0051` before all candidate financial/backing
+  readers, retain prepaid-aware handlers/history on rollback, and keep public
+  model permission and HTTP payment collection separate.
+
+- `video_contract.py` owns the candidate strict LTX-2.5 execution/timing
+  contract. Only recipes declaring `_grid.videoContract` use it. Qualified
+  graphs are snapshotted before reserve; steps/frames/duration and quote units
+  must match dispatch. `recipes/qualification/` is not loaded at startup.
+  Typed pins are metadata, not executable nodes: the resolver expands the
+  governed first-image scaffold into a fixed LTX guide chain. Distilled permits
+  up to 337 frames, dev 81, both at most sixteen ordered pins starting at zero.
+  Source lists and bindings must agree before reserve; multi-pin dispatch requires
+  `recipe-image-bindings-v1`. Old workers requeue without receiving the graph;
+  mismatch exhaustion releases the hold through the existing terminal path.
+  Distilled candidates may declare audio/video source modes. Core expands only
+  its fixed frozen-audio/Union-Canny scaffold, independently of optional opening
+  image pins. A character portrait is not identity-only conditioning.
+  The distinct `ingredients-dev-v1` appearance profile is fixed to Dev BF16,
+  768x448/121 frames/24 fps/40 steps/CFG2. It requires a separate appearance PNG
+  and exact-duration audio, rejects opening pins, and chains Ingredients before
+  optional Union motion control. Standard Dev remains capped at 81 frames.
+  Appearance/motion strengths are committed execution controls, not node or
+  adapter selectors; no portrait-at-frame-zero or identity-fidelity promise.
+  Optional finite `reference_attention_strength` in (0, 1] changes only the
+  appearance guide to the governed Advanced node. Omission preserves its
+  original graph and intent; neither denoising nor motion attention changes.
+  Both source inventories require that node before worker advertisement.
+  `normalize_timing` shares exact frame/duration validation with execution and
+  non-mutating credit quotes. A quote needs no private appearance/audio bytes;
+  it cannot validate sources, compile a graph or grant admission. Full
+  `normalize` still rejects missing appearance/audio inputs. Ordinary Dev's
+  frame limit and the fixed Ingredients bucket remain unchanged.
+- `video_sources.py` owns bounded inline WAV/MP4 input decoding, exact-duration
+  audio validation and isolated FFmpeg probe/full-frame checks. It accepts no
+  input URLs or filenames. Validate all inputs before quota/upload, retain
+  hash/size/role/timing commitments and require them to match the compiled
+  source slots before a hold. The Ingredients-only `reference_image` role is
+  a fully decoded, nonanimated 768x448 PNG under 12 MiB with separate byte/hash/
+  dimension commitments; it never enters the opening-image source list.
+  MP4 verification has two process-local slots;
+  cancelled callers retain their slot until their decoder task finishes.
+  FFmpeg time/individual-allocation limits are not a complete OS sandbox.
+  Source retention/privacy and joint native/billing qualification remain gates.
+  Governed audio/video sources and typed LTX image pins use
+  `storage.upload_private_source`, never the output bucket. Its typed private
+  bucket must be configured separately; the native route preflights that
+  requirement before quota/uploads. Uploads return bounded one-hour GET links.
+  Private-bucket public-access/lifecycle review is an operator gate; URL expiry
+  is not object deletion. Legacy `upload_source` still uses the public output
+  bucket and must not be described as private merely because its URL is signed.
+- `media_source_retention.py` records at most eighteen exact Core-uploaded
+  private input keys with the journal/hold transaction.
+  Ingredients appearance/sound/motion may record three ordered source roles,
+  exclusively without opening pins; ordinary source collections remain capped
+  at two. The total eighteen-object authority is unchanged. Only a committed settled
+  reservation (paid or refunded) permits cleanup. Historical payloads are never
+  backfilled into deletion authority. A separate minute loop deletes bounded
+  batches with time-limited S3 calls and retries exact keys after crashes or
+  partial failure. Cancellation retains its single-flight guard until storage
+  work finishes. Failures rotate behind other pending jobs, not starving them.
+  Cleanup markers are operational metadata; no credits, results or ledgers move.
+  It continues after admission rollback. Retain old bucket permissions until
+  their recorded jobs drain; changing the S3 account or making a recorded bucket
+  the output bucket refuses deletion. ComfyUI files, output/attempt orphans and
+  pre-admission uploads are not cleaned by this service. The provider source
+  lifecycle remains required. Apply migration `0045` before candidate startup.
+
 - **Dispatch:** `job_queue.py` (Redis streams - the ONE live queue), `token_stream.py`
   (worker->client token relay), `media.py` (image/video job abstraction), `storage.py`
   (presigned R2 upload), `enforcement.py` (worker strike/evict).
+- `media_jobs.py` owns the private journal for default-off async video ingress
+  and the bounded background outbox. A UUIDv4 idempotency key is hashed, bound to
+  the canonical account and normalized-intent hash, then retained with one
+  immutable compiled graph. PostgreSQL serializes pocket draws; the existing
+  credit hold and journal insert commit together. Live positive credit holds and
+  explicit cost caps are required; dry-run never writes an async job.
+  The canonical-account lock also serializes the held async-job cap (default
+  four, at most sixteen), including proved aliases. This is separate from the
+  synchronous media/text concurrency limits; replay does not consume a slot.
+  Unclaimed queued work can be republished after lease expiry, including after
+  Redis loss. Each queue attempt has a five-second maximum; six attempts exhaust
+  to an unstarted-only release. The outbox continues after admission rollback.
+  Outbox retries may create duplicate Redis entries. Before any marked job's WS
+  dispatch, the worker handler must commit the SQL execution fence under the
+  existing financial job lock. Never clear that fence on reconnect, requeue or
+  rollback. Uncertain execution awaits reconciliation/refund, not a rerender.
+  Financial/results authority remains `grid_reservations`; no second settler.
+  Recovery reads accept exactly one owned job UUID or hashed request key and
+  expose the normalized intent digest, never key text or private payloads.
+  Request-key recovery is a read, not another admission or retry. Proved
+  aliases remain recoverable; merged duplicate keys fail as ambiguous.
+  Queue give-up may release a marked job only with `only_if_unstarted_media`
+  under that same job lock. The current leased terminal or stale-hold sweeper can still release;
+  a duplicate delivery must not refund another worker's running hold.
+  Candidate original-worker continuation selects only held executions bound to
+  the authenticated worker UUID, exact selected checkpoint and required features.
+  A 60-second renewable private Core lease fences both success and failure in
+  the money transaction; replaced/expired sessions move nothing. Renewal stops
+  at 30 minutes from the original claim, never restarting that budget. Resume is
+  sent directly with `resume:true`, the original job/graph/seed and fresh,
+  attempt-isolated upload slots; a missing local journal must not rerender.
+  Pre-0044 NULL leases remain uncertain, never backfilled. Recovery works after
+  new-admission rollback and Redis loss. Legacy workers perform no recovery query.
+  Public enablement, joint worker/GPU/R2 crash canaries, retained inputs/results
+  and bounded private cache retention remain release gates. Old workers must not advertise
+  `async-video-resume-v1`. See `LTX_2_5_VIDEO.md`.
+- `video_output.py` owns candidate async video byte verification only. It accepts
+  one exact Core-issued attempt slot, bounds the MP4 to 256 MiB, and copies it
+  under a unique Core-only final key with the observed source ETag condition.
+  Core streams/hashes that copy directly through S3 before the money terminal.
+  Two active verifications per process, bounded reads/retries and a 120-second
+  verification budget constrain resource use. Invalid bytes release only the
+  current lease's hold; storage/conditional-copy uncertainty retains the hold
+  without payment or ACK. The paid result and receipt use the verified copy,
+  never a worker-writable PUT slot. This does not prove codec/timing, creative
+  quality, model fidelity, production R2 behavior or retention. Ambiguous
+  copies may orphan unique objects; private cleanup/lifecycle is a release gate.
+  Legacy synchronous image/audio/video and validator storage are unchanged.
+- `video_plans.py` owns private in-memory validated inputs and immutable
+  `aipg.video-plan.v1` execution snapshots. Async ingress validates sources and
+  compatible-worker admission, then compiles one graph/seed/units/source digest
+  before quota or storage. Planning uses non-routable source slots; only their
+  locations change during staging. Keep source bytes out of serialized snapshots
+  and reprs. Recheck commitments before uploads and copy mutable metadata before
+  yielding. Returned dictionaries cannot mutate the snapshot. This is not a
+  durable quote, frozen tariff, payment authorization, recovery selector or
+  public graph interface. Core still prices and reserves through the existing
+  live-credit authority. `video_quotes.py` now separately persists bounded
+  immutable private quotes; planning alone is still not quotation authority.
+- `video_quotes.py` owns `grid_video_quotes`, not reservations or the outbox.
+  Five-minute quotes freeze canonical owner/request key, normalized intent,
+  source-byte commitments, selected seed/graph/units, undiscounted price-book
+  snapshot, canonical Base USDC recipient/network and one derived nonce.
+  New binding-v2 snapshots also freeze the USDC EIP-712 name/version/chain/token
+  domain; old domainless v1 quotes remain readable/replayable without upgrade,
+  repricing or a replacement nonce, but cannot acquire signing authority.
+  Reads verify the commitment and indexed fields; replay never recompiles or
+  reprices. PostgreSQL globally serializes inserts and retained-row caps while
+  account locks fence merges; no decoder/storage/network call runs under those
+  locks. Cheap capacity preflight precedes native decoding. Preparation is
+  additionally bounded to two owners per process and one per local owner; this
+  is not a cross-replica decoder lease. Expired rows remain readable and count
+  toward the pilot's caps; no deletion/reused identity or payment acceptance
+  exists. No quote can enqueue, upload, consume quota, debit, pay or refund.
+  Apply `0046` before using these optional routes and retain quote history on
+  rollback. Shared receipt ownership is a separate `0048` candidate, not quote
+  authority. HTTP acceptance, live payment proof, funded admission and real
+  refunds remain gates.
+- `video_quote_staging.py` owns private `0049` quote-input persistence, not
+  public admission. It verifies the original plan, commits exact private keys
+  before storage I/O, and retains those keys on expired-lease retry. Conditional
+  S3 puts and bounded streamed readback prove stored size/hash before one fenced
+  ready commit. Two local slots remain owned until a cancelled storage thread
+  finishes. Recovery refreshes exact private GET URLs without decoding,
+  recompiling, repricing or uploading again. No signatures, credits, payment
+  sender or outbox are written. First attempt permission now requires matching
+  ready state, but no HTTP sender exists. Candidate `0050` now closes expired,
+  attempt-free staging irreversibly after lease/grace, then deletes only its
+  recorded keys. No recorded payment attempt is eligible, even unresolved or
+  reviewed state. Failed validation rotates without granting storage authority.
+  ACKs are revisited for late in-flight writes; the provider lifecycle remains
+  required. Repeated cancellation retains staging/cleanup guards until their
+  owned storage threads finish. The independent default-off startup loop drains
+  only unpaid inputs after quote-creation rollback, with count/type-only logs.
+  Current optional staging queries require `0050`. Retention transfer to funded
+  jobs and live R2 qualification remain gates. The SQLite/PostgreSQL staging, quote,
+  attempt and shared-receipt matrix passes 234 cases with nine explicit skips;
+  synthetic S3 and real botocore request-model checks are not live storage proof.
+  The local full suite passes 3,293 tests with 37 skips and 139 existing warnings;
+  it predates the final test-only merge-retry correction, separately qualified
+  by 14 real PostgreSQL credit tests. Fresh exact-commit CI remains pending.
+- `video_eip3009.py` is an offline, admission-time exact EIP-3009 binding
+  helper, not a payment endpoint. It builds unsigned SDK-compatible typed data
+  including the mandatory JSON-RPC `EIP712Domain` type definitions,
+  and checks canonical 65-byte low-S signatures against one owner-loaded v2
+  quote's amount/payer/recipient/nonce/domain/window. It rejects self-payments,
+  compact/wrapped signatures, unbound SDK nonces and expired quotes. Core never
+  signs or takes private keys; the bound result contains no signature or
+  funded state. No database, RPC, replay claim, balance/code check, facilitator,
+  upload or dispatch occurs. Live signer classification/token-domain checks,
+  outer-envelope validation and durable financial admission remain required.
+  Do not use its current-window check to abandon recovery of an earlier payment
+  attempt after expiry. No real-wallet prompting or published client exists.
+  Separate MIT SDK candidates now supply dependency-free policy/preparation and
+  explicit signer callbacks. Their actual preview path blocks signing; private
+  Core/SQL qualification uses future-enabled copies and unfunded signatures,
+  not an enabled HTTP payment rail or released package.
+- `media.compile_dispatch` is the non-I/O governed compiler; the existing
+  async `prepare_dispatch` wrapper additionally checks compatible workers.
+  It freezes the same governed graph/execution units for
+  HTTP waiting and async ingress; `bind_dispatch_recipe` attaches that exact
+  snapshot without another recipe resolution. Native source validation,
+  capability admission are shared through `videos.validate_video` without
+  uploads/quota. The waiting `videos.prepare_video` wrapper stages those inputs;
+  async ingress stages the already compiled snapshot without recipe re-resolution.
+- `video_payment_proofs.py` owns non-routable historical exact-USDC evidence.
+  Two distinct operator-selected HTTPS destinations must agree on one direct
+  canonical-token v/r/s `transferWithAuthorization`, actual recovered signature,
+  exact Transfer and AuthorizationUsed logs, payment-block code/domain/decimals/
+  consumed-nonce state, and a re-read canonical confirmation anchor. Every
+  state call uses a required-canonical block-hash selector. Payer and relayer
+  need not match; any payer code/delegation at that block rejects this EOA lane.
+  Safe/finalized and depth are explicit policy inputs, never latest fallbacks.
+  Expired quotes remain inspectable; unavailable, pending or inconsistent proof
+  never means no payment or permission to retry. Two process-local slots, five-
+  second reads, a thirty-second whole-proof deadline, 512-KiB replies, strict
+  duplicate-free JSON-RPC and no redirects bound the transport. Caller-owned
+  authenticated/TLS-verifying clients remain a future adapter contract; distinct
+  hostnames are not operator-independence or cryptographic chain proof. The
+  separate attempt journal calls it, but no request/loop, sender or dispatch
+  does. The pure verifier writes no claims or money. Wrapped/batched calls,
+  receive-authorization, bytes overloads and calldata suffixes are unsupported,
+  not silently credited. Live compatibility and atomic funded admission remain
+  gates; journal/shared-claim fixture tests do not prove real settlement.
+- `video_payment_attempts.py` owns optional `0047` pre-send/reconciliation state,
+  not a payment endpoint. First permission requires `0049` verified input
+  staging; an old attempt can only recover, never gain another send permission.
+  Account/quote locks serialize one initial valid
+  authorization winner; created-time/deadline checks run after locks and again
+  before commit. It retains a canonical payload hash rather than the spending
+  signature. Replays after expiry/rollback grant no send permission. Payer and
+  safe/finalized/depth policy are immutable, as is the recorded transaction.
+  Owner-family recovery preserves the quote's original commitment; missing/
+  foreign state is hidden and mutated bindings fail closed. Network proof runs
+  outside SQL locks, then rechecks owner/quote/transaction before one committed
+  proof. Repeated proven reads retain the original anchors with no network.
+  Unavailable/pending proof leaves state unchanged; rejected proof is manual
+  review, not no-payment/refund. Commit-reply loss recovers the original row.
+  The separate `0048` shared receipt claim now commits with new proven evidence.
+  Claim conflict retains that proof as `receipt_claim_conflict` manual review,
+  not a payable/refundable duplicate. Previously proven rows recover unchanged
+  and are not silently backfilled into ownership; future admission must check
+  its actual shared claim. There is no facilitator, watcher, signature-retention/
+  retry, funded hold/outbox, credit or payout write. Private input persistence
+  is separately owned by the staging service, not the attempt journal.
+  `proven` evidence alone cannot admit work. Missing-transaction recovery still
+  needs the bounded nonce watcher or reviewed manual correlation. No runtime
+  route/loop invokes this journal and normal quote views remain payment-disabled.
+- `payment_receipt_claims.py` is the `0048` cross-rail ownership writer. One
+  chain/asset/transaction belongs to one deposit/text/video economic reference;
+  the same reference cannot adopt another receipt or change purpose. Different
+  assets in one transaction retain separate value. PostgreSQL serializes the
+  key and SQL uniqueness guards owner races; nested insert conflicts leave the
+  caller transaction usable. SQLite explicitly begins the actual transaction
+  before savepoints, preventing rollback-orphan claims in legacy driver mode.
+  Deposits commit claim/receipt/credit together; independently proved text
+  x402 commits claim/settled state together. ETH conversion claims its actual
+  USDC token, not native input. Historical books are checked without backfill;
+  old conversions missing token provenance reject ambiguous reassignment.
+  Bounded canonical AuthorizationUsed witnesses exclude any other rail from
+  a matching original video attempt even when no transaction hash is recorded.
+  Video proof/claim commit together but do not grant funded admission. Failed
+  ownership preserves proof for manual review without automatic credit/refund.
+  No RPC, sender, public route, signature or model/worker authority exists here.
+  All deposit/text-x402 replicas and offline reconcilers require migration-first
+  synchronized upgrade; old writers can bypass claims. Retain claim-aware code
+  and history on rollback. Future funded admission must call the ownership gate,
+  not infer ownership from an old `proven` label.
 - `probe.py` is a retired fail-closed compatibility shim, not a sampler.
   Its old `GRID_PROBE_*` variables cannot dispatch work. Use the existing
   assignment-bound validator or manager-bound setup paths for no-DEN checks;
@@ -20,6 +287,14 @@ content sanitization, and reward settlement.
   them. Source-image, image-batch, and video-timeline capabilities additionally
   require their base image/video path. This is not a pricing or reward exemption;
   internal validator/setup probes retain their separate non-economic contracts.
+  Typed video requests with multiple image pins also require `video-timeline`.
+  The video router repeats admission before source uploads or quota consumption.
+  `audio-to-video`, `video-to-video` and `appearance-to-video` are default-dark subpaths; all
+  require `video`, and motion-guided video also requires `audio-to-video`.
+  Source-bearing dispatch requires one worker with `recipe-media-sources-v1`
+  plus every other requested feature. Appearance additionally requires
+  `recipe-appearance-reference-v1` on that same worker. Released workers do not
+  advertise the appearance feature.
   `validate_rollout` rejects global charging with an omitted admission list
   before startup touches dependencies. Dark/allowlisted deployment can retain
   defaults; an explicit empty list is a valid closed rollout. This guard forces
@@ -466,8 +741,25 @@ content sanitization, and reward settlement.
   Affinity exhaustion keeps the claim for local execution. Generation retries
   use a separate message-carried counter (including any legacy Redis counter
   during upgrade), capped at two for compatible-worker failures. Mismatch
-  bounces retain their separate cap. Stale recovery preserves both counters;
+  bounces with no compatible live peer retain their separate cap. Stale recovery preserves both counters;
   it is not itself a backend failure or a new generation attempt.
+  Compatibility routing transfers the original pending delivery with XCLAIM,
+  guarded by its current consumer and the peer's exact fresh registry snapshot.
+  The same worker must have the model, modality, API format and every feature;
+  a server-owned `stream-inbox-v1` marker excludes older Core receivers. The
+  per-worker inbox stores only delivery IDs plus one-use nonces, bounded by the
+  stream cap and twice the wait-window TTL. Changed-owner/old notifications
+  cannot dispatch or refund. Pending-load ordering favors a less-loaded peer;
+  busy compatible capacity does not consume the absence-search bounce budget.
+  Queue age survives mismatch/affinity/stale handoffs; only a genuine capped
+  generation retry starts a new capacity wait. Redis rechecks the original
+  pending owner and deadline immediately before dispatch after local prefetch;
+  expiry closes only that delivery, and superseded readers do nothing.
+  Routed waits are bounded to five minutes for text and fifteen for media.
+  Expired delivery closes only that
+  queue item and must use the existing unstarted-only async refund guard.
+  The outbox, execution lease and stale-hold deadlines remain independent.
+  There is no model-fidelity claim or new worker binary requirement.
   `tests/test_job_queue_redis.py` uses isolated Unix-socket Redis to prove append
   errors, duplicate races, metadata retention, caps and child-process death
   immediately before/after handoff. Lua errors do not roll back writes; retain
@@ -475,6 +767,12 @@ content sanitization, and reward settlement.
   not prove Redis persistence loss, exactly-once GPU execution, stream trimming
   under overload, full Uvicorn restart, or SQL/queue distributed transactions.
   Paid settlement remains guarded separately by its durable reservation.
+  `routers/tests/test_worker_dispatch_routing.py` combines real disposable Redis
+  with SQLite/PostgreSQL holds for busy-peer delivery without another payload
+  or debit, joint capability/target/protocol checks, notification replay,
+  registry races, expiry and no-refund-after-execution. Queue subprocess tests
+  additionally kill the coordinator around the claim transfer. These are not
+  a native-GPU full-film, purchased-credit or production rollout canary.
 - Money paths must stay idempotent and tested; value-moving credit ledger writes
   require non-null refs and must not overdraft under concurrency.
 - Validator compensation is separate from worker den and audit-execution
@@ -551,6 +849,11 @@ content sanitization, and reward settlement.
 - Media billing reserves exact deterministic cost before dispatch and refunds on
   non-running paths; text billing reserves max cost and reconciles against trusted
   usage.
+- `authorize_media` checks an optional strict `max_cost_micro_usd` against the
+  discounted total before service exposure, promotional/daily allowance or SQL
+  debits. It rejects over-budget work as `cost_limit`; the image route exposes
+  this as a 402 before dispatch. Dry-run remains zero-charge without activating
+  billing. A quote is an estimate, never the ceiling's enforcement authority.
 - Batch is accepted only for workflows with a verified batch strategy. Until
   recipe metadata carries that contract, video and source-image jobs are
   single-output and must reject larger `n` before quota, upload, reservation,
@@ -791,6 +1094,82 @@ content sanitization, and reward settlement.
 
 ## Verification
 
+- `tests/test_video_quotes.py` exercises immutable quotation on SQLite and
+  disposable PostgreSQL: native synthetic source validation, price/seed replay,
+  owner/merge isolation, retained-cap races, corruption and migration parity.
+  No facilitator, payment, production admission or GPU quality is proved.
+- `tests/test_video_eip3009.py` performs real offline ECDSA and locked x402 SDK
+  typed-data/digest compatibility on both Base networks, source-commitment and
+  changed-domain/payer/nonce/amount/expiry controls, unsupported signatures,
+  immutable views and legacy refusal. Synthetic keys never hold funds. This is
+  not a live facilitator/contract, published adapter or payment canary.
+- `tests/test_video_payment_proofs.py` exercises actual HTTPX request/envelope
+  handling with fixture transports on both Base domains, real synthetic ECDSA
+  and the official SDK/Web3 ABI. It covers historical recovery after expiry,
+  nonce/amount/domain/event/calldata mismatch, payer/relayer distinction, provider
+  disagreement, anchored code/delegation, moving heads/reorgs, duplicate/oversized
+  replies, redirects, read/whole deadlines and live local-capacity cancellation.
+  It performs no SQL/network-chain/payment/admission and does not prove that a
+  selected live RPC/facilitator supports this deliberately restricted shape.
+- `tests/test_video_payment_attempts.py` uses real SQLite and disposable
+  PostgreSQL state with synthetic unfunded signatures and fixture HTTP RPC.
+  It proves commit-before-send permission, no retained capability, alias/foreign
+  isolation, immutable reports/proofs, late recovery, pre/post-commit reply loss,
+  changed intent/policy rejection, and zero credit/hold/job/ledger effects.
+  Twenty-five PostgreSQL duplicate callers yield one winner; an observed real
+  quote-lock waiter rechecks expiry after release. DDL/schema parity and empty-
+  only downgrade are exercised on both databases. Shared ownership now has its
+  own matrix below; these original lifecycle cases are not
+  facilitator execution, process-SIGKILL, actual payment or funded admission proof.
+- `tests/test_payment_receipt_claims.py` verifies both directions across the
+  three rails, real deposit/text/video writers, shared/owner purpose conflicts,
+  rollback of failed credit writes, conversion-backed asset identity, legacy
+  exclusion without backfill, retained conflict proof, and lost-reply nonce
+  protection. Twenty-five competing PostgreSQL rail identities yield one claim.
+  SQLite savepoint rollback and both DDL/downgrade paths are explicit tests.
+  Signatures/HTTP RPC remain synthetic fixtures; no actual payment, production
+  mixed-version rollout, complete funded outbox or refund is qualified.
+
+- `tests/test_ltx25_appearance.py` checks the separate fixed Ingredients profile,
+  nonanimated/unrotated PNG decoding, default-dark admission, committed roles/
+  controls, immutable guide chains and refusal of the unpriced live tariff.
+  Optional `MEDIA_VIDEO_WORKER_SOURCE` points to an explicitly reviewed media
+  worker checkout with a test `.venv`; its real adapter consumes the Core plan
+  in an env-file-disabled child, verifies synthetic bytes and binds renamed
+  inputs through mocked HTTP for audio and audio/video. No GPU, live storage,
+  wallet, quality or identity proof is claimed. The async router test separately
+  exercises both appearance/audio and appearance/audio/video with real scoped
+  keys, independently decoded MP4 sources, one hold, exact two-/three-key
+  retention and unchanged-ID rollback recovery on SQLite/disposable PostgreSQL,
+  with a test-only price and private-upload stub.
+
+- `tests/test_video_output.py` uses synthetic S3/body fixtures to prove
+  source-conditional copy, post-copy worker overwrite isolation, streaming
+  bounds/closure, digest/header rejection, private-key cleanup, deadlines,
+  capacity and uncertain transport. `test_media_job_journal.py` adds SQLite/PG
+  terminal controls for canonical result recovery, invalid refund, uncertain
+  held state and a stale connection's no-payout/no-publication behavior.
+  The process-crash fixture stubs frozen storage explicitly. None of these
+  tests is the joint native-worker/GPU/R2 canary or a video-fidelity verdict.
+
+- `tests/test_media_job_journal.py` additionally exercises original-worker/model/
+  feature binding, private lease fencing, 25 competing PostgreSQL resumptions,
+  refund/resume races, stale detach/renew/terminal rejection and 0043-to-0044
+  schema parity. Mocked worker dispatch proves the fresh `resume:true` envelope
+  has one original hold/result. The separate router process test kills real Core
+  and destroys its private Redis queue; worker output/storage remain synthetic.
+  These do not establish joint GPU/R2 recovery or public release qualification.
+
+- `tests/test_ltx25_billing.py` verifies candidate video duration/graph holds
+  before dispatch and the ordinary worker terminal's commit-before-DONE/ACK.
+  SQLite and isolated PostgreSQL schemas cover exact settlement, result-write
+  rollback, timeout recovery, duplicate protection and no payout after release;
+  PostgreSQL additionally observes real competing terminal locks and reserve
+  overdraft races. Prices/storage/transport/free pockets are synthetic, not a
+  live funding, R2, GPU, wallet or price-activation proof.
+  The shot-image cases additionally pin an increased reserve-time price against
+  the caller ceiling (no dispatch or money movement), plus a successful exact
+  ceiling hold with one charge and recoverable result under duplicate completion.
 - `tests/test_billing_monitor.py` exercises the actual background loop with
   synthetic health and delivery dependencies: drift and aging are distinct,
   failures are redacted without skipping treasury/reward checks, the next
@@ -808,6 +1187,11 @@ content sanitization, and reward settlement.
   token and native user-token transport verify real Grid signatures; upstream
   Google/SIWE proof is outside this test.
 - `pytest grid_api/services/` - covers `job_queue`, `den`, `quota` (+ settlement subtree).
+- Credit/account merge races may deliberately fail closed with the exact
+  canonical-account-change retry signal before money writes. Tests must retry
+  the original durable ref, not assume every concurrent call succeeds or
+  swallow arbitrary exceptions. The controlled pre-lock merge case proves zero
+  initial credit rows and exactly one canonical-account credit after retry.
 - PostgreSQL lock-observation tests must refresh `pg_stat_activity` snapshots
   inside a long-lived observer transaction. Prime the snapshot before starting
   the contender and call `pg_stat_clear_snapshot()` before each poll; otherwise

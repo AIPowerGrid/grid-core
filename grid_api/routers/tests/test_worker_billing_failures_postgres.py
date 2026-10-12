@@ -148,7 +148,10 @@ class Worker:
         return value
 
 
-async def dispatch(monkeypatch, account, job, incoming, *, retry=False, disconnected=False):
+async def dispatch(monkeypatch, account, job, incoming, *, retry=False, disconnected=False, mismatch=False,
+                   expired=False, routed_status=None):
+    job["dispatch_deadline_expired"] = expired
+    job["routed_dispatch"] = routed_status is not None
     worker = Worker(job, incoming)
     ended = asyncio.Event()
     pending = [job]
@@ -159,9 +162,15 @@ async def dispatch(monkeypatch, account, job, incoming, *, retry=False, disconne
             return pending.pop()
         await asyncio.Future()
 
+    async def routing_status(_job):
+        if routed_status == "superseded":
+            ended.set()
+        return routed_status
+
     async def requeue(*args, **kwargs):
         requeues.append((args, kwargs))
-        ended.set()
+        if retry or not mismatch:
+            ended.set()
         return "2-0" if retry else None
 
     original_release = credits.release_job
@@ -199,10 +208,14 @@ async def dispatch(monkeypatch, account, job, incoming, *, retry=False, disconne
     monkeypatch.setattr(transport, "_requires_managed_profile", lambda *_: False)
     for name in ("register_worker", "unregister_worker", "refresh_worker", "_clear_strikes"):
         monkeypatch.setattr(transport, name, AsyncMock())
+    monkeypatch.setattr(transport, "_requeue_incompatible_job", requeue)
     monkeypatch.setattr(transport, "_is_in_cooldown", AsyncMock(return_value=False))
     monkeypatch.setattr(transport, "_record_strike", AsyncMock(return_value=1))
     monkeypatch.setattr(transport.job_queue, "pop_job", pop)
+    monkeypatch.setattr(transport.job_queue, "routed_dispatch_status", routing_status)
     monkeypatch.setattr(transport.job_queue, "requeue_job", requeue)
+    if mismatch:
+        monkeypatch.setattr(transport.job_queue, "requeue_for_mismatch", requeue)
     monkeypatch.setattr(transport.job_queue, "ack_job", ack)
     monkeypatch.setattr(transport.job_queue, "maintain_job_claim", claim)
     monkeypatch.setattr(transport.token_stream, "publish_error", error)
@@ -243,10 +256,40 @@ async def dispatch(monkeypatch, account, job, incoming, *, retry=False, disconne
         await asyncio.sleep(0)
     assert result is None or isinstance(result, asyncio.CancelledError), result
     assert any(message["type"] == "ready" for message in worker.sent), worker.sent
-    assert sum(message["type"] == "job" for message in worker.sent) == 1
+    no_dispatch = mismatch or expired or routed_status in {"closed", "superseded"}
+    assert sum(message["type"] == "job" for message in worker.sent) == (0 if no_dispatch else 1)
     assert not successes
     assert not any(message["type"] == "ack" and message.get("den", 0) > 0 for message in worker.sent)
     return requeues, acks, errors
+
+
+@pytest.mark.parametrize("fmt", FORMATS)
+async def test_expired_routed_delivery_refunds_without_backend_dispatch(pg, monkeypatch, fmt):
+    account, job, _ = await reserve(pg, fmt)
+    requeues, acks, errors = await dispatch(monkeypatch, account, job, [], expired=True)
+    assert not requeues and not acks and len(errors) == 1
+    assert await credits.get_balance(account) == INITIAL
+    async with pg() as session:
+        assert await session.scalar(sa.select(sa.func.count()).select_from(tables.ledger)) == 0
+
+
+@pytest.mark.parametrize("fmt", FORMATS)
+@pytest.mark.parametrize("status", ["closed", "superseded"])
+async def test_routed_prefetch_deadline_and_ownership_recheck_prevents_dispatch(pg, monkeypatch, fmt, status):
+    account, job, cost = await reserve(pg, fmt)
+    requeues, acks, errors = await dispatch(monkeypatch, account, job, [], routed_status=status)
+    assert not requeues and not acks and len(errors) == (1 if status == "closed" else 0)
+    await assert_money(pg, account, job, cost, held=status == "superseded")
+
+
+@pytest.mark.parametrize("retry", [False, True])
+async def test_old_media_worker_never_receives_multi_image_job(pg, monkeypatch, retry):
+    account, job, reserved = await reserve(pg, "video")
+    job["payload"]["required_media_feature"] = "recipe-image-bindings-v1"
+    requeues, acks, errors = await dispatch(monkeypatch, account, job, [], retry=retry, mismatch=True)
+    assert len(requeues) == 1 and not acks
+    assert bool(errors) is (not retry)
+    await assert_money(pg, account, job, reserved, held=retry)
 
 
 async def assert_money(pg, account, job, reserved, *, held):

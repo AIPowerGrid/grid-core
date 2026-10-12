@@ -17,7 +17,8 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - `models/` - Pydantic request/response models for OpenAI-compatible requests
   and worker structures.
 - `abis/` / `_abi.py` - local contract ABI loaders used by background sync.
-- `main.py` - lifecycle: DB/Redis init, stale-job reclaimer, reservation and
+- `main.py` - lifecycle: DB/Redis init, stale-job reclaimer, bounded async-media
+  outbox and exact private-input cleanup (both continue after admission rollback), reservation and
   billing invariant monitors, OAuth operational-state retention, validator operational-history pruning,
   disabled-by-default validator shadow outbox collection,
   default-off read-only treasury balance warnings through the billing monitor,
@@ -27,6 +28,15 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 
 ## Local Contracts
 
+- Private `0051` receipt-backed video admission is non-routable. It commits
+  actual owned proof, exact external hold, frozen outbox and original private
+  input authority together, or records an unsent USDC refund obligation without
+  a job. Existing terminal/fence/reward code recognizes `video_prepaid` without
+  drawing or refunding credit pockets. Migrate before candidate financial and
+  backing readers even dark, and retain new handlers/history on rollback.
+  No `/pay` route, sender, watcher, refund signer or public model permission
+  exists; real payment/storage/GPU/client qualification remains required.
+
 - **Auth:** API keys are SHA-256 hashed; keep `auth.py` byte-compatible with
   server-side key issuance. Retired `users.api_key` credentials are not an
   authentication authority.
@@ -35,6 +45,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - **Dispatch:** exactly one live job queue - `services/job_queue.py` (Redis streams). The
   `services/p2p/` variants are default-off scaffolding and must not become the
   production path without a dedicated design/test pass.
+  Candidate compatibility routing transfers the original pending delivery to
+  a fully compatible live peer, using bounded one-use inbox notifications.
+  Those notifications are not another payload queue or financial authority.
+  Server-owned registry protocol markers exclude older Core receivers.
 - **On-chain:** read via background sync loops or offline jobs, cached; never
   perform Base RPC calls on the hot request path.
 - The validator bond loop may update only existing reviewed reference rows. It
@@ -51,6 +65,58 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   local file. Never infer this authority from `GRID_DIAMOND_ADDRESS`.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
+- **Async video:** `MEDIA_ASYNC_ENABLED=0` closes new async admission only.
+  Audio/video conditioning adds separately default-dark `audio-to-video` and
+  `video-to-video` admission; Ingredients appearance adds `appearance-to-video`.
+  Do not infer these gates from the base video path,
+  charging mode or health features. MP4 source verification needs FFmpeg/ffprobe;
+  missing tools reject rather than bypassing validation.
+  Governed LTX image/audio/video inputs require an explicit separate
+  `MEDIA_PRIVATE_SOURCE_BUCKET`; missing/shared output storage rejects before
+  quota or uploads. Operators must verify no public bucket endpoint and the
+  one-day input lifecycle. Signed links alone do not make output-bucket objects
+  private. Existing legacy image ingest is not silently migrated here.
+  Apply migrations through `0045` before starting this candidate even with the flag off:
+  the outbox reads its journal. Typed settings bound held async concurrency,
+  batch size, lease and cadence. Retain the schema and irreversible execution
+  fence on rollback; never rerender a claimed job based on queue loss alone.
+  Original-worker continuation uses a separate renewable Core execution lease,
+  not another queue attempt. Expired/replaced sessions cannot settle or refund.
+  Rig-scoped read-only `/v1/workers/self/media-jobs` confirms irreversible
+  closure for local-cache retention, including lost ACKs after settlement. It
+  remains available on admission rollback; unknown/expired is not closed.
+- **Video quotation:** independently default-off `VIDEO_X402_QUOTES_ENABLED`
+  permits only a bounded, explicitly expiring account pilot. Quote creation
+  validates/compiles without uploads, quota, credits, dispatch or chain calls.
+  Optional quote reads require migration `0046`. This feature is not payment
+  acceptance, video admission or model-use clearance. Rollback closes new
+  quotations while preserving authenticated recovery and immutable history.
+  Offline EIP-3009 matching is non-routable evidence; it grants neither live
+  signer approval nor funded job authority. Current-window expiry cannot
+  discard an already attempted payment's reconciliation/refund obligation.
+  The separate read-only historical receipt helper can inspect an expired
+  quote through two operator-selected HTTPS sources. Its explicit safe/finalized
+  policy has no latest fallback; no route/background loop calls it, and its
+  evidence is not a durable attempt, funding claim or admission transaction.
+  The separate `0047` attempt journal now persists a pre-send identity and
+  original receipt evidence. It has no route, facilitator or background hook,
+  no retained spending signature and no funded-job authority. Quote recovery
+  remains available without this optional journal; no startup loop reads it.
+  Private `0049` staging now commits exact source keys before uploads and verifies
+  stored bytes before ready state. A first journal `begin` requires ready inputs;
+  existing attempts remain observation-only without invented staging history.
+  No route, sender or funded job uses this foundation yet. Candidate `0050`
+  adds default-off unpaid-input cleanup independent of quote creation, with
+  irreversible abandonment, repeated exact-key ACKs and exclusion of every
+  payment attempt. Disabled startup does not query optional staging. Retention
+  transfer, real storage/payment and public license gates remain.
+- Shared receipt ownership requires `0048` before updated deposit/text-x402
+  financial writers run. The same chain/asset/transaction cannot fund a second
+  reference. Video evidence can claim that ownership but still cannot create
+  a hold/outbox. Spent-nonce witnesses bind a transfer to its original video
+  attempt even if the facilitator reply/hash was lost. Quiesce/migrate/upgrade
+  all writers together; neither dark video nor ordinary charging flags permit
+  an older writer to bypass this shared economic record.
 - An enrolled worker's verified signing authority is independent of later
   account payout-preference changes. Reconnection retains the exact owned
   delegation with fresh proof, never arbitrary old wallets or another account's

@@ -111,6 +111,14 @@ Merkle claims on Base.
 
 ## Local Contracts
 
+- Candidate prepaid video is a distinct `video_prepaid` source, not the text
+  x402 post-response rail. Reward selectors require exact completed consumption
+  and its admitted payment, original proven attempt and shared receipt purpose,
+  with no refund liability. It draws no credit pockets; malformed/missing
+  evidence supplies no backing. Apply `0051` before all these readers, retain
+  prepaid-aware code/history on rollback. No sender, policy, budget, payout
+  period or production activation is changed by this candidate.
+
 - **Money moves only after OFAC screening.** A screen hit or an unverifiable
   address is a terminal row status, never a send.
 - **Proof, not trust:** a payout is `sent` ONLY on a proven receipt (matching

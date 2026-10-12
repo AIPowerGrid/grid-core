@@ -20,6 +20,88 @@ validator shadow-observation records.
 
 ## Local Contracts
 
+- Migration `0051` creates empty `grid_video_prepaid_payments`, unique by quote,
+  job and shared receipt claim. Exact amount, proof/quote/input commitments and
+  initial admission are retained; refund-due timestamps are unsent liabilities,
+  not refunded state. No historical evidence or credit is backfilled. Existing
+  reservations remain the terminal authority for new `video_prepaid` holds.
+  Apply before financial/reward readers even with admission dark, retain
+  prepaid-aware terminal/backing code on rollback, and refuse any nonempty
+  downgrade. No sender or public API is enabled by migration.
+
+- Migration `0050` adds nullable abandonment and cleanup-attempt/ACK times to
+  quote staging. Partial and ready input commitments are preserved when a
+  quote is irreversibly abandoned; no row or replay identity is deleted.
+  Cleanup ACKs are point-in-time acknowledgements and are revisited, not
+  terminal absence proof. All recorded payment attempts exclude cleanup.
+  Operational rotation may record failed validation without granting deletion
+  authority; corrupt records never authorize storage writes. Migrate before
+  optional staging/cleanup, retain abandonment-aware code on rollback, and
+  refuse downgrade with any cleanup history. No financial state changes.
+
+- Migration `0049` adds empty `grid_video_quote_staging`, one FK-bound private
+  input manifest per quote. Allocated private keys and quote/source commitments
+  persist before upload; lease replacement never changes the keys. Ready state
+  requires bounded readback proof and its hash, not an executable hold/outbox.
+  Retain allocated and ready history on rollback. Downgrade refuses any row;
+  candidate `0050` adds unpaid-source cleanup, while funded ownership transfer
+  and live storage qualification remain gates. Ordinary API/payment paths and
+  default-off startup do not select this table.
+
+- Migration `0048` adds empty `grid_payment_receipt_claims`, unique by both
+  chain/asset/transaction and economic kind/reference. Private bounded purposes
+  are hashed and immutable through the service API. Native ETH is explicit;
+  converted ETH claims actual USDC rather than its input asset. Existing books
+  receive no invented claim/log/token facts. New deposits and independently
+  settled text payments commit ownership with their economic write; video
+  proof commits ownership without a hold/outbox. Any conflict retains received-
+  money evidence for review, never an automatic refund or second credit.
+  All financial writers require migration-first synchronized upgrade and
+  claim-aware rollback. No retained row may be deleted to reuse value.
+
+- Migration `0047` creates empty private `grid_video_payment_attempts`, keyed
+  by a quotation FK; the quote's unique job/nonce remain the execution binding.
+  It freezes quote commitment, EIP-3009 identity, payload fingerprint, payer,
+  explicit confirmation policy and start time. No spending signature is stored.
+  One authorization/transaction and coherent SQL-NULL proof/review fields are
+  database-enforced. Retained `settling`, `reported`, `proven` or `manual_review`
+  state is not a funded reservation, replay claim or executable job. Apply before
+  calling this optional service; first `begin` additionally requires `0049`
+  ready inputs. No normal API/loop selects it. Rollback retains
+  every row, and downgrade refuses even an unresolved or reviewed attempt.
+
+- Migration `0046` creates empty private `grid_video_quotes`, without a
+  reservation, executable job or payment signature. Quote/job UUIDs, nonce and
+  owner/request-key uniqueness bind the private immutable snapshot; amount and
+  expiry checks remain database-enforced. The service verifies its SHA-256
+  commitment and indexed fields on every recovery. Expired rows retain their
+  identity and consume fixed pilot capacity. Apply before using optional quote
+  routes; retain on rollback. Downgrade refuses any recorded quotation history.
+  Binding-v2 JSON snapshots freeze the signing domain without new columns or
+  backfill. Domainless v1 quotes remain readable with their original nonce and
+  commitment; they cannot be upgraded or used by the offline signing verifier.
+
+- Migration `0043` creates empty private `grid_media_jobs` request/execution
+  records; no historical request is reconstructed or admitted. Each row has a
+  matching reservation FK and a unique account/idempotency-hash pair. The
+  compiled graph is private bounded customer data, not public telemetry.
+  Dispatch leases are reclaimable; execution claims are irrevocable. Reservation
+  state remains the sole charge/refund/result authority. Retain these rows on
+  rollback; downgrade refuses any history. Apply the migration before creating
+  marked jobs, and never roll back to worker dispatch code without the fence.
+  Migration `0044` adds nullable original execution-model/session-lease fields
+  and an original-worker recovery index. Existing claims remain NULL and cannot
+  acquire fabricated resume authority. New claims require all lease fields;
+  terminal/refund authority checks the current lease under the financial job
+  lock. Downgrade refuses any recorded lease, even after settlement. Apply before
+  candidate startup and retain lease-aware transport/financial writers on rollback.
+  Migration `0045` adds nullable exact private-source object records and cleanup
+  attempt/completion timestamps, with a pending-cleanup index. Existing jobs stay
+  SQL NULL: payload URLs are not historical deletion authority. New records
+  commit with the hold/journal. They authorize only exact private-key cleanup
+  after financial closure, never execution, charging or payout. Apply before
+  startup; retain on rollback. Downgrade refuses any recorded retention history.
+
 - Migration `0042` adds `grid_credits.funded_balance_micro` and the append-only
   `grid_credit_ledger.funded_delta_micro`. Both default to zero: historical
   grants and purchased labels are not proof of external funding. A DB check
