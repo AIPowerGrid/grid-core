@@ -159,8 +159,16 @@ content sanitization, and reward settlement.
   finishes. Recovery refreshes exact private GET URLs without decoding,
   recompiling, repricing or uploading again. No signatures, credits, payment
   sender or outbox are written. First attempt permission now requires matching
-  ready state, but no HTTP sender exists. Source cleanup/retention transfer and
-  live R2 qualification remain gates. The SQLite/PostgreSQL staging, quote,
+  ready state, but no HTTP sender exists. Candidate `0050` now closes expired,
+  attempt-free staging irreversibly after lease/grace, then deletes only its
+  recorded keys. No recorded payment attempt is eligible, even unresolved or
+  reviewed state. Failed validation rotates without granting storage authority.
+  ACKs are revisited for late in-flight writes; the provider lifecycle remains
+  required. Repeated cancellation retains staging/cleanup guards until their
+  owned storage threads finish. The independent default-off startup loop drains
+  only unpaid inputs after quote-creation rollback, with count/type-only logs.
+  Current optional staging queries require `0050`. Retention transfer to funded
+  jobs and live R2 qualification remain gates. The SQLite/PostgreSQL staging, quote,
   attempt and shared-receipt matrix passes 234 cases with nine explicit skips;
   synthetic S3 and real botocore request-model checks are not live storage proof.
   The local full suite passes 3,293 tests with 37 skips and 139 existing warnings;

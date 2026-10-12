@@ -198,7 +198,11 @@ validation, worker incentives, and trust boundaries.
   verifies actual stored bytes and fences ready state. First attempt permission
   requires ready inputs; existing attempts stay observation-only. Recovery
   refreshes locations, not source/graph/seed/price. Synthetic storage and real
-  SQL/SDK tests do not qualify live R2, input cleanup or retention transfer.
+  SQL/SDK tests do not qualify live R2 or retention transfer. Candidate `0050`
+  now adds default-off, repeatable exact-key cleanup for expired attempt-free
+  stages, with irreversible abandonment and exclusion of all payment attempts.
+  Synthetic cleanup, corruption/rotation/cancellation and actual SQL/migration
+  tests do not qualify live deletion or funded-job authority transfer.
   Video remains non-routable without a
   funded hold/outbox, automatic retry or refund. Real SQLite/PostgreSQL and fixture HTTP tests cover
   duplicate/lock-expiry and commit-reply recovery; no real payment is attempted.

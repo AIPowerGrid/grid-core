@@ -31,7 +31,9 @@ from . import video_quotes as quotes
 LEASE_SECONDS = 180
 STORAGE_SECONDS = 120
 MAX_OBJECT_BYTES = 32 * 1024 * 1024
+CLEANUP_GRACE_SECONDS = 240
 _active: set = set()
+_cleanup_lock = asyncio.Lock()
 
 
 class VideoStageError(ValueError):
@@ -125,10 +127,18 @@ def _validate(row, quote):
     authority(manifest)
     if not _objects(manifest) and (manifest["endpoint"] is not None or manifest["bucket"] is not None):
         raise VideoStageError("source-free staging cannot adopt storage authority")
-    ready = row["status"] == "ready"
-    if (row["status"] not in {"staging", "ready"}
+    ready = row["proof"] is not None
+    abandoned = row["status"] == "abandoned"
+    if (row["status"] not in {"staging", "ready", "abandoned"}
+            or (row["status"] == "ready" and not ready) or (row["status"] == "staging" and ready)
             or ready != (row["ready_at"] is not None and row["proof"] is not None and row["proof_hash"] is not None)
-            or (not ready and any(row[key] is not None for key in ("ready_at", "proof", "proof_hash")))):
+            or (not ready and any(row[key] is not None for key in ("ready_at", "proof", "proof_hash")))
+            or abandoned != (row["abandoned_at"] is not None)
+            or (abandoned and quotes._aware(row["abandoned_at"]) < max(quotes._aware(quote["expires"]),
+                quotes._aware(row["lease_until"]) + timedelta(seconds=CLEANUP_GRACE_SECONDS)))
+            or (row["cleanup_attempted_at"] is not None and quotes._aware(row["cleanup_attempted_at"]) < quotes._aware(row["created"]))
+            or (row["cleanup_ack_at"] is not None and (not abandoned or row["cleanup_attempted_at"] is None
+                or quotes._aware(row["cleanup_ack_at"]) < quotes._aware(row["cleanup_attempted_at"])))):
         raise VideoStageError("stored video staging state changed")
     if ready:
         proof = row["proof"]
@@ -153,7 +163,7 @@ async def _owned(session, account_id, quote_id, *, lock=False):
     row = (await session.execute(query.with_for_update() if lock else query)).mappings().one_or_none()
     if row is not None:
         row = dict(row)
-        for key in ("created", "lease_until", "ready_at"):
+        for key in ("created", "lease_until", "ready_at", "abandoned_at", "cleanup_attempted_at", "cleanup_ack_at"):
             if row[key] is not None:
                 row[key] = quotes._aware(row[key])
         _validate(row, quote)
@@ -181,6 +191,8 @@ async def _allocate(account_id, quote_id, plan, admission_until):
             raise VideoStageError("inputs do not match the original video quote")
         if row is not None and row["status"] == "ready":
             return row, False
+        if row is not None and row["status"] == "abandoned":
+            raise VideoStageError("new video staging is closed")
         now = _now()
         if (attempt is not None or quotes._aware(quote["expires"]) <= now
                 or admission_until <= now):
@@ -192,7 +204,8 @@ async def _allocate(account_id, quote_id, plan, admission_until):
             manifest = _manifest(quote)
             row = dict(quote_id=quote["id"], quote_commitment=quote["commitment"], manifest=manifest,
                        manifest_hash=quotes._hash(manifest), status="staging", lease_token=token, lease_until=until,
-                       created=now, ready_at=None, proof=None, proof_hash=None)
+                       created=now, ready_at=None, proof=None, proof_hash=None,
+                       abandoned_at=None, cleanup_attempted_at=None, cleanup_ack_at=None)
             _validate(row, quote)
             await session.execute(stages.insert().values(**row))
         else:
@@ -216,7 +229,7 @@ def _upload(row, raw_objects):
         commitment = item["commitment"]
         if len(raw) != commitment["bytes"] or hashlib.sha256(raw).hexdigest() != commitment["sha256"]:
             raise VideoStageError("source bytes changed before upload")
-        if monotonic() >= deadline:
+        if monotonic() >= deadline or _now() >= quotes._aware(row["lease_until"]):
             raise VideoStageError("video source storage deadline exceeded")
         try:
             client.put_object(Bucket=record["bucket"], Key=item["key"], Body=raw,
@@ -232,7 +245,7 @@ def _upload(row, raw_objects):
                 raise VideoStageError("stored source size is unproven")
             digest, size = hashlib.sha256(), 0
             while True:
-                if monotonic() >= deadline:
+                if monotonic() >= deadline or _now() >= quotes._aware(row["lease_until"]):
                     raise VideoStageError("video source storage deadline exceeded")
                 chunk = body.read(min(64 * 1024, len(raw) - size + 1))
                 if type(chunk) is not bytes or size + len(chunk) > len(raw):
@@ -256,6 +269,8 @@ async def _finish(account_id, quote_id, lease_token, proof):
             raise VideoStageError("video staging lease changed")
         if row["status"] == "ready":
             return row
+        if row["status"] == "abandoned":
+            raise VideoStageError("video staging is abandoned")
         if quotes._aware(row["lease_until"]) <= _now():
             raise VideoStageError("video staging lease expired")
         row.update(status="ready", ready_at=_now(), proof=proof, proof_hash=quotes._hash(proof))
@@ -264,6 +279,22 @@ async def _finish(account_id, quote_id, lease_token, proof):
                               .values(**{key: row[key] for key in ("status", "ready_at", "proof", "proof_hash")}))
         await session.commit()
         return row
+
+
+async def _wait_storage(task):
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if task.done() and not task.cancelled():
+            task.exception()
+        raise
 
 
 async def stage(account_id, quote_id, plan: video_plans.FrozenVideoPlan, *, admission_until: datetime):
@@ -280,11 +311,7 @@ async def stage(account_id, quote_id, plan: video_plans.FrozenVideoPlan, *, admi
             plan.check_inputs()
             raw = [image[0] for image in plan.inputs.images] + [source.data for source in plan.inputs.sources]
             task = asyncio.create_task(asyncio.to_thread(_upload, row, raw))
-            try:
-                proof = await asyncio.shield(task)
-            except asyncio.CancelledError:
-                await asyncio.gather(task, return_exceptions=True)
-                raise
+            proof = await _wait_storage(task)
             return await _finish(account_id, quote_id, row["lease_token"], proof)
     except VideoStageError:
         raise
@@ -332,3 +359,84 @@ async def dispatch_payload(account_id, quote_id, *, expires=3600):
         raise
     except Exception:
         raise VideoStageError("staged video recovery unavailable") from None
+
+
+def _no_attempt():
+    return ~sa.exists(sa.select(attempts.attempts.c.quote_id)
+                     .where(attempts.attempts.c.quote_id == stages.c.quote_id).correlate(stages))
+
+
+async def _abandon(account_id, quote_id):
+    async with await new_session() as session:
+        quote, attempt, row = await _owned(session, account_id, quote_id, lock=True)
+        now = _now()
+        if (row is None or attempt is not None or quote["id"] in _active
+                or quotes._aware(quote["expires"]) > now
+                or quotes._aware(row["lease_until"]) + timedelta(seconds=CLEANUP_GRACE_SECONDS) > now):
+            return None
+        if row["status"] != "abandoned":
+            row.update(status="abandoned", abandoned_at=now)
+            _validate(row, quote)
+            await session.execute(stages.update().where(stages.c.quote_id == row["quote_id"])
+                                  .values(status="abandoned", abandoned_at=now))
+            await session.commit()
+        return row
+
+
+async def sweep_unpaid(*, limit=2, recheck_seconds=60):
+    """Repeatable, non-routable cleanup; an ACK is not permanent absence proof.
+
+    Every recorded payment attempt is excluded, even unresolved/unproven ones.
+    No financial state moves. Revisit abandoned keys for late in-flight writes;
+    provider lifecycle and real-storage qualification remain required.
+    """
+    if (type(limit) is not int or not 1 <= limit <= 10 or type(recheck_seconds) is not int
+            or not 30 <= recheck_seconds <= 3600):
+        raise VideoStageError("bounded unpaid cleanup policy required")
+    counts = {"abandoned": 0, "acknowledged": 0, "errors": 0}
+    if _cleanup_lock.locked():
+        return counts
+    async with _cleanup_lock:
+        now = _now()
+        eligible = [quotes.video_quotes.c.expires <= now, _no_attempt(),
+            stages.c.lease_until <= now - timedelta(seconds=CLEANUP_GRACE_SECONDS),
+            sa.or_(stages.c.cleanup_attempted_at.is_(None),
+                   stages.c.cleanup_attempted_at <= now - timedelta(seconds=recheck_seconds))]
+        async with await new_session() as session:
+            selected = (await session.execute(sa.select(stages.c.quote_id, quotes.video_quotes.c.account_id)
+                .join(quotes.video_quotes, quotes.video_quotes.c.id == stages.c.quote_id).where(*eligible)
+                .order_by(sa.func.coalesce(stages.c.cleanup_attempted_at, stages.c.created), stages.c.quote_id)
+                .limit(limit))).mappings().all()
+        for selected_row in selected:
+            quote_id, account_id = selected_row["quote_id"], selected_row["account_id"]
+            try:
+                if quote_id in _active:
+                    continue
+                attempted = _now()
+                # This is rotation metadata only; invalid authority must never
+                # block every later row or be adopted into deletion permission.
+                async with await new_session() as session:
+                    marked = await session.execute(stages.update().where(stages.c.quote_id == quote_id, _no_attempt())
+                        .values(cleanup_attempted_at=attempted, cleanup_ack_at=None))
+                    await session.commit()
+                    if marked.rowcount != 1:
+                        continue
+                row = await _abandon(account_id, quote_id)
+                if row is None:
+                    continue
+                counts["abandoned"] += 1
+                record = authority(row["manifest"])
+                if record is not None:
+                    task = asyncio.create_task(asyncio.to_thread(retention.delete, record))
+                    await _wait_storage(task)
+                async with await new_session() as session:
+                    result = await session.execute(stages.update().where(stages.c.quote_id == quote_id,
+                        stages.c.status == "abandoned", stages.c.cleanup_attempted_at == attempted, _no_attempt())
+                        .values(cleanup_ack_at=_now()))
+                    await session.commit()
+                    counts["acknowledged"] += result.rowcount
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                counts["errors"] += 1
+        return counts

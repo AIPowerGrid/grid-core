@@ -96,8 +96,11 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   Private `0049` staging now commits exact source keys before uploads and verifies
   stored bytes before ready state. A first journal `begin` requires ready inputs;
   existing attempts remain observation-only without invented staging history.
-  No route, sender or funded job uses this foundation yet. Input cleanup,
-  retention transfer, real storage/payment and public license gates remain.
+  No route, sender or funded job uses this foundation yet. Candidate `0050`
+  adds default-off unpaid-input cleanup independent of quote creation, with
+  irreversible abandonment, repeated exact-key ACKs and exclusion of every
+  payment attempt. Disabled startup does not query optional staging. Retention
+  transfer, real storage/payment and public license gates remain.
 - Shared receipt ownership requires `0048` before updated deposit/text-x402
   financial writers run. The same chain/asset/transaction cannot fund a second
   reference. Video evidence can claim that ownership but still cannot create

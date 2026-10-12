@@ -20,13 +20,24 @@ validator shadow-observation records.
 
 ## Local Contracts
 
+- Migration `0050` adds nullable abandonment and cleanup-attempt/ACK times to
+  quote staging. Partial and ready input commitments are preserved when a
+  quote is irreversibly abandoned; no row or replay identity is deleted.
+  Cleanup ACKs are point-in-time acknowledgements and are revisited, not
+  terminal absence proof. All recorded payment attempts exclude cleanup.
+  Operational rotation may record failed validation without granting deletion
+  authority; corrupt records never authorize storage writes. Migrate before
+  optional staging/cleanup, retain abandonment-aware code on rollback, and
+  refuse downgrade with any cleanup history. No financial state changes.
+
 - Migration `0049` adds empty `grid_video_quote_staging`, one FK-bound private
   input manifest per quote. Allocated private keys and quote/source commitments
   persist before upload; lease replacement never changes the keys. Ready state
   requires bounded readback proof and its hash, not an executable hold/outbox.
   Retain allocated and ready history on rollback. Downgrade refuses any row;
-  source cleanup, funded ownership transfer and live storage qualification remain
-  separate gates. Ordinary API and payment paths do not select this table.
+  candidate `0050` adds unpaid-source cleanup, while funded ownership transfer
+  and live storage qualification remain gates. Ordinary API/payment paths and
+  default-off startup do not select this table.
 
 - Migration `0048` adds empty `grid_payment_receipt_claims`, unique by both
   chain/asset/transaction and economic kind/reference. Private bounded purposes

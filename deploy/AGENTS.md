@@ -73,6 +73,16 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Apply `0050` before current optional quote staging/first-payment-attempt use
+  or enabling `VIDEO_UNPAID_CLEANUP_ENABLED`. Its default is off and ordinary
+  startup does not query staging. Keep cleanup enabled independently after
+  quote-creation rollback to drain expired, attempt-free input keys. Its bounded
+  interval is 30-3600 seconds (default 60); ACKs are revisited, not permanent
+  absence proof. Every recorded payment attempt is excluded, not refunded.
+  Retain abandonment-aware code/history on rollback. Provider lifecycle, actual
+  R2 behavior and paid-job retention transfer are separate gates; no production
+  deployment or public LTX/payment permission is implied.
+
 - Shared receipt candidate `0048` is a migration-first all-writer cutover, not
   a video flag. Quiesce deposit claims and text-x402 reconciliation/senders,
   require exact-release backup/restore/schema proof, apply the migration, then

@@ -149,6 +149,15 @@ owning AGENTS.md and any affected parent Child DOX Index.
   with rollback and real PostgreSQL cross-rail race tests. Neither the journal
   nor shared ownership grants a funded hold, outbox or refund authority.
 - Router billing/settlement coverage: `pytest grid_api/routers/`.
+- Candidate `0050` adds repeatable unpaid-input cleanup, independently default
+  off. It closes expired, lease-aged, attempt-free staging before any exact-key
+  deletion; every payment attempt is excluded. Abandonment is irreversible and
+  cleanup ACKs are revisited. Optional staging/cleanup requires this migration;
+  disabled startup does not query it. Real storage and funded-job retention
+  transfer remain gates. No refund, payment, dispatch or public admission moves.
+  Its focused matrix passes 212 cases; the final local full suite passes 3,325
+  with 37 skips. A preceding process-test timeout is retained as inconclusive,
+  followed by unchanged isolated and full passing reruns. Fresh CI is required.
 - Private `0049` quote-input staging is a candidate with 234 focused staging/
   quote/attempt/shared-receipt tests and nine explicit skips. First attempt
   permission now requires its matching ready record; existing attempt recovery
