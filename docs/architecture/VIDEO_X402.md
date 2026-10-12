@@ -115,6 +115,24 @@ and an explicit UTC pilot deadline at most 24 hours ahead when enabled at
 startup. Admission rechecks the deadline after source preparation and again
 under the SQL commit lock. Existing media/model/source gates still apply.
 Enabling this pilot is not public model-use clearance or payment activation.
+Normal expiry closes new quotes, not Core startup, even if the enable flag
+remains set. Existing owner GET/replay stays available; selecting a new pilot
+still requires a reviewed future deadline and bounded explicit cohort.
+
+The private integrated branch now also carries the credit-first pilot guards:
+exact account admission, captured deadline checks across staging/SQL waits,
+pocket rollback and no governed waiting/chat bypass. Quote and credit pilots
+remain independent: a quote creates no executable job or funding authority.
+The receipt-backed private helper still uses its separate explicit admission
+policy; no payment route or flag is introduced. Integrated regression results
+are separate from the credit-first PR's exact CI evidence.
+The full integrated Python 3.13/PostgreSQL 14 run passes 3,818 with 41 explicit
+skips and 139 inherited warnings, including six isolated real Core-process
+restart cases and all four reviewed media-worker adapter checks. Pinned SDK
+HTTP/SQL/signature checks pass 68. The 296-case focused run has eleven explicit
+skips (SQLite concurrency/DDL counterparts and absent optional worker-source
+configuration); the full run supplies that reviewed source. No real payment,
+native render, release or production configuration is activated.
 
 `VIDEO_X402_QUOTE_NETWORK` defaults to `eip155:84532` (Base Sepolia); the only
 other accepted network is `eip155:8453`. Assets are the canonical Circle USDC

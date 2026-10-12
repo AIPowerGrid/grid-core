@@ -37,6 +37,7 @@ from grid_api.services import credits, job_queue, pricing, recipes
 from grid_api.services import media_jobs as jobs
 from grid_api.services.recipe_import import recipe_root
 from grid_api.v2.schema import account_aliases, accounts, credit_ledger, ledger, media_jobs, metadata, reservations
+from grid_api.v2.schema import credits as balances
 
 ROOT = Path(__file__).resolve().parents[3]
 MODEL = "LTX-2.5 Distilled BF16"
@@ -199,6 +200,65 @@ async def test_changed_body_conflicts_before_pocket_draws(db):
         await jobs.reserve(prepared(aid, key=key, request_hash="f" * 64))
     assert await counts() == (1, 1, 0)
     assert credits._promo_first.await_count == credits._free_first.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("locked_table", ["account", "balance"])
+async def test_pilot_expiry_after_observed_postgres_lock_never_commits_hold(db, monkeypatch, locked_table):
+    factory, backend = db
+    if backend != "postgres":
+        pytest.skip("real PostgreSQL row-lock observation required")
+    aid = await owner()
+    deadline = datetime.now(UTC) + timedelta(minutes=15)
+    job = replace(prepared(aid), admission_deadline=deadline)
+    promo_release = AsyncMock()
+    service_release = AsyncMock()
+    monkeypatch.setattr(credits, "_promo_release", promo_release)
+    monkeypatch.setattr(credits.service_limits, "release", service_release)
+    if locked_table == "balance":
+        monkeypatch.setattr(credits, "_promo_first", AsyncMock(return_value=4_000))
+        monkeypatch.setattr(credits, "_free_first", AsyncMock(return_value=5_000))
+    column = accounts.c.id if locked_table == "account" else balances.c.account_id
+    task = None
+    try:
+        async with factory() as holder:
+            await holder.execute(sa.select(column).where(column == aid).with_for_update())
+            holder_pid = await holder.scalar(sa.text("SELECT pg_backend_pid()"))
+            async with asyncio.timeout(15), factory() as observer:
+                await observer.scalar(sa.text("SELECT count(*) FROM pg_stat_activity"))
+                task = asyncio.create_task(jobs.reserve(job))
+                while True:
+                    await observer.execute(sa.text("SELECT pg_stat_clear_snapshot()"))
+                    if await observer.scalar(sa.text(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE :pid = ANY(pg_blocking_pids(pid)))",
+                    ), {"pid": holder_pid}):
+                        break
+                    if task.done():
+                        await task
+                        pytest.fail("video hold did not wait on the owned PostgreSQL row lock")
+                    await asyncio.sleep(0.02)
+            monkeypatch.setattr(jobs, "_now", lambda: deadline)
+            await holder.commit()
+        with pytest.raises(jobs.MediaJobAdmissionClosed):
+            await asyncio.wait_for(task, 15)
+    finally:
+        if task:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    assert await counts() == (0, 0, 0)
+    assert await credits.get_balance(aid) == OPENING
+    async with factory() as session:
+        assert await session.scalar(sa.select(balances.c.funded_balance_micro).where(balances.c.account_id == aid)) == OPENING
+        assert await session.scalar(sa.select(sa.func.count()).select_from(credit_ledger).where(
+            credit_ledger.c.ref == job.job_id)) == 0
+    if locked_table == "balance":
+        promo_release.assert_awaited_once_with(aid, str(job.job_id))
+        credits.free_credits.release.assert_awaited_once_with(aid, str(job.job_id))
+        service_release.assert_awaited_once_with(None, str(job.job_id))
+    else:
+        credits._promo_first.assert_not_awaited()
+        credits._free_first.assert_not_awaited()
+        promo_release.assert_not_awaited()
 
 
 @pytest.mark.asyncio

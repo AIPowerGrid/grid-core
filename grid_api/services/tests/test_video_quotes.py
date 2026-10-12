@@ -295,10 +295,17 @@ def test_quote_settings_are_dark_bounded_and_require_private_pilot():
     for change in ({"video_x402_quote_accounts": []}, {"video_x402_quote_pay_to": ""},
                    {"video_x402_quote_pay_to": "0x" + "0" * 40}, {"video_x402_quotes_until": None},
                    {"video_x402_quotes_until": datetime.now(UTC) + timedelta(days=2)},
-                   {"video_x402_quotes_until": datetime.now(UTC) - timedelta(seconds=1)},
                    {"video_x402_quote_capacity": 1}, {"video_x402_quote_network": "eip155:1"}):
         with pytest.raises(ValueError):
             GridSettings(_env_file=None, **{**enabled, **change})
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_expired_quote_pilot_metadata_keeps_core_startup_available(enabled):
+    settings = GridSettings(_env_file=None, video_x402_quotes_enabled=enabled,
+                            video_x402_quote_accounts=[uuid4()], video_x402_quote_pay_to=PAY_TO,
+                            video_x402_quotes_until=datetime.now(UTC) - timedelta(days=1))
+    assert settings.video_x402_quotes_enabled == enabled
 
 
 def migration():

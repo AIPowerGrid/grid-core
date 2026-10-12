@@ -96,6 +96,16 @@ owning AGENTS.md and any affected parent Child DOX Index.
 
 ## Verification
 
+- The local integrated video candidate ports the credit-first exact-account/
+  deadline/waiting-route guards while preserving all quote/prepaid/refund
+  readers and migrations. Normal expiry of either pilot permits startup and
+  authorized recovery, never new jobs/quotes. Six real isolated Core restart
+  cases pass, including both flags left enabled after expiry. Full local
+  Python 3.13/PostgreSQL 14 regression passes 3,818 with 41 explicit skips and
+  139 inherited warnings; all four reviewed worker-adapter checks execute.
+  The pinned SDK qualification still passes 68. This is local evidence, not
+  publication, exact-source Linux CI, a funded canary or production activation.
+
 - New private binding-v3 video quotes commit upfront/EIP-3009 terms. Fresh
   signatures and both SDK callbacks require explicit upfront acceptance;
   existing v1/v2 identities retain recovery and v2 historical proof, never
