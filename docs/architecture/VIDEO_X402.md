@@ -311,8 +311,9 @@ attempt and cannot produce a second send permission.
 
 A crash after `begin` but before the facilitator call can therefore leave an
 unsent `settling` attempt. Likewise, a lost facilitator reply may leave the
-transaction unknown. Both need the future bounded nonce watcher/confirmed
-unspent-authorization closure or reviewed correlation; neither may be reset or
+transaction unknown. A separate bounded recovery candidate below can locate
+and prove the original transfer; automatic watcher scheduling and confirmed
+unspent-authorization closure remain absent. Neither attempt may be reset or
 automatically resent. The separate staged-input candidate is described below;
 no facilitator consumes it yet. The separate `0051` private admission candidate
 can consume new proved evidence with its actual shared ownership. New proven evidence commits its shared receipt ownership,
@@ -555,8 +556,49 @@ Scratch Alembic upgrades through `0051` and reports no schema drift. New module,
 test and migration files pass Ruff; unrelated inherited lint remains unchanged.
 It does not prove a received payment, facilitator, GPU render or sent refund.
 Fresh exact-commit PostgreSQL 16 CI is still required for this candidate.
-The missing HTTP/envelope/sender, lost-transaction watcher, reviewed Safe refund
-proof, live testnet/storage/GPU chain and public model permission remain gates.
+The missing HTTP/envelope/sender, automatic lost-transaction watcher, reviewed
+Safe refund proof, live testnet/storage/GPU chain and public model permission
+remain gates.
+
+### Lost Transaction Recovery Candidate
+
+`locate_authorization` is a non-routable, read-only correlation helper. Its caller
+selects an operator-reviewed range of at most 1024 blocks covered by the stored
+safe/finalized policy. Both configured HTTPS sources must agree on the exact
+canonical-USDC `AuthorizationUsed` token/payer/nonce log and its transaction,
+index, block and range anchor. Event/range blocks are re-read to reject changed
+anchors. It shares the receipt verifier's capacity, deadline and response bounds.
+Two matching sources are defense in depth, not cryptographic chain proof or
+proof that their operators are independent.
+
+The returned hash is correlation only. `recover_lost_transaction` requires an
+owned prior unknown `settling` attempt, proves the entire original transfer
+before recording its immutable transaction, then uses ordinary reconciliation
+to persist proof and shared receipt ownership. Known transactions use ordinary
+reconciliation; already proven reads retain the original evidence without RPC.
+No SQL/account/quote locks cover network reads. Report/proof commit-reply loss
+recovers the same attempt; no signature, second send permission, hold, credit,
+executable job, payout or refund is produced by this helper.
+
+An empty range is pending, not proof that payment never happened, that the
+authorization is unspent, or that another send is safe. Disagreement, invalid
+receipts and transport uncertainty do not reset the attempt. There is no
+automatic cursor, range selector, scheduler, HTTP route or facilitator adapter.
+
+The local recovery/receipt/journal/shared-claim/prepaid matrix passes 437 cases
+with five explicit SQLite skips; their PostgreSQL counterparts execute against
+the isolated PostgreSQL 14 database. It includes 25 competing recovery callers,
+actual SQL lock checks, expiry, provider/log/anchor faults, cancellation and
+pre/post-commit reply failures. Chain responses/signatures are synthetic and
+unfunded. Fresh exact-commit CI and actual payment/refund qualification remain
+required. This future payment branch is separate from the credit-pilot PR and
+is neither merged nor deployed. The full local Python 3.13/Grid suite also
+passes 3,479 with 39 skips and 139 inherited warnings in 477.56 seconds. New
+recovery and changed runtime modules pass Ruff; the pre-existing import-order
+diagnostic in the extended attempt-test module remains outside this scope.
+
+Protocol references: [EIP-3009](https://eips.ethereum.org/EIPS/eip-3009) and the
+[Ethereum JSON-RPC log API](https://ethereum.org/en/developers/docs/apis/json-rpc/#eth_getlogs).
 
 ### Intended Flow
 
@@ -712,9 +754,10 @@ local nor CI fixture results change public serving permission.
    Candidate `0050` now handles expired attempt-free input cleanup separately;
    `0051` transfers admitted input authority to the existing terminal cleanup.
    Live storage/cleanup and unadmitted-payment retention remain gates.
-   The bounded lost-transaction watcher, actual facilitator/payer compatibility
-   remain unimplemented. Atomic funded admission is a private `0051` candidate,
-   not an HTTP sender or live receipt-to-GPU proof.
+   Bounded original-transaction lookup/recovery is now a private candidate;
+   automatic watcher range selection/scheduling and actual facilitator/payer
+   compatibility remain unimplemented. Atomic funded admission is a private
+   `0051` candidate, not an HTTP sender or live receipt-to-GPU proof.
    Prove duplicates, concurrency and cross-rail claims on PostgreSQL 16. Keep
    the existing text x402 contract unchanged.
 4. Integrate leased success/failure and reviewed refunds. Kill processes before/

@@ -233,6 +233,12 @@ content sanitization, and reward settlement.
   receive-authorization, bytes overloads and calldata suffixes are unsupported,
   not silently credited. Live compatibility and atomic funded admission remain
   gates; journal/shared-claim fixture tests do not prove real settlement.
+  `locate_authorization` additionally correlates one original transaction from
+  an operator-selected confirmed range of at most 1024 blocks. Both sources
+  must agree on exact token/payer/nonce logs and re-read range/event anchors.
+  It shares the bounded transport/proof slots; a miss is pending, never proof
+  of unspent authorization or permission to resend. The result is correlation
+  only, not a payment proof. Automatic range selection/scheduling remains absent.
 - `video_payment_attempts.py` owns optional `0047` pre-send/reconciliation state,
   not a payment endpoint. First permission requires `0049` verified input
   staging; an old attempt can only recover, never gain another send permission.
@@ -251,11 +257,15 @@ content sanitization, and reward settlement.
   Claim conflict retains that proof as `receipt_claim_conflict` manual review,
   not a payable/refundable duplicate. Previously proven rows recover unchanged
   and are not silently backfilled into ownership; future admission must check
-  its actual shared claim. There is no facilitator, watcher, signature-retention/
-  retry, funded hold/outbox, credit or payout write. Private input persistence
+  its actual shared claim. There is no facilitator, automatic watcher,
+  signature-retention/retry, funded hold/outbox, credit or payout write. Private input persistence
   is separately owned by the staging service, not the attempt journal.
-  `proven` evidence alone cannot admit work. Missing-transaction recovery still
-  needs the bounded nonce watcher or reviewed manual correlation. No runtime
+  `proven` evidence alone cannot admit work. `recover_lost_transaction` uses
+  the bounded nonce-log lookup only for an original unknown `settling` attempt,
+  proves the entire transfer before immutable report, then uses ordinary
+  reconciliation/shared ownership. Known/proven transactions bypass the scan.
+  Network reads hold no SQL locks; report/proof commit-reply failures recover
+  the same attempt without a send permission or economic movement. No runtime
   route/loop invokes this journal and normal quote views remain payment-disabled.
 - `payment_receipt_claims.py` is the `0048` cross-rail ownership writer. One
   chain/asset/transaction belongs to one deposit/text/video economic reference;
