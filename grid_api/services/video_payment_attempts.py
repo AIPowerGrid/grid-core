@@ -57,7 +57,8 @@ def _validate(row: dict, quote: dict) -> dict:
     if (status not in {"settling", "reported", "proven", "manual_review"}
             or (status == "settling" and tx is not None)
             or (status in {"reported", "proven"} and tx is None)
-            or ((status == "manual_review") != (row["review_code"] == "receipt_unproven"))):
+            or (status == "manual_review" and row["review_code"] not in {"receipt_unproven", "receipt_claim_conflict"})
+            or (status != "manual_review" and row["review_code"] is not None)):
         raise VideoAttemptError("stored video attempt state changed")
     if tx is not None:
         proofs._hex(tx, 32)
@@ -249,6 +250,16 @@ async def reconcile(account_id, quote_id, *, sources: tuple[proofs.PaymentRPC, p
                 current.update(status="manual_review", review_code="receipt_unproven")
             else:
                 current.update(status="proven", proof=proof, proof_hash=quotes._hash(proof), proven_at=_now(), review_code=None)
+                from . import payment_receipt_claims as receipt_claims
+
+                try:
+                    await receipt_claims.claim_in_session(session, chain_id=proof["chain_id"], asset=proof["asset"],
+                        transaction_hash=proof["transaction_hash"], owner_kind="video_x402", owner_ref=str(current["quote_id"]),
+                        observed_nonces=((proof["payer"], proof["authorization_nonce"]),),
+                        purpose={"schema": "aipg.video-receipt.v1", "quote_commitment": current["quote_commitment"],
+                                 "authorization_identity": current["authorization_identity"], "amount_micro": proof["amount_micro"]})
+                except receipt_claims.ReceiptClaimConflict:
+                    current.update(status="manual_review", review_code="receipt_claim_conflict")
             _validate(current, current_quote)
             await session.execute(attempts.update().where(attempts.c.quote_id == current["quote_id"])
                 .values(**{key: current[key] for key in ("status", "proof", "proof_hash", "proven_at", "review_code")}))

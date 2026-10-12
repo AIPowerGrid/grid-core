@@ -93,6 +93,13 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   original receipt evidence. It has no route, facilitator or background hook,
   no retained spending signature and no funded-job authority. Quote recovery
   remains available without this optional journal; no startup loop reads it.
+- Shared receipt ownership requires `0048` before updated deposit/text-x402
+  financial writers run. The same chain/asset/transaction cannot fund a second
+  reference. Video evidence can claim that ownership but still cannot create
+  a hold/outbox. Spent-nonce witnesses bind a transfer to its original video
+  attempt even if the facilitator reply/hash was lost. Quiesce/migrate/upgrade
+  all writers together; neither dark video nor ordinary charging flags permit
+  an older writer to bypass this shared economic record.
 - An enrolled worker's verified signing authority is independent of later
   account payout-preference changes. Reconnection retains the exact owned
   delegation with fresh proof, never arbitrary old wallets or another account's

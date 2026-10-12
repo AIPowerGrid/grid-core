@@ -55,6 +55,10 @@ owning AGENTS.md and any affected parent Child DOX Index.
   legacy `GRID_CHARGING_ENABLED` fallback. The legacy flag being `0` does not
   prove dry-run when a mode is configured; verify the selected request cohort
   and actual running configuration.
+- Candidate `0048` shared receipt ownership is mandatory before updated deposit
+  or text-x402 reconciliation writers run. Drain/quiesce those writers, migrate,
+  and upgrade every replica/offline runner together; old writers do not consult
+  the new claims. Retain claim-aware writers/history on rollback after use.
 - Production Python dependencies resolve from `requirements-grid.txt` into the
   reviewed, hash-locked Python 3.12/Linux `requirements-grid.lock`. Docker and
   host deploys consume only matching binary wheels from the lock and do not
@@ -135,12 +139,15 @@ owning AGENTS.md and any affected parent Child DOX Index.
   destinations, bounded read-only replies, actual ECDSA/official-SDK ABI checks,
   exact USDC authorization/Transfer events and pinned block state. Fixture
   tests are not live RPC, facilitator or purchased-payment qualification. It
-  has no runtime hook, payment attempt, cross-rail claim or economic authority.
+  has no runtime hook or economic authority; the separate journal consumes its
+  proof without making the pure verifier a payment writer.
 - Private migration `0047` and the non-routable video attempt journal persist
   one pre-send winner and immutable transaction/proof recovery per quote. No
   spending signature is retained. SQLite/real PostgreSQL cover reply loss,
-  rollback, duplicate races and lock-delayed expiry; the journal grants no
-  shared receipt ownership, funded hold, outbox or refund authority.
+  rollback, duplicate races and lock-delayed expiry. Candidate `0048` adds
+  shared receipt ownership for new proven evidence and deposit/text writers,
+  with rollback and real PostgreSQL cross-rail race tests. Neither the journal
+  nor shared ownership grants a funded hold, outbox or refund authority.
 - Router billing/settlement coverage: `pytest grid_api/routers/`.
 - Legacy smoke tests live under `tests/` and may skip without external services.
 - For docs-only changes, run at least `git diff --check` and inspect the DOX

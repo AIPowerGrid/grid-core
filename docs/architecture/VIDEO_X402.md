@@ -4,7 +4,7 @@
 # Video x402 Build
 
 Status: **private quotation, offline signature-binding and read-only historical
-receipt/attempt-journal candidates implemented; payment collection remains a proposal**.
+receipt/attempt-journal/shared-ownership candidates implemented; payment collection remains a proposal**.
 Reviewed against the candidate async video code and locally locked x402 2.16.0
 SDK on October 11, 2026. The quote routes below are independently default-off
 and have no payment collection, reservation, dispatch, refund sender or
@@ -197,8 +197,8 @@ are refused, without returning the supplied signature or request values.
 The quote window is checked before and after cryptographic work.
 
 The result retains no signature or paid/funded state. Its authorization identity
-commits chain/token/payer/nonce for future shared replay claims; **no claim is
-currently written**, so repeating a valid offline verification is not prevented.
+commits chain/token/payer/nonce for the durable attempt journal; **this offline
+helper writes no claim**, so repeating its valid verification is not prevented.
 It does not check balance, authorization consumption, live token implementation/
 domain, payer code/delegation, confirmation, receipts or facilitator support.
 These require separately qualified bounded chain reads before financial
@@ -281,7 +281,8 @@ FK, unique authorization identity/transaction, immutable payload fingerprint,
 payer, confirmation policy and start time, plus coherent nullable receipt/review
 state. `services/video_payment_attempts.py` is non-routable; no endpoint or
 background loop invokes it. It writes no credit, reservation, executable journal,
-completion, payout or shared receipt claim. Normal quote views still return
+completion or payout. The later shared ownership integration is described below.
+Normal quote views still return
 `payment_enabled:false`. Optional journal use requires the migration; ordinary
 quote recovery does not. Downgrade refuses any attempt or unresolved liability.
 
@@ -308,8 +309,8 @@ unsent `settling` attempt. Likewise, a lost facilitator reply may leave the
 transaction unknown. Both need the future bounded nonce watcher/confirmed
 unspent-authorization closure or reviewed correlation; neither may be reset or
 automatically resent. Staged private input persistence is still missing from
-this journal. A proven transfer remains a recoverable liability until shared
-cross-rail ownership and funded admission/refund commit; this candidate must
+this journal. New proven evidence now commits its shared receipt ownership,
+but remains a recoverable liability until funded admission/refund commits; this candidate must
 not take real payments merely because its SQL tests pass.
 
 Local SQLite/PostgreSQL 14 plus fixture-HTTP quote/signature/receipt/attempt
@@ -333,6 +334,50 @@ Never put them in URLs, logs, result envelopes or ordinary evidence exports.
 Retained authorizations need private access-controlled storage and bounded
 expiry. Reads authenticate the owner; neither a quote ID nor a supplied wallet,
 payment header or idempotency key is independently an access credential.
+
+## Shared Receipt Candidate
+
+Migration `0048` creates empty `grid_payment_receipt_claims` with unique
+chain/actual-asset/transaction and economic-kind/reference identities. Private
+bounded purpose metadata is hashed and immutable. The initial unit is one
+token/transaction, not an individual log: legacy deposits sum matching token
+transfers and text/video x402 cannot split one token/transaction across jobs.
+Different token assets in a transaction retain their separate value.
+
+New deposits atomically commit ownership, receipt and purchased/funded credit.
+ETH conversion claims actual USDC rather than its native input. Text x402 claims
+ownership only with its independently confirmed exact terminal charge; its
+configured RPC chain must match the recorded network. A new video proof commits
+its ownership in the proof transaction, not a funded hold/outbox. Conflict
+retains the observed money proof as `receipt_claim_conflict` manual review;
+it cannot cause a second charge/credit or automatic refund.
+
+Canonical bounded AuthorizationUsed witnesses also exclude another rail from
+a matching original video attempt when the facilitator reply/transaction hash
+was lost. This prevents a deposit or text reconciliation from repurposing that
+same spent video nonce. The ordinary recorded-transaction and historical-book
+checks remain additional guards. Spent nonce recognition is not itself payment
+proof, an unused-nonce oracle, a transaction watcher or dispatch authority.
+
+Existing economic books are read as exclusion evidence without backfill. Old
+conversion receipts lacking token provenance conservatively refuse ambiguous
+reassignment; new claim records identify the actual token. Previously proven
+video rows recover unchanged and acquire no fabricated claim. Future atomic
+admission must require the actual matching shared ownership row, not infer it
+from an old `proven` label. Claims retain replay identity permanently.
+
+PostgreSQL transaction-scoped key locks and uniqueness enforce receipt/owner
+races. Nested insert conflicts preserve the caller transaction for review;
+SQLite explicitly starts a physical transaction before its savepoint so outer
+rollback cannot orphan a released claim. This behavior is separately tested.
+No new RPC, sender, public video API, reservation or outbox is added here.
+
+**Deployment boundary:** quiesce deposit/text-x402 writers and offline runners,
+prove exact-release backup/restore, migrate through `0048`, then upgrade every
+writer before resuming. Mixed-version writers can bypass claims and are unsafe.
+After first use, rollback retains ownership and claim-aware financial writers;
+downgrade refuses any stored claim. Applying this migration does not enable
+video collection or grant model-use permission. No production changes are made.
 
 ## Proposed Payment Flow
 
@@ -360,7 +405,7 @@ the independently funded transaction commits.
 | quoted / verified | Quote or valid authorization only | Forbidden |
 | settling | Durable attempt; outcome may be unknown | Forbidden |
 | reported | Facilitator transaction, not independently proved | Forbidden |
-| proven | Original historical receipt stored; no shared claim/hold/outbox | Forbidden |
+| proven | New original receipt plus shared ownership stored; no hold/outbox | Forbidden |
 | funded | Exact confirmed payment committed with held job | Existing outbox only |
 | manual_review | Ambiguous payment or inconsistent proof | Forbidden |
 | refund_due / refund_pending | Money owed back, refund not proved | Forbidden |
@@ -433,8 +478,17 @@ JSON exponent-overflow guard then passes 238 targeted tests: 170 receipt cases
 plus 68 exact-signature cases. The earlier full run predates those final two
 overflow cases. Receipt revision `18354a8e` subsequently passes its own
 [exact-commit Linux/PostgreSQL 16 CI](https://github.com/AIPowerGrid/grid-core/actions/runs/38184190435).
-The newer `0047` attempt journal requires fresh exact-commit CI; these prior
-results do not qualify its SQL transitions or migration.
+The `0047` attempt journal `b81fff0a` separately passes its own
+[exact-commit Linux/PostgreSQL 16 CI](https://github.com/AIPowerGrid/grid-core/actions/runs/38186145247).
+The following `0048` shared-ownership changes still require fresh exact-commit
+CI; those prior results do not qualify the new cross-rail transitions.
+The final shared-ownership candidate passes the full local Grid suite:
+3,225 passed, 35 skipped and 139 existing warnings in 461.76 seconds, with
+the real disposable PostgreSQL 14 fixture configured. Its 25-way cross-rail
+race, rollback and migration cases execute; PostgreSQL-only SQLite variants
+and optional external integration checks remain skips, not claimed proof.
+An isolated empty PostgreSQL database migrates through `0048` and passes
+`alembic check` without drift. Targeted Ruff and `git diff --check` pass.
 The receipt tests have no real payment or SQL mutation. Real payment and
 native quote-to-funded job qualification remain pending. Neither
 local nor CI fixture results change public serving permission.
@@ -456,8 +510,9 @@ local nor CI fixture results change public serving permission.
    live account/token/facilitator compatibility before taking payment.
 3. Attempt journal, independent chain proof and atomic prepaid hold/outbox.
    The receipt verifier and durable prior-attempt journal are candidates with
-   real SQL/fixture transport proofs. Shared cross-rail claims, staged-input
-   persistence, the bounded lost-transaction watcher, actual facilitator/payer
+   real SQL/fixture transport proofs. Shared cross-rail claims now integrate with
+   deposits/text/video, with migration/all-writer rollout and fresh CI gates.
+   Staged-input persistence, the bounded lost-transaction watcher, actual facilitator/payer
    compatibility and atomic funded admission are not implemented yet.
    Prove duplicates, concurrency and cross-rail claims on PostgreSQL 16. Keep
    the existing text x402 contract unchanged.

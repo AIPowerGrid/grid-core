@@ -148,8 +148,9 @@ content sanitization, and reward settlement.
   toward the pilot's caps; no deletion/reused identity or payment acceptance
   exists. No quote can enqueue, upload, consume quota, debit, pay or refund.
   Apply `0046` before using these optional routes and retain quote history on
-  rollback. HTTP signature acceptance, live payment proof, cross-rail claim ownership,
-  funded admission and real refunds remain separate implementation gates.
+  rollback. Shared receipt ownership is a separate `0048` candidate, not quote
+  authority. HTTP acceptance, live payment proof, funded admission and real
+  refunds remain gates.
 - `video_eip3009.py` is an offline, admission-time exact EIP-3009 binding
   helper, not a payment endpoint. It builds unsigned SDK-compatible typed data
   including the mandatory JSON-RPC `EIP712Domain` type definitions,
@@ -187,11 +188,12 @@ content sanitization, and reward settlement.
   second reads, a thirty-second whole-proof deadline, 512-KiB replies, strict
   duplicate-free JSON-RPC and no redirects bound the transport. Caller-owned
   authenticated/TLS-verifying clients remain a future adapter contract; distinct
-  hostnames are not operator-independence or cryptographic chain proof. No
-  request/loop, attempt journal, replay claim, monetary write, sender or dispatch
-  calls it. Wrapped/batched calls, receive-authorization, bytes overloads and
-  calldata suffixes are unsupported, not silently credited. Live compatibility,
-  prior-attempt binding, shared claims and atomic funded admission remain gates.
+  hostnames are not operator-independence or cryptographic chain proof. The
+  separate attempt journal calls it, but no request/loop, sender or dispatch
+  does. The pure verifier writes no claims or money. Wrapped/batched calls,
+  receive-authorization, bytes overloads and calldata suffixes are unsupported,
+  not silently credited. Live compatibility and atomic funded admission remain
+  gates; journal/shared-claim fixture tests do not prove real settlement.
 - `video_payment_attempts.py` owns optional `0047` pre-send/reconciliation state,
   not a payment endpoint. Account/quote locks serialize one initial valid
   authorization winner; created-time/deadline checks run after locks and again
@@ -204,11 +206,35 @@ content sanitization, and reward settlement.
   proof. Repeated proven reads retain the original anchors with no network.
   Unavailable/pending proof leaves state unchanged; rejected proof is manual
   review, not no-payment/refund. Commit-reply loss recovers the original row.
-  There is no facilitator, watcher, signature-retention/retry, shared cross-rail
-  claim, staged input persistence, funded hold/outbox, credit or payout write.
+  The separate `0048` shared receipt claim now commits with new proven evidence.
+  Claim conflict retains that proof as `receipt_claim_conflict` manual review,
+  not a payable/refundable duplicate. Previously proven rows recover unchanged
+  and are not silently backfilled into ownership; future admission must check
+  its actual shared claim. There is no facilitator, watcher, signature-retention/
+  retry, staged input persistence, funded hold/outbox, credit or payout write.
   `proven` evidence alone cannot admit work. Missing-transaction recovery still
   needs the bounded nonce watcher or reviewed manual correlation. No runtime
   route/loop invokes this journal and normal quote views remain payment-disabled.
+- `payment_receipt_claims.py` is the `0048` cross-rail ownership writer. One
+  chain/asset/transaction belongs to one deposit/text/video economic reference;
+  the same reference cannot adopt another receipt or change purpose. Different
+  assets in one transaction retain separate value. PostgreSQL serializes the
+  key and SQL uniqueness guards owner races; nested insert conflicts leave the
+  caller transaction usable. SQLite explicitly begins the actual transaction
+  before savepoints, preventing rollback-orphan claims in legacy driver mode.
+  Deposits commit claim/receipt/credit together; independently proved text
+  x402 commits claim/settled state together. ETH conversion claims its actual
+  USDC token, not native input. Historical books are checked without backfill;
+  old conversions missing token provenance reject ambiguous reassignment.
+  Bounded canonical AuthorizationUsed witnesses exclude any other rail from
+  a matching original video attempt even when no transaction hash is recorded.
+  Video proof/claim commit together but do not grant funded admission. Failed
+  ownership preserves proof for manual review without automatic credit/refund.
+  No RPC, sender, public route, signature or model/worker authority exists here.
+  All deposit/text-x402 replicas and offline reconcilers require migration-first
+  synchronized upgrade; old writers can bypass claims. Retain claim-aware code
+  and history on rollback. Future funded admission must call the ownership gate,
+  not infer ownership from an old `proven` label.
 - `probe.py` is a retired fail-closed compatibility shim, not a sampler.
   Its old `GRID_PROBE_*` variables cannot dispatch work. Use the existing
   assignment-bound validator or manager-bound setup paths for no-DEN checks;
@@ -1050,8 +1076,17 @@ content sanitization, and reward settlement.
   changed intent/policy rejection, and zero credit/hold/job/ledger effects.
   Twenty-five PostgreSQL duplicate callers yield one winner; an observed real
   quote-lock waiter rechecks expiry after release. DDL/schema parity and empty-
-  only downgrade are exercised on both databases. Not cross-rail ownership,
+  only downgrade are exercised on both databases. Shared ownership now has its
+  own matrix below; these original lifecycle cases are not
   facilitator execution, process-SIGKILL, actual payment or funded admission proof.
+- `tests/test_payment_receipt_claims.py` verifies both directions across the
+  three rails, real deposit/text/video writers, shared/owner purpose conflicts,
+  rollback of failed credit writes, conversion-backed asset identity, legacy
+  exclusion without backfill, retained conflict proof, and lost-reply nonce
+  protection. Twenty-five competing PostgreSQL rail identities yield one claim.
+  SQLite savepoint rollback and both DDL/downgrade paths are explicit tests.
+  Signatures/HTTP RPC remain synthetic fixtures; no actual payment, production
+  mixed-version rollout, complete funded outbox or refund is qualified.
 
 - `tests/test_ltx25_appearance.py` checks the separate fixed Ingredients profile,
   nonanimated/unrotated PNG decoding, default-dark admission, committed roles/

@@ -20,6 +20,17 @@ validator shadow-observation records.
 
 ## Local Contracts
 
+- Migration `0048` adds empty `grid_payment_receipt_claims`, unique by both
+  chain/asset/transaction and economic kind/reference. Private bounded purposes
+  are hashed and immutable through the service API. Native ETH is explicit;
+  converted ETH claims actual USDC rather than its input asset. Existing books
+  receive no invented claim/log/token facts. New deposits and independently
+  settled text payments commit ownership with their economic write; video
+  proof commits ownership without a hold/outbox. Any conflict retains received-
+  money evidence for review, never an automatic refund or second credit.
+  All financial writers require migration-first synchronized upgrade and
+  claim-aware rollback. No retained row may be deleted to reuse value.
+
 - Migration `0047` creates empty private `grid_video_payment_attempts`, keyed
   by a quotation FK; the quote's unique job/nonce remain the execution binding.
   It freezes quote commitment, EIP-3009 identity, payload fingerprint, payer,

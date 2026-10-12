@@ -917,6 +917,30 @@ video_payment_attempts = sa.Table(
 sa.Index("ix_grid_video_attempt_reconcile", video_payment_attempts.c.status, video_payment_attempts.c.created)
 
 
+# Cross-rail receipt ownership. The initial unit is one token/transaction:
+# legacy deposit sums and text x402 already cannot split that unit into jobs.
+payment_receipt_claims = sa.Table(
+    "grid_payment_receipt_claims", metadata,
+    sa.Column("claim_key", sa.String(64), primary_key=True),
+    sa.Column("chain_id", sa.Integer, nullable=False),
+    sa.Column("asset", sa.String(42), nullable=False),
+    sa.Column("transaction_hash", sa.String(66), nullable=False),
+    sa.Column("owner_kind", sa.String(16), nullable=False),
+    sa.Column("owner_ref", sa.String(128), nullable=False),
+    sa.Column("purpose", sa.JSON(none_as_null=True), nullable=False),
+    sa.Column("purpose_hash", sa.String(64), nullable=False),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.UniqueConstraint("chain_id", "asset", "transaction_hash", name="uq_grid_receipt_chain_asset_tx"),
+    sa.UniqueConstraint("owner_kind", "owner_ref", name="uq_grid_receipt_owner"),
+    sa.CheckConstraint("chain_id > 0 AND length(claim_key) = 64 AND length(transaction_hash) = 66 AND length(purpose_hash) = 64",
+                       name="ck_grid_receipt_identity"),
+    sa.CheckConstraint("asset = lower(asset) AND (asset = 'native' OR (length(asset) = 42 AND substr(asset, 1, 2) = '0x'))",
+                       name="ck_grid_receipt_asset"),
+    sa.CheckConstraint("owner_kind IN ('deposit', 'text_x402', 'video_x402') AND length(owner_ref) > 0",
+                       name="ck_grid_receipt_owner"),
+)
+
+
 # x402 is a post-response on-chain settlement rail. A verified authorization is
 # recorded before dispatch. The before-settle hook durably records the exact
 # attempted amount before the facilitator can touch chain. Facilitator success

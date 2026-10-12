@@ -189,12 +189,16 @@ validation, worker incentives, and trust boundaries.
   are not live chain proof; no attempt, claim, funding or dispatch is written.
   The separate `0047` journal now records one pre-send winner, immutable policy/
   transaction and original historical proof without retaining the signature.
-  It remains non-routable and has no shared transfer claim, funded hold/outbox,
-  automatic retry or refund. Real SQLite/PostgreSQL and fixture HTTP tests cover
+  The `0048` candidate now commits shared receipt ownership with new video
+  evidence, deposit/credit writes and independently settled text x402. Known
+  spent nonces protect video attempts even after lost transaction replies;
+  conflicts retain proof for review. All writers require synchronized migration-
+  first upgrade and claim-aware rollback. Video remains non-routable without a
+  funded hold/outbox, automatic retry or refund. Real SQLite/PostgreSQL and fixture HTTP tests cover
   duplicate/lock-expiry and commit-reply recovery; no real payment is attempted.
   Remaining work includes published client/outer-envelope integration, live
   chain/account/facilitator proof, payment-before-outbox admission,
-  cross-rail replay protection, separate refund obligations and real payment
+  live shared-ownership rollout, separate refund obligations and real payment
   qualification. No signer, payment collection or production authority exists.
 - `PROOF_OF_QUALITY.md` - validator/probe/scoring model for measured worker and
   model quality.

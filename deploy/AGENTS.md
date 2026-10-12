@@ -73,6 +73,15 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Shared receipt candidate `0048` is a migration-first all-writer cutover, not
+  a video flag. Quiesce deposit claims and text-x402 reconciliation/senders,
+  require exact-release backup/restore/schema proof, apply the migration, then
+  upgrade every Core replica and offline financial runner before resuming.
+  Old writers do not consult shared ownership. After its first use, rollback
+  retains the table and claim-aware writers, never restores an older financial
+  writer or deletes ownership. Video/public/model/funding gates stay independent;
+  this candidate still enables no `/pay` route, funded outbox or refund sender.
+
 - Private video quotation is separate from async generation and text x402.
   `VIDEO_X402_QUOTES_ENABLED=0` is the default; enabling additionally requires
   at most ten explicit `VIDEO_X402_QUOTE_ACCOUNTS`, a nonzero
