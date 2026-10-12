@@ -137,7 +137,35 @@ jobs:
         run: |
           alembic upgrade head
           alembic check
+      - name: Checkout reviewed media-worker adapter
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: AIPowerGrid/grid-media-worker
+          ref: 1332fa20c6eba4f529a8b64c5689ea777f5c803f
+          path: .integration/media-worker
+          persist-credentials: false
+      - name: Install the media-worker's frozen test runtime
+        run: >-
+          uv sync --frozen --extra test --python "$(command -v python)"
+          --project .integration/media-worker
+      - name: Require all four Core/worker appearance cases without skips
+        env:
+          MEDIA_VIDEO_WORKER_SOURCE: ${{ github.workspace }}/.integration/media-worker
+        run: |
+          test "$(git -C "$MEDIA_VIDEO_WORKER_SOURCE" rev-parse HEAD)" = 1332fa20c6eba4f529a8b64c5689ea777f5c803f
+          python -m pytest \
+            grid_api/services/tests/test_ltx25_appearance.py::test_core_payload_reaches_actual_worker_appearance_adapter \
+            -q -rs --junitxml="$RUNNER_TEMP/video-worker-adapter.xml"
+          python - "$RUNNER_TEMP/video-worker-adapter.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          cases = ET.parse(sys.argv[1]).findall(".//testcase")
+          assert len(cases) == 4, "all four pinned appearance cases must execute"
+          assert all(case.find(tag) is None for case in cases for tag in ("skipped", "failure", "error")), "adapter cases must pass without skips"
+          PY
       - name: Offline test suite (grid_api)
+        env:
+          MEDIA_VIDEO_WORKER_SOURCE: ${{ github.workspace }}/.integration/media-worker
         run: python -m pytest grid_api -q
       - name: Checkout reviewed validator client
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

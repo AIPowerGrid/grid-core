@@ -96,6 +96,19 @@ owning AGENTS.md and any affected parent Child DOX Index.
 
 ## Verification
 
+- Candidate PR/main CI pins media-worker `1332fa20c6eba4f529a8b64c5689ea777f5c803f`
+  and installs its frozen test runtime. The audio/video appearance cases with
+  default/explicit attention must all execute: exactly four passing cases,
+  zero skips/failures/errors. The full Grid suite receives that same worker
+  source. These are actual adapter/compiler checks with synthetic HTTP, not
+  native GPU/R2 or funded-payment evidence; never describe them as those proofs.
+- Published Core `1d89b3c1` passed exact-source Linux/Python3.12/PostgreSQL16
+  run `38281040906`: 3,814 tests, 45 explicit skips and 139 warnings; pinned
+  SDK qualification passes 68 and Console/validator handoff passes. That run
+  omitted the four worker-adapter cases; the new required checkout/no-skip
+  follow-up needs its own exact-source CI before promotion. Model permission,
+  customer pricing, purchased-credit acceptance and reviewed rollout remain gates.
+
 - The local integrated video candidate ports the credit-first exact-account/
   deadline/waiting-route guards while preserving all quote/prepaid/refund
   readers and migrations. Normal expiry of either pilot permits startup and
