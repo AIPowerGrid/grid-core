@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0051`
+- `versions/` - ordered migration revisions. Current source head: `0052`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -77,8 +77,17 @@ production database match the Grid-owned schema contracts without relying on
   automatically and no historical URL becomes deletion authority.
   `0051` creates empty quote/receipt-bound prepaid video funding and unsent
   refund obligations. No historical payment, hold or job is admitted.
+  `0052` creates empty reviewed Safe refund intents/proofs with unique nonce/
+  receipt bindings. Shared receipt ownership constraints are unchanged; no
+  signature, sender or historical refund is adopted.
 
 ## Local Contracts
+
+- Apply `0052` before optional private refund tooling. Keep nonce-bound intent
+  and proof-aware tools plus all recorded history on rollback. Downgrade refuses
+  any prepared/refunded row or retained refund-namespaced receipt claim; source
+  obligations remain historical after repayment. No ordinary route or loop
+  reads this optional table, and migration enables no signing or sending.
 
 - Apply `0051` before candidate financial/backing readers start, even with
   video payment dark. Retain new `video_prepaid` terminal/reward handlers and

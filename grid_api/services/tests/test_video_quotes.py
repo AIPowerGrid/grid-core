@@ -344,9 +344,12 @@ async def test_real_postgres_migration_matches_schema_and_preserves_quote_histor
     quote, key = await prepared(await owner(0))
 
     def apply_and_check(connection):
+        refunds = metadata.tables["grid_video_refunds"]
         assert connection.scalar(sa.select(sa.func.count()).select_from(video_payment_attempts)) == 0
         assert connection.scalar(sa.select(sa.func.count()).select_from(video_quote_staging)) == 0
         assert connection.scalar(sa.select(sa.func.count()).select_from(video_prepaid_payments)) == 0
+        assert connection.scalar(sa.select(sa.func.count()).select_from(refunds)) == 0
+        refunds.drop(connection)
         video_prepaid_payments.drop(connection)
         video_payment_attempts.drop(connection)
         video_quote_staging.drop(connection)
@@ -365,6 +368,7 @@ async def test_real_postgres_migration_matches_schema_and_preserves_quote_histor
         video_payment_attempts.create(connection)
         video_quote_staging.create(connection)
         video_prepaid_payments.create(connection)
+        refunds.create(connection)
 
     async with db[0].kw["bind"].begin() as connection:
         await connection.run_sync(apply_and_check)

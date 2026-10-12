@@ -7,6 +7,31 @@ content sanitization, and reward settlement.
 
 ## Ownership
 
+- `video_refunds.py` owns private `0052` reviewed Safe refund intent/recovery.
+  Only an owned proved receipt with a committed refund obligation can prepare
+  one nonce/amount/payer. Active and completed paid jobs cannot refund. Existing
+  account aliases or payout-wallet changes cannot redirect the original payer.
+  Chain/Safe/nonce uniqueness fences competing obligations. Preparation grants
+  no send permission; the operator must review the nonce and other Safe traffic.
+  Stored nonces are never replaced automatically. Proof runs outside SQL locks;
+  outbound `video_x402`/`refund:<quote UUID>` receipt ownership and confirmed
+  refund status commit together. Failures/conflicts stay unresolved, never a
+  reason to resend. Original prepaid refund-due/zero-charge state stays intact,
+  so returned money cannot mint credit or worker backing. No route/signer/loop
+  invokes this service. Retain all history on rollback, including preparations.
+- `video_refund_proofs.py` owns unsigned single-transfer Safe 1.4.1 intents and
+  read-only dual-source proof. Freeze Call-only canonical USDC transfer, zero
+  native value/gas reimbursement, original payer/amount, Safe nonce and EIP-712
+  hash. Require exact direct execution calldata, one matching ExecutionSuccess
+  after one exact Transfer, status, code/version/decimals/hash/consumed-nonce
+  views at the required-canonical block and re-read confirmation anchors.
+  Unknown versions, modules, batches, delegatecall and gas-token reimbursement
+  reject. It shares existing bounded RPC deadlines/replies/slots and writes no
+  state or signatures. Version/state reads are not general runtime attestation;
+  actual treasury proxy/singleton/guard/modules, pending nonce coordination,
+  Safe UI and real token/refund qualification remain gates. Sources must be
+  operator-selected TLS-verifying clients; two hosts are not chain proof.
+
 - `video_prepaid.py` owns private `0051` proved-receipt admission. Actual shared
   ownership, proof, ready original inputs and account/quote/job locks precede
   one exact external hold plus frozen outbox/input-authority transaction.
