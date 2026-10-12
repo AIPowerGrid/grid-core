@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 MICRO = 1_000_000  # micro-USD per USD (the ledger's integer unit)
-PRICE_BOOK_VERSION = "2026-09-17-a"
+PRICE_BOOK_VERSION = "2026-10-12-a"
 COMPARISON_AS_OF = "2026-08-29T00:00:00Z"
 COMPARISON_VALID_UNTIL = "2026-09-29T00:00:00Z"
 
@@ -91,6 +91,8 @@ PRICING: dict[str, ModelPrice] = {
     "flux.2 klein 4b fp8":  half_of(0, 0, usd_image=0.02),       # → $0.010/image (Flux distilled 4B)
     "krea 2 turbo":         half_of(0, 0, usd_image=0.01),       # → $0.005/image (txt2img or img2img)
     "ltx-2.3":              half_of(0, 0, usd_video_sec=0.04),   # → $0.020/second video (Justin)
+    # Owner-approved credit-first tariff. Dev/Ingredients remain unpriced.
+    "ltx-2.5 distilled bf16": ModelPrice(0, 0, video_per_second=0.02),
     # Aggressive 3090-native launch peg. Production telemetry through 2026-07-26
     # measured 151 jobs averaging 78.8 output seconds in 10.3 runtime seconds.
     # At $0.0002/output-second, a one-minute song costs $0.012 while measured

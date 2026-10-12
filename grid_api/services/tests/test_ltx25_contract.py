@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 
 from grid_api.config import GridSettings
-from grid_api.services import credits, generation_admission, job_queue, media, recipes, token_stream, video_contract
+from grid_api.services import credits, generation_admission, job_queue, media, pricing, recipes, token_stream, video_contract
 from grid_api.services.recipe_import import recipe_root, validate_recipe
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -29,9 +29,18 @@ def registry(monkeypatch):
     monkeypatch.setattr(generation_admission, "require_media", lambda *_args: None)
 
 
-def test_qualification_directory_is_not_loaded_at_startup():
+def test_startup_loads_only_promoted_distilled_recipes():
     recipes.load_local_recipes(str(ROOT / "recipes"))
-    assert MODEL not in {recipe.model_name for recipe in recipes._LOCAL_RECIPES.values()}
+    names = {recipe.model_name for recipe in recipes._LOCAL_RECIPES.values()}
+    assert MODEL in names
+    assert "LTX-2.5 Dev BF16" not in names
+    assert "LTX-2.5 Dev BF16 Ingredients" not in names
+    for mode in ("t2v", "i2v"):
+        filename = f"ltx-2.5-distilled-bf16-{mode}-v1.json"
+        promoted = json.loads((ROOT / "recipes" / filename).read_text())
+        qualified = json.loads((ROOT / "recipes/qualification" / filename).read_text())
+        assert promoted == qualified
+        assert validate_recipe(promoted) == []
 
 
 @pytest.mark.parametrize("variant", ["distilled", "dev"])
@@ -48,7 +57,11 @@ def test_recipe_structure_and_exact_execution_units(variant, source):
         "sampler": "euler_ancestral_cfg_pp", "audio": True,
     }
     assert graph["latent_video"]["inputs"]["length"] == graph["latent_audio"]["inputs"]["frames_number"] == 81
-    assert graph["conditioning"]["inputs"]["frame_rate"] == graph["latent_audio"]["inputs"]["frame_rate"] == graph["video"]["inputs"]["fps"] == 24
+    assert (
+        graph["conditioning"]["inputs"]["frame_rate"]
+        == graph["latent_audio"]["inputs"]["frame_rate"]
+        == graph["video"]["inputs"]["fps"] == 24
+    )
     assert graph["guider"]["inputs"]["cfg"] == resolved["execution"]["cfg"]
     assert graph["sampler"]["inputs"]["sampler_name"] == resolved["execution"]["sampler"]
     assert graph["video"]["inputs"]["audio"] == ["decode_audio", 0]
@@ -131,11 +144,35 @@ def test_text_only_recipe_does_not_advertise_keyframe_inputs():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("timing,expected", [({"seconds": 4.0}, 97), ({"frames": 297}, 297)])
 async def test_quote_reports_effective_duration_even_when_not_priced(monkeypatch, timing, expected):
+    monkeypatch.delitem(pricing.PRICING, MODEL.lower())
     monkeypatch.setattr(credits, "account_credit_summary", AsyncMock(return_value={}))
     result = await credits.quote_for_account({}, model=MODEL, modality="video", **timing)
     assert result["estimate"]["seconds"] == expected / 24
     assert result["estimate"]["frames"] == expected
     assert result["estimate"]["priced"] is False  # Pricing is a separate activation gate.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frames,cost", [(81, 67_500), (97, 80_834), (337, 280_834)])
+async def test_approved_tariff_quotes_exact_frame_cost_without_debit(monkeypatch, frames, cost):
+    summary = {
+        "paid": {"balance_micro": 1_000_000},
+        "promotional": {"active": False, "remaining_micro": 0},
+        "free": {"active": False, "remaining_micro": 0},
+    }
+    original = copy.deepcopy(summary)
+    monkeypatch.setattr(credits, "account_credit_summary", AsyncMock(return_value=summary))
+    monkeypatch.setattr(credits, "holder_discount_bps", AsyncMock(return_value=0))
+    result = await credits.quote_for_account({}, model=MODEL, modality="video", frames=frames)
+    estimate = result["estimate"]
+    assert estimate["priced"] is True
+    assert estimate["frames"] == frames
+    assert estimate["seconds"] == frames / 24
+    assert estimate["base_cost_micro"] == estimate["cost_micro"] == cost
+    assert estimate["from_paid_micro"] == cost
+    assert estimate["shortfall_micro"] == 0
+    for pocket in ("paid", "promotional", "free"):
+        assert result[pocket] == original[pocket]
 
 
 @pytest.mark.asyncio

@@ -92,6 +92,11 @@ owning AGENTS.md and any affected parent Child DOX Index.
 
 ## Verification
 
+- Credit-first release CI uses reviewed media-worker
+  `1332fa20c6eba4f529a8b64c5689ea777f5c803f`. All four actual appearance
+  adapter cases must pass without skips; the complete suite uses that same
+  source. Synthetic HTTP does not establish a funded GPU/storage canary.
+
 - Full Python sanity: `pytest` from `system-core`.
 - Dependency gate:
   `pip-audit -r requirements-grid.lock --require-hashes --no-deps --disable-pip`;
