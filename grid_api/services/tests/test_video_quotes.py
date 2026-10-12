@@ -27,7 +27,7 @@ from grid_api.services import video_quotes as quotes
 from grid_api.services.tests import test_media_job_journal as journal_tests
 from grid_api.services.tests import test_video_plans as plan_tests
 from grid_api.services.tests.test_video_plans import request
-from grid_api.v2.schema import account_aliases, metadata, video_payment_attempts, video_quotes
+from grid_api.v2.schema import account_aliases, metadata, video_payment_attempts, video_quote_staging, video_quotes
 
 db = journal_tests.db
 owner = journal_tests.owner
@@ -310,7 +310,7 @@ def test_migration_parity_empty_downgrade_and_refusal_after_quote():
     try:
         with engine.begin() as connection:
             metadata.create_all(connection, tables=[table for table in metadata.sorted_tables
-                                                    if table not in {video_quotes, video_payment_attempts}])
+                                                    if table not in {video_quotes, video_payment_attempts, video_quote_staging}])
             with Operations.context(MigrationContext.configure(connection)):
                 revision.upgrade()
                 inspector = sa.inspect(connection)
@@ -345,7 +345,9 @@ async def test_real_postgres_migration_matches_schema_and_preserves_quote_histor
 
     def apply_and_check(connection):
         assert connection.scalar(sa.select(sa.func.count()).select_from(video_payment_attempts)) == 0
+        assert connection.scalar(sa.select(sa.func.count()).select_from(video_quote_staging)) == 0
         video_payment_attempts.drop(connection)
+        video_quote_staging.drop(connection)
         video_quotes.drop(connection)
         with Operations.context(MigrationContext.configure(connection)):
             revision.upgrade()
@@ -359,6 +361,7 @@ async def test_real_postgres_migration_matches_schema_and_preserves_quote_histor
             revision.downgrade()
             revision.upgrade()
         video_payment_attempts.create(connection)
+        video_quote_staging.create(connection)
 
     async with db[0].kw["bind"].begin() as connection:
         await connection.run_sync(apply_and_check)

@@ -193,7 +193,13 @@ validation, worker incentives, and trust boundaries.
   evidence, deposit/credit writes and independently settled text x402. Known
   spent nonces protect video attempts even after lost transaction replies;
   conflicts retain proof for review. All writers require synchronized migration-
-  first upgrade and claim-aware rollback. Video remains non-routable without a
+  first upgrade and claim-aware rollback.
+  The private `0049` staging journal now allocates source keys before storage,
+  verifies actual stored bytes and fences ready state. First attempt permission
+  requires ready inputs; existing attempts stay observation-only. Recovery
+  refreshes locations, not source/graph/seed/price. Synthetic storage and real
+  SQL/SDK tests do not qualify live R2, input cleanup or retention transfer.
+  Video remains non-routable without a
   funded hold/outbox, automatic retry or refund. Real SQLite/PostgreSQL and fixture HTTP tests cover
   duplicate/lock-expiry and commit-reply recovery; no real payment is attempted.
   Remaining work includes published client/outer-envelope integration, live

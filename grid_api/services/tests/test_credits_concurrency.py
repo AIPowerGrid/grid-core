@@ -25,10 +25,10 @@ from grid_api import database
 from grid_api.services import credits, deposits, identities, pricing, x402_payments
 from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import deposits as deposits_t
-from grid_api.v2.schema import metadata as v2_metadata
-from grid_api.v2.schema import x402_payments as x402_payments_t
 from grid_api.v2.schema import ledger as ledger_t
+from grid_api.v2.schema import metadata as v2_metadata
 from grid_api.v2.schema import reservations as reservations_t
+from grid_api.v2.schema import x402_payments as x402_payments_t
 
 
 async def _seed_account() -> uuid.UUID:
@@ -239,13 +239,68 @@ async def test_opposing_account_merges_cannot_create_alias_cycle(pg):
 async def test_credit_racing_merge_is_not_stranded_on_retired_account(pg):
     destination = await _seed_account()
     source = await _seed_account()
-    await asyncio.gather(
+    credited, merged = await asyncio.gather(
         credits.credit(source, 50_000, "deposit", ref=f"deposit:{source}"),
         identities.merge_accounts(destination, source, merge_ref=f"credit-race:{source}"),
+        return_exceptions=True,
     )
+    assert not isinstance(merged, BaseException)
+    if isinstance(credited, RuntimeError):
+        assert str(credited) == "account changed during value movement; retry"
+        assert await credits.credit(source, 50_000, "deposit", ref=f"deposit:{source}")
+    else:
+        assert credited is True
+    assert not await credits.credit(source, 50_000, "deposit", ref=f"deposit:{source}")
     canonical = await identities.canonical_account_id(source)
     assert canonical == await identities.canonical_account_id(destination)
     assert await credits.get_balance(canonical) == 50_000
+    assert (await credits.billing_health())["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_prelock_merge_change_rolls_back_then_same_ref_retry_credits_once(pg, monkeypatch):
+    destination, source = await _seed_account(), await _seed_account()
+    read, resume = asyncio.Event(), asyncio.Event()
+    original = identities.canonical_account_id
+    creditor, paused = None, False
+    ref = f"forced-deposit-race:{source}"
+
+    async def pause_after_first_credit_lookup(account_id, **kwargs):
+        nonlocal paused
+        canonical = await original(account_id, **kwargs)
+        if asyncio.current_task() is creditor and account_id == source and not paused:
+            paused = True
+            read.set()
+            await resume.wait()
+        return canonical
+
+    monkeypatch.setattr(identities, "canonical_account_id", pause_after_first_credit_lookup)
+    creditor = asyncio.create_task(credits.credit(source, 50_000, "deposit", ref=ref))
+    try:
+        await asyncio.wait_for(read.wait(), 5)
+        await identities.merge_accounts(destination, source, merge_ref=f"forced-credit-race:{source}")
+        resume.set()
+        with pytest.raises(RuntimeError, match="^account changed during value movement; retry$"):
+            await asyncio.wait_for(creditor, 5)
+    finally:
+        resume.set()
+        if not creditor.done():
+            creditor.cancel()
+        await asyncio.gather(creditor, return_exceptions=True)
+
+    async with await database.new_session() as session:
+        assert await session.scalar(sa.select(sa.func.count()).select_from(credits.ledger_t)
+                                    .where(credits.ledger_t.c.ref == ref)) == 0
+    assert await credits.get_balance(destination) == 0
+    assert await credits.credit(source, 50_000, "deposit", ref=ref)
+    assert not await credits.credit(source, 50_000, "deposit", ref=ref)
+    async with await database.new_session() as session:
+        rows = (await session.execute(sa.select(credits.ledger_t.c.account_id, credits.ledger_t.c.delta_micro)
+                                      .where(credits.ledger_t.c.ref == ref))).all()
+        assert rows == [(destination, 50_000)]
+    assert await identities.canonical_account_id(source) == destination
+    assert await credits.get_balance(destination) == 50_000
+    assert await credits.get_balance(source) == 0
     assert (await credits.billing_health())["ok"] is True
 
 

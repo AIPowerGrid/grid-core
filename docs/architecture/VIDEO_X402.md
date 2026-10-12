@@ -287,7 +287,9 @@ Normal quote views still return
 quote recovery does not. Downgrade refuses any attempt or unresolved liability.
 
 `begin` locks the owned quote and current account family before verifying the
-original signature and committing `settling`. It checks the explicit admission
+original signature, requiring `0049` matching ready inputs, and committing
+`settling`. Existing attempts without staging only recover their original state,
+never acquire new send permission. It checks the explicit admission
 deadline/quote window after locks and before commit. Exactly one caller receives
 the initial send permission; every exact replay, including after expiry or
 admission rollback, receives no permission. Changed payer, payload or confirmation
@@ -308,8 +310,8 @@ A crash after `begin` but before the facilitator call can therefore leave an
 unsent `settling` attempt. Likewise, a lost facilitator reply may leave the
 transaction unknown. Both need the future bounded nonce watcher/confirmed
 unspent-authorization closure or reviewed correlation; neither may be reset or
-automatically resent. Staged private input persistence is still missing from
-this journal. New proven evidence now commits its shared receipt ownership,
+automatically resent. The separate staged-input candidate is described below;
+no facilitator or funded admission consumes it yet. New proven evidence commits its shared receipt ownership,
 but remains a recoverable liability until funded admission/refund commits; this candidate must
 not take real payments merely because its SQL tests pass.
 
@@ -380,6 +382,49 @@ downgrade refuses any stored claim. Applying this migration does not enable
 video collection or grant model-use permission. No production changes are made.
 
 ## Proposed Payment Flow
+
+### Private Input Staging Candidate
+
+Migration `0049` creates empty `grid_video_quote_staging`, one manifest per
+immutable quote. `video_quote_staging.py` verifies the original in-memory plan
+against that quote, then commits exact private object keys before uploading.
+Neither raw bytes, expiring access URLs nor spending signatures enter the row.
+Allocated keys survive partial upload, database reply loss and lease replacement;
+no historical source URL is adopted. The quote's retained pilot capacity also
+bounds the number of staging records.
+
+Two local slots bound active staging. Recorded-authority S3 operations use
+conditional creation and streamed size/SHA-256 readback, with bounded object
+sizes, individual network reads and a cooperative whole-storage deadline.
+Cancellation retains the slot until its owned thread finishes. An expired or
+replaced lease cannot publish ready state. Storage/SQL uncertainty keeps the
+allocation incomplete, with no payment permission. Exact ready replay uploads
+nothing, and owned recovery refreshes only private GET URLs; graph, source
+commitments, selected seed, quote price and request identity remain unchanged.
+Account/bucket rebinding or corrupted commitments fail closed.
+
+A first payment-journal `begin` now requires matching ready inputs under the
+existing account/quote locks. Earlier attempts lacking staging may still be
+observed, not reset or granted another send. There is no payment endpoint,
+facilitator, funded hold/outbox, refund, worker dispatch or automatic cleanup
+hook. Future admission must transfer the exact input authority to funded-job
+retention; unpaid/uncertain allocations need their own safe cleanup policy.
+The provider lifecycle remains a backstop, not proof of application cleanup.
+Do not enable collection with those gates unfinished.
+
+The combined staging/quote/attempt/shared-receipt matrix passes 234 tests with
+nine explicit skips on SQLite and a real disposable PostgreSQL 14 database.
+It covers actual conditional-put parameters through botocore's request model,
+partial/wrong/truncated storage, source-body closure, preserved keys, pre-/post-
+commit reply loss, canceled threads, 25 competing stagers and an observed
+quote-lock waiter rejected after expiry. Synthetic storage is not real R2 or
+GPU evidence. Scratch Alembic upgrade through `0049` and `alembic check` pass;
+The full local Core run passes 3,293 tests, with 37 skips and 139 existing
+warnings, in 463.21 seconds. It predates the final test-only credit-merge retry
+correction below; a separate 14-case real PostgreSQL credit suite qualifies
+that final change. Fresh exact-commit CI and live storage proof remain pending.
+
+### Intended Flow
 
 ```text
 Agent: scoped key + bounded intent + idempotency key
@@ -482,6 +527,16 @@ The `0047` attempt journal `b81fff0a` separately passes its own
 [exact-commit Linux/PostgreSQL 16 CI](https://github.com/AIPowerGrid/grid-core/actions/runs/38186145247).
 The following `0048` shared-ownership changes still require fresh exact-commit
 CI; those prior results do not qualify the new cross-rail transitions.
+Receipt revision `ff776aac` completed its required CI with one failure:
+`test_credit_racing_merge_is_not_stranded_on_retired_account` assumed both
+concurrent calls always succeed, while the unchanged credit helper deliberately
+rolls back if the canonical account changes before locking. The new test-only
+correction accepts only that exact retry signal, retries the same durable ref
+and proves one credit. A controlled PostgreSQL merge between lookup and lock
+also proves zero initial credit rows, retired-account zero balance and one
+canonical credit after retry. All 14 isolated PostgreSQL credit tests pass.
+No financial guard is relaxed and the failed CI is not claimed qualified;
+the current staging/guard/retry candidate needs its own complete CI run.
 The final shared-ownership candidate passes the full local Grid suite:
 3,225 passed, 35 skipped and 139 existing warnings in 461.76 seconds, with
 the real disposable PostgreSQL 14 fixture configured. Its 25-way cross-rail
@@ -512,8 +567,17 @@ local nor CI fixture results change public serving permission.
    The receipt verifier and durable prior-attempt journal are candidates with
    real SQL/fixture transport proofs. Shared cross-rail claims now integrate with
    deposits/text/video, with migration/all-writer rollout and fresh CI gates.
-   Staged-input persistence, the bounded lost-transaction watcher, actual facilitator/payer
-   compatibility and atomic funded admission are not implemented yet.
+   Private `0049` staged-input persistence is a local, non-routable candidate:
+   exact private keys commit before upload, conditional writes and bounded
+   readback precede a fenced ready commit, and recovery refreshes locations
+   without changing source/graph/seed commitments. Focused SQLite/PostgreSQL
+   tests pass as part of the 234-case matrix above using synthetic storage.
+   First attempt permission requires ready inputs, but no HTTP sender exists.
+   The local full suite and targeted merge-retry tests pass; fresh exact-commit
+   CI and real R2 compatibility remain pending;
+   cleanup of unpaid inputs and transfer to funded-job retention remain gates.
+   The bounded lost-transaction watcher, actual facilitator/payer compatibility
+   and atomic funded admission are not implemented yet.
    Prove duplicates, concurrency and cross-rail claims on PostgreSQL 16. Keep
    the existing text x402 contract unchanged.
 4. Integrate leased success/failure and reviewed refunds. Kill processes before/

@@ -20,6 +20,14 @@ validator shadow-observation records.
 
 ## Local Contracts
 
+- Migration `0049` adds empty `grid_video_quote_staging`, one FK-bound private
+  input manifest per quote. Allocated private keys and quote/source commitments
+  persist before upload; lease replacement never changes the keys. Ready state
+  requires bounded readback proof and its hash, not an executable hold/outbox.
+  Retain allocated and ready history on rollback. Downgrade refuses any row;
+  source cleanup, funded ownership transfer and live storage qualification remain
+  separate gates. Ordinary API and payment paths do not select this table.
+
 - Migration `0048` adds empty `grid_payment_receipt_claims`, unique by both
   chain/asset/transaction and economic kind/reference. Private bounded purposes
   are hashed and immutable through the service API. Native ETH is explicit;
@@ -38,7 +46,8 @@ validator shadow-observation records.
   One authorization/transaction and coherent SQL-NULL proof/review fields are
   database-enforced. Retained `settling`, `reported`, `proven` or `manual_review`
   state is not a funded reservation, replay claim or executable job. Apply before
-  calling this optional service; no normal API/loop selects it. Rollback retains
+  calling this optional service; first `begin` additionally requires `0049`
+  ready inputs. No normal API/loop selects it. Rollback retains
   every row, and downgrade refuses even an unresolved or reviewed attempt.
 
 - Migration `0046` creates empty private `grid_video_quotes`, without a

@@ -22,6 +22,7 @@ from grid_api.services import video_payment_attempts as journal
 from grid_api.services.tests import test_video_payment_attempts as attempt_tests
 from grid_api.services.tests import test_video_payment_proofs as proof_tests
 from grid_api.services.tests import test_x402_payments as text_tests
+from grid_api.services.tests import video_staging_support as stage_support
 from grid_api.v2.schema import credit_ledger, credits, metadata, reservations
 from grid_api.v2.schema import deposits as deposit_rows
 from grid_api.v2.schema import payment_receipt_claims as claim_rows
@@ -31,6 +32,7 @@ db = attempt_tests.db
 admission = attempt_tests.admission
 registry = attempt_tests.registry
 synthetic_dependencies = attempt_tests.synthetic_dependencies
+source_store = stage_support.source_store
 pytestmark = pytest.mark.asyncio
 ASSET = "0x" + "2" * 40
 OTHER_ASSET = "0x" + "4" * 40

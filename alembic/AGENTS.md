@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0048`
+- `versions/` - ordered migration revisions. Current source head: `0049`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -70,8 +70,16 @@ production database match the Grid-owned schema contracts without relying on
   constraints. It stores no spending signature and grants no funded admission.
   `0048` creates empty shared asset/transaction and economic-reference claims.
   It invents no historical receipt/token provenance and enables no video API.
+  `0049` creates empty private quote-input staging with exact object authority,
+  lease fencing and stored-byte proof. No payment, outbox or public route exists.
 
 ## Local Contracts
+
+- Apply `0049` before calling optional private quote staging. Keys commit before
+  storage I/O; no historical inputs are adopted. Retain rows on rollback;
+  downgrade refuses even a partial allocation. Prepayment cleanup and transfer
+  to funded-job retention are not implemented; provider lifecycle remains a
+  backstop, not application cleanup proof.
 
 - Apply `0048` before any updated deposit or text-x402 reconciliation writer,
   even with video disabled. Quiesce all financial writers before the migration/
@@ -82,6 +90,8 @@ production database match the Grid-owned schema contracts without relying on
   retained ownership. Shared ownership alone grants no funded video admission.
 
 - Apply `0047` before using the optional non-routable video attempt journal.
+  New initial `begin` calls now additionally require `0049` ready staging;
+  historical attempt reads acquire no new staging or send authority.
   Normal credit/deposit/text x402 and quote routes do not query the new table.
   Application rollback retains it; downgrade refuses any attempt, including
   unresolved `settling` and reviewed state. No historical attempt/payment is
