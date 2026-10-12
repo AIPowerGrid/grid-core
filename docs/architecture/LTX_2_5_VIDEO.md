@@ -7,6 +7,13 @@
 
 ### Owner-Approved Credit Pilot - 2026-10-12 UTC
 
+The credit-only source is now merged and deployed dark at `b053b2ce` / `0045`,
+with six workers and unchanged charging/timers/environment. Its tree equals
+main squash `f3e05bf1`; public price book `2026-10-12-a` exposes the Distilled
+tariff. Async remains disabled/pilot, journal empty, and LTX-2.3 still serves.
+See `deploy/VIDEO_CREDIT_DARK_2026_10_12.md` for actual restore, cutover,
+rejection and remaining funded/rig/private-storage evidence boundaries.
+
 The owner confirmed model use, pricing and launch approval in this task.
 Record this as an owner assertion/decision, not an independently verified
 licensor permission or legal opinion; upstream restrictions still apply.

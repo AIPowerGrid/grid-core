@@ -7,6 +7,12 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Ownership
 
+- `VIDEO_CREDIT_DARK_2026_10_12.md` - owner-approved Distilled tariff and
+  credit-only PR217 merge, exact tested/main tree identity, actual production
+  backup/restore and drained `b053b2ce` / `0045` cutover. All six workers return;
+  charging/timers/env are unchanged. Async remains off/pilot with an empty
+  journal, no LTX-2.5 workers, no funded canary and no x402 activation.
+
 - `CUSTOMER_PRICING_ROLLOUT_2026_09_17.md` - immutable `3384c223` Qwen pricing
   fix, real Chat billing canary, preserved cancelled/partial observation and
   replacement start blocked by stale-candidate health; no compensation changes.
@@ -80,8 +86,8 @@ executes an immutable release selected through `/home/aipg/current`.
   Preserve global charging, payouts, other model services and the protected
   client GPT backend. No broad opening follows from the approval or tariff
   commit; current-source CI, restore proof and actual canary must pass first.
-  Production currently lacks FFmpeg/ffprobe and a private-source bucket.
-  Verify those prerequisites before source-video admission, rather than
+  FFmpeg/ffprobe are now installed; a private-source bucket remains unconfigured.
+  Verify storage prerequisites before source-video admission, rather than
   bypassing input validation or using the public output bucket.
 
 - Async video remains a default-off candidate, not production admission.
