@@ -217,14 +217,44 @@ async def report(account_id, quote_id, transaction_hash: str) -> dict:
         raise VideoAttemptError("video payment report unavailable") from None
 
 
+async def recover_lost_transaction(account_id, quote_id, *, sources: tuple[proofs.PaymentRPC, proofs.PaymentRPC],
+                                   from_block: int, to_block: int) -> dict:
+    """Find and prove the original send; never resend or grant execution.
+
+    No SQL lock covers network reads. The bounded search is operator-selected,
+    not a payment request. An empty range result leaves the attempt untouched.
+    Known/proven transactions recover through the ordinary receipt path.
+    """
+    try:
+        async with await new_session() as session:
+            quote, row = await _owned(session, account_id, quote_id)
+        if row is None:
+            raise VideoAttemptError("video quote or attempt unavailable")
+        if row["transaction_hash"] is not None:
+            return await reconcile(account_id, quote_id, sources=sources)
+        if row["status"] != "settling":
+            raise VideoAttemptConflict("video payment cannot acquire another transaction")
+        tx = await proofs.locate_authorization(quote, payer=row["payer"], sources=sources,
+            from_block=from_block, to_block=to_block, confirmation_tag=row["confirmation_tag"])
+        # Correlation alone must not pin an unproved transaction into history.
+        await proofs.prove_transfer(quote, payer=row["payer"], transaction_hash=tx, sources=sources,
+            confirmation_tag=row["confirmation_tag"], min_confirmations=row["min_confirmations"])
+        await report(account_id, quote_id, tx)
+        return await reconcile(account_id, quote_id, sources=sources)
+    except (VideoAttemptError, proofs.VideoPaymentProofError):
+        raise
+    except Exception:
+        raise VideoAttemptError("video payment transaction recovery unavailable") from None
+
+
 async def reconcile(account_id, quote_id, *, sources: tuple[proofs.PaymentRPC, proofs.PaymentRPC]) -> dict:
-    """Persist historical evidence without a hold, claim, payout or dispatch.
+    """Persist historical evidence/shared ownership without funding or dispatch.
 
     Network calls occur outside SQL/account/quote locks. Proven replay reads the
     original winning proof without network or updated anchors. Pending/transport
     uncertainty leaves the attempt unchanged; failed proof goes to manual review.
-    This journal cannot resolve an unknown transaction without the future bounded
-    nonce watcher or manual correlation, and never resends its authorization.
+    Unknown transactions use the separate bounded recovery helper or reviewed
+    manual correlation. Neither path resends the original authorization.
     """
     try:
         async with await new_session() as session:

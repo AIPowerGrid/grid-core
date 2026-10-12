@@ -26,6 +26,7 @@ from grid_api.services import video_plans
 from grid_api.services import video_quote_staging as staging
 from grid_api.services import video_quotes as quotes
 from grid_api.services.tests import test_video_payment_proofs as proof_tests
+from grid_api.services.tests import test_video_payment_recovery as search_tests
 from grid_api.services.tests import test_video_plans as plan_tests
 from grid_api.services.tests import test_video_quotes as quote_tests
 from grid_api.services.tests import video_staging_support as stage_support
@@ -65,6 +66,137 @@ async def no_economic_effects():
     async with await database.new_session() as session:
         for name in ("grid_reservations", "grid_media_jobs", "grid_ledger", "grid_credit_ledger", "grid_x402_payments", "grid_deposits"):
             assert await session.scalar(sa.select(sa.func.count()).select_from(metadata.tables[name])) == 0
+
+
+async def test_lost_reply_nonce_recovery_after_expiry_proves_original_without_send_permission(db, admission, monkeypatch):
+    owner, row, account, payload = await saved()
+    original, winner = await begin(owner, row, account, payload)
+    assert winner
+    first, second = search_tests.SearchRPC(row, account), search_tests.SearchRPC(row, account)
+    monkeypatch.setattr(bindings, "_now", lambda: quotes._aware(row["expires"]) + timedelta(days=1))
+    async with proof_tests.sources(first, second) as sources:
+        result = await journal.recover_lost_transaction(owner, row["id"], sources=sources, from_block=80, to_block=110)
+        assert result["status"] == "proven" and result["transaction_hash"] == proof_tests._TX
+        assert result["payload_hash"] == original["payload_hash"]
+        first.calls.clear()
+        second.calls.clear()
+        repeat = await journal.recover_lost_transaction(owner, row["id"], sources=sources, from_block=80, to_block=110)
+        assert repeat == result and not first.calls and not second.calls
+    repeated, winner = await begin(owner, row, account, payload)
+    assert repeated == result and not winner
+    await no_economic_effects()
+
+
+@pytest.mark.parametrize("failure", ["missing", "invalid-receipt", "unavailable"])
+async def test_uncertain_nonce_recovery_preserves_original_unreported_attempt(db, admission, failure):
+    owner, row, account, payload = await saved()
+    original, _winner = await begin(owner, row, account, payload)
+    first, second = search_tests.SearchRPC(row, account), search_tests.SearchRPC(row, account)
+    if failure == "missing":
+        first.logs = second.logs = []
+    elif failure == "invalid-receipt":
+        first.receipt["logs"].pop()
+    else:
+        first.fault = TimeoutError("private-provider-detail")
+    async with proof_tests.sources(first, second) as sources:
+        with pytest.raises(proofs.VideoPaymentProofError):
+            await journal.recover_lost_transaction(owner, row["id"], sources=sources, from_block=80, to_block=110)
+    assert await journal.lookup(owner, row["id"]) == original
+    await no_economic_effects()
+
+
+async def test_lost_transaction_foreign_or_unattempted_quote_does_no_rpc(db, admission):
+    owner, row, account, _payload = await saved()
+    stranger = await quote_tests.owner(0)
+    first, second = search_tests.SearchRPC(row, account), search_tests.SearchRPC(row, account)
+    async with proof_tests.sources(first, second) as sources:
+        for principal, identity in ((stranger, row["id"]), (stranger, uuid4()), (owner, row["id"])):
+            with pytest.raises(journal.VideoAttemptError):
+                await journal.recover_lost_transaction(principal, identity, sources=sources, from_block=80, to_block=110)
+    assert not first.calls and not second.calls
+    await no_economic_effects()
+
+
+async def test_lost_recovery_chain_reads_never_hold_account_or_quote_locks(db, admission):
+    owner, row, account, payload = await saved()
+    await begin(owner, row, account, payload)
+    first, second = search_tests.SearchRPC(row, account), search_tests.SearchRPC(row, account)
+
+    async def unlocked(_method, _params):
+        async with await database.new_session() as session:
+            await session.execute(sa.select(accounts.c.id).where(accounts.c.id == owner).with_for_update(nowait=True))
+            await session.execute(sa.select(quotes.video_quotes.c.id).where(quotes.video_quotes.c.id == row["id"])
+                .with_for_update(nowait=True))
+
+    first.before_read = second.before_read = unlocked
+    async with proof_tests.sources(first, second) as sources:
+        result = await journal.recover_lost_transaction(owner, row["id"], sources=sources, from_block=80, to_block=110)
+    assert result["status"] == "proven"
+    await no_economic_effects()
+
+
+async def test_postgres_duplicate_lost_recovery_has_one_original_proof_and_no_execution(db, admission):
+    if db[1] != "postgres":
+        pytest.skip("real PostgreSQL concurrency required")
+    owner, row, account, payload = await saved()
+    await begin(owner, row, account, payload)
+    first, second = search_tests.SearchRPC(row, account), search_tests.SearchRPC(row, account)
+    async with proof_tests.sources(first, second) as sources:
+        async def recover():
+            return await journal.recover_lost_transaction(owner, row["id"], sources=sources,
+                                                          from_block=80, to_block=110)
+
+        results = await asyncio.wait_for(asyncio.gather(*(recover() for _ in range(25)), return_exceptions=True), 30)
+        winners = [result for result in results if isinstance(result, dict)]
+        assert winners and all(result == winners[0] for result in winners)
+        assert all(isinstance(result, (dict, proofs.VideoPaymentUnavailable)) for result in results)
+        assert await recover() == winners[0]
+    async with await database.new_session() as session:
+        assert await session.scalar(sa.select(sa.func.count()).select_from(attempts)) == 1
+        assert await session.scalar(sa.select(sa.func.count()).select_from(metadata.tables["grid_payment_receipt_claims"])) == 1
+    await no_economic_effects()
+
+
+@pytest.mark.parametrize("phase", ["report", "proof"])
+@pytest.mark.parametrize("after_commit", [False, True])
+async def test_lost_recovery_commit_reply_errors_never_allow_another_send(db, admission, monkeypatch, phase, after_commit):
+    owner, row, account, payload = await saved()
+    await begin(owner, row, account, payload)
+    first, second = search_tests.SearchRPC(row, account), search_tests.SearchRPC(row, account)
+    factory = journal.new_session
+    commits = 0
+
+    async def uncertain_session():
+        session = await factory()
+        commit = session.commit
+
+        async def maybe_fail():
+            nonlocal commits
+            commits += 1
+            if commits == (1 if phase == "report" else 2):
+                if after_commit:
+                    await commit()
+                raise RuntimeError("private SQL and signature must stay private")
+            await commit()
+
+        session.commit = maybe_fail
+        return session
+
+    monkeypatch.setattr(journal, "new_session", uncertain_session)
+    async with proof_tests.sources(first, second) as sources:
+        with pytest.raises(journal.VideoAttemptError) as error:
+            await journal.recover_lost_transaction(owner, row["id"], sources=sources, from_block=80, to_block=110)
+        assert "private SQL" not in str(error.value) and payload["signature"] not in str(error.value)
+        monkeypatch.setattr(journal, "new_session", factory)
+        retained = await journal.lookup(owner, row["id"])
+        expected = "settling" if phase == "report" and not after_commit else (
+            "proven" if phase == "proof" and after_commit else "reported")
+        assert retained["status"] == expected
+        result = await journal.recover_lost_transaction(owner, row["id"], sources=sources, from_block=80, to_block=110)
+    assert result["status"] == "proven" and result["transaction_hash"] == proof_tests._TX
+    recovered, winner = await begin(owner, row, account, payload)
+    assert recovered == result and not winner
+    await no_economic_effects()
 
 
 @pytest.mark.parametrize("mode", ["generated", "audio", "video"])

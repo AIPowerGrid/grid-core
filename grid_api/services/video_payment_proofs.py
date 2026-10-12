@@ -217,7 +217,7 @@ def _finite_real(value: str) -> float:
 
 async def _rpc_response(source: PaymentRPC, method: str, params: list):
     if method not in {"eth_chainId", "eth_getTransactionByHash", "eth_getTransactionReceipt",
-                      "eth_getBlockByNumber", "eth_getCode", "eth_call"}:
+                      "eth_getBlockByNumber", "eth_getCode", "eth_call", "eth_getLogs"}:
         raise VideoPaymentUnavailable("unsupported payment RPC read")
     async with source.client.stream("POST", source.origin, follow_redirects=False, timeout=_RPC_SECONDS,
             json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params}) as response:
@@ -290,6 +290,100 @@ async def _observe(source: PaymentRPC, snapshot: dict, typed: dict, tx_hash: str
     }
 
 
+def _require_sources(sources: tuple[PaymentRPC, PaymentRPC]) -> None:
+    if (type(sources) is not tuple or len(sources) != 2
+            or any(not isinstance(source, PaymentRPC) for source in sources)):
+        raise VideoPaymentProofError("two operator RPC sources required")
+    hosts = []
+    for source in sources:
+        origin = urlsplit(source.origin)
+        if (origin.scheme != "https" or not origin.hostname or origin.username or origin.password
+                or origin.query or origin.fragment or not isinstance(source.client, httpx.AsyncClient)):
+            raise VideoPaymentProofError("operator HTTPS RPC sources required")
+        hosts.append(httpx.URL(source.origin).raw_host.decode("ascii").rstrip(".").lower())
+    if len(set(hosts)) != 2:
+        raise VideoPaymentProofError("distinct operator RPC hosts required")
+
+
+async def _locate(source: PaymentRPC, typed: dict, start: int, end: int, tag: str) -> tuple[dict, dict | None]:
+    domain, message = typed["domain"], typed["message"]
+    if _number(await _read(source, "eth_chainId", [])) != domain["chainId"]:
+        raise VideoPaymentProofError("payment RPC chain mismatch")
+    confirmed = _mapping(await _read(source, "eth_getBlockByNumber", [tag, False]))
+    if _number(confirmed["number"]) < end:
+        raise VideoPaymentPending("payment search range is not confirmed")
+    boundary = _mapping(await _read(source, "eth_getBlockByNumber", [hex(end), False]))
+    anchor = {"number": _number(boundary["number"]), "hash": _hex(boundary["hash"], 32)}
+    if anchor["number"] != end:
+        raise VideoPaymentProofError("payment search anchor mismatch")
+    topics = [_USED, "0x" + "0" * 24 + message["from"][2:], message["nonce"]]
+    logs = await _read(source, "eth_getLogs", [{"fromBlock": hex(start), "toBlock": hex(end),
+        "address": domain["verifyingContract"], "topics": topics}])
+    if type(logs) is not list or len(logs) > 1:
+        raise VideoPaymentProofError("ambiguous payment authorization logs")
+    found = None
+    if logs:
+        log = _mapping(logs[0])
+        number = _number(log["blockNumber"])
+        if (log.get("removed", False) is not False or not start <= number <= end
+                or _hex(log["address"], 20) != domain["verifyingContract"] or log["data"] != "0x"
+                or type(log["topics"]) is not list or len(log["topics"]) != 3
+                or [_hex(topic, 32) for topic in log["topics"]] != topics):
+            raise VideoPaymentProofError("payment authorization log mismatch")
+        found = {"transaction_hash": _hex(log["transactionHash"], 32), "block_number": number,
+            "block_hash": _hex(log["blockHash"], 32), "transaction_index": _number(log["transactionIndex"]),
+            "log_index": _number(log["logIndex"])}
+        block = _mapping(await _read(source, "eth_getBlockByNumber", [hex(number), False]))
+        if _number(block["number"]) != number or _hex(block["hash"], 32) != found["block_hash"]:
+            raise VideoPaymentProofError("payment authorization block mismatch")
+    return anchor, found
+
+
+async def locate_authorization(row: dict, *, payer: str, sources: tuple[PaymentRPC, PaymentRPC],
+                               from_block: int, to_block: int, confirmation_tag: Literal["safe", "finalized"]) -> str:
+    """Bounded original-transaction correlation, never payment or absence proof.
+
+    Only an operator-selected confirmed range of at most 1024 blocks is read.
+    A miss, disagreement or transport error cannot authorize another send. The
+    caller must still prove the entire original transaction before funding.
+    """
+    global _active
+    if _active >= 2:
+        raise VideoPaymentUnavailable("video payment proof capacity exhausted")
+    _active += 1
+    try:
+        async with asyncio.timeout(_PROOF_SECONDS):
+            _require_sources(sources)
+            if (confirmation_tag not in {"safe", "finalized"} or type(from_block) is not int
+                    or type(to_block) is not int or not 0 <= from_block <= to_block < 2**64
+                    or to_block - from_block >= 1024):
+                raise VideoPaymentProofError("bounded reviewed payment search required")
+            _snapshot, typed = _expectation(copy.deepcopy(row), payer)
+            first_anchor, first = await _locate(sources[0], typed, from_block, to_block, confirmation_tag)
+            second_anchor, second = await _locate(sources[1], typed, from_block, to_block, confirmation_tag)
+            if first_anchor != second_anchor or first != second:
+                raise VideoPaymentProofError("payment search evidence disagrees")
+            for source in sources:
+                selected = [(to_block, first_anchor["hash"])]
+                if first is not None:
+                    selected.append((first["block_number"], first["block_hash"]))
+                for number, expected in selected:
+                    current = _mapping(await _read(source, "eth_getBlockByNumber", [hex(number), False]))
+                    if _number(current["number"]) != number or _hex(current["hash"], 32) != expected:
+                        raise VideoPaymentProofError("payment search anchor changed")
+            if first is None:
+                raise VideoPaymentPending("original payment transaction not located; retain attempt")
+            return first["transaction_hash"]
+    except (TimeoutError, asyncio.IncompleteReadError):
+        raise VideoPaymentUnavailable("video payment search deadline exceeded") from None
+    except VideoPaymentProofError:
+        raise
+    except Exception:
+        raise VideoPaymentProofError("video payment transaction could not be located") from None
+    finally:
+        _active -= 1
+
+
 async def prove_transfer(row: dict, *, payer: str, transaction_hash: str, sources: tuple[PaymentRPC, PaymentRPC],
                          confirmation_tag: Literal["safe", "finalized"], min_confirmations: int) -> VerifiedVideoTransfer:
     """Reconcile one original transaction, even after quote/config expiry.
@@ -307,18 +401,9 @@ async def prove_transfer(row: dict, *, payer: str, transaction_hash: str, source
     try:
         async with asyncio.timeout(_PROOF_SECONDS):
             if (confirmation_tag not in {"safe", "finalized"} or type(min_confirmations) is not int
-                    or not 1 <= min_confirmations <= 256 or type(sources) is not tuple or len(sources) != 2
-                    or any(not isinstance(source, PaymentRPC) for source in sources)):
+                    or not 1 <= min_confirmations <= 256):
                 raise VideoPaymentProofError("reviewed confirmation policy and two RPC sources required")
-            hosts = []
-            for source in sources:
-                origin = urlsplit(source.origin)
-                if (origin.scheme != "https" or not origin.hostname or origin.username or origin.password
-                        or origin.query or origin.fragment or not isinstance(source.client, httpx.AsyncClient)):
-                    raise VideoPaymentProofError("operator HTTPS RPC sources required")
-                hosts.append(httpx.URL(source.origin).raw_host.decode("ascii").rstrip(".").lower())
-            if len(set(hosts)) != 2:
-                raise VideoPaymentProofError("distinct operator RPC hosts required")
+            _require_sources(sources)
             # A caller cannot change its snapshot while the RPC reads yield.
             snapshot, typed = _expectation(copy.deepcopy(row), payer)
             tx_hash = _hex(transaction_hash, 32)
