@@ -34,6 +34,7 @@ from typing import Any, Optional
 
 from ..config import get_settings
 from ..safe_logging import error_type
+from . import video_contract as video_contract_svc
 
 logger = logging.getLogger("grid_api.recipes")
 
@@ -58,6 +59,7 @@ class Recipe:
     model_name: str = ""             # advertised model this recipe serves (≥1 recipe/model)
     lora_inject: Optional[dict] = None  # if set, recipe supports LoRAs (worker splices loaders here)
     seed_max: int = 2**53 - 1        # cap the seed to the model's range (e.g. TRELLIS = 2**31-1)
+    video_contract: Optional[video_contract_svc.LtxVideoContract] = None
 
 
 # recipe_root (lower hex) -> Recipe ; plus id + name indexes for convenience refs.
@@ -87,6 +89,15 @@ def _recipe_from_workflow(
 ) -> Recipe:
     meta = dict(workflow.get("_grid") or {})
     spec = {k: v for k, v in workflow.items() if k != "_grid"}
+    contract = (video_contract_svc.LtxVideoContract.model_validate(meta["videoContract"])
+                if "videoContract" in meta else None)
+    if contract:
+        for mode in contract.source_modes:
+            source_spec = copy.deepcopy(spec)
+            if contract.appearance_profile:
+                video_contract_svc.expand_appearance(source_spec)
+            video_contract_svc.expand_sources(source_spec, mode, 0.5 if contract.appearance_profile else 0.85,
+                                             0.25 if contract.appearance_profile and mode == "video" else None)
     return Recipe(
         recipe_root=recipe_root.lower(),
         recipe_id=recipe_id,
@@ -103,6 +114,7 @@ def _recipe_from_workflow(
         model_name=str(meta.get("modelName") or name),
         lora_inject=(meta.get("loraInject") or None),
         seed_max=int(meta.get("seedMax") or (2**53 - 1)),
+        video_contract=contract,
     )
 
 
@@ -272,7 +284,9 @@ def generation_modes(ref: str | int) -> list[str]:
         else:
             mode = "img2video" if "image" in recipe.vars else "txt2video"
         modes.add(mode)
-    order = ("txt2img", "img2img", "txt2video", "img2video")
+        if recipe.video_contract:
+            modes.update(f"{mode}2video" for mode in recipe.video_contract.source_modes)
+    order = ("txt2img", "img2img", "txt2video", "img2video", "audio2video", "video2video")
     return [mode for mode in order if mode in modes]
 
 
@@ -348,7 +362,7 @@ def param_schema(ref: str | int) -> Optional[dict]:
                 params[name] = {"type": "integer", "minimum": 0, "maximum": 2**53 - 1}
             else:
                 params[name] = {"type": "number"}
-    return {
+    schema = {
         "model": cands[0].model_name,
         "job_type": cands[0].job_type,
         "capabilities": {
@@ -358,6 +372,63 @@ def param_schema(ref: str | int) -> Optional[dict]:
         },
         "params": params,
     }
+    contract = cands[0].video_contract
+    if contract is not None:
+        params.update({
+            "size": {"type": "size", "minimum": 256, "maximum": 960, "multiple_of": 32,
+                     "max_pixels": contract.max_pixels, "default": "960x544"},
+            "frames": {"type": "integer", "minimum": 9, "maximum": contract.max_frames,
+                       "multiple_of": 8, "offset": 1, "default": 81},
+            "seconds": {"type": "number", "minimum": 9 / 24, "maximum": contract.max_frames / 24,
+                        "description": "Nearest 8n+1 frame count; grid.execution returns the effective duration"},
+            "fps": {"type": "enum", "options": [24]},
+            "steps": {"type": "integer", "minimum": 8 if contract.variant == "distilled" else 4,
+                      "maximum": 8 if contract.variant == "distilled" else 40,
+                      "default": 8 if contract.variant == "distilled" else 40},
+            "cfg_scale": {"type": "number", "minimum": 1,
+                          "maximum": 1 if contract.variant == "distilled" else 5,
+                          "default": 1 if contract.variant == "distilled" else 2},
+            "audio": {"type": "enum", "options": [True]},
+        })
+        if any("image" in recipe.vars for recipe in cands):
+            max_keyframes = max(recipe.video_contract.max_keyframes for recipe in cands
+                                if recipe.video_contract is not None and "image" in recipe.vars)
+            params["keyframes"] = {
+                "type": "array", "max_items": max_keyframes,
+                "description": "Inline image pins: first at frame 0, then unique increasing frames; strength 0..1; cannot be combined with image",
+            }
+        source_modes = sorted({mode for recipe in cands if recipe.video_contract
+                               for mode in recipe.video_contract.source_modes})
+        if source_modes:
+            params["reference_audio"] = {
+                "type": "audio", "max_bytes": 12 * 1024 * 1024,
+                "description": "Inline exact-duration 48 kHz stereo PCM16 WAV; held fixed during video generation",
+            }
+        if "video" in source_modes:
+            params["reference_video"] = {
+                "type": "video", "max_bytes": 32 * 1024 * 1024,
+                "description": "Inline H.264 MP4 motion guide at the explicit requested size, 24 fps and exact frame count; requires reference_audio",
+            }
+            params["guide_strength"] = {"type": "number", "minimum_exclusive": 0, "maximum": 1, "default": 0.85}
+        if contract.appearance_profile:
+            params["size"].update(default="768x448", options=["768x448"])
+            params["frames"].update(minimum=121, default=121)
+            params["seconds"].update(minimum=121 / 24, maximum=121 / 24)
+            params["steps"].update(minimum=40, maximum=40)
+            params["cfg_scale"].update(minimum=2, maximum=2)
+            params["reference_image"] = {"type": "image", "max_bytes": 12 * 1024 * 1024,
+                                         "width": 768, "height": 448, "content_type": "image/png",
+                                         "description": "Appearance guide, not an opening frame; requires source audio and Ingredients"}
+            params["reference_strength"] = {"type": "number", "minimum_exclusive": 0, "maximum": 1, "default": 1.0}
+            params["reference_attention_strength"] = {"type": "number", "minimum_exclusive": 0, "maximum": 1,
+                                                        "description": "Optional appearance-guide attention; omission preserves the original guide"}
+            params["guide_strength"]["default"] = 0.5
+            params["motion_attention_strength"] = {"type": "number", "minimum_exclusive": 0, "maximum": 1, "default": 0.25,
+                                                    "description": "Video-reference attention only; requires reference_video"}
+        schema["video_contract"] = {**contract.model_dump(by_alias=True, exclude_none=True),
+                                    "source_modes": source_modes,
+                                    "max_keyframes": params.get("keyframes", {}).get("max_items", 0)}
+    return schema
 
 
 def load_local_recipes(dir_path: str) -> int:
@@ -474,6 +545,23 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
     if r is None:
         raise RecipeError(f"recipe '{ref}' is not approved / not in the vault")
 
+    execution = None
+    if r.video_contract is not None:
+        try:
+            inputs = video_contract_svc.normalize(r.video_contract, inputs)
+        except ValueError:
+            # Do not reflect private prompts, upload names or the Pydantic input
+            # values into public/logged validation errors.
+            raise RecipeError("Invalid LTX-2.5 inputs; consult the model parameter contract") from None
+        execution = {key: inputs[key] for key in ("width", "height", "frames", "fps", "seconds", "steps", "cfg", "sampler", "audio")}
+        if inputs.get("keyframes"):
+            execution["keyframes"] = inputs["keyframes"]
+        if inputs.get("source_mode"):
+            execution["source_mode"] = inputs["source_mode"]
+        for key in ("guide_strength", "appearance_profile", "reference_strength", "reference_attention_strength", "motion_attention_strength"):
+            if key in inputs:
+                execution[key] = inputs[key]
+
     spec = copy.deepcopy(r.spec)
 
     # Seed: first-class. Default to a fresh one; always echo back (for NFT repro).
@@ -510,6 +598,24 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
         for p in (path if isinstance(path, list) else [path]):
             _set_path(spec, p, val)
 
+    image_bindings = None
+    if r.video_contract is not None and inputs.get("keyframes"):
+        try:
+            image_bindings = video_contract_svc.expand_keyframes(spec, inputs["keyframes"])
+        except ValueError:
+            raise RecipeError("LTX keyframe scaffold is unavailable") from None
+
+    source_bindings = None
+    if r.video_contract is not None and inputs.get("source_mode"):
+        try:
+            source_bindings = (video_contract_svc.expand_appearance(
+                                   spec, inputs["reference_strength"], inputs.get("reference_attention_strength"))
+                               if r.video_contract.appearance_profile else [])
+            source_bindings.extend(video_contract_svc.expand_sources(
+                spec, inputs["source_mode"], inputs.get("guide_strength", 0.85), inputs.get("motion_attention_strength")))
+        except (ValueError, KeyError):
+            raise RecipeError("LTX source-conditioning scaffold is unavailable") from None
+
     return {
         "recipe_root": r.recipe_root,
         "recipe_id": r.recipe_id,
@@ -522,7 +628,10 @@ def resolve(ref: str | int, inputs: dict | None = None) -> dict:
         "required_models": r.required_models,
         "lora_inject": r.lora_inject,   # worker splices LoraLoader nodes here (if loras requested)
         "image_paths": r.vars.get("image"),  # path(s) the worker binds a source image to (image slot is NOT pre-injected)
+        **({"image_bindings": image_bindings} if image_bindings is not None else {}),
+        **({"source_bindings": source_bindings} if source_bindings is not None else {}),
         "spec": spec,
+        **({"execution": execution} if execution is not None else {}),
     }
 
 
@@ -547,9 +656,12 @@ def _recipe_for_model(model: str, inputs: dict | None = None, *,
             return False
         return True
 
-    return (next((r for r in cands if _matches(r)), None)
-            or next((r for r in cands if ("image" in r.vars) == has_source), None)
-            or cands[0])
+    chosen = (next((r for r in cands if _matches(r)), None)
+              or next((r for r in cands if ("image" in r.vars) == has_source), None)
+              or cands[0])
+    if chosen.video_contract is not None and ("image" in chosen.vars) != has_source:
+        raise RecipeError("No LTX-2.5 recipe supports this source-image mode")
+    return chosen
 
 
 def baked_default_for_model(model: str, input_name: str, inputs: dict | None = None, *,
@@ -567,6 +679,12 @@ def baked_default_for_model(model: str, input_name: str, inputs: dict | None = N
         return None
     first_path = path[0] if isinstance(path, list) else path
     return _get_path(chosen.spec, first_path)
+
+
+def video_contract_for_model(model: str, *, has_source: bool = False) -> Optional[video_contract_svc.LtxVideoContract]:
+    cands = recipes_for_model(model)
+    chosen = next((r for r in cands if ("image" in r.vars) == has_source), cands[0] if cands else None)
+    return chosen.video_contract if chosen else None
 
 
 def resolve_for_model(model: str, inputs: dict | None = None, *, has_source: bool = False) -> Optional[dict]:

@@ -73,6 +73,57 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- The owner approved the credit-first LTX-2.5 rollout on 2026-10-12.
+  PR217 stops at 0045; do not pull the later x402/refund migration stack into
+  this release. Distilled alone is priced at USD 0.020/output-second, with a
+  USD 1.00 total funded owner canary ceiling and an expiring account pilot.
+  Preserve global charging, payouts, other model services and the protected
+  client GPT backend. No broad opening follows from the approval or tariff
+  commit; current-source CI, restore proof and actual canary must pass first.
+  Production currently lacks FFmpeg/ffprobe and a private-source bucket.
+  Verify those prerequisites before source-video admission, rather than
+  bypassing input validation or using the public output bucket.
+
+- Async video remains a default-off candidate, not production admission.
+  Source conditioning additionally requires explicit `audio-to-video` /
+  `video-to-video` allowlist entries, which are excluded from omitted defaults.
+  Ingredients also requires the default-dark `appearance-to-video` path and
+  matching appearance worker feature. Its distinct fixed profile remains
+  non-serving/unpriced; adding schema support is not activation authority.
+  Core needs FFmpeg/ffprobe before MP4 source admission; package pinning,
+  decoder isolation, input privacy/retention and joint qualification remain
+  gates. Do not change production allowlists merely because schemas exist.
+  `MEDIA_PRIVATE_SOURCE_BUCKET` defaults empty and must differ from output
+  storage. Keep its r2.dev/custom-domain access disabled, verify anonymous
+  denial and expiry, and review its one-day source lifecycle before admitting
+  any governed LTX input. Legacy image sources are not migrated by this gate.
+  Apply migrations through `0045` before starting this release, even with
+  `MEDIA_ASYNC_ENABLED=0`: the lifecycle outbox reads `grid_media_jobs`.
+  `MEDIA_ASYNC_ADMISSION_MODE=pilot` is the default. A reviewed enabled pilot
+  requires one to ten distinct private account UUIDs in
+  `MEDIA_ASYNC_CANARY_ACCOUNTS` and an aware `MEDIA_ASYNC_CANARY_UNTIL` no more
+  than 24 hours ahead at startup. Normal expiry closes new jobs, not Core
+  startup: recovery continues even if the enable flag remains set. Use a future
+  expiry for a new pilot. Public `open` requires both
+  pilot fields cleared and separate approval; it cannot silently ignore a cohort.
+  Contract-backed waiting/chat video is closed in pilot mode. These admission
+  controls do not change global charging, tariffs or model-use clearance.
+  Defaults are `MEDIA_ASYNC_CONCURRENCY=4`, `MEDIA_JOB_SWEEP_SECONDS=10`,
+  `MEDIA_JOB_DISPATCH_LEASE_SECONDS=60`, and `MEDIA_JOB_BATCH_SIZE=10`.
+  Turning admission off preserves authenticated replay/status, drains existing
+  holds and continues accepted-job private-input cleanup. A separate minute loop deletes only
+  exact recorded private keys after committed financial closure; failures do
+  not block the queue or billing. Preserve the old private bucket and scoped
+  credentials until pending records drain when rotating buckets. Changing the
+  R2 account or rebinding a recorded source bucket as public output fails
+  cleanup closed. The provider one-day lifecycle still covers pre-admission
+  orphan inputs; ComfyUI and output/attempt retention remain separate gates.
+  Never drop journal history or restore a worker
+  handler without the execution fence. Enablement additionally requires
+  qualified `async-video-resume-v1` workers, durable prompt/result recovery,
+  restart/crash proofs and supervised billing/storage canaries. The current
+  media-worker candidate does not advertise that capability; do not add it by
+  hand merely to bypass the gate. See `docs/architecture/LTX_2_5_VIDEO.md`.
 - Core `ca1f2a12` / Alembic `0042` was selected September28 at 19:00:18 UTC.
   PR/main CI, production backup/restore, drained cutover and authenticated
   reduced-account response checks passed; all six workers returned. Billing,

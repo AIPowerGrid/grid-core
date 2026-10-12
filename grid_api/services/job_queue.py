@@ -14,6 +14,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from uuid import uuid4
 
 import redis.exceptions
 
@@ -36,18 +37,29 @@ def _stale_ms_for(stream: str) -> int:
     return STALE_JOB_MS_MEDIA if stream == MEDIA_STREAM_KEY else STALE_JOB_MS
 
 
-# A job can be requeued (bounced between workers that don't serve its model)
-# at most this many times before we give up and fault it. With instant
-# requeues, a job for a model NO worker serves hits this cap in milliseconds
-# and fails cleanly, instead of hanging the client until the 300s timeout.
-# Set comfortably above the realistic number of model-mismatched workers a
-# job might bounce through in a healthy heterogeneous pool.
+# With no compatible live peer, cap mismatch handoffs rather than hanging a
+# caller. A known compatible peer receives the original pending delivery
+# directly, so its busy period does not consume this absence-search budget.
 MAX_REQUEUE = 25
 # An empty/failed generation has already reached a compatible worker and is a
 # much stronger failure signal than a model-mismatch bounce. Permit two retries
 # (three total backend attempts) so a transient can recover without hammering a
 # sole worker or holding the client open through the generic 25-bounce budget.
 MAX_GENERATION_REQUEUE = 2
+
+# Waiting for compatible capacity is not a failed generation. Keep that wait
+# bounded independently of the count of incompatible consumers in the pool.
+DISPATCH_WAIT_MS_TEXT = STALE_JOB_MS
+DISPATCH_WAIT_MS_MEDIA = STALE_JOB_MS_MEDIA
+ROUTING_PROTOCOL = "stream-inbox-v1"
+
+
+def _dispatch_wait_ms_for(stream: str) -> int:
+    return DISPATCH_WAIT_MS_MEDIA if stream == MEDIA_STREAM_KEY else DISPATCH_WAIT_MS_TEXT
+
+
+def _routing_inbox(stream: str, worker_id: str) -> str:
+    return f"{stream}:routed:{worker_id}"
 
 # Cap the job streams so they don't grow without bound. XACK removes a job from
 # the consumer group's pending list but NOT from the stream itself, so without
@@ -135,10 +147,152 @@ elseif mode == 'failure' then
 elseif mode ~= 'stale' then
     return redis.error_reply('invalid retry mode')
 end
+-- Preserve queue age across mismatches, affinity and stale recovery. A real
+-- backend retry has its own failure cap and starts a new capacity-wait window.
+if mode == 'failure' then
+    local clock = redis.call('TIME')
+    write('queued_at_ms', tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000))
+elseif not offsets['queued_at_ms'] then
+    write('queued_at_ms', string.match(ARGV[2], '^(%d+)-'))
+end
 local replacement = redis.call('XADD', KEYS[1], 'MAXLEN', '~', maxlen, '*', unpack(fields))
 redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
 return {'requeued', replacement}
 """
+
+
+# The stream remains the sole payload/claim authority. Inboxes contain delivery
+# IDs and one-use notification nonces only, not another copy of the request.
+_ROUTE = """
+local pending = redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[2], ARGV[2], 1)
+if #pending == 0 or pending[1][2] ~= ARGV[4] then return 'superseded' end
+local source = redis.call('XRANGE', KEYS[1], ARGV[2], ARGV[2])
+if #source == 0 then return redis.error_reply('pending source missing') end
+local fields = source[1][2]
+local job_id, queued_at = '', string.match(ARGV[2], '^(%d+)-')
+for i = 1, #fields, 2 do
+    if fields[i] == 'job_id' then job_id = fields[i + 1] end
+    if fields[i] == 'queued_at_ms' then queued_at = fields[i + 1] end
+end
+if job_id ~= ARGV[3] then return redis.error_reply('pending job mismatch') end
+local start, budget = tonumber(queued_at), tonumber(ARGV[7])
+if not start or start < 0 or not budget or budget <= 0 then
+    return redis.error_reply('invalid dispatch deadline')
+end
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+if now >= start + budget then
+    redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+    return 'closed'
+end
+if redis.call('SISMEMBER', KEYS[4], ARGV[5]) == 0
+    or redis.call('GET', KEYS[3]) ~= ARGV[6] then return 'unavailable' end
+local inbox_type = redis.call('TYPE', KEYS[2]).ok
+if inbox_type ~= 'none' and inbox_type ~= 'list' then
+    return redis.error_reply('invalid routing inbox')
+end
+local maxlen = tonumber(ARGV[8])
+if not maxlen or maxlen <= 0 then return redis.error_reply('invalid routing bound') end
+if redis.call('LLEN', KEYS[2]) >= maxlen then return 'unavailable' end
+-- Append the notification before transferring the claim. If XCLAIM fails,
+-- the receiver discards the hint whose owner does not match; source stays held.
+redis.call('SET', KEYS[5], ARGV[9], 'PX', budget * 2)
+redis.call('RPUSH', KEYS[2], ARGV[2] .. ':' .. ARGV[9])
+redis.call('EXPIRE', KEYS[2], math.ceil(budget * 2 / 1000))
+redis.call('XCLAIM', KEYS[1], ARGV[1], ARGV[5], 0, ARGV[2], 'JUSTID')
+return 'routed'
+"""
+
+
+_TAKE_ROUTED = """
+for i = 1, 64 do
+    local hint = redis.call('LPOP', KEYS[2])
+    if not hint then return {} end
+    local id, nonce = string.match(hint, '^(%d+%-%d+):(%x+)$')
+    local notification = id and (KEYS[1] .. ':routing:' .. id)
+    if notification and redis.call('GET', notification) == nonce then
+      local pending = redis.call('XPENDING', KEYS[1], ARGV[1], id, id, 1)
+      if #pending ~= 0 and pending[1][2] == ARGV[2] then
+        local source = redis.call('XRANGE', KEYS[1], id, id)
+        if #source ~= 0 then
+            local fields = source[1][2]
+            local queued_at = string.match(id, '^(%d+)-')
+            for j = 1, #fields, 2 do
+                if fields[j] == 'queued_at_ms' then queued_at = fields[j + 1] end
+            end
+            local start, budget = tonumber(queued_at), tonumber(ARGV[3])
+            if not start or start < 0 or not budget or budget <= 0 then
+                return redis.error_reply('invalid dispatch deadline')
+            end
+            local clock = redis.call('TIME')
+            local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+            redis.call('DEL', notification)
+            if now >= start + budget then
+                redis.call('XACK', KEYS[1], ARGV[1], id)
+                return {id, fields, 'expired'}
+            end
+            return {id, fields, 'ready'}
+        end
+      end
+    end
+end
+return {}
+"""
+
+
+_ROUTED_DISPATCH = """
+local pending = redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[2], ARGV[2], 1)
+if #pending == 0 or pending[1][2] ~= ARGV[4] then return 'superseded' end
+local source = redis.call('XRANGE', KEYS[1], ARGV[2], ARGV[2])
+if #source == 0 then return redis.error_reply('pending source missing') end
+local job_id, queued_at = '', string.match(ARGV[2], '^(%d+)-')
+local fields = source[1][2]
+for i = 1, #fields, 2 do
+    if fields[i] == 'job_id' then job_id = fields[i + 1] end
+    if fields[i] == 'queued_at_ms' then queued_at = fields[i + 1] end
+end
+if job_id ~= ARGV[3] then return redis.error_reply('pending job mismatch') end
+local start, budget = tonumber(queued_at), tonumber(ARGV[5])
+if not start or start < 0 or not budget or budget <= 0 then
+    return redis.error_reply('invalid dispatch deadline')
+end
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+if now >= start + budget then
+    redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+    return 'closed'
+end
+return 'ready'
+"""
+
+
+async def routed_dispatch_status(job: dict) -> str:
+    """Recheck original ownership/deadline after a routed job's local prefetch."""
+    if not job.get("routed_dispatch") or not job.get("stream_id") or not job.get("worker_id"):
+        raise ValueError("routed dispatch requires an owned pending delivery")
+    stream = job.get("stream") or _stream_for(job.get("job_type", "text"))
+    return await get_redis().eval(
+        _ROUTED_DISPATCH, 1, stream, CONSUMER_GROUP, job["stream_id"], job["job_id"], job["worker_id"],
+        _dispatch_wait_ms_for(stream),
+    )
+
+
+async def route_to_worker(job: dict, worker_id: str, status_snapshot: str) -> str:
+    """Move one owned pending delivery to a still-compatible live peer.
+
+    The caller compares the entire worker's model/type/format/features before
+    this call. Lua requires that exact fresh registry snapshot and consumer
+    ownership. Superseded is nonterminal; only closed authorizes a refund.
+    """
+    if not job.get("stream_id") or not job.get("worker_id") or worker_id == job["worker_id"]:
+        raise ValueError("routing requires an owned pending delivery and a different peer")
+    stream = job.get("stream") or _stream_for(job.get("job_type", "text"))
+    return await get_redis().eval(
+        _ROUTE, 5, stream, _routing_inbox(stream, worker_id), f"grid:worker:{worker_id}:status", "grid:workers:active",
+        f"{stream}:routing:{job['stream_id']}",
+        CONSUMER_GROUP, job["stream_id"], job["job_id"], job["worker_id"], worker_id, status_snapshot,
+        _dispatch_wait_ms_for(stream), MAX_STREAM_LEN, uuid4().hex,
+    )
 
 
 async def _handoff(job: dict, mode: str, limit: int = MAX_REQUEUE) -> tuple[str, str]:
@@ -210,23 +364,35 @@ async def pop_job(worker_id: str, timeout_ms: int = 5000, job_types: list[str] |
     """
     r = get_redis()
     streams = sorted({_stream_for(t) for t in (job_types or ["text"])})
-    try:
-        results = await r.xreadgroup(
-            CONSUMER_GROUP,
-            worker_id,
-            {s: ">" for s in streams},
-            count=1,
-            block=timeout_ms,
+    expired = False
+    from_inbox = False
+    for stream_name in streams:
+        routed = await r.eval(
+            _TAKE_ROUTED, 2, stream_name, _routing_inbox(stream_name, worker_id),
+            CONSUMER_GROUP, worker_id, _dispatch_wait_ms_for(stream_name),
         )
-    except redis.exceptions.TimeoutError:
-        # The blocking read can race its own socket timeout when no job
-        # arrives within the block window — that's just "no job", not an error.
-        return None
-    if not results:
-        return None
-
-    stream_name, messages = results[0]
-    message_id, fields = messages[0]
+        if routed:
+            message_id, flat_fields, state = routed
+            fields = dict(zip(flat_fields[::2], flat_fields[1::2]))
+            expired = state == "expired"
+            from_inbox = True
+            break
+    else:
+        try:
+            results = await r.xreadgroup(
+                CONSUMER_GROUP,
+                worker_id,
+                {s: ">" for s in streams},
+                count=1,
+                block=timeout_ms,
+            )
+        except redis.exceptions.TimeoutError:
+            # A blocking read racing its socket timeout is just an idle poll.
+            return None
+        if not results:
+            return None
+        stream_name, messages = results[0]
+        message_id, fields = messages[0]
 
     return {
         "stream_id": message_id,
@@ -241,6 +407,9 @@ async def pop_job(worker_id: str, timeout_ms: int = 5000, job_types: list[str] |
         "hard_target_worker": fields.get("hard_target_worker", ""),
         "affinity_passes": int(fields.get("affinity_passes", 0)),
         "progress_token": fields.get("progress_token", ""),
+        "worker_id": worker_id,
+        "routed_dispatch": from_inbox,
+        "dispatch_deadline_expired": expired,
     }
 
 

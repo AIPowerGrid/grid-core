@@ -182,6 +182,12 @@ list (with min/max bands and enum options) straight from your `_grid`, so
 
 ## Variant recipes (t2i / i2i / edit)
 
+LTX-2.5 candidates live in `recipes/qualification/`, deliberately outside
+startup loading. Their `_grid.videoContract` adds cross-field frame/dimension,
+fixed-distilled-step and effective-duration checks that ordinary clamp ranges
+cannot express. See [LTX-2.5 integration](LTX_2_5_VIDEO.md) before promotion;
+copying a local render into the active directory is not billing approval.
+
 A model can have **several** recipes and the resolver picks per request:
 
 - `flux2-klein-t2i.json` — no `image` var → chosen when there's no source frame.

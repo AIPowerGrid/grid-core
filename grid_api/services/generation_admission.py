@@ -3,9 +3,39 @@
 
 """Operational admission for new public inference, independent of charging mode."""
 
+from datetime import UTC, datetime
+from uuid import UUID
+
 from fastapi import HTTPException
 
-from ..config import get_settings
+from ..config import GridSettings, get_settings
+
+
+def require_async_video(settings: GridSettings, account_id: UUID | str) -> datetime | None:
+    """New jobs only; return the captured pilot deadline for the hold transaction."""
+    if settings.media_async_enabled:
+        if settings.media_async_admission_mode == "open":
+            return None
+        try:
+            owner = UUID(str(account_id))
+        except (ValueError, TypeError, AttributeError):
+            owner = None
+        until = settings.media_async_canary_until
+        if (settings.media_async_admission_mode == "pilot" and owner is not None
+                and owner in settings.media_async_canary_accounts and until is not None
+                and until.tzinfo is not None and datetime.now(UTC) < until):
+            return until
+    raise HTTPException(503, detail="Async video admission is unavailable; recover any existing receipt")
+
+
+def require_waiting_video(model: str) -> None:
+    """A governed pilot must not leak through waiting/chat media entry points."""
+    from . import recipes
+
+    if (any(recipes.video_contract_for_model(model, has_source=source) is not None
+            for source in (False, True))
+            and get_settings().media_async_admission_mode != "open"):
+        raise HTTPException(503, detail="This video model requires the controlled async video job endpoint")
 
 
 def validate_rollout(charging_mode: str) -> None:
@@ -27,7 +57,14 @@ def require_media(job_type: str, payload: dict) -> None:
         if int(payload.get("n", 1) or 1) > 1:
             require_path("image-batch")
     elif job_type == "video":
+        if payload.get("source_media"):
+            require_path("audio-to-video")
+            if any(source.get("role") == "reference_image" for source in payload["source_media"]):
+                require_path("appearance-to-video")
+            if any(source.get("role") == "reference_video" for source in payload["source_media"]):
+                require_path("video-to-video")
         if payload.get("source_image_url"):
             require_path("image-to-video")
-        if payload.get("timeline") or (payload.get("recipe_inputs") or {}).get("timeline"):
+        if (payload.get("timeline") or (payload.get("recipe_inputs") or {}).get("timeline")
+                or len((payload.get("recipe_inputs") or {}).get("keyframes") or []) > 1):
             require_path("video-timeline")

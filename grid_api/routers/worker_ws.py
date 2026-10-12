@@ -30,19 +30,22 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..config import get_settings
 from ..database import new_session
-from ..redis_client import get_redis
+from ..redis_client import CONSUMER_GROUP, get_redis
+from ..safe_logging import error_type, opaque_id
 from ..services import accounts as accounts_svc
 from ..services import (
     audio,
     chat_output,
     credits,
     job_queue,
+    media_jobs,
     route_events,
     signing,
     storage,
     token_stream,
     validator_responses,
     validator_text_fidelity,
+    video_output,
 )
 from ..services import ledger as ledger_svc
 from ..services import worker_identity as worker_identity_svc
@@ -65,12 +68,61 @@ RETIRED_WORKER_MODEL_PREFIXES = ("flux.1-krea-dev", "flux1-krea-dev")
 WORKER_SELF_CANARY_MEDIA_TIMEOUT_SECONDS = 840
 
 
+async def _release_undispatched_job(job: dict) -> None:
+    if media_jobs.MARKER in (job.get("payload") or {}):
+        await credits.release_job(job["job_id"], only_if_unstarted_media=True)
+    else:
+        await credits.release_job(job["job_id"])
+
+
 async def _worker_online(worker_name: str) -> bool:
     """True if a worker with this name currently has a live registration."""
     if not worker_name:
         return False
     r = get_redis()
     return bool(await r.get(f"{WORKER_ONLINE_BY_NAME}{worker_name}"))
+
+
+async def _requeue_incompatible_job(job: dict) -> bool:
+    """Route to one fully compatible peer, including busy peers, before bouncing."""
+    payload = job.get("payload") or {}
+    features = payload.get("required_media_features", [])
+    feature = payload.get("required_media_feature")
+    api_format = payload.get("api_format", "openai-chat")
+    if (not isinstance(features, list) or len(features) > 8
+            or not all(isinstance(item, str) for item in features)
+            or feature is not None and not isinstance(feature, str)
+            or not isinstance(api_format, str)):
+        return await job_queue.requeue_for_mismatch(job)
+    required = set(features) | ({feature} if feature else set())
+    r = get_redis()
+    workers = sorted(await r.smembers(WORKER_ACTIVE_SET))
+    pipe = r.pipeline()
+    for worker in workers:
+        pipe.get(f"{WORKER_STATUS_PREFIX}{worker}{WORKER_STATUS_SUFFIX}")
+    snapshots = await pipe.execute() if workers else []
+    compatible = []
+    for worker, snapshot in zip(workers, snapshots):
+        if not snapshot or worker == job.get("worker_id"):
+            continue
+        info = json.loads(snapshot)
+        if (info.get("dispatch_protocol") != job_queue.ROUTING_PROTOCOL
+                or job.get("hard_target_worker") and info.get("name") != job["hard_target_worker"]
+                or job.get("job_type", "text") not in (info.get("job_types") or ["text"])
+                or api_format not in (info.get("api_formats") or ["openai-chat"])
+                or not required.issubset(info.get("media_features") or [])
+                or job.get("models") and not any(model in (info.get("models") or []) for model in job["models"])
+                or not info.get("models")):
+            continue
+        compatible.append((worker, snapshot))
+    if compatible:
+        pending = await r.xpending(job.get("stream") or job_queue._stream_for(job.get("job_type", "text")), CONSUMER_GROUP)
+        loads = {item["name"]: item["pending"] for item in pending.get("consumers", [])}
+        for worker, snapshot in sorted(compatible, key=lambda item: (loads.get(item[0], 0), item[0])):
+            status = await job_queue.route_to_worker(job, worker, snapshot)
+            if status != "unavailable":
+                return status != "closed"
+    return await job_queue.requeue_for_mismatch(job)
 
 
 # In-process tracking for WebSocket handles (can't serialize these to Redis)
@@ -304,7 +356,9 @@ async def refresh_worker(worker_id: str, info: dict):
         await r.setex(f"{WORKER_ONLINE_BY_NAME}{info['name']}", 60, "1")
 
 
-async def get_available_models(job_type: str | None = None, api_format: str | None = None) -> list[str]:
+async def get_available_models(job_type: str | None = None, api_format: str | None = None,
+                               media_feature: str | None = None,
+                               media_features: tuple[str, ...] = ()) -> list[str]:
     """Get models from connected workers (reads from Redis).
 
     When `job_type` is given (e.g. "text"), only models served by a worker of
@@ -340,6 +394,10 @@ async def get_available_models(job_type: str | None = None, api_format: str | No
         if job_type and job_type not in (info.get("job_types") or ["text"]):
             continue
         if api_format and api_format not in (info.get("api_formats") or ["openai-chat"]):
+            continue
+        if media_feature and media_feature not in (info.get("media_features") or []):
+            continue
+        if not set(media_features).issubset(info.get("media_features") or []):
             continue
         models.update(info.get("models", []))
     # Recipe-backed models: a media recipe can define a NEW model name served by an
@@ -451,6 +509,11 @@ async def worker_websocket(ws: WebSocket):
         # assumed to be plain OpenAI chat workers.
         api_formats = init_msg.get("api_formats") or ["openai-chat"]
         api_formats = [f for f in api_formats if f in ("openai-chat", "openai-responses", "anthropic")] or ["openai-chat"]
+        media_features = init_msg.get("media_features")
+        media_features = ([feature for feature in media_features if isinstance(feature, str)
+                           and feature in {"recipe-image-bindings-v1", "recipe-media-sources-v1",
+                                           "recipe-appearance-reference-v1", "async-video-resume-v1"}]
+                          if isinstance(media_features, list) and len(media_features) <= 8 else [])
         # Input modalities the worker's model accepts (operator-declared). Surfaced
         # on /v1/models as input_modalities so the chat UI enables image upload for
         # vision models. Defaults to text-only for workers that don't advertise it.
@@ -592,12 +655,14 @@ async def worker_websocket(ws: WebSocket):
 
         # Register in Redis (visible to all processes)
         worker_info = {
+            "dispatch_protocol": job_queue.ROUTING_PROTOCOL,
             "worker_id": worker_id,
             "user_id": user["id"],
             "name": worker_name,
             "models": models,
             "job_types": job_types,
             "api_formats": api_formats,
+            "media_features": media_features,
             "modalities": modalities,
             "max_length": max_length,
             "max_context_length": max_context_length,
@@ -677,6 +742,19 @@ async def worker_websocket(ws: WebSocket):
 
         try:
             while True:
+                # Resume the original execution directly from SQL, never through
+                # model routing or a new reservation. Old workers query nothing.
+                resumed = await media_jobs.claim_resumption(
+                    worker_id=worker_id, models=models, media_features=media_features,
+                )
+                if resumed is not None:
+                    ok = await _handle_media_job(
+                        ws, resumed, resumed["selected_model"], worker_id, worker_info,
+                        resume_token=resumed["execution_token"],
+                    )
+                    if not ok:
+                        break
+                    continue
                 # Wait for the next job, or time out every 10s to keepalive.
                 try:
                     job = await asyncio.wait_for(local_jobs.get(), timeout=10)
@@ -706,6 +784,18 @@ async def worker_websocket(ws: WebSocket):
 
                 # Got a job → dispatch it (model check + text/media paths below).
 
+                if job.get("routed_dispatch") and not job.get("dispatch_deadline_expired"):
+                    status = await job_queue.routed_dispatch_status(job)
+                    if status == "superseded":
+                        continue
+                    if status not in {"ready", "closed"}:
+                        raise RuntimeError("unknown routed dispatch status")
+                    job["dispatch_deadline_expired"] = status == "closed"
+                if job.get("dispatch_deadline_expired"):
+                    await token_stream.publish_error(job["job_id"], "Compatible worker capacity wait expired.", code=503)
+                    await _release_undispatched_job(job)
+                    continue
+
                 # ── Worker targeting ──
                 # Validator probes and setup canaries use hard targeting. If
                 # Redis hands the job to any other worker, that worker must not
@@ -722,7 +812,7 @@ async def worker_websocket(ws: WebSocket):
                         code=503,
                     )
                     await job_queue.ack_job(job["stream_id"], stream=job.get("stream"))
-                    await credits.release_job(job["job_id"])
+                    await _release_undispatched_job(job)
                     current_job = None
                     continue
 
@@ -744,22 +834,35 @@ async def worker_websocket(ws: WebSocket):
                 # hands jobs to a random worker regardless of served models, so
                 # a mismatch is normal in a heterogeneous pool. Requeue for
                 # another worker instead of discarding (which would strand the
-                # client). If the job has bounced past the requeue limit, no
-                # worker serves the model — fault it and tell the client.
+                # client). A live compatible peer receives the original pending
+                # delivery directly; it may be busy. Bounce count alone cannot
+                # prove a model is unavailable in a heterogeneous pool.
                 job_models = job["models"]
                 matching = [m for m in job_models if m in models] if job_models else models
                 if not matching:
-                    requeued = await job_queue.requeue_for_mismatch(job)
+                    requeued = await _requeue_incompatible_job(job)
                     if not requeued:
                         await token_stream.publish_error(
                             job["job_id"],
                             f"No worker available for the requested model(s): "
                             f"{', '.join(job_models) if job_models else 'unspecified'}.",
                         )
-                        await credits.release_job(job["job_id"])  # gave up → refund the hold
+                        await _release_undispatched_job(job)  # Only an unstarted async job may release.
                     continue
 
                 selected_model = matching[0]
+
+                feature = job["payload"].get("required_media_feature")
+                required_features = job["payload"].get("required_media_features", [])
+                features_ok = (isinstance(required_features, list) and len(required_features) <= 8
+                               and all(isinstance(item, str) and item in worker_info.get("media_features", [])
+                                       for item in required_features))
+                if not features_ok or (feature and feature not in worker_info.get("media_features", [])):
+                    requeued = await _requeue_incompatible_job(job)
+                    if not requeued:
+                        await token_stream.publish_error(job["job_id"], "No compatible media worker is available.", code=503)
+                        await _release_undispatched_job(job)
+                    continue
 
                 # Check API-format compatibility too. A job for /v1/responses or
                 # /v1/messages must land on a worker whose backend natively serves
@@ -768,14 +871,14 @@ async def worker_websocket(ws: WebSocket):
                 job_format = job["payload"].get("api_format", "openai-chat")
                 worker_formats = worker_info.get("api_formats") or ["openai-chat"]
                 if job_format not in worker_formats:
-                    requeued = await job_queue.requeue_for_mismatch(job)
+                    requeued = await _requeue_incompatible_job(job)
                     if not requeued:
                         await token_stream.publish_error(
                             job["job_id"],
                             f"No worker available serving the '{job_format}' API for "
                             f"model(s): {', '.join(job_models) if job_models else 'unspecified'}.",
                         )
-                        await credits.release_job(job["job_id"])  # gave up → refund the hold
+                        await _release_undispatched_job(job)
                     continue
 
                 # Track current job for retry on disconnect
@@ -1173,7 +1276,7 @@ async def worker_websocket(ws: WebSocket):
                 logger.error(f"Worker disconnected with job {job_id}; requeue gave up — failing to client")
                 await token_stream.publish_error(job_id, "Worker disconnected during generation; no capacity to retry.")
                 if not is_validator_probe:
-                    await credits.release_job(job_id)  # terminal: refund the hold
+                    await _release_undispatched_job(current_job)
 
         # Drain a PREFETCHED-but-undispatched job (local_jobs, maxsize=1) so it
         # requeues immediately instead of waiting out the stale-reclaim loop. The
@@ -1202,7 +1305,7 @@ async def worker_websocket(ws: WebSocket):
                         pid,
                         "Worker disconnected before dispatch; no capacity to retry.",
                     )
-                    await credits.release_job(pid)
+                    await _release_undispatched_job(prefetched)
             except Exception:
                 logger.error("failed to requeue prefetched job on cleanup", exc_info=True)
 
@@ -1668,7 +1771,80 @@ async def _handle_validator_media_probe(
         return True
 
 
-async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict) -> bool:
+async def _handle_media_job(
+    ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict, *, resume_token: str | None = None,
+) -> bool:
+    """Keep Core execution authority separate from the permanent render fence."""
+    if media_jobs.MARKER not in job["payload"]:
+        return await _dispatch_media_job(ws, job, selected_model, worker_id, worker_info)
+    token = resume_token or str(uuid4())
+    try:
+        if resume_token is None:
+            claim = await media_jobs.claim_execution(
+                job_id=job["job_id"],
+                payload=job["payload"],
+                route_models=job.get("models", []),
+                preferred_worker=job.get("preferred_worker", ""),
+                selected_model=selected_model,
+                worker_id=worker_id,
+                job_type=job.get("job_type", "image"),
+                execution_token=token,
+            )
+            if claim != "claimed":
+                return True  # Queue duplicate/closed, never sent to another worker.
+        elif not await media_jobs.renew_execution(job_id=job["job_id"], worker_id=worker_id, execution_token=token):
+            return False
+    except Exception as exc:
+        logger.error("Async media execution claim failed job=%s error_type=%s", opaque_id(job["job_id"]), error_type(exc))
+        return False
+
+    job = {**job, "_media_execution_token": token, "_media_resume": resume_token is not None}
+
+    async def renew_lease() -> None:
+        while True:
+            await asyncio.sleep(media_jobs.EXECUTION_RENEW_SECONDS)
+            try:
+                valid = await asyncio.wait_for(
+                    media_jobs.renew_execution(
+                        job_id=job["job_id"],
+                        worker_id=worker_id,
+                        execution_token=token,
+                    ),
+                    timeout=5,
+                )
+            except Exception as exc:
+                logger.error("Async media lease renewal failed job=%s error_type=%s", opaque_id(job["job_id"]), error_type(exc))
+                valid = False
+            if not valid:
+                await asyncio.wait_for(ws.close(code=1012), timeout=5)
+                return
+
+    renewal = asyncio.create_task(renew_lease())
+    try:
+        ok = await _dispatch_media_job(ws, job, selected_model, worker_id, worker_info)
+        if not ok:
+            await asyncio.wait_for(ws.close(code=1012), timeout=5)
+        return ok
+    finally:
+        renewal.cancel()
+        await asyncio.gather(renewal, return_exceptions=True)
+        try:
+            await asyncio.wait_for(media_jobs.detach_execution(job_id=job["job_id"], execution_token=token), timeout=5)
+        except Exception as exc:
+            # A lost DB response leaves only the bounded old lease, never a new
+            # render authorization. Reconnect waits for its expiry.
+            logger.error("Async media lease detach failed job=%s error_type=%s", opaque_id(job["job_id"]), error_type(exc))
+
+
+async def _release_media_execution(job: dict) -> bool:
+    token = job.get("_media_execution_token")
+    if token is not None:
+        return await credits.release_job(job["job_id"], media_execution_token=token) is True
+    await credits.release_job(job["job_id"])
+    return True
+
+
+async def _dispatch_media_job(ws: WebSocket, job: dict, selected_model: str, worker_id: str, worker_info: dict) -> bool:
     """Dispatch one image/video job to the worker and collect the result.
 
     The job message carries presigned PUT slots so the worker uploads outputs
@@ -1688,9 +1864,12 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
     n = int(payload.get("n", 1) or 1)
     ext = payload.get("ext") or ("mp4" if job_type == "video" else "wav" if job_type == "audio" else "glb" if job_type == "3d" else "webp")
     upload_expires = audio.AUDIO_UPLOAD_URL_TTL if job_type == "audio" else 900
+    # Expired connections retain old PUT URLs. A resumed upload must use a new
+    # object namespace so that transport cannot overwrite the winner's result.
+    upload_id = f"{job_id}/attempt-{uuid4().hex}" if job.get("_media_execution_token") else job_id
     try:
         upload_slots = storage.presign_outputs(
-            job_id,
+            upload_id,
             n,
             ext,
             expires=upload_expires,
@@ -1698,8 +1877,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
         )
     except Exception as e:
         logger.error(f"Presign failed for job {job_id}: {e}")
+        if not await _release_media_execution(job):
+            return False
         await token_stream.publish_error(job_id, "Storage unavailable; please retry.")
-        await credits.release_job(job_id)  # terminal: never dispatched → refund the hold
         return True
 
     await ws.send_json(
@@ -1710,6 +1890,7 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
             "model": selected_model,
             "payload": payload,
             "upload": [{"put_url": s["put_url"], "key": s["key"], "content_type": s["content_type"]} for s in upload_slots],
+            **({"resume": True} if job.get("_media_resume") else {}),
         },
     )
     route_events.capture_route(job=job, selected_model=selected_model, worker_id=worker_id)
@@ -1719,6 +1900,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
     while True:
         msg = await asyncio.wait_for(ws.receive_json(), timeout=receive_timeout)
         msg_type = msg.get("type")
+        if job.get("_media_execution_token") and msg_type != "pong" and msg.get("id") != job_id:
+            # Unknown/late frames cannot act as this job's terminal authority.
+            raise WebSocketDisconnect(code=1008)
 
         if msg_type == "progress":
             pct = msg.get("pct", 0)
@@ -1742,8 +1926,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
             expected_recipe_root = payload.get("recipe_root") if job_type == "audio" else None
             if expected_recipe_root and msg.get("recipe_root") != expected_recipe_root:
                 logger.error("Audio worker returned the wrong recipe root for job %s", job_id)
+                if not await _release_media_execution(job):
+                    return False
                 await token_stream.publish_error(job_id, "Worker recipe verification failed.")
-                await credits.release_job(job_id)
                 route_events.capture_outcome(
                     job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
                 )
@@ -1752,8 +1937,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 reported = _validated_media_results(msg.get("results"), n)
             except ValueError as exc:
                 logger.error("Media output verification failed for job %s: %s", job_id, exc)
+                if not await _release_media_execution(job):
+                    return False
                 await token_stream.publish_error(job_id, "Worker output verification failed.")
-                await credits.release_job(job_id)
                 route_events.capture_outcome(
                     job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
                 )
@@ -1764,14 +1950,28 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 if job_type == "audio"
                 else {"min_bytes": 1}
             )
+            frozen_output = None
             try:
-                uploaded = await asyncio.to_thread(
-                    storage.uploaded_outputs_present,
-                    upload_slots,
-                    **storage_bounds,
-                )
+                if job_type == "video" and job.get("_media_execution_token"):
+                    if n != 1:
+                        raise ValueError("Async video requires one output slot")
+                    frozen_output = await asyncio.to_thread(
+                        video_output.freeze,
+                        upload_slots[0],
+                        job_id=job_id,
+                        expected_sha256=reported[0]["sha256"],
+                    )
+                    uploaded = True
+                else:
+                    uploaded = await asyncio.to_thread(
+                        storage.uploaded_outputs_present,
+                        upload_slots,
+                        **storage_bounds,
+                    )
+            except video_output.InvalidVideoOutput:
+                uploaded = False
             except Exception as exc:
-                logger.error("Media storage verification unavailable for job %s: %s", job_id, exc)
+                logger.error("Media storage verification unavailable for job %s: %s", job_id, type(exc).__name__)
                 await token_stream.publish_error(job_id, "Output verification unavailable; please retry.")
                 route_events.capture_outcome(
                     job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
@@ -1779,8 +1979,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 return False
             if not uploaded:
                 logger.error("Media output object is missing or invalid for job %s", job_id)
+                if not await _release_media_execution(job):
+                    return False
                 await token_stream.publish_error(job_id, "Worker output verification failed.")
-                await credits.release_job(job_id)
                 route_events.capture_outcome(
                     job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
                 )
@@ -1790,10 +1991,10 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 rep = reported.get(i, {})
                 outputs.append(
                     {
-                        "url": slot["public_url"],
-                        "key": slot["key"],
+                        "url": frozen_output["url"] if frozen_output else slot["public_url"],
+                        "key": frozen_output["key"] if frozen_output else slot["key"],
                         "seed": rep.get("seed"),
-                        "sha256": rep.get("sha256"),
+                        "sha256": frozen_output["sha256"] if frozen_output else rep.get("sha256"),
                     },
                 )
 
@@ -1807,13 +2008,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 seconds=float(payload.get("seconds", 0) or 0),
             )
 
-            # Result hash: digest over the worker-reported per-output sha256s.
-            # ⚠️ UNATTESTED: the worker uploads to R2 directly and self-reports the
-            # sha256 — the grid never fetches the bytes, so a malicious/lazy worker can
-            # report an arbitrary hash for arbitrary content and still earn den (audit H4).
-            # This hash is integrity bookkeeping, NOT proof-of-output. Real attestation
-            # comes from the validator scan path (re-fetch + recompute, or sampled re-exec);
-            # do not treat media result_hash as authoritative at settlement until then.
+            # Candidate async video commits Core-hashed, worker-unwritable bytes.
+            # Legacy media still commits self-reported hashes after HEAD checks.
+            # Neither path proves model fidelity or the video's creative quality.
             result_commitment = _media_result_commitment(job_type, payload, outputs)
             result_hash = ledger_svc.canonical_hash(result_commitment)
             verified_sig = signing.verify_worker_sig(
@@ -1824,8 +2021,9 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
             )
             if _requires_signed_receipt(job_type, worker_info) and not verified_sig:
                 logger.error("Managed worker returned an invalid receipt for job %s", job_id)
+                if not await _release_media_execution(job):
+                    return False
                 await token_stream.publish_error(job_id, "Worker receipt verification failed.")
-                await credits.release_job(job_id)
                 route_events.capture_outcome(
                     job=job, worker_id=worker_id, terminal_status="failed", duration_seconds=gen_time,
                 )
@@ -1859,7 +2057,11 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
                 ),
                 exact=True,
                 media_result=media_result,
+                **({"media_execution_token": job["_media_execution_token"]}
+                   if job.get("_media_execution_token") else {}),
             )
+            if settle_result == "execution_superseded":
+                return False  # No client DONE/error, worker ACK, den or metrics.
             if settle_result == "error":
                 # Terminal didn't commit → error out and DON'T ack (return False),
                 # leaving the job for stale-reclaim rather than acking unsettled.
@@ -1899,9 +2101,10 @@ async def _handle_media_job(ws: WebSocket, job: dict, selected_model: str, worke
 
         elif msg_type == "error":
             logger.error(f"Worker error on media job {job_id}: {msg.get('message')}")
+            if not await _release_media_execution(job):
+                return False
             await token_stream.publish_error(job_id, msg.get("message", "Worker error"))
             record_job_failed()
-            await credits.release_job(job_id)  # terminal failure → refund the hold
             route_events.capture_outcome(job=job, worker_id=worker_id, terminal_status="failed")
             return True
 

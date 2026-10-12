@@ -3,9 +3,9 @@
 
 """Exact public price-book contracts."""
 
-from grid_api.services import pricing
-from grid_api.services import den
 import pytest
+
+from grid_api.services import den, pricing
 
 
 def test_unknown_text_uses_published_default_without_reward_promotion():
@@ -57,3 +57,27 @@ def test_turbo_image_launch_prices_are_locked():
 def test_turbo_image_prices_scale_per_output():
     assert pricing.quote_image("Z-IMAGE-TURBO", 4) == 12_000
     assert pricing.quote_image("krea 2 turbo", 4) == 20_000
+
+
+def test_distilled_video_tariff_uses_effective_output_duration():
+    model = "LTX-2.5 Distilled BF16"
+    assert pricing.is_priced_for(model, "video")
+    assert pricing.quote_video(model, 81 / 24) == 67_500
+    assert pricing.quote_video(model, 337 / 24) == 280_834
+    assert pricing.quote_video(model, 60) == 1_200_000
+    for modality in ("text", "image", "audio", "3d"):
+        assert not pricing.is_priced_for(model, modality)
+    for unapproved in ("LTX-2.5 Dev BF16", "LTX-2.5 Dev BF16 Ingredients", "LTX-2.5"):
+        assert pricing.get_price(unapproved) is None
+        assert not pricing.is_priced_for(unapproved, "video")
+
+
+def test_distilled_video_catalog_does_not_claim_availability_or_comparison():
+    catalog = pricing.public_catalog()
+    row = next(item for item in catalog["price_book"]["models"]
+               if item["model"] == "ltx-2.5 distilled bf16")
+    assert row["rates"]["per_video_second_usd"] == 0.02
+    assert all(row["rates"][key] is None for key in row["rates"]
+               if key != "per_video_second_usd")
+    assert all(item["model"] != row["model"]
+               for item in catalog["comparison_evidence"]["items"])

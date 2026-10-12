@@ -202,12 +202,17 @@ class CreditQuoteForm(BaseModel):
     prompt_tokens: int = Field(default=0, ge=0, le=2_000_000)
     max_tokens: int = Field(default=0, ge=0, le=1_000_000)
     n: int = Field(default=1, ge=1, le=16)
-    seconds: Optional[float] = Field(default=None, gt=0, le=3_600)
+    seconds: Optional[float] = Field(default=None, gt=0, le=3_600, allow_inf_nan=False)
+    frames: Optional[int] = Field(default=None, ge=9, le=337, strict=True)
 
     @model_validator(mode="after")
     def require_modality_inputs(self):
-        if self.modality in {"video", "audio"} and self.seconds is None:
+        if self.modality == "audio" and self.seconds is None:
             raise ValueError(f"seconds is required for {self.modality} quotes")
+        if self.modality == "video" and self.seconds is None and self.frames is None:
+            raise ValueError("seconds or frames is required for video quotes")
+        if self.frames is not None and self.modality != "video":
+            raise ValueError("frames is only supported for video quotes")
         return self
 
 
@@ -1960,6 +1965,7 @@ async def quote_credits(
         max_tokens=form.max_tokens,
         n=form.n,
         seconds=float(form.seconds or 0),
+        frames=form.frames,
     )
 
 

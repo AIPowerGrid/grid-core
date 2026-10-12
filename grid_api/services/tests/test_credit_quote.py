@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -299,3 +301,70 @@ def test_quote_request_is_strict_and_bounded():
             modality="image",
             unknown=True,
         )
+
+
+def test_quote_accepts_distilled_handoff_frame_ceiling():
+    form = accounts_router.CreditQuoteForm(model="ltx-2.5-distilled-bf16", modality="video", frames=337)
+    assert form.frames == 337
+    with pytest.raises(ValidationError):
+        accounts_router.CreditQuoteForm(model=form.model, modality="video", frames=338)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("priced", [False, True])
+async def test_ingredients_quote_needs_only_timing_and_moves_no_value(db, monkeypatch, priced):
+    from grid_api.services import recipes, pricing, video_contract
+    from grid_api.services.recipe_import import recipe_root
+
+    for name in ("_BY_ROOT", "_BY_ID", "_BY_NAME", "_BY_MODEL"):
+        monkeypatch.setattr(recipes, name, {})
+    path = Path(__file__).parents[3] / "recipes/qualification/ltx-2.5-dev-bf16-ingredients-v1.json"
+    graph = json.loads(path.read_text())
+    model = graph["_grid"]["modelName"]
+    recipes.register_recipe(recipe_root(graph), graph["_grid"]["name"], graph)
+    if priced:
+        monkeypatch.setitem(pricing.PRICING, model.lower(), pricing.ModelPrice(0, 0, video_per_second=0.02))
+    else:
+        monkeypatch.delitem(pricing.PRICING, model.lower(), raising=False)
+    monkeypatch.setattr("grid_api.services.promotions.available_micro", _zero)
+    monkeypatch.setattr("grid_api.services.free_credits.daily_cap_micro", _zero)
+    monkeypatch.setattr("grid_api.services.free_credits.available_micro", _zero)
+    account, key = await accounts.create_account(username="Appearance quote", issue_initial_key=True)
+    aid = UUID(account["id"])
+    await credits.credit(aid, 1_000_000, "test_funding", "ingredients-quote-funding")
+    summary = await credits.account_credit_summary({"account_id": aid})
+    for fields in ({"frames": 121}, {"seconds": 121 / 24}):
+        quote = await accounts_router.quote_credits(
+            Request({"type": "http", "method": "POST", "path": "/", "headers": []}),
+            accounts_router.CreditQuoteForm(model=model, modality="video", **fields),
+            apikey=key, authorization=None, x_grid_user_assertion=None, x_grid_user_token=None)
+        estimate = quote["estimate"]
+        assert (estimate["frames"], estimate["fps"], estimate["seconds"]) == (121, 24, 121 / 24)
+        assert estimate["priced"] is priced
+        assert estimate["cost_micro"] == (100_834 if priced else None)
+        assert await credits.account_credit_summary({"account_id": aid}) == summary
+    async with await database.new_session() as session:
+        import sqlalchemy as sa
+        from grid_api.v2 import schema
+        assert await session.scalar(sa.select(sa.func.count()).select_from(schema.reservations)) == 0
+        assert await session.scalar(sa.select(sa.func.count()).select_from(schema.media_jobs)) == 0
+    with pytest.raises(ValueError, match="separate appearance image"):
+        video_contract.normalize(recipes.video_contract_for_model(model), {"frames": 121})
+
+
+@pytest.mark.parametrize("variant,maximum,appearance,frames,seconds", [
+    ("dev", 81, False, 121, None),
+    ("dev", 121, True, 81, None),
+    ("dev", 121, True, 122, None),
+    ("dev", 121, True, 121, 4.0),
+    ("distilled", 337, False, 338, None),
+])
+def test_shared_quote_timing_does_not_widen_execution(variant, maximum, appearance, frames, seconds):
+    from grid_api.services.video_contract import LtxVideoContract, normalize_timing
+    contract = LtxVideoContract.model_validate({
+        "schema": "aipg.ltx-video.v1", "variant": variant, "max_frames": maximum,
+        "max_pixels": 768 * 448,
+        **({"appearance_profile": "ingredients-dev-v1", "source_modes": ["audio", "video"]}
+           if appearance else {})})
+    with pytest.raises(ValueError):
+        normalize_timing(contract, frames=frames, seconds=seconds)

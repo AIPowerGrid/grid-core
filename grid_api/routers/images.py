@@ -40,6 +40,7 @@ class ImageRequest(BaseModel):
     prompt: str
     model: Optional[str] = None
     n: int = Field(default=1, ge=1, le=4)
+    max_cost_micro_usd: int | None = Field(default=None, ge=0, le=2**63 - 1, strict=True)
     size: str = "1024x1024"
     quality: Optional[str] = "standard"
     image: Optional[str] = None  # img2img source: inline base64 / data: URI
@@ -75,7 +76,7 @@ async def create_image(
             await accounts_svc.assert_owns_worker(user, body.worker)
 
         # Advanced passthrough knobs (steps/cfg_scale/sampler/scheduler/seed/negative_prompt).
-        extra = body.model_dump(exclude={"prompt", "model", "n", "size", "quality", "image",
+        extra = body.model_dump(exclude={"prompt", "model", "n", "max_cost_micro_usd", "size", "quality", "image",
                                          "loras", "output_format", "response_format", "worker", "style", "progress_token"})
         prompt = body.prompt
         style_model = None
@@ -172,10 +173,11 @@ async def create_image(
         if loras:
             payload["loras"] = loras
 
+        cost_limit = {"max_cost_micro_usd": body.max_cost_micro_usd} if body.max_cost_micro_usd is not None else {}
         outputs, meta = await media.submit_and_wait(model, "image", payload, media.IMAGE_TIMEOUT,
                                               account_id=user.get("account_id"), concurrency_limit=media.MEDIA_CONCURRENCY,
                                               preferred_worker=body.worker or "", progress_token=body.progress_token or "",
-                                              billing_user=user)
+                                              billing_user=user, **cost_limit)
 
         want_b64 = body.response_format == "b64_json"
         data = []

@@ -60,6 +60,10 @@ owning AGENTS.md and any affected parent Child DOX Index.
   host deploys consume only matching binary wheels from the lock and do not
   upgrade pip during release construction; dependency updates must regenerate
   it and pass the CI lock-drift and `pip-audit` gates.
+- Retain the reviewed PyJWT 2.15.1, multidict 6.9.1 and urllib3 2.8.0
+  security floors in both dependency declarations. Updating these libraries
+  still requires authentication/funding/worker regression tests; never waive
+  audit findings to unblock a feature release.
 - Treat `grid_ledger` and `grid_credit_ledger` as append-only economic records.
   Do not mutate historical ledger rows except via an explicit audited migration.
 - Worker/model claims are untrusted until verified by registry sync, signed
@@ -88,6 +92,11 @@ owning AGENTS.md and any affected parent Child DOX Index.
 
 ## Verification
 
+- Credit-first release CI uses reviewed media-worker
+  `1332fa20c6eba4f529a8b64c5689ea777f5c803f`. All four actual appearance
+  adapter cases must pass without skips; the complete suite uses that same
+  source. Synthetic HTTP does not establish a funded GPU/storage canary.
+
 - Full Python sanity: `pytest` from `system-core`.
 - Dependency gate:
   `pip-audit -r requirements-grid.lock --require-hashes --no-deps --disable-pip`;
@@ -106,11 +115,21 @@ owning AGENTS.md and any affected parent Child DOX Index.
 - PR and main CI also start an isolated Unix-socket Redis for the shadow-outbox
   reclaim tests. Rejected-event acknowledgement must wait for durable observer
   error recording; Redis retries and SQL/report behavior have separate proofs.
+- PR and main CI install FFmpeg and require both `ffmpeg` and `ffprobe` before
+  the dedicated media-source decoder tests. Missing executables must fail the
+  job, not silently skip MP4 validation. Record decoder versions in the log;
+  this gate does not qualify production packaging or an OS decoder sandbox.
 - Service units: `pytest grid_api/services/`.
 - Required PR/main tests additionally build pinned, reviewed validator/Console
   commits and run the real PostgreSQL/Core/Console/node compensation handoff.
   Cross-repo source pins are an explicit compatibility baseline; update them
   with reviewed client changes, never silently follow moving branches.
+- PR/main CI also pins both video SDK candidates and runs their optional
+  generated/audio/video qualification on SQLite and PostgreSQL 16. JavaScript
+  uses actual localhost HTTP to the isolated Core router, not mocked fetch;
+  scoped fixture keys, synthetic media and test balances never reach production.
+  One POST, GET-only recovery after reply loss/rollback and 401/403/404 isolation
+  are required. This does not prove GPU output, funded storage or video x402.
 - Router billing/settlement coverage: `pytest grid_api/routers/`.
 - Legacy smoke tests live under `tests/` and may skip without external services.
 - For docs-only changes, run at least `git diff --check` and inspect the DOX
