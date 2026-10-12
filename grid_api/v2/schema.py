@@ -931,13 +931,21 @@ video_quote_staging = sa.Table(
     sa.Column("ready_at", sa.DateTime(timezone=True), nullable=True),
     sa.Column("proof", sa.JSON(none_as_null=True), nullable=True),
     sa.Column("proof_hash", sa.String(64), nullable=True),
+    sa.Column("abandoned_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("cleanup_attempted_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("cleanup_ack_at", sa.DateTime(timezone=True), nullable=True),
     sa.CheckConstraint("length(quote_commitment) = 64 AND length(manifest_hash) = 64 AND lease_until > created",
                        name="ck_grid_video_stage_binding"),
-    sa.CheckConstraint("(status = 'staging' AND ready_at IS NULL AND proof IS NULL AND proof_hash IS NULL) OR "
-                       "(status = 'ready' AND ready_at IS NOT NULL AND proof IS NOT NULL "
+    sa.CheckConstraint("(status IN ('staging', 'abandoned') AND ready_at IS NULL AND proof IS NULL AND proof_hash IS NULL) OR "
+                       "(status IN ('ready', 'abandoned') AND ready_at IS NOT NULL AND proof IS NOT NULL "
                        "AND proof_hash IS NOT NULL AND length(proof_hash) = 64)",
                        name="ck_grid_video_stage_state"),
+    sa.CheckConstraint("((status = 'abandoned' AND abandoned_at IS NOT NULL) OR "
+                       "(status != 'abandoned' AND abandoned_at IS NULL)) AND "
+                       "(cleanup_ack_at IS NULL OR (status = 'abandoned' AND cleanup_attempted_at IS NOT NULL "
+                       "AND cleanup_ack_at >= cleanup_attempted_at))", name="ck_grid_video_stage_cleanup"),
 )
+sa.Index("ix_grid_video_stage_cleanup", video_quote_staging.c.cleanup_attempted_at, video_quote_staging.c.lease_until)
 
 
 # Cross-rail receipt ownership. The initial unit is one token/transaction:

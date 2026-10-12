@@ -246,6 +246,9 @@ async def test_cancellation_keeps_storage_slot_until_owned_thread_finishes(db, a
         task.cancel()
         await asyncio.sleep(0.01)
         assert not task.done() and quote["id"] in staging._active
+        task.cancel()
+        await asyncio.sleep(0.01)
+        assert not task.done() and quote["id"] in staging._active
         with pytest.raises(staging.VideoStageBusy):
             await staging.stage(owner, quote["id"], plan, **policy())
     finally:
@@ -414,6 +417,14 @@ def migration():
     return revision
 
 
+def cleanup_migration():
+    path = Path(__file__).resolve().parents[3] / "alembic/versions/0050_video_unpaid_input_cleanup.py"
+    spec = importlib.util.spec_from_file_location("video_stage_cleanup_migration", path)
+    revision = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(revision)
+    return revision
+
+
 async def test_migration_parity_empty_downgrade_and_refusal_after_allocation(db, admission, source_store):
     revision = migration()
     assert revision.down_revision == "0048"
@@ -424,12 +435,15 @@ async def test_migration_parity_empty_downgrade_and_refusal_after_allocation(db,
             revision.upgrade()
             inspector = sa.inspect(connection)
             assert {column["name"]: column["nullable"] for column in inspector.get_columns(stages.name)} == {
-                column.name: column.nullable for column in stages.columns}
+                column.name: column.nullable for column in stages.columns
+                if column.name not in {"abandoned_at", "cleanup_attempted_at", "cleanup_ack_at"}}
             assert {check["name"] for check in inspector.get_check_constraints(stages.name)} == {
-                check.name for check in stages.constraints if isinstance(check, sa.CheckConstraint)}
+                check.name for check in stages.constraints if isinstance(check, sa.CheckConstraint)
+                and check.name != "ck_grid_video_stage_cleanup"}
             assert {item["referred_table"] for item in inspector.get_foreign_keys(stages.name)} == {"grid_video_quotes"}
             revision.downgrade()
             revision.upgrade()
+            cleanup_migration().upgrade()
 
     async with db[0].kw["bind"].begin() as connection:
         await connection.run_sync(apply)

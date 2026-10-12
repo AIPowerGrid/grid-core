@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0049`
+- `versions/` - ordered migration revisions. Current source head: `0050`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -72,14 +72,23 @@ production database match the Grid-owned schema contracts without relying on
   It invents no historical receipt/token provenance and enables no video API.
   `0049` creates empty private quote-input staging with exact object authority,
   lease fencing and stored-byte proof. No payment, outbox or public route exists.
+  `0050` adds nullable abandonment and repeatable cleanup-attempt/ACK metadata,
+  with coherent state constraints and a rotation index. No history is closed
+  automatically and no historical URL becomes deletion authority.
 
 ## Local Contracts
 
+- Apply `0050` before using the updated optional staging/first-attempt service
+  or enabling `VIDEO_UNPAID_CLEANUP_ENABLED`; default-off startup does not read
+  this table. Keep abandonment-aware code and retained metadata on rollback;
+  downgrade refuses any cleanup history, including unsuccessful rotation.
+  Every recorded payment attempt excludes its inputs from this cleanup.
+
 - Apply `0049` before calling optional private quote staging. Keys commit before
   storage I/O; no historical inputs are adopted. Retain rows on rollback;
-  downgrade refuses even a partial allocation. Prepayment cleanup and transfer
-  to funded-job retention are not implemented; provider lifecycle remains a
-  backstop, not application cleanup proof.
+  downgrade refuses even a partial allocation. Candidate `0050` adds repeatable
+  attempt-free cleanup; transfer to funded-job retention is still unimplemented.
+  Provider lifecycle remains a backstop, not application cleanup proof.
 
 - Apply `0048` before any updated deposit or text-x402 reconciliation writer,
   even with video disabled. Quiesce all financial writers before the migration/
@@ -90,7 +99,8 @@ production database match the Grid-owned schema contracts without relying on
   retained ownership. Shared ownership alone grants no funded video admission.
 
 - Apply `0047` before using the optional non-routable video attempt journal.
-  New initial `begin` calls now additionally require `0049` ready staging;
+  New initial `begin` calls now additionally require current ready staging
+  through `0050`;
   historical attempt reads acquire no new staging or send authority.
   Normal credit/deposit/text x402 and quote routes do not query the new table.
   Application rollback retains it; downgrade refuses any attempt, including

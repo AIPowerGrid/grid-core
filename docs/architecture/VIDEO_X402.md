@@ -407,8 +407,9 @@ A first payment-journal `begin` now requires matching ready inputs under the
 existing account/quote locks. Earlier attempts lacking staging may still be
 observed, not reset or granted another send. There is no payment endpoint,
 facilitator, funded hold/outbox, refund, worker dispatch or automatic cleanup
-hook. Future admission must transfer the exact input authority to funded-job
-retention; unpaid/uncertain allocations need their own safe cleanup policy.
+hook in that original revision. The subsequent unpaid-cleanup candidate is
+described below. Future admission must transfer the exact input authority to
+funded-job retention; uncertain payment attempts remain outside unpaid cleanup.
 The provider lifecycle remains a backstop, not proof of application cleanup.
 Do not enable collection with those gates unfinished.
 
@@ -423,6 +424,57 @@ The full local Core run passes 3,293 tests, with 37 skips and 139 existing
 warnings, in 463.21 seconds. It predates the final test-only credit-merge retry
 correction below; a separate 14-case real PostgreSQL credit suite qualifies
 that final change. Fresh exact-commit CI and live storage proof remain pending.
+
+### Unpaid Input Cleanup Candidate
+
+Migration `0050` adds nullable abandonment, cleanup-attempt and ACK timestamps
+to existing staging. It closes no history automatically and adopts no URLs.
+Current optional staging/first-attempt use needs this migration. The independent
+`VIDEO_UNPAID_CLEANUP_ENABLED` background loop defaults off; disabled startup
+does not query staging. Its bounded interval is 30-3600 seconds, default 60.
+Keep this flag on after quote-creation rollback when private staged work exists.
+No production flag or worker is changed by this candidate.
+
+The sweeper selects a bounded batch only after quote expiry and the recorded
+lease plus a four-minute grace. It rechecks under the account/quote locks and
+irreversibly commits `abandoned` before any deletion. Every payment attempt is
+excluded, including unknown-transaction, reported, proven and manual-review
+state. It never releases/refunds money or decides that an uncertain attempt is
+unpaid. Original source/graph/price/replay identity and prior byte proof survive.
+An abandoned stage cannot upload, become ready, refresh input links or grant
+first-send permission. New requests need a new quote, not reuse of old identity.
+
+Deletion uses only the recorded private authority. Corrupt rows rotate behind
+other work without granting deletion; storage-account changes and public-bucket
+rebinding fail closed. An old recorded private bucket remains eligible after
+private-bucket rotation. ACKs are revisited, not considered permanent absence
+proof: a stalled prior write can finish after the first deletion and the next
+pass repairs it. Uploads additionally check lease time before write/readback.
+Repeated cancellation retains local staging/cleanup guards until their owned
+storage threads finish; errors contain counts or opaque types, not private data.
+The provider lifecycle is still required and this is not an OS/process or live
+storage guarantee.
+
+The cleanup/staging/attempt/shared-receipt matrix passes 212 tests with five
+explicit SQLite variants of PostgreSQL-only cases skipped. PostgreSQL 14
+variants execute. Tests use real SQL and synthetic storage/chain replies;
+late writes, partial staging, uncertain payment exclusion, scan-to-close races,
+corrupt-row rotation, bucket rebinding, repeated cancellation, default-off loop,
+loop error recovery and `0049`/`0050` migration roundtrips are covered. Scratch
+Alembic upgrades through `0050` with no schema drift. The initial full run
+stopped after 143 passes when the synthetic process-recovery `committed` case
+received no first job within its unchanged 30-second limit. Its harness closed
+the private Core/Redis/database; the retained log showed no dispatch/root-cause
+error. Both original process-recovery cases then passed unchanged in isolation
+(26.33 seconds). A fresh full run passes 3,325 tests with 37 skips and 139
+existing warnings in 467.02 seconds. The timeout cause remains inconclusive,
+not waived or claimed fixed. Fresh exact-commit CI remains pending for cleanup.
+
+Staging/first-attempt revision `52e4e4ba` separately passes its
+[exact-commit Linux/PostgreSQL 16 CI](https://github.com/AIPowerGrid/grid-core/actions/runs/38190410725),
+including the credit-merge retry correction. It does not qualify later cleanup
+code. Paid-job authority transfer, actual R2 cleanup, facilitator, funded
+dispatch/refund and public model permission remain gates.
 
 ### Intended Flow
 
@@ -575,7 +627,8 @@ local nor CI fixture results change public serving permission.
    First attempt permission requires ready inputs, but no HTTP sender exists.
    The local full suite and targeted merge-retry tests pass; fresh exact-commit
    CI and real R2 compatibility remain pending;
-   cleanup of unpaid inputs and transfer to funded-job retention remain gates.
+   Candidate `0050` now handles expired attempt-free input cleanup separately;
+   paid-job retention transfer and live storage/cleanup qualification remain gates.
    The bounded lost-transaction watcher, actual facilitator/payer compatibility
    and atomic funded admission are not implemented yet.
    Prove duplicates, concurrency and cross-rail claims on PostgreSQL 16. Keep

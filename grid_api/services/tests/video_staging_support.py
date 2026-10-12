@@ -19,6 +19,14 @@ class SourceStore:
         self.objects, self.puts, self.reads, self.bodies = {}, [], [], []
         self.failure, self.before_put = None, None
         self.signed = 0
+        self.deleted = []
+
+    def delete_object(self, *, Bucket, Key):
+        if self.failure == "delete":
+            raise RuntimeError("synthetic private storage failure")
+        self.deleted.append(Key)
+        self.objects.pop(Key, None)
+        return {"ResponseMetadata": {"HTTPStatusCode": 204}}
 
     def put_object(self, *, Bucket, Key, Body, ContentType, IfNoneMatch):
         assert IfNoneMatch == "*" and Bucket == "synthetic-private-inputs"

@@ -96,7 +96,7 @@ class GridSettings(BaseSettings):
     media_job_dispatch_lease_seconds: int = Field(default=60, ge=30, le=300)
     media_job_batch_size: int = Field(default=10, ge=1, le=50)
     media_private_source_bucket: str = Field(
-        default="", pattern=r"^(?:[a-z0-9][a-z0-9-]{1,61}[a-z0-9])?$"
+        default="", pattern=r"^(?:[a-z0-9][a-z0-9-]{1,61}[a-z0-9])?$",
     )
     # Private quotation pilot only; no payment verifier/sender or dispatch.
     video_x402_quotes_enabled: bool = False
@@ -107,6 +107,9 @@ class GridSettings(BaseSettings):
     video_x402_quote_max_micro: int = Field(default=1_000_000, ge=1, le=1_000_000_000)
     video_x402_quote_per_account: int = Field(default=8, ge=1, le=32)
     video_x402_quote_capacity: int = Field(default=256, ge=1, le=4096)
+    # Independent of quote creation: keep cleanup on after admission rollback.
+    video_unpaid_cleanup_enabled: bool = False
+    video_unpaid_cleanup_seconds: int = Field(default=60, ge=30, le=3600)
     # Native-manager device enrollment. Independently dark until the console
     # approval page and release manager are deployed together.
     worker_enrollment_enabled: bool = False
