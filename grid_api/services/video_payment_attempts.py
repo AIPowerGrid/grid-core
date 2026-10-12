@@ -6,7 +6,7 @@
 No route or background sender calls this candidate. Exactly one begin caller can
 win; every replay is observation, never permission to contact a facilitator.
 Only the authorization's fingerprint is stored, not its spending signature.
-Cross-rail receipt ownership and atomic external hold/outbox remain separate.
+Shared ownership follows receipt proof; atomic external hold/outbox is separate.
 """
 
 from __future__ import annotations
@@ -168,6 +168,9 @@ async def begin(account_id, quote_id, payload: dict, *, expected_payer: str,
             if admission_until <= _now():
                 raise VideoAttemptError("video payment admission expired")
             verified = bindings.verify(quote, payload, expected_payer=payer)
+            from . import video_quote_staging as staging
+
+            await staging.require_ready_in_session(session, account_id, quote["id"])
             created = _now().replace(microsecond=0)
             if created >= quotes._aware(quote["expires"]) or admission_until <= _now():
                 raise VideoAttemptError("video payment admission expired")

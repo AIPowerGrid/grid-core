@@ -917,6 +917,29 @@ video_payment_attempts = sa.Table(
 sa.Index("ix_grid_video_attempt_reconcile", video_payment_attempts.c.status, video_payment_attempts.c.created)
 
 
+# Private quote inputs are allocated before uploads and verified before payment.
+video_quote_staging = sa.Table(
+    "grid_video_quote_staging", metadata,
+    sa.Column("quote_id", sa.Uuid, sa.ForeignKey("grid_video_quotes.id"), primary_key=True),
+    sa.Column("quote_commitment", sa.String(64), nullable=False),
+    sa.Column("manifest", sa.JSON(none_as_null=True), nullable=False),
+    sa.Column("manifest_hash", sa.String(64), nullable=False),
+    sa.Column("status", sa.String(16), nullable=False),
+    sa.Column("lease_token", sa.Uuid, nullable=False),
+    sa.Column("lease_until", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("ready_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("proof", sa.JSON(none_as_null=True), nullable=True),
+    sa.Column("proof_hash", sa.String(64), nullable=True),
+    sa.CheckConstraint("length(quote_commitment) = 64 AND length(manifest_hash) = 64 AND lease_until > created",
+                       name="ck_grid_video_stage_binding"),
+    sa.CheckConstraint("(status = 'staging' AND ready_at IS NULL AND proof IS NULL AND proof_hash IS NULL) OR "
+                       "(status = 'ready' AND ready_at IS NOT NULL AND proof IS NOT NULL "
+                       "AND proof_hash IS NOT NULL AND length(proof_hash) = 64)",
+                       name="ck_grid_video_stage_state"),
+)
+
+
 # Cross-rail receipt ownership. The initial unit is one token/transaction:
 # legacy deposit sums and text x402 already cannot split that unit into jobs.
 payment_receipt_claims = sa.Table(

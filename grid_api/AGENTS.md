@@ -93,6 +93,11 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   original receipt evidence. It has no route, facilitator or background hook,
   no retained spending signature and no funded-job authority. Quote recovery
   remains available without this optional journal; no startup loop reads it.
+  Private `0049` staging now commits exact source keys before uploads and verifies
+  stored bytes before ready state. A first journal `begin` requires ready inputs;
+  existing attempts remain observation-only without invented staging history.
+  No route, sender or funded job uses this foundation yet. Input cleanup,
+  retention transfer, real storage/payment and public license gates remain.
 - Shared receipt ownership requires `0048` before updated deposit/text-x402
   financial writers run. The same chain/asset/transaction cannot fund a second
   reference. Video evidence can claim that ownership but still cannot create

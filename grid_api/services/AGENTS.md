@@ -151,6 +151,21 @@ content sanitization, and reward settlement.
   rollback. Shared receipt ownership is a separate `0048` candidate, not quote
   authority. HTTP acceptance, live payment proof, funded admission and real
   refunds remain gates.
+- `video_quote_staging.py` owns private `0049` quote-input persistence, not
+  public admission. It verifies the original plan, commits exact private keys
+  before storage I/O, and retains those keys on expired-lease retry. Conditional
+  S3 puts and bounded streamed readback prove stored size/hash before one fenced
+  ready commit. Two local slots remain owned until a cancelled storage thread
+  finishes. Recovery refreshes exact private GET URLs without decoding,
+  recompiling, repricing or uploading again. No signatures, credits, payment
+  sender or outbox are written. First attempt permission now requires matching
+  ready state, but no HTTP sender exists. Source cleanup/retention transfer and
+  live R2 qualification remain gates. The SQLite/PostgreSQL staging, quote,
+  attempt and shared-receipt matrix passes 234 cases with nine explicit skips;
+  synthetic S3 and real botocore request-model checks are not live storage proof.
+  The local full suite passes 3,293 tests with 37 skips and 139 existing warnings;
+  it predates the final test-only merge-retry correction, separately qualified
+  by 14 real PostgreSQL credit tests. Fresh exact-commit CI remains pending.
 - `video_eip3009.py` is an offline, admission-time exact EIP-3009 binding
   helper, not a payment endpoint. It builds unsigned SDK-compatible typed data
   including the mandatory JSON-RPC `EIP712Domain` type definitions,
@@ -195,7 +210,9 @@ content sanitization, and reward settlement.
   not silently credited. Live compatibility and atomic funded admission remain
   gates; journal/shared-claim fixture tests do not prove real settlement.
 - `video_payment_attempts.py` owns optional `0047` pre-send/reconciliation state,
-  not a payment endpoint. Account/quote locks serialize one initial valid
+  not a payment endpoint. First permission requires `0049` verified input
+  staging; an old attempt can only recover, never gain another send permission.
+  Account/quote locks serialize one initial valid
   authorization winner; created-time/deadline checks run after locks and again
   before commit. It retains a canonical payload hash rather than the spending
   signature. Replays after expiry/rollback grant no send permission. Payer and
@@ -211,7 +228,8 @@ content sanitization, and reward settlement.
   not a payable/refundable duplicate. Previously proven rows recover unchanged
   and are not silently backfilled into ownership; future admission must check
   its actual shared claim. There is no facilitator, watcher, signature-retention/
-  retry, staged input persistence, funded hold/outbox, credit or payout write.
+  retry, funded hold/outbox, credit or payout write. Private input persistence
+  is separately owned by the staging service, not the attempt journal.
   `proven` evidence alone cannot admit work. Missing-transaction recovery still
   needs the bounded nonce watcher or reviewed manual correlation. No runtime
   route/loop invokes this journal and normal quote views remain payment-disabled.
@@ -1145,6 +1163,11 @@ content sanitization, and reward settlement.
   token and native user-token transport verify real Grid signatures; upstream
   Google/SIWE proof is outside this test.
 - `pytest grid_api/services/` - covers `job_queue`, `den`, `quota` (+ settlement subtree).
+- Credit/account merge races may deliberately fail closed with the exact
+  canonical-account-change retry signal before money writes. Tests must retry
+  the original durable ref, not assume every concurrent call succeeds or
+  swallow arbitrary exceptions. The controlled pre-lock merge case proves zero
+  initial credit rows and exactly one canonical-account credit after retry.
 - PostgreSQL lock-observation tests must refresh `pg_stat_activity` snapshots
   inside a long-lived observer transaction. Prime the snapshot before starting
   the contender and call `pg_stat_clear_snapshot()` before each poll; otherwise

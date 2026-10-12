@@ -9,6 +9,7 @@ import importlib.util
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -17,12 +18,17 @@ from eth_account import Account
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from grid_api import database
+from grid_api.routers import videos
 from grid_api.services import video_eip3009 as bindings
 from grid_api.services import video_payment_attempts as journal
 from grid_api.services import video_payment_proofs as proofs
+from grid_api.services import video_plans
+from grid_api.services import video_quote_staging as staging
 from grid_api.services import video_quotes as quotes
 from grid_api.services.tests import test_video_payment_proofs as proof_tests
+from grid_api.services.tests import test_video_plans as plan_tests
 from grid_api.services.tests import test_video_quotes as quote_tests
+from grid_api.services.tests import video_staging_support as stage_support
 from grid_api.v2.schema import account_aliases, accounts, metadata
 from grid_api.v2.schema import video_payment_attempts as attempts
 
@@ -31,14 +37,20 @@ admission = quote_tests.admission
 registry = quote_tests.registry
 mp4 = quote_tests.mp4
 synthetic_dependencies = quote_tests.synthetic_dependencies
+source_store = stage_support.source_store
 pytestmark = pytest.mark.asyncio
 POLICY = {"confirmation_tag": "safe", "min_confirmations": 12}
 
 
 async def saved(*, mode="generated", video=None):
     owner = await quote_tests.owner(0)
-    prepared, key = await quote_tests.prepared(owner, mode=mode, video=video)
+    inputs = await videos.validate_video(plan_tests.request(mode, video=video), {}, async_submission=True)
+    plan = video_plans.compile_video(inputs)
+    key = str(uuid4())
+    prepared = quotes.prepare(account_id=owner, idempotency_key=key, request_hash=quote_tests.INTENT, plan=plan,
+        max_cost_micro=100_000, server_max_micro=100_000, network="eip155:84532", pay_to=quote_tests.PAY_TO)
     row, _new = await quotes.persist(prepared, idempotency_key=key, **quote_tests.LIMITS)
+    await staging.stage(owner, row["id"], plan, admission_until=datetime.now(UTC) + timedelta(minutes=1))
     account = Account.create()
     payload = proof_tests.binding_tests.sign(row, account)
     return owner, row, account, payload
