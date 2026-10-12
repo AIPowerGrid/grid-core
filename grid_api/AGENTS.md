@@ -28,6 +28,13 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 
 ## Local Contracts
 
+- The optional `0052` Safe refund journal is non-routable. It requires an owned
+  proved payment and closed refund obligation, freezes the original payer/exact
+  amount and one reviewed Safe nonce, and commits outbound receipt ownership
+  with confirmed refund state. It moves no credit or worker reward and never
+  clears historical refund-due timestamps. No signer or automatic nonce/send
+  permission exists; actual Safe/refund and rollout qualification remain gates.
+
 - Private `0051` receipt-backed video admission is non-routable. It commits
   actual owned proof, exact external hold, frozen outbox and original private
   input authority together, or records an unsent USDC refund obligation without

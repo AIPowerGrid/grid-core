@@ -300,6 +300,10 @@ validation, worker incentives, and trust boundaries.
   exact nonce logs through two sources and proves the full transfer before
   immutable journal report/reconciliation. No automatic watcher, sender or
   HTTP collection is implied; empty searches do not prove no payment.
+  Private `0052` now adds one reviewed unsigned Safe refund intent and atomic
+  confirmed-refund/shared-receipt closure. It has no signer, send permission or
+  runtime hook. Original payer, amount and nonce are frozen; original refund-due
+  history remains. Actual Safe/payment/refund qualification is still required.
 
 - Keep the live/dry-run/stub status explicit. If a checklist marks an item done,
   code and tests must support that claim.
