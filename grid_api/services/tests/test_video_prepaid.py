@@ -26,6 +26,7 @@ from grid_api.v2.schema import (
     account_aliases,
     credit_ledger,
     ledger,
+    metadata,
     payment_receipt_claims,
     reservations,
     video_payment_attempts,
@@ -418,9 +419,13 @@ async def test_0051_empty_roundtrip_and_nonempty_downgrade_refusal(db, admission
     factory, _backend = db
     async with factory().bind.begin() as connection:
         def roundtrip(sync):
+            refunds = metadata.tables["grid_video_refunds"]
+            assert sync.scalar(sa.select(sa.func.count()).select_from(refunds)) == 0
+            refunds.drop(sync)
             with Operations.context(MigrationContext.configure(sync)):
                 module.downgrade()
                 module.upgrade()
+            refunds.create(sync)
         await connection.run_sync(roundtrip)
     owner, quote, _account = await proven()
     await video_prepaid.admit_proven(owner, quote["id"], **policy(allow_execution=False))

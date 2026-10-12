@@ -328,7 +328,10 @@ async def test_migration_parity_empty_downgrade_and_retained_ownership(db):
 
     def apply(connection):
         prepaid = metadata.tables["grid_video_prepaid_payments"]
+        refunds = metadata.tables["grid_video_refunds"]
         assert connection.scalar(sa.select(sa.func.count()).select_from(prepaid)) == 0
+        assert connection.scalar(sa.select(sa.func.count()).select_from(refunds)) == 0
+        refunds.drop(connection)
         prepaid.drop(connection)
         claim_rows.drop(connection)
         with Operations.context(MigrationContext.configure(connection)):
@@ -342,6 +345,7 @@ async def test_migration_parity_empty_downgrade_and_retained_ownership(db):
             revision.downgrade()
             revision.upgrade()
         prepaid.create(connection)
+        refunds.create(connection)
 
     async with db[0].kw["bind"].begin() as connection:
         await connection.run_sync(apply)
