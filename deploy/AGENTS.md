@@ -73,6 +73,12 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- Candidate `0051` must precede updated financial/worker-backing readers even
+  with video payment dark. It creates no enabled endpoint or sender. Retain
+  prepaid-aware release/terminal/reward handlers and funded/refund history after
+  first use; old code could incorrectly restore account credit. `refund_due`
+  means USDC owed, not sent. No production switch is made by these fixtures.
+
 - Apply `0050` before current optional quote staging/first-payment-attempt use
   or enabling `VIDEO_UNPAID_CLEANUP_ENABLED`. Its default is off and ordinary
   startup does not query staging. Keep cleanup enabled independently after

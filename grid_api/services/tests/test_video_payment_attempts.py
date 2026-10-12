@@ -385,6 +385,9 @@ async def test_migration_parity_and_liability_retention_on_real_database(db, adm
     assert revision.down_revision == "0046"
 
     def apply(connection):
+        prepaid = metadata.tables["grid_video_prepaid_payments"]
+        assert connection.scalar(sa.select(sa.func.count()).select_from(prepaid)) == 0
+        prepaid.drop(connection)
         attempts.drop(connection)
         with Operations.context(MigrationContext.configure(connection)):
             revision.upgrade()
@@ -399,6 +402,7 @@ async def test_migration_parity_and_liability_retention_on_real_database(db, adm
             assert {c["referred_table"] for c in inspector.get_foreign_keys(attempts.name)} == {"grid_video_quotes"}
             revision.downgrade()
             revision.upgrade()
+        prepaid.create(connection)
 
     async with db[0].kw["bind"].begin() as connection:
         await connection.run_sync(apply)

@@ -291,6 +291,12 @@ validation, worker incentives, and trust boundaries.
 
 ## Local Contracts
 
+- `VIDEO_X402.md` now distinguishes the private `0051` proved-receipt hold/
+  outbox/refund-obligation candidate from still-missing HTTP payment collection.
+  Admitted source authority transfers to existing cleanup; uncertain or
+  unadmitted payment retention remains a gate. `refund_due` is not a sent
+  refund. SQL/Redis fixtures are not live payment/GPU/storage/model permission.
+
 - Keep the live/dry-run/stub status explicit. If a checklist marks an item done,
   code and tests must support that claim.
 - Economics docs must distinguish demand billing from supply settlement.

@@ -18,19 +18,20 @@ periods never double-count a job on the boundary.
 
 from __future__ import annotations
 
-from datetime import datetime
 import math
+from datetime import datetime
 
 import sqlalchemy as sa
 
-from ...database import new_session
 from ...config import get_settings
+from ...database import new_session
 from ...v2.schema import accounts as accounts_table
 from ...v2.schema import credit_ledger as credit_ledger_table
 from ...v2.schema import ledger as ledger_table
 from ...v2.schema import reservations as reservations_table
 from ...v2.schema import workers as workers_table
 from ...v2.schema import x402_payments as x402_payments_table
+from .. import video_prepaid
 
 
 def _reservation_matches_job():
@@ -49,7 +50,7 @@ def _purchased_den():
     """Purchased fraction shared by payout eligibility and its read-only monitor."""
     r = reservations_table.c
     purchased = sa.case(
-        (r.billing_source == "x402", r.actual_micro),
+        (r.billing_source.in_(("x402", "video_prepaid")), r.actual_micro),
         else_=sa.case(
             (r.actual_micro > r.free_micro + r.promo_micro,
              r.actual_micro - r.free_micro - r.promo_micro),
@@ -61,7 +62,7 @@ def _purchased_den():
         .where(
             _reservation_matches_job(),
             r.status == "settled",
-            r.billing_source.in_(("credits", "x402")),
+            r.billing_source.in_(("credits", "x402", "video_prepaid")),
             sa.or_(r.billing_source == "x402", r.account_id.isnot(None)),
             r.actual_micro > 0,
             r.reserved_micro > 0,
@@ -116,7 +117,11 @@ def _funded_job():
             ),
         )
     )
-    return ~sa.exists(unsettled_x402)
+    invalid_video = sa.select(sa.literal(1)).select_from(reservations_table).where(
+        _reservation_matches_job(), reservations_table.c.billing_source == "video_prepaid",
+        ~video_prepaid.funded_condition(reservations_table.c),
+    )
+    return sa.and_(~sa.exists(unsettled_x402), ~sa.exists(invalid_video))
 
 
 async def reward_backing_health(start: datetime, end: datetime) -> dict:
@@ -207,7 +212,7 @@ async def funded_work_by_account(start: datetime, end: datetime) -> tuple[list[d
     """
     r = reservations_table.c
     purchased = sa.case(
-        (r.billing_source == "x402", r.actual_micro),
+        (r.billing_source.in_(("x402", "video_prepaid")), r.actual_micro),
         else_=r.actual_micro - r.free_micro - r.promo_micro,
     )
     c = credit_ledger_table.c
@@ -224,7 +229,7 @@ async def funded_work_by_account(start: datetime, end: datetime) -> tuple[list[d
     # A label such as "purchased" or "usdc_deposit" is not funding proof.
     # Refunds reduce backing; missing/contradictory job movements earn none.
     backing = sa.case(
-        (r.billing_source == "x402", purchased),
+        (r.billing_source.in_(("x402", "video_prepaid")), purchased),
         (sa.and_(spent == purchased, funded >= 0, funded <= purchased), funded),
         else_=0,
     )
@@ -253,7 +258,8 @@ async def funded_work_by_account(start: datetime, end: datetime) -> tuple[list[d
             r.free_micro >= 0, r.promo_micro >= 0,
             r.free_micro + r.promo_micro <= r.actual_micro,
             sa.or_(sa.and_(r.billing_source == "credits", r.account_id.isnot(None)),
-                   sa.and_(r.billing_source == "x402", paid_x402)),
+                   sa.and_(r.billing_source == "x402", paid_x402),
+                   sa.and_(r.billing_source == "video_prepaid", video_prepaid.funded_condition(r))),
         ).subquery()
     )
     # Grant-only jobs must not dilute funded workers via the DEN denominator,

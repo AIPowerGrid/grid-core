@@ -28,6 +28,15 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 
 ## Local Contracts
 
+- Private `0051` receipt-backed video admission is non-routable. It commits
+  actual owned proof, exact external hold, frozen outbox and original private
+  input authority together, or records an unsent USDC refund obligation without
+  a job. Existing terminal/fence/reward code recognizes `video_prepaid` without
+  drawing or refunding credit pockets. Migrate before candidate financial and
+  backing readers even dark, and retain new handlers/history on rollback.
+  No `/pay` route, sender, watcher, refund signer or public model permission
+  exists; real payment/storage/GPU/client qualification remains required.
+
 - **Auth:** API keys are SHA-256 hashed; keep `auth.py` byte-compatible with
   server-side key issuance. Retired `users.api_key` credentials are not an
   authentication authority.

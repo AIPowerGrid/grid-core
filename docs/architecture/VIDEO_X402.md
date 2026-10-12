@@ -3,13 +3,16 @@
 
 # Video x402 Build
 
-Status: **private quotation, offline signature-binding and read-only historical
-receipt/attempt-journal/shared-ownership candidates implemented; payment collection remains a proposal**.
+Status: **private quotation, signature/receipt/ownership foundations and
+receipt-backed hold/outbox with unsent refund obligations implemented as
+candidates; HTTP payment collection remains a proposal**.
 Reviewed against the candidate async video code and locally locked x402 2.16.0
 SDK on October 11, 2026. The quote routes below are independently default-off
 and have no payment collection, reservation, dispatch, refund sender or
 production authority. Credit-backed video remains the first integration path;
 [LTX qualification](LTX_2_5_VIDEO.md) and model-use permission still gate launch.
+The separate non-routable `0051` service below can atomically admit an already
+proved, owned receipt into the existing outbox; no quote route calls it.
 
 ## Current Boundary
 
@@ -311,7 +314,8 @@ unsent `settling` attempt. Likewise, a lost facilitator reply may leave the
 transaction unknown. Both need the future bounded nonce watcher/confirmed
 unspent-authorization closure or reviewed correlation; neither may be reset or
 automatically resent. The separate staged-input candidate is described below;
-no facilitator or funded admission consumes it yet. New proven evidence commits its shared receipt ownership,
+no facilitator consumes it yet. The separate `0051` private admission candidate
+can consume new proved evidence with its actual shared ownership. New proven evidence commits its shared receipt ownership,
 but remains a recoverable liability until funded admission/refund commits; this candidate must
 not take real payments merely because its SQL tests pass.
 
@@ -473,8 +477,86 @@ not waived or claimed fixed. Fresh exact-commit CI remains pending for cleanup.
 Staging/first-attempt revision `52e4e4ba` separately passes its
 [exact-commit Linux/PostgreSQL 16 CI](https://github.com/AIPowerGrid/grid-core/actions/runs/38190410725),
 including the credit-merge retry correction. It does not qualify later cleanup
-code. Paid-job authority transfer, actual R2 cleanup, facilitator, funded
-dispatch/refund and public model permission remain gates.
+code. Cleanup revision `a7584e56` subsequently passes its
+[exact Linux/PostgreSQL 16 CI](https://github.com/AIPowerGrid/grid-core/actions/runs/38194765392).
+That does not qualify the following `0051` candidate or real storage/payments.
+
+### Receipt-Backed Admission Candidate
+
+Migration `0051` adds empty `grid_video_prepaid_payments`, bound to the original
+quote attempt and shared receipt claim. `services/video_prepaid.py` is a private
+service, not a `/pay` endpoint or background sender. It accepts no payment
+signature, supplied transaction, graph, tariff, seed or refund wallet. Its
+caller must independently enforce scoped authentication, model permission and
+the expiring runtime pilot before allowing execution. Quote replies still say
+`payment_enabled:false`, and SDK preview signer callbacks remain blocked.
+
+Only original `proven` evidence with its exact retained shared receipt purpose
+can proceed. Legacy `proven` labels without claims and conflicted/manual-review
+receipts cannot fund another job or automatic refund. Presigned private input
+locations are prepared outside SQL locks; the account/quote and existing job
+locks then serialize one decision. The exact payment record, positive
+`video_prepaid` reservation, frozen async job and original private object
+authority commit together. No credit, free allowance or promotion is drawn.
+Admission preserves the quoted UUID, seed, graph, request identity, tariff and
+input commitments. New quotes additionally freeze already-validated worker
+affinity; old snapshots are not rewritten or assigned invented affinity.
+
+Expired quotes, closed admission or exhausted held-job capacity record a
+durable exact refund obligation **without a hold or executable job**. Expiry
+during SQL preparation rolls back the job and commits only that liability.
+Replay and owner-family lookup retain the original decision after expiry or
+rollback, without repricing, uploading, refreshing a job or admitting it later.
+Storage-presigning/DB uncertainty remains recoverable against the same receipt;
+it is not permission for another payment. No receiving or sending wallet key
+is present in this service.
+
+Existing outbox publication, initial execution and original-worker continuation
+recheck the prepaid hold, claim, proof, original graph/source keys and job
+binding. Redis reply loss may produce duplicate deliveries, but the existing
+irreversible execution fence allows only one claim. Successful output, demand
+charge and worker ledger still commit through `credits.record_and_settle`.
+A prepaid success without the verified media result is refused; the legacy
+`settle_exact` shortcut cannot close this source. Failure, unstarted give-up
+and stale-hold recovery close it with zero actual charge and the exact USDC
+refund obligation in the same transaction. They never restore account credit.
+Duplicate failure is a no-op; success after closure cannot mint worker reward.
+Closing a hold records money owed, **not an on-chain refund**.
+
+Only completed, exact-charge prepaid work with the original owned proof and
+no refund obligation contributes purchased/funded worker backing. Source labels,
+damaged ownership/proof/amount and missing results contribute nothing, including
+before the paid-only cutoff. No payout sender, rate, period or budget changes.
+Admitted jobs transfer the original allocated input keys to the existing
+post-financial-closure retention loop; URLs are not inferred as authority.
+Proved but unadmitted/refund-only or uncertain attempts remain outside unpaid
+cleanup. Their payment-aware retention, live R2 behavior and provider lifecycle
+still need qualification; no fixture cleanup is advertised as live privacy.
+
+Apply `0051` before this financial/aggregation candidate starts, even with video
+payment disabled: reward queries refer to its table. Quiesced migration-first
+all-writer `0048` rules still apply. After any prepaid job exists, retain the
+new terminal/reward handlers and payment history on rollback; old release code
+could mint credit instead of the required USDC liability. Downgrade refuses
+every payment/refund row, including unadmitted or completed state.
+
+Current qualification uses real SQLite/PostgreSQL 14 and isolated Redis with
+synthetic chain/storage and newly generated unfunded signatures. The combined
+video/credit/reservation/reward/API matrix passes 674 cases with 19 explicit
+skips. The full local Grid suite passes 3,396 with 38 skips and 139 existing
+warnings in 493.05 seconds. It predates ten final test-only terminal-commit/
+worker-affinity cases and a behavior-neutral trailing-comma edit. All 81 prepaid
+cases then pass separately, with one SQLite variant of the executed PostgreSQL
+race skipped. This includes pre/post-commit reply errors for both success and
+failure, zero credit/refund leakage, exact backed reward queries, source/graph/
+receipt corruption, original-worker fencing, 25 concurrent admission callers,
+real Redis reply loss and `0051` empty-roundtrip/nonempty-downgrade proof.
+Scratch Alembic upgrades through `0051` and reports no schema drift. New module,
+test and migration files pass Ruff; unrelated inherited lint remains unchanged.
+It does not prove a received payment, facilitator, GPU render or sent refund.
+Fresh exact-commit PostgreSQL 16 CI is still required for this candidate.
+The missing HTTP/envelope/sender, lost-transaction watcher, reviewed Safe refund
+proof, live testnet/storage/GPU chain and public model permission remain gates.
 
 ### Intended Flow
 
@@ -628,9 +710,11 @@ local nor CI fixture results change public serving permission.
    The local full suite and targeted merge-retry tests pass; fresh exact-commit
    CI and real R2 compatibility remain pending;
    Candidate `0050` now handles expired attempt-free input cleanup separately;
-   paid-job retention transfer and live storage/cleanup qualification remain gates.
+   `0051` transfers admitted input authority to the existing terminal cleanup.
+   Live storage/cleanup and unadmitted-payment retention remain gates.
    The bounded lost-transaction watcher, actual facilitator/payer compatibility
-   and atomic funded admission are not implemented yet.
+   remain unimplemented. Atomic funded admission is a private `0051` candidate,
+   not an HTTP sender or live receipt-to-GPU proof.
    Prove duplicates, concurrency and cross-rail claims on PostgreSQL 16. Keep
    the existing text x402 contract unchanged.
 4. Integrate leased success/failure and reviewed refunds. Kill processes before/

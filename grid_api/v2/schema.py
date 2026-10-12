@@ -948,6 +948,32 @@ video_quote_staging = sa.Table(
 sa.Index("ix_grid_video_stage_cleanup", video_quote_staging.c.cleanup_attempted_at, video_quote_staging.c.lease_until)
 
 
+video_prepaid_payments = sa.Table(
+    "grid_video_prepaid_payments", metadata,
+    sa.Column("quote_id", sa.Uuid, sa.ForeignKey("grid_video_payment_attempts.quote_id"), primary_key=True),
+    sa.Column("job_id", sa.String(64), nullable=False, unique=True),
+    sa.Column("receipt_claim_key", sa.String(64), sa.ForeignKey("grid_payment_receipt_claims.claim_key"), nullable=False, unique=True),
+    sa.Column("quote_commitment", sa.String(64), nullable=False),
+    sa.Column("proof_hash", sa.String(64), nullable=False),
+    sa.Column("amount_micro", sa.BigInteger, nullable=False),
+    sa.Column("manifest_hash", sa.String(64), nullable=True),
+    sa.Column("admitted_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("refund_due_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("refund_reason", sa.String(32), nullable=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint("length(quote_commitment) = 64 AND length(proof_hash) = 64 AND amount_micro > 0",
+                       name="ck_grid_video_prepaid_binding"),
+    sa.CheckConstraint("(admitted_at IS NOT NULL AND manifest_hash IS NOT NULL AND length(manifest_hash) = 64) OR "
+                       "(admitted_at IS NULL AND manifest_hash IS NULL AND refund_due_at IS NOT NULL)",
+                       name="ck_grid_video_prepaid_admission"),
+    sa.CheckConstraint("(refund_due_at IS NULL AND refund_reason IS NULL) OR "
+                       "(refund_due_at IS NOT NULL AND refund_reason IN "
+                       "('quote_expired', 'admission_closed', 'capacity_exceeded', 'execution_failed'))",
+                       name="ck_grid_video_prepaid_refund"),
+)
+sa.Index("ix_grid_video_prepaid_refunds", video_prepaid_payments.c.refund_due_at)
+
+
 # Cross-rail receipt ownership. The initial unit is one token/transaction:
 # legacy deposit sums and text x402 already cannot split that unit into jobs.
 payment_receipt_claims = sa.Table(

@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0050`
+- `versions/` - ordered migration revisions. Current source head: `0051`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -75,8 +75,16 @@ production database match the Grid-owned schema contracts without relying on
   `0050` adds nullable abandonment and repeatable cleanup-attempt/ACK metadata,
   with coherent state constraints and a rotation index. No history is closed
   automatically and no historical URL becomes deletion authority.
+  `0051` creates empty quote/receipt-bound prepaid video funding and unsent
+  refund obligations. No historical payment, hold or job is admitted.
 
 ## Local Contracts
+
+- Apply `0051` before candidate financial/backing readers start, even with
+  video payment dark. Retain new `video_prepaid` terminal/reward handlers and
+  every payment/refund row on rollback; older release code could restore credit
+  instead of recording USDC owed. Downgrade refuses all nonempty history.
+  Migration creates no payment sender or enabled admission API.
 
 - Apply `0050` before using the updated optional staging/first-attempt service
   or enabling `VIDEO_UNPAID_CLEANUP_ENABLED`; default-off startup does not read

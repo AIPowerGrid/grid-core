@@ -1393,17 +1393,23 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok",
                           reservations_t.c.input_per_mtok_micro,
                           reservations_t.c.output_per_mtok_micro,
                           reservations_t.c.discount_bps,
-                          reservations_t.c.service_id)
+                          reservations_t.c.service_id, reservations_t.c.billing_source)
                 .where(reservations_t.c.job_id == str(job_id))
             )).first()
             if not row:
                 return False
 
+            if row[10] == "video_prepaid":
+                if status == "ok":
+                    raise ValueError("prepaid video success requires atomic output settlement")
+                from . import video_prepaid
+                await video_prepaid.fail_in_session(s, str(job_id))
+
             res = await s.execute(
                 sa.update(reservations_t)
                 .where(sa.and_(reservations_t.c.job_id == str(job_id),
                                reservations_t.c.status == "held"))
-                .values(status="settled", settled=_now())
+                .values(status="settled", settled=_now(), **({"actual_micro": 0} if row[10] == "video_prepaid" else {})),
             )
             if res.rowcount == 0:
                 await s.rollback()
@@ -1418,7 +1424,7 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok",
             paid_held = reserved - free_held - promo_held
             service_id = row[9]
 
-            if aid and reserved > 0:
+            if aid and reserved > 0 and row[10] != "video_prepaid":
                 # Two pockets, never converted: the paid refund moves in THIS txn;
                 # the free restore is a Redis op queued for after commit (a crash
                 # between them forfeits free-day allowance, never paid money).
@@ -1496,9 +1502,11 @@ async def settle_exact(job_id) -> None:
         promo_finalize = None
         async with await new_session() as s:
             row = (await s.execute(
-                sa.select(reservations_t.c.account_id, reservations_t.c.promo_micro)
+                sa.select(reservations_t.c.account_id, reservations_t.c.promo_micro, reservations_t.c.billing_source)
                 .where(reservations_t.c.job_id == str(job_id))
             )).first()
+            if row and row[2] == "video_prepaid":
+                raise ValueError("prepaid video success requires atomic output settlement")
             res = await s.execute(
                 sa.update(reservations_t)
                 .where(sa.and_(reservations_t.c.job_id == str(job_id),
@@ -1650,6 +1658,11 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
             )
             if row and audit:
                 raise RuntimeError("job has both demand and compensated-audit reservations")
+            if row and row[10] == "video_prepaid":
+                if not exact or media_result is None or ledger_values["job_type"] != "video":
+                    raise ValueError("prepaid video success requires its verified output")
+                from . import video_prepaid
+                await video_prepaid.require_hold_in_session(s, job_id)
             try:
                 await ledger_svc.record_completion_in_session(s, **ledger_values)
             except IntegrityError:
