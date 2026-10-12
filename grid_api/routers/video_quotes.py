@@ -91,6 +91,7 @@ async def create_video_quote(
                     account_id=user["account_id"], idempotency_key=idempotency_key, request_hash=intent, plan=plan,
                     max_cost_micro=body.max_cost_micro_usd, network=settings.video_x402_quote_network,
                     pay_to=settings.video_x402_quote_pay_to, server_max_micro=settings.video_x402_quote_max_micro,
+                    preferred_worker=body.worker or "",
                 )
                 _admit(settings, user)  # Recheck pilot expiry after bounded source work.
                 row, created = await quotes.persist(prepared, idempotency_key=idempotency_key,

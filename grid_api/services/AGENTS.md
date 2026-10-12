@@ -7,6 +7,22 @@ content sanitization, and reward settlement.
 
 ## Ownership
 
+- `video_prepaid.py` owns private `0051` proved-receipt admission. Actual shared
+  ownership, proof, ready original inputs and account/quote/job locks precede
+  one exact external hold plus frozen outbox/input-authority transaction.
+  Closed/expired/capacity-rejected admission instead records an unsent USDC
+  refund obligation without an executable job. Neither outcome draws credit.
+  Existing worker terminal/release/sweep/fence/backing code recognizes this
+  distinct source; failed jobs owe USDC, never restored credit. Only a committed
+  verified result earns exact backed worker consumption. Replay/read recover
+  one immutable decision; altered graph/source/receipt bindings fail closed.
+  Admitted inputs use existing post-closure cleanup, not inferred URL authority.
+  Unadmitted/uncertain-payment input cleanup, live storage/chain/GPU and actual
+  reviewed refunds remain gates. No endpoint, facilitator, signer or loop
+  invokes this admission. Apply `0051` before all candidate financial/backing
+  readers, retain prepaid-aware handlers/history on rollback, and keep public
+  model permission and HTTP payment collection separate.
+
 - `video_contract.py` owns the candidate strict LTX-2.5 execution/timing
   contract. Only recipes declaring `_grid.videoContract` use it. Qualified
   graphs are snapshotted before reserve; steps/frames/duration and quote units

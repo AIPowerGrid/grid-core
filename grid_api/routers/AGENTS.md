@@ -105,6 +105,10 @@ transport, accounts, stats, health/metrics.
   `/pay` route or PAYMENT-REQUIRED challenge exists. This is not a live x402
   rail, held generation, stock-client compatibility or public model permission.
   The optional quotation table requires migration `0046` before use.
+  New quote snapshots additionally freeze the worker affinity already checked
+  during native validation. Replay never rewrites old snapshots or guesses an
+  absent affinity. Private `0051` receipt-backed admission is not called by
+  these routes; replies remain payment-disabled and no `/pay` exists.
 - `worker_enrollment.py` - dark device-style manager pairing. Public create,
   intent, poll, and ACK endpoints are capability-bound by a high-entropy
   enrollment ID plus poll secret; prepare/approve require a recent scoped user

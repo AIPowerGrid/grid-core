@@ -20,6 +20,15 @@ validator shadow-observation records.
 
 ## Local Contracts
 
+- Migration `0051` creates empty `grid_video_prepaid_payments`, unique by quote,
+  job and shared receipt claim. Exact amount, proof/quote/input commitments and
+  initial admission are retained; refund-due timestamps are unsent liabilities,
+  not refunded state. No historical evidence or credit is backfilled. Existing
+  reservations remain the terminal authority for new `video_prepaid` holds.
+  Apply before financial/reward readers even with admission dark, retain
+  prepaid-aware terminal/backing code on rollback, and refuse any nonempty
+  downgrade. No sender or public API is enabled by migration.
+
 - Migration `0050` adds nullable abandonment and cleanup-attempt/ACK times to
   quote staging. Partial and ready input commitments are preserved when a
   quote is irreversibly abandoned; no row or replay identity is deleted.

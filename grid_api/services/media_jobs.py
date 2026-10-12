@@ -184,14 +184,15 @@ def prepare(*, account_id, idempotency_key: str, request_hash: str, model: str,
     return job
 
 
-def _validate_prepared(job: PreparedMediaJob) -> None:
+def _validate_prepared(job: PreparedMediaJob, *, quoted: bool = False) -> None:
     if not isinstance(job, PreparedMediaJob):
         raise MediaJobError("prepared video job required")
     _uuid(job.job_id)
     _uuid(job.account_id)
     for digest in (job.idempotency_hash, job.request_hash, job.payload_hash):
         _digest(digest)
-    if job.job_id != str(uuid5(_NAMESPACE, f"{job.account_id}:{job.idempotency_hash}")):
+    if ((not quoted and job.job_id != str(uuid5(_NAMESPACE, f"{job.account_id}:{job.idempotency_hash}")))
+            or (quoted and _uuid(job.job_id).version != 4)):
         raise MediaJobError("job id does not match request identity")
     if (type(job.max_cost_micro) is not int or not 0 < job.max_cost_micro <= 2**63 - 1
             or not isinstance(job.model, str) or not 0 < len(job.model) <= 255
@@ -222,20 +223,25 @@ def _validate_prepared(job: PreparedMediaJob) -> None:
         raise MediaJobError("prepared video commitment mismatch")
 
 
-async def insert_in_session(session, job: PreparedMediaJob) -> None:
-    """Called only inside the credit debit/reservation transaction."""
-    _validate_prepared(job)
+async def insert_in_session(session, job: PreparedMediaJob, *, prepaid: bool = False, source_objects=None) -> None:
+    """Called only inside the credit or proved-video hold/admission transaction."""
+    _validate_prepared(job, quoted=prepaid)
     hold = (await session.execute(sa.select(reservations).where(
         reservations.c.job_id == job.job_id))).mappings().one_or_none()
     if (hold is None or hold["account_id"] != job.account_id or hold["model"] != job.model
-            or hold["status"] != "held" or hold["billing_source"] != "credits"
+            or hold["status"] != "held" or hold["billing_source"] != ("video_prepaid" if prepaid else "credits")
             or not 0 < hold["reserved_micro"] <= job.max_cost_micro):
-        raise MediaJobError("async video requires its matching positive credit hold")
+        raise MediaJobError("async video requires its matching positive hold")
+    if prepaid:
+        from . import video_prepaid
+        await video_prepaid.require_prepared_in_session(session, job, source_objects)
+    else:
+        source_objects = media_source_retention.capture(job.payload)
     await session.execute(media_jobs.insert().values(
         job_id=job.job_id, account_id=job.account_id, idempotency_hash=job.idempotency_hash,
         request_hash=job.request_hash, payload_hash=job.payload_hash, model=job.model,
         payload=job.payload, route_models=job.route_models, preferred_worker=job.preferred_worker,
-        max_cost_micro=job.max_cost_micro, source_objects=media_source_retention.capture(job.payload), created=_now(),
+        max_cost_micro=job.max_cost_micro, source_objects=source_objects, created=_now(),
     ))
 
 
@@ -355,6 +361,16 @@ async def _locked_job(session, job_id) -> dict | None:
     return dict(row) if row else None
 
 
+async def _billing_authorized(session, row):
+    if row["billing_source"] == "credits":
+        return True
+    if row["billing_source"] == "video_prepaid":
+        from . import video_prepaid
+        await video_prepaid.require_hold_in_session(session, row["job_id"])
+        return True
+    return False
+
+
 async def dispatch_one(job_id, *, lease_seconds: int = 60) -> bool:
     """One bounded outbox attempt; failed/lost XADD replies leave a reclaimable lease.
 
@@ -372,6 +388,8 @@ async def dispatch_one(job_id, *, lease_seconds: int = 60) -> bool:
                 or row["dispatch_attempts"] >= MAX_DISPATCH_ATTEMPTS
                 or (row["dispatch_deadline"] is not None and _aware(row["dispatch_deadline"]) > now)):
             return False
+        if not await _billing_authorized(session, row):
+            raise MediaJobError("async video funding is unavailable")
         token = str(uuid4())
         await session.execute(media_jobs.update().where(media_jobs.c.job_id == job_id).values(
             dispatch_state="dispatching", dispatch_token=token,
@@ -441,7 +459,7 @@ async def claim_execution(*, job_id, payload: dict, route_models: list[str],
                 or type(payload.get(MARKER)) is not int or payload.get(MARKER) != 1
                 or selected_model not in row["route_models"]
                 or row["hold_owner"] != row["account_id"] or row["hold_model"] != row["model"]
-                or row["billing_source"] != "credits"
+                or not await _billing_authorized(session, row)
                 or not 0 < row["reserved_micro"] <= row["max_cost_micro"]):
             raise MediaJobError("queue job does not match durable video authorization")
         if row["status"] != "held":
@@ -599,7 +617,7 @@ async def claim_resumption(*, worker_id: UUID | str, models: list[str], media_fe
             if (
                 row["hold_owner"] != row["account_id"]
                 or row["hold_model"] != row["model"]
-                or row["billing_source"] != "credits"
+                or not await _billing_authorized(session, row)
                 or not 0 < row["reserved_micro"] <= row["max_cost_micro"]
                 or row["execution_model"] not in row["route_models"]
                 or row["payload_hash"] != _payload_hash(payload, row["route_models"], row["model"], row["preferred_worker"])

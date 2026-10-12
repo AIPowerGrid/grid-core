@@ -96,6 +96,17 @@ owning AGENTS.md and any affected parent Child DOX Index.
 
 ## Verification
 
+- Candidate `0051` privately commits a proved/owned exact-USDC video payment,
+  its external reservation, frozen job and original input authority together.
+  Closed/expired/capacity-rejected admission records only an unsent refund
+  obligation. Existing terminal, stale release, outbox and reward selectors
+  recognize `video_prepaid`; no credits are drawn/restored. Migrate before all
+  financial/backing readers and retain these handlers/history on rollback.
+  HTTP sender/watcher, actual refunds and live testnet/GPU/storage remain gates.
+  The focused matrix passes 674 cases; the full local suite passes 3,396 with
+  38 skips. Ten final test-only terminal-commit/affinity cases additionally pass
+  within the 81-case prepaid matrix. Fresh exact-commit CI remains required.
+
 - Full Python sanity: `pytest` from `system-core`.
 - Dependency gate:
   `pip-audit -r requirements-grid.lock --require-hashes --no-deps --disable-pip`;

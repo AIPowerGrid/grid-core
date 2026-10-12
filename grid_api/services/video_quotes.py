@@ -156,11 +156,14 @@ class PreparedVideoQuote:
 
 
 def prepare(*, account_id, idempotency_key: str, request_hash: str, plan: video_plans.FrozenVideoPlan,
-            max_cost_micro: int, network: str, pay_to: str, server_max_micro: int) -> PreparedVideoQuote:
+            max_cost_micro: int, network: str, pay_to: str, server_max_micro: int,
+            preferred_worker: str = "") -> PreparedVideoQuote:
     """Freeze validated execution and the undiscounted exact-USDC tariff once."""
     owner, key_hash, intent = _uuid(account_id), _key_hash(idempotency_key), _digest(request_hash)
     if network not in USDC:
         raise VideoQuoteError("unsupported video payment network")
+    if type(preferred_worker) is not str or len(preferred_worker) > 255:
+        raise VideoQuoteError("bounded worker affinity required")
     pay_to = _address(pay_to)
     if any(type(cap) is not int or not 0 < cap <= 2**63 - 1 for cap in (max_cost_micro, server_max_micro)):
         raise VideoQuoteError("positive bounded cost ceilings required")
@@ -182,6 +185,7 @@ def prepare(*, account_id, idempotency_key: str, request_hash: str, plan: video_
     quote = PreparedVideoQuote(_canonical({
         "schema": "aipg.video-quote-binding.v2", "quote_id": str(uuid4()), "job_id": str(uuid4()),
         "owner": str(owner), "idempotency_hash": key_hash, "request_hash": intent,
+        "preferred_worker": preferred_worker,
         "plan": frozen, "plan_hash": plan.sha256,
         "price": {"version": pricing.PRICE_BOOK_VERSION, "currency": "USD", "video_per_second_usd": rate,
                   "discount_bps": 0},
@@ -219,6 +223,7 @@ def _validate_row(row: dict) -> dict:
                 or type(seconds) not in {int, float} or not math.isfinite(seconds) or seconds <= 0
                 or math.ceil(rate * seconds * pricing.MICRO) != row["amount_micro"]
                 or not isinstance(price["version"], str) or not 0 < len(price["version"]) <= 64
+                or type(snapshot.get("preferred_worker", "")) is not str or len(snapshot.get("preferred_worker", "")) > 255
                 or type(row["amount_micro"]) is not int or not 0 < row["amount_micro"] <= row["max_cost_micro"]
                 or not _HASH.fullmatch(snapshot["salt"])):
             raise VideoQuoteError("invalid video quote binding")

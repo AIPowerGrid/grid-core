@@ -327,6 +327,9 @@ async def test_migration_parity_empty_downgrade_and_retained_ownership(db):
     assert revision.down_revision == "0047"
 
     def apply(connection):
+        prepaid = metadata.tables["grid_video_prepaid_payments"]
+        assert connection.scalar(sa.select(sa.func.count()).select_from(prepaid)) == 0
+        prepaid.drop(connection)
         claim_rows.drop(connection)
         with Operations.context(MigrationContext.configure(connection)):
             revision.upgrade()
@@ -338,6 +341,7 @@ async def test_migration_parity_empty_downgrade_and_retained_ownership(db):
                 assert {c["name"] for c in read(claim_rows.name)} == {c.name for c in claim_rows.constraints if isinstance(c, kind)}
             revision.downgrade()
             revision.upgrade()
+        prepaid.create(connection)
 
     async with db[0].kw["bind"].begin() as connection:
         await connection.run_sync(apply)
