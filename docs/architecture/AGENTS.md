@@ -321,6 +321,10 @@ validation, worker incentives, and trust boundaries.
   Upgrade all candidate readers before v3 writes and retain them on rollback.
   Upfront omits facilitator `/verify`; locked 2.16.0 format compatibility does
   not prove client flow handling or selected-facilitator support.
+  The copied-contract v3 follow-up executes the strict header's exact original
+  capability after the winning journal commit. Wrong/absent flow cannot create
+  an attempt or transfer. This remains loopback simulation, not a collector,
+  live facilitator, independent RPC or purchased/GPU acceptance.
 
 - Keep the live/dry-run/stub status explicit. If a checklist marks an item done,
   code and tests must support that claim.

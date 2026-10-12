@@ -59,6 +59,13 @@ content sanitization, and reward settlement.
   Snapshot rollback runs in finally. Two logical proof adapters share one
   fork, not independent providers; this is neither actual Base payment nor
   GPU/storage/customer-funded qualification. Inputs/prices remain synthetic.
+  The v3 follow-up decodes the strict PAYMENT-SIGNATURE header and executes
+  that exact forwarded capability, never a newly constructed signature.
+  Missing/authorization/escrow flow rejects before an attempt or transfer.
+  Payment, lost-hash recovery, failed-job refund and both replay reverts pass
+  against copied contracts; 225 combined cases and an 11-case unchanged-code
+  repeat pass, each with one explicit SQLite financial skip. No collector or
+  live-facilitator semantics are qualified by this test.
 
 - `video_prepaid.py` owns private `0051` proved-receipt admission. Actual shared
   ownership, proof, ready original inputs and account/quote/job locks precede
