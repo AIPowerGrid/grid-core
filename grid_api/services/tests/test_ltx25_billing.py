@@ -36,6 +36,9 @@ OPENING_MICRO = 1_000_000
 
 @pytest.fixture(autouse=True)
 def synthetic_dependencies(monkeypatch):
+    from grid_api.config import GridSettings
+    monkeypatch.setattr(generation_admission, "get_settings", lambda: GridSettings(
+        _env_file=None, media_async_admission_mode="open"))
     for name in ("_BY_ROOT", "_BY_NAME", "_BY_ID", "_BY_MODEL", "_LOCAL_RECIPES", "_ONCHAIN_RECIPES"):
         monkeypatch.setattr(recipes, name, {})
     for path in (ROOT / "recipes/qualification").glob("*.json"):
@@ -99,6 +102,20 @@ async def funded_account(amount=OPENING_MICRO):
                                              f"test-deposit:{account_id}", funded_micro=amount)
         await session.commit()
     return account_id
+
+
+@pytest.mark.asyncio
+async def test_private_pilot_cannot_be_bypassed_by_shared_waiting_submit(db, monkeypatch):
+    from grid_api.config import GridSettings
+    monkeypatch.setattr(generation_admission, "get_settings", lambda: GridSettings(_env_file=None))
+    prepare, charge = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(media, "prepare_dispatch", prepare)
+    monkeypatch.setattr(credits, "authorize_media", charge)
+    with pytest.raises(HTTPException) as error:
+        await media.submit_and_wait(DISTILLED, "video", {}, 1, account_id=uuid.uuid4())
+    assert error.value.status_code == 503
+    prepare.assert_not_awaited()
+    charge.assert_not_awaited()
 
 
 async def conserved_balance(account_id):

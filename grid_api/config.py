@@ -91,6 +91,9 @@ class GridSettings(BaseSettings):
     # New async admission is independently dark. The outbox still drains old
     # journaled holds when admission is disabled; never roll back its schema/fence.
     media_async_enabled: bool = False
+    media_async_admission_mode: Literal["pilot", "open"] = "pilot"
+    media_async_canary_accounts: list[UUID] = Field(default_factory=list, max_length=10, repr=False)
+    media_async_canary_until: AwareDatetime | None = Field(default=None, repr=False)
     media_async_concurrency: int = Field(default=4, ge=1, le=16)
     media_job_sweep_seconds: int = Field(default=10, ge=5, le=60)
     media_job_dispatch_lease_seconds: int = Field(default=60, ge=30, le=300)
@@ -247,8 +250,23 @@ class GridSettings(BaseSettings):
             if (not self.video_x402_quote_accounts or not self.video_x402_quote_pay_to
                     or int(self.video_x402_quote_pay_to[2:], 16) == 0
                     or self.video_x402_quotes_until is None
-                    or not now < self.video_x402_quotes_until <= now + timedelta(hours=24)):
-                raise ValueError("Video quote pilot requires accounts, nonzero recipient and an expiry within 24 hours")
+                    or self.video_x402_quotes_until > now + timedelta(hours=24)):
+                raise ValueError("Video quote pilot requires accounts, nonzero recipient and an expiry no more than 24 hours ahead")
+        return self
+
+    @model_validator(mode="after")
+    def validate_media_async_admission(self):
+        cohort, until = self.media_async_canary_accounts, self.media_async_canary_until
+        if len(cohort) != len(set(cohort)):
+            raise ValueError("Async video pilot accounts must be distinct")
+        if self.media_async_admission_mode == "open":
+            if cohort or until is not None:
+                raise ValueError("Open async admission cannot ignore configured pilot restrictions")
+        elif self.media_async_enabled:
+            now = datetime.now(UTC)
+            # Normal expiry closes new jobs, not Core startup or old-job recovery.
+            if not cohort or until is None or until > now + timedelta(hours=24):
+                raise ValueError("Async video pilot requires accounts and an expiry no more than 24 hours ahead")
         return self
 
     @model_validator(mode="after")

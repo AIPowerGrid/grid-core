@@ -96,6 +96,59 @@ owning AGENTS.md and any affected parent Child DOX Index.
 
 ## Verification
 
+- Candidate PR/main CI pins media-worker `1332fa20c6eba4f529a8b64c5689ea777f5c803f`
+  and installs its frozen test runtime. The audio/video appearance cases with
+  default/explicit attention must all execute: exactly four passing cases,
+  zero skips/failures/errors. The full Grid suite receives that same worker
+  source. These are actual adapter/compiler checks with synthetic HTTP, not
+  native GPU/R2 or funded-payment evidence; never describe them as those proofs.
+- Published Core `1d89b3c1` passed exact-source Linux/Python3.12/PostgreSQL16
+  run `38281040906`: 3,814 tests, 45 explicit skips and 139 warnings; pinned
+  SDK qualification passes 68 and Console/validator handoff passes. That run
+  omitted the four worker-adapter cases; the new required checkout/no-skip
+  follow-up needs its own exact-source CI before promotion. Model permission,
+  customer pricing, purchased-credit acceptance and reviewed rollout remain gates.
+
+- The local integrated video candidate ports the credit-first exact-account/
+  deadline/waiting-route guards while preserving all quote/prepaid/refund
+  readers and migrations. Normal expiry of either pilot permits startup and
+  authorized recovery, never new jobs/quotes. Six real isolated Core restart
+  cases pass, including both flags left enabled after expiry. Full local
+  Python 3.13/PostgreSQL 14 regression passes 3,818 with 41 explicit skips and
+  139 inherited warnings; all four reviewed worker-adapter checks execute.
+  The pinned SDK qualification still passes 68. This is local evidence, not
+  publication, exact-source Linux CI, a funded canary or production activation.
+
+- New private binding-v3 video quotes commit upfront/EIP-3009 terms. Fresh
+  signatures and both SDK callbacks require explicit upfront acceptance;
+  existing v1/v2 identities retain recovery and v2 historical proof, never
+  retrofit or another send. The focused quote/signature/envelope/proof/journal/
+  prepaid/refund matrix passes 659 with ten explicit SQLite skips and real
+  PostgreSQL counterparts. Cross-SDK isolated HTTP/SQL/signature/consent checks
+  pass 68. New SDK pins are local-only until authorized publication; exact-
+  revision Linux/PostgreSQL 16 CI and selected-facilitator flow handling remain
+  required. No sender, public activation or production configuration changes.
+  Full local Python 3.13/PostgreSQL 14 regression passes 3,767 with 43 explicit
+  skips and 139 inherited warnings. This is not exact-source Linux CI or a
+  live token/facilitator/GPU payment canary.
+  A test-only follow-up executes the strict header's original v3/upfront
+  capability in the copied-contract fork. Altered flow produces no attempt/
+  transfer; exact payment, recovery, refund and both replay reverts pass.
+  The combined matrix passes 225 with one SQLite skip; unchanged-code repeat
+  passes 11 with the same skip. The full-suite result above is the prior
+  runtime revision, not a rerun of this test-only extension or remote CI.
+
+- Prior implicit-flow v2 envelope qualification used the locked SDK's real
+  header encoder and verify/settle request shapes, plus actual offline ECDSA
+  on both Base domains. The envelope-only matrix passes 136 cases; combined
+  envelope/signature/journal coverage passes 281 with three explicit SQLite
+  skips and real PostgreSQL counterparts. Headers/types/requirements/resource
+  ambiguity, mutation, expiry and redacted failures reject. No route, sender,
+  SQL, funding or dispatch authority is introduced. The finalized full local
+  suite passes 3,739 with 43 explicit skips; its 141 warnings include the 139
+  inherited warnings plus two JUnit/optional-fork compatibility warnings.
+  Exact-source Linux/PostgreSQL 16 CI remains required for the new candidate.
+
 - Private `0052` adds reviewed, unsigned Safe refund intents and atomic
   confirmed-refund receipt closure. Nonces are unique by chain/Safe, never
   automatically replaced; outgoing receipts use the existing `video_x402`
@@ -103,11 +156,20 @@ owning AGENTS.md and any affected parent Child DOX Index.
   `refund_due_at` remains historical after repayment; do not erase it to restore
   worker backing. No signer, route, loop, price or public flag is enabled.
   Apply before private refund tooling; retain every intent/proof on rollback.
-  Actual Safe/token/payment/refund and client qualification remain release gates.
+  Actual live Safe/token/payment/refund and client qualification remain release gates.
   The focused money matrix passes 374 with 11 explicit skips; the full local
   Python 3.13/PostgreSQL 14 Grid suite passes 3,585 with 41 skips and 139 inherited
-  warnings. Scratch genesis-through-0052/schema parity passes. Chain/Safe
-  responses remain synthetic; exact-revision Linux/PostgreSQL 16 CI is required.
+  warnings. Scratch genesis-through-0052/schema parity passes. Those historical
+  chain/Safe fixtures masked incorrect non-indexed ExecutionSuccess encoding.
+  The correction requires the exact indexed transaction-hash topic and zero-
+  payment data. An opt-in local Anvil/Base fork executes copied Safe/USDC
+  contracts and proves authorization, lost-hash recovery, failed-job refund,
+  both replay reverts and zero credit/reward movement on scratch PostgreSQL.
+  No production keys, live transfers or real funds are used; two logical
+  adapters share one fork, not independent RPCs. The pure/fork matrix passes
+  79 with one SQLite skip. The corrected full local suite passes 3,603 with
+  43 explicit skips and 139 inherited warnings; separate Redis recovery
+  passes two cases. Exact-revision Linux/PostgreSQL 16 CI remains required.
 
 - Candidate `0051` privately commits a proved/owned exact-USDC video payment,
   its external reservation, frozen job and original input authority together.

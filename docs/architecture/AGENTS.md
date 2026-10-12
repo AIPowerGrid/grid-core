@@ -180,8 +180,8 @@ validation, worker incentives, and trust boundaries.
 - `VIDEO_X402.md` - authenticated prepaid-video design and current private
   quotation foundation. Default-off owner-bound quote POST/GET freeze one
   source/seed/graph/tariff/deadline/nonce without money or dispatch.
-  Binding-v2 snapshots include the signing domain; legacy v1 identities recover
-  unchanged without signing authority. Offline exact-signature checks and locked
+  Binding-v3 snapshots include the domain and upfront/EIP-3009 terms; legacy
+  v1/v2 recover unchanged without fresh signing authority. Offline checks and locked
   SDK compatibility are candidates, not HTTP acceptance or a released adapter.
   A separate historical receipt helper now verifies direct v/r/s transfers
   through two bounded HTTPS RPC destinations with exact authorization/transfer,
@@ -304,6 +304,31 @@ validation, worker incentives, and trust boundaries.
   confirmed-refund/shared-receipt closure. It has no signer, send permission or
   runtime hook. Original payer, amount and nonce are frozen; original refund-due
   history remains. Actual Safe/payment/refund qualification is still required.
+  The local Base-fork test caught an incorrect non-indexed ExecutionSuccess
+  fixture/verifier; the corrected exact indexed topic/data contract now passes
+  copied Safe/USDC execution, SQL refund closure and both replay controls.
+  Loopback-only simulation is not live payment, independent RPC or funded proof.
+  The separate strict v2 envelope candidate now derives server requirements,
+  validates exact primitive fields and the quote's original inner signature,
+  and bounds canonical PAYMENT-SIGNATURE decoding before SDK construction.
+  Its optional resource descriptor is operator-controlled, not HTTP Host or
+  client authority. SDK-shaped ephemeral bodies are capabilities, never send
+  grants; no route/client/SQL/funding is added. Fixture compatibility does not
+  qualify a live facilitator or released SDK/Director payment transport.
+  New binding-v3 commits upfront/EIP-3009 terms and clients must explicitly
+  accept pre-render settlement before wallet callbacks. Old v1/v2 remain
+  historical-only; v2 attempts retain recovery/proof, never another send.
+  Upgrade all candidate readers before v3 writes and retain them on rollback.
+  Upfront omits facilitator `/verify`; locked 2.16.0 format compatibility does
+  not prove client flow handling or selected-facilitator support.
+  The copied-contract v3 follow-up executes the strict header's exact original
+  capability after the winning journal commit. Wrong/absent flow cannot create
+  an attempt or transfer. This remains loopback simulation, not a collector,
+  live facilitator, independent RPC or purchased/GPU acceptance.
+  The local integrated branch additionally retains the credit-first account/
+  deadline guards without removing prepaid/refund history. Quote and credit
+  cohorts remain independent; neither quote nor expired metadata grants a job.
+  Normally expired pilots must preserve startup and existing authorized recovery.
 
 - Keep the live/dry-run/stub status explicit. If a checklist marks an item done,
   code and tests must support that claim.

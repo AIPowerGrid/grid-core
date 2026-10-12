@@ -38,9 +38,9 @@ _TYPES = ["address", "address", "uint256", "uint256", "uint256", "bytes32", "uin
 
 
 class RPCFixture:
-    def __init__(self, row, account):
+    def __init__(self, row, account, *, request=None):
         self.row, self.account = row, account
-        request = bindings.signing_request(row, payer=account.address)
+        request = request if request is not None else bindings.signing_request(row, payer=account.address)
         auth, typed = request["authorization"], request["typed_data"]
         self.typed = typed
         signed = account.sign_message(encode_typed_data(full_message=typed))
@@ -356,10 +356,33 @@ async def test_corrupt_or_legacy_quote_has_no_historical_proof_authority(prepare
     legacy = copy.deepcopy(row["snapshot"])
     legacy["schema"] = "aipg.video-quote-binding.v1"
     legacy["payment"].pop("eip712_domain")
+    legacy["payment"].pop("payment_flow")
+    legacy["payment"].pop("asset_transfer_method")
     for invalid in (corrupt, quotes.PreparedVideoQuote(quotes._canonical(legacy)).values):
         with pytest.raises(proofs.VideoPaymentProofError):
             await prove(invalid, account, first, second)
     assert not first.calls and not second.calls
+
+
+async def test_prior_v2_payment_keeps_historical_proof_after_upfront_upgrade(prepared, monkeypatch):
+    row, account = prepared
+    from grid_api.services import video_quotes as quotes
+    snapshot = copy.deepcopy(row["snapshot"])
+    snapshot["schema"] = "aipg.video-quote-binding.v2"
+    snapshot["payment"].pop("payment_flow")
+    snapshot["payment"].pop("asset_transfer_method")
+    legacy = quotes.PreparedVideoQuote(quotes._canonical(snapshot)).values
+    authorization = bindings._authorization(snapshot, account.address)
+    request = {"authorization": bindings.ExactEIP3009Payload(authorization).to_dict()["authorization"],
+        "typed_data": bindings._typed_data(snapshot, authorization)}
+    first, second = RPCFixture(legacy, account, request=request), RPCFixture(legacy, account, request=request)
+    monkeypatch.setattr(bindings, "_now", lambda: quotes._aware(legacy["expires"]) + timedelta(days=1))
+    with pytest.raises(bindings.VideoAuthorizationError):
+        bindings.signing_request(legacy, payer=account.address)
+    result = await prove(legacy, account, first, second)
+    assert result.authorization_nonce == legacy["authorization_nonce"]
+    assert result.amount_micro == legacy["amount_micro"] and result.transaction_hash == _TX
+    assert "payment_flow" not in quotes.view(legacy)["payment"]
 
 
 async def test_input_snapshot_cannot_mutate_while_rpc_reads_yield(prepared):

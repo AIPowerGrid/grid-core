@@ -453,6 +453,8 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
         raise HTTPException(status_code=422, detail="Invalid maximum media cost")
     if progress_token and (not isinstance(progress_token, str) or len(progress_token) > 128):
         raise HTTPException(status_code=422, detail="progress_token must be at most 128 characters")
+    if job_type == "video":
+        generation_admission.require_waiting_video(model)
     payload, resolved_recipe = await prepare_dispatch(model, job_type, payload)
     n = int(payload.get("n", 1) or 1)
     job_id = str(uuid4())

@@ -13,10 +13,11 @@ from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
-from eth_account import Account
-
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from eth_account import Account
+from eth_account.messages import encode_typed_data
+
 from grid_api import database
 from grid_api.routers import videos
 from grid_api.services import video_eip3009 as bindings
@@ -66,6 +67,43 @@ async def no_economic_effects():
     async with await database.new_session() as session:
         for name in ("grid_reservations", "grid_media_jobs", "grid_ledger", "grid_credit_ledger", "grid_x402_payments", "grid_deposits"):
             assert await session.scalar(sa.select(sa.func.count()).select_from(metadata.tables[name])) == 0
+
+
+async def test_legacy_v2_attempt_recovers_without_fresh_signature_or_send(db, admission, monkeypatch):
+    owner, current, account, _payload = await saved()
+    snapshot = copy.deepcopy(current["snapshot"])
+    snapshot["schema"] = "aipg.video-quote-binding.v2"
+    snapshot["payment"].pop("payment_flow")
+    snapshot["payment"].pop("asset_transfer_method")
+    legacy = quotes.PreparedVideoQuote(quotes._canonical(snapshot)).values
+    authorization = bindings._authorization(snapshot, account.address)
+    typed_data = bindings._typed_data(snapshot, authorization)
+    payload = {"authorization": bindings.ExactEIP3009Payload(authorization).to_dict()["authorization"],
+        "signature": "0x" + account.sign_message(encode_typed_data(full_message=typed_data)).signature.hex()}
+    # Seed a pre-upgrade journal; current code must not authorize a new v2 send.
+    original = {"quote_id": legacy["id"], "quote_commitment": legacy["commitment"],
+        "authorization_identity": bindings._identity(snapshot["payment"]["eip712_domain"],
+            account.address.lower(), legacy["authorization_nonce"]),
+        "payload_hash": journal._payload_hash(payload), "payer": account.address.lower(),
+        **POLICY, "status": "settling", "transaction_hash": None, "proof": None,
+        "proof_hash": None, "proven_at": None, "review_code": None, "created": legacy["created"]}
+    async with await database.new_session() as session:
+        await session.execute(sa.update(metadata.tables["grid_video_quotes"])
+            .where(metadata.tables["grid_video_quotes"].c.id == legacy["id"]).values(**legacy))
+        await session.execute(attempts.insert().values(**original))
+        await session.commit()
+    late = quotes._aware(legacy["expires"]) + timedelta(days=1)
+    monkeypatch.setattr(bindings, "_now", lambda: late)
+    monkeypatch.setattr(journal, "_now", lambda: late)
+    with pytest.raises(bindings.VideoAuthorizationError):
+        bindings.signing_request(legacy, payer=account.address)
+    retained = await journal.lookup(owner, legacy["id"])
+    replay, winner = await begin(owner, legacy, account, payload, admission_until=late - timedelta(seconds=1))
+    assert not winner and replay == retained == original
+    assert payload["signature"] not in json.dumps(replay, default=str)
+    assert (await quotes.lookup(owner, quote_id=legacy["id"]))["authorization_nonce"] == legacy["authorization_nonce"]
+    assert "payment_flow" not in quotes.view(legacy)["payment"]
+    await no_economic_effects()
 
 
 async def test_lost_reply_nonce_recovery_after_expiry_proves_original_without_send_permission(db, admission, monkeypatch):

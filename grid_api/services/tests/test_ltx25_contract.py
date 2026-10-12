@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+from grid_api.config import GridSettings
 from grid_api.services import credits, generation_admission, job_queue, media, recipes, token_stream, video_contract
 from grid_api.services.recipe_import import recipe_root, validate_recipe
 
@@ -18,6 +19,8 @@ MODEL = "LTX-2.5 Distilled BF16"
 
 @pytest.fixture(autouse=True)
 def registry(monkeypatch):
+    monkeypatch.setattr(generation_admission, "get_settings", lambda: GridSettings(
+        _env_file=None, media_async_admission_mode="open"))
     for name in ("_BY_ROOT", "_BY_NAME", "_BY_ID", "_BY_MODEL", "_LOCAL_RECIPES", "_ONCHAIN_RECIPES"):
         monkeypatch.setattr(recipes, name, {})
     for path in (ROOT / "recipes/qualification").glob("*.json"):

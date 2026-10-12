@@ -170,8 +170,8 @@ async def _observe(source, intent, tx_hash, tag, depth):
                 raise rpc.VideoPaymentProofError("refund token transfer mismatch")
             transfer.append(offset)
         if address == intent["safe_address"] and topics[0] in {_SUCCESS, _FAILURE}:
-            if (topics != [_SUCCESS] or data != "0x" + encode(["bytes32", "uint256"],
-                    [bytes.fromhex(intent["safe_transaction_hash"][2:]), 0]).hex()):
+            if (topics != [_SUCCESS, intent["safe_transaction_hash"]]
+                    or data != "0x" + encode(["uint256"], [0]).hex()):
                 raise rpc.VideoPaymentProofError("Safe refund execution mismatch")
             success.append(offset)
     if len(transfer) != 1 or len(success) != 1 or transfer[0] >= success[0]:

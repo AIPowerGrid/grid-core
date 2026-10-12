@@ -9,6 +9,7 @@ scoped registration, original-worker SQL binding, WS resume envelopes and money.
 
 import hashlib
 import json
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import httpx
@@ -47,14 +48,24 @@ async def registered(core, credential, name="resume-fixture"):
 
 
 @pytest.mark.parametrize("phase", ["dispatched", "committed"])
-async def test_real_core_restart_preserves_one_job_charge_and_original_worker(rig, phase):
+@pytest.mark.parametrize("admission", ["open", "expired_pilot", "expired_both_pilots"])
+async def test_real_core_restart_preserves_one_job_charge_and_original_worker(rig, phase, admission):
     core, engine, redis, account, key, worker_key = rig
     await core.kill()
     async with engine.begin() as connection:
         await connection.execute(tables.api_keys.update().where(
             tables.api_keys.c.hash == hashlib.sha256((core.env["GRID_SALT"] + worker_key).encode()).hexdigest(),
         ).values(key_kind="worker", label="worker:resume-fixture"))
-    core.env.update(TEST_ASYNC_VIDEO="1", MEDIA_ASYNC_ENABLED="1", MEDIA_JOB_SWEEP_SECONDS="5")
+    core.env.update(TEST_ASYNC_VIDEO="1", MEDIA_ASYNC_ENABLED="1",
+                    MEDIA_ASYNC_ADMISSION_MODE="open", MEDIA_JOB_SWEEP_SECONDS="5")
+    if admission != "open":
+        core.env.update(MEDIA_ASYNC_ADMISSION_MODE="pilot",
+                        MEDIA_ASYNC_CANARY_ACCOUNTS=json.dumps([str(account)]),
+                        MEDIA_ASYNC_CANARY_UNTIL=(datetime.now(UTC) + timedelta(minutes=15)).isoformat())
+    if admission == "expired_both_pilots":
+        core.env.update(VIDEO_X402_QUOTES_ENABLED="1", VIDEO_X402_QUOTE_ACCOUNTS=json.dumps([str(account)]),
+                        VIDEO_X402_QUOTE_PAY_TO="0x" + "1" * 40,
+                        VIDEO_X402_QUOTES_UNTIL=(datetime.now(UTC) + timedelta(minutes=15)).isoformat())
     await core.start("committed" if phase == "committed" else "none")
     first, worker_id = await registered(core, worker_key)
     idempotency = str(uuid4())
@@ -68,6 +79,11 @@ async def test_real_core_restart_preserves_one_job_charge_and_original_worker(ri
                 "size": "512x320",
                 "max_cost_micro_usd": 100_000,
             }
+            quote = None
+            if admission == "expired_both_pilots":
+                quoted = await client.post("/v1/x402/videos/quotes", headers={"Idempotency-Key": idempotency}, json=body)
+                assert quoted.status_code == 201 and not quoted.json()["payment_enabled"], quoted.text
+                quote = quoted.json()
             created = await client.post("/v1/videos/jobs", headers={"Idempotency-Key": idempotency}, json=body)
             assert created.status_code == 202, created.text
             original = await frame(first, "job")
@@ -99,7 +115,13 @@ async def test_real_core_restart_preserves_one_job_charge_and_original_worker(ri
         # Admission disabled and all Redis queue state destroyed: only original
         # SQL execution, not a new job/hold or Redis delivery, can recover it.
         await redis.flushdb()
-        core.env["MEDIA_ASYNC_ENABLED"] = "0"
+        if admission != "open":
+            # Expiry alone must not take down Core on restart or prevent recovery.
+            core.env["MEDIA_ASYNC_CANARY_UNTIL"] = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+        else:
+            core.env["MEDIA_ASYNC_ENABLED"] = "0"
+        if admission == "expired_both_pilots":
+            core.env["VIDEO_X402_QUOTES_UNTIL"] = (datetime.now(UTC) - timedelta(days=1)).isoformat()
         await core.start()
         second, same_worker_id = await registered(core, worker_key)
         try:
@@ -122,6 +144,17 @@ async def test_real_core_restart_preserves_one_job_charge_and_original_worker(ri
             assert recovered.status_code == 200 and recovered.json()["state"] == "completed", recovered.text
             replay = await client.post("/v1/videos/jobs", headers={"Idempotency-Key": idempotency}, json=body)
             assert replay.status_code == 200 and replay.json() == recovered.json()
+            if admission != "open":
+                fresh = await client.post("/v1/videos/jobs", headers={"Idempotency-Key": str(uuid4())}, json=body)
+                assert fresh.status_code == 503
+            if quote is not None:
+                retained = await client.get(f"/v1/x402/videos/quotes/{quote['quote_id']}")
+                assert retained.status_code == 200, retained.text
+                for field in ("quote_id", "job_id", "commitment", "authorization_nonce", "request_hash"):
+                    assert retained.json()[field] == quote[field]
+                assert not retained.json()["payment_enabled"]
+                new_quote = await client.post("/v1/x402/videos/quotes", headers={"Idempotency-Key": str(uuid4())}, json=body)
+                assert new_quote.status_code == 503
             async with engine.connect() as connection:
                 for table in (tables.media_jobs, tables.reservations, tables.ledger):
                     assert await connection.scalar(sa.select(sa.func.count()).select_from(table)) == 1
