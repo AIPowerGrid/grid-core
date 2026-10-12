@@ -7,7 +7,7 @@ Status: **private quotation, signature/receipt/ownership foundations,
 receipt-backed hold/outbox and reviewed Safe refund intent/proof implemented as
 candidates; HTTP payment collection remains a proposal**.
 Reviewed against the candidate async video code and locally locked x402 2.16.0
-SDK on October 11, 2026. The quote routes below are independently default-off
+SDK on October 12, 2026. The quote routes below are independently default-off
 and have no payment collection, reservation, dispatch, refund sender or
 production authority. Credit-backed video remains the first integration path;
 [LTX qualification](LTX_2_5_VIDEO.md) and model-use permission still gate launch.
@@ -623,6 +623,9 @@ The read-only verifier requires both configured sources to agree on the original
 direct calldata, status, one exact USDC Transfer before one matching
 ExecutionSuccess (not ExecutionFailure), code/version/decimals/hash and consumed-
 nonce views at the required-canonical block, and re-read safe/finalized anchors.
+Safe 1.4.1 indexes the execution hash: exactly the event and frozen transaction-
+hash topics plus one zero-payment data word are required. A non-indexed hash,
+missing/extra topics, changed hash, nonzero payment or trailing data rejects.
 It uses the existing response/deadline/capacity bounds. State/version checks are
 not general Safe runtime attestation; two RPC sources are not cryptographic
 chain proof. The payment received by the treasury cannot stand in for its refund.
@@ -657,6 +660,47 @@ warnings in 495.67 seconds. Scratch migration through `0052` and schema drift
 checks pass. New runtime/test/migration files pass Ruff; the four extended
 historical test modules retain their pre-existing import-order diagnostics.
 Fresh exact-commit Linux/Python 3.12/PostgreSQL 16 CI remains a promotion gate.
+
+#### Executed Local Base-Fork Follow-Up - October 12
+
+The earlier `a63f307` fixture/CI pass is historical, not refund-release
+qualification: actual copied Safe execution exposed that the verifier and
+synthetic receipt both incorrectly put the indexed execution hash in data.
+The strict decoder and fixtures are corrected; malformed legacy encoding now
+rejects. This was found by contract execution, not the preceding interface reads.
+
+The optional `test_video_payment_fork.py` runs only with explicit local-fork
+opt-in and scratch PostgreSQL. Its helper accepts only literal HTTP loopback,
+verifies Anvil/Base/pinned-fork identity before every write and never submits
+to the upstream RPC. It uses Anvil 1.5.1 and copied finalized Base block
+52,502,387, a supplied Safe 1.4.1, local-only owner impersonation and a fresh
+ephemeral payer key. No production key, live signature or real funds are used.
+All balances, approvals and simulated transactions revert to the starting
+snapshot in finally; private test reports contain no signer keys or recipients.
+
+The test executes actual USDC EIP-3009 calldata/signature, discards the transaction
+reply, recovers its original receipt by nonce and commits normal shared ownership.
+Only then does private prepaid admission reserve one job. Unstarted failure
+records the exact refund obligation; an actual copied Safe transfer returns
+the original amount to the original payer. Strict execution/Transfer proof
+commits one outbound ownership claim and refunded state. Reconciliation replay
+is unchanged; consumed EIP-3009 authorization and reused Safe approvals both
+revert without another transfer. Provider failure is not counted as a revert.
+Payer/Safe token balances return exactly, Safe nonce advances once for refund,
+the original refund-due history stays intact, and credit/reward ledgers remain
+empty. The pure/fork matrix passes 79 cases with one SQLite skip, repeated at
+unchanged code with full snapshot rollback.
+
+These are copied-contract EVM execution and real SQL proofs, not Base Sepolia/
+Mainnet payments, purchased credit or wallet/Safe UI qualification. Video inputs
+and tariff are synthetic; no GPU/R2 execution occurs in this test. Two logical
+HTTPS fixture transports read the same real local fork, so independent RPC/TLS
+and consensus assurance remain unqualified. No route, automatic sender, nonce
+allocator, facilitator or production setting is activated. The corrected full
+local Python 3.13/PostgreSQL 14 suite passes 3,603 with 43 explicit skips and
+139 inherited warnings in 494.37 seconds; separate isolated Redis recovery
+passes two cases. Ruff and diff checks pass. Fresh exact-source
+Linux/PostgreSQL 16 CI remains required for this correction.
 
 Primary interface references: [Safe 1.4.1 source](https://github.com/safe-global/safe-smart-account/blob/v1.4.1/contracts/Safe.sol),
 [Safe execution API](https://docs.safe.global/reference-smart-account/transactions/execTransaction)

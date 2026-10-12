@@ -34,6 +34,9 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   with confirmed refund state. It moves no credit or worker reward and never
   clears historical refund-due timestamps. No signer or automatic nonce/send
   permission exists; actual Safe/refund and rollout qualification remain gates.
+  Safe 1.4.1 execution hashes must be decoded from indexed event topics, not
+  data. Opt-in local-fork execution covers copied real contracts and SQL;
+  it grants no public broadcaster, live-chain proof or funded launch approval.
 
 - Private `0051` receipt-backed video admission is non-routable. It commits
   actual owned proof, exact external hold, frozen outbox and original private

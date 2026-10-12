@@ -103,11 +103,20 @@ owning AGENTS.md and any affected parent Child DOX Index.
   `refund_due_at` remains historical after repayment; do not erase it to restore
   worker backing. No signer, route, loop, price or public flag is enabled.
   Apply before private refund tooling; retain every intent/proof on rollback.
-  Actual Safe/token/payment/refund and client qualification remain release gates.
+  Actual live Safe/token/payment/refund and client qualification remain release gates.
   The focused money matrix passes 374 with 11 explicit skips; the full local
   Python 3.13/PostgreSQL 14 Grid suite passes 3,585 with 41 skips and 139 inherited
-  warnings. Scratch genesis-through-0052/schema parity passes. Chain/Safe
-  responses remain synthetic; exact-revision Linux/PostgreSQL 16 CI is required.
+  warnings. Scratch genesis-through-0052/schema parity passes. Those historical
+  chain/Safe fixtures masked incorrect non-indexed ExecutionSuccess encoding.
+  The correction requires the exact indexed transaction-hash topic and zero-
+  payment data. An opt-in local Anvil/Base fork executes copied Safe/USDC
+  contracts and proves authorization, lost-hash recovery, failed-job refund,
+  both replay reverts and zero credit/reward movement on scratch PostgreSQL.
+  No production keys, live transfers or real funds are used; two logical
+  adapters share one fork, not independent RPCs. The pure/fork matrix passes
+  79 with one SQLite skip. The corrected full local suite passes 3,603 with
+  43 explicit skips and 139 inherited warnings; separate Redis recovery
+  passes two cases. Exact-revision Linux/PostgreSQL 16 CI remains required.
 
 - Candidate `0051` privately commits a proved/owned exact-USDC video payment,
   its external reservation, frozen job and original input authority together.

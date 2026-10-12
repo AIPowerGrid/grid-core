@@ -304,6 +304,10 @@ validation, worker incentives, and trust boundaries.
   confirmed-refund/shared-receipt closure. It has no signer, send permission or
   runtime hook. Original payer, amount and nonce are frozen; original refund-due
   history remains. Actual Safe/payment/refund qualification is still required.
+  The local Base-fork test caught an incorrect non-indexed ExecutionSuccess
+  fixture/verifier; the corrected exact indexed topic/data contract now passes
+  copied Safe/USDC execution, SQL refund closure and both replay controls.
+  Loopback-only simulation is not live payment, independent RPC or funded proof.
 
 - Keep the live/dry-run/stub status explicit. If a checklist marks an item done,
   code and tests must support that claim.
