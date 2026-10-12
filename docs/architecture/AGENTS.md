@@ -296,6 +296,10 @@ validation, worker incentives, and trust boundaries.
   Admitted source authority transfers to existing cleanup; uncertain or
   unadmitted payment retention remains a gate. `refund_due` is not a sent
   refund. SQL/Redis fixtures are not live payment/GPU/storage/model permission.
+  A separate bounded lost-transaction recovery helper now correlates confirmed
+  exact nonce logs through two sources and proves the full transfer before
+  immutable journal report/reconciliation. No automatic watcher, sender or
+  HTTP collection is implied; empty searches do not prove no payment.
 
 - Keep the live/dry-run/stub status explicit. If a checklist marks an item done,
   code and tests must support that claim.
