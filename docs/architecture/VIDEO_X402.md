@@ -3,7 +3,7 @@
 
 # Video x402 Build
 
-Status: **private quotation, signature/receipt/ownership foundations,
+Status: **private quotation, envelope/signature/receipt/ownership foundations,
 receipt-backed hold/outbox and reviewed Safe refund intent/proof implemented as
 candidates; HTTP payment collection remains a proposal**.
 Reviewed against the candidate async video code and locally locked x402 2.16.0
@@ -22,7 +22,8 @@ Wrapping `/v1/videos/jobs` in it would let the SQL outbox dispatch before paymen
 is independently proved. A successful 202 is not a completed video, and a valid
 payment signature is not received revenue.
 
-Current owners are `routers/video_jobs.py`, `services/media_jobs.py`,
+Current owners include private `services/video_payment_envelope.py`,
+`routers/video_jobs.py`, `services/media_jobs.py`,
 `services/credits.py`, `services/x402_payments.py`, `services/deposits.py` and
 `services/settlement/aggregate.py`. The async journal currently requires an
 account and a live credit hold. Existing x402 reconciliation requires a terminal
@@ -213,6 +214,57 @@ This is an admission-time current-window check, not a historical receipt
 verifier. An already attempted payment still requires reconciliation after
 expiry; the helper's expiry refusal is never proof that funds were not sent or
 permission to discard a refund/recovery obligation. No live payment route exists.
+
+### Strict Outer Envelope Candidate
+
+`services/video_payment_envelope.py` is an offline, unrouted v2 boundary, not
+an HTTP collector or payment sender. It derives SDK `PaymentRequirements` from
+the owner-loaded immutable live quote: exact canonical USDC/network, amount,
+payTo, quote lifetime, signing-domain name/version and explicit EIP-3009 transfer
+method. Client echoes must match every field and primitive type; missing/
+additional fields, legacy amount names, other schemes/networks/assets,
+discounts, coercible versions/timeouts and extensions reject before SDK model
+construction. Checksum addresses normalize without changing the server's
+canonical requirements. The original inner authorization/signature verifier
+still binds the payer, quote nonce, amount, destination, domain and expiry.
+
+Optional resource metadata is accepted only against an explicit operator-
+controlled HTTPS URL and fixed description/MIME descriptor. Request Host or
+client metadata cannot choose it; without such a descriptor, resource fields
+reject. The descriptor is metadata, not received money or signing authority.
+
+The optional wire adapter bounds PAYMENT-SIGNATURE at 8,192 characters and
+requires canonical standard base64 plus UTF-8 JSON. Duplicate keys, floats,
+nonfinite numbers, invalid/deep/oversized input, omitted/coercible versions and
+legacy shapes reject without reflecting the header/capability. SDK header
+encoding and verify/settle request schemas match the generated body. Returned
+facilitator JSON contains the original signature only ephemerally: never log or
+persist it, and do not contact a facilitator without winning the committed
+attempt and confirming ready inputs. A successfully constructed body is not
+send permission, a receipt, replay protection, funding or a job.
+
+Quote/envelope snapshots are frozen before validation and serialization;
+changes to the caller's shared objects cannot replace the checked authorization
+or requirements. Returned mutable JSON is still a caller-owned capability,
+not a persisted grant or trustworthy financial state.
+
+The envelope-only matrix passes 136 cases on both canonical Base domains with
+actual offline ECDSA and the locked x402 2.16.0 header/request helpers. Combined
+envelope/signature/journal qualification passes 281 with three explicit SQLite
+skips and real PostgreSQL counterparts. Mutation isolation, metadata changes,
+malformed wire data and expiry during serialization are covered. There is no
+new route/client, SQL writer, callback invocation, sender or economic authority;
+live facilitator, released client, received-payment and native payment/GPU/R2
+qualification remain required. The finalized full local Python 3.13/
+PostgreSQL 14 suite passes 3,739 with 43 explicit skips and 141 warnings in
+496.40 seconds; two warnings are JUnit/optional-fork compatibility notices
+in addition to the 139 inherited warnings. An earlier superseded full run
+ended with scratch-fixture cleanup failure during a stop attempt and is not
+claimed qualified. No financial/DDL guard was relaxed; the fresh final run
+passes. Ruff/diff checks pass. Exact-source Linux/PostgreSQL 16 CI remains a
+release gate; these source changes are local and public publication is held.
+
+Primary wire reference: [official x402 v2 specification](https://github.com/x402-foundation/x402/blob/main/specs/x402-specification-v2.md).
 
 ### Historical Receipt Candidate
 
@@ -556,7 +608,7 @@ Scratch Alembic upgrades through `0051` and reports no schema drift. New module,
 test and migration files pass Ruff; unrelated inherited lint remains unchanged.
 It does not prove a received payment, facilitator, GPU render or sent refund.
 Fresh exact-commit PostgreSQL 16 CI is still required for this candidate.
-The missing HTTP/envelope/sender, automatic lost-transaction watcher, actual
+The missing authenticated HTTP/envelope plumbing/sender, automatic lost-transaction watcher, actual
 Safe/refund qualification, live testnet/storage/GPU chain and public model permission
 remain gates.
 
@@ -843,8 +895,10 @@ local nor CI fixture results change public serving permission.
    deadline, changed source commitments, legacy-domain refusal and unsupported
    signature controls. The tested opt-in SDK signing sequence is not a released
    client. The SDK callback candidates are implemented/tested, not published.
-   Finish outer-envelope integration and qualify
-   live account/token/facilitator compatibility before taking payment.
+   The separate strict outer/header adapter now matches the locked SDK and
+   rejects unquoted requirements/coercions/extensions offline. Integrating it
+   into authenticated payment ingress, then qualifying live account/token/
+   facilitator compatibility, remains required before taking payment.
 3. Attempt journal, independent chain proof and atomic prepaid hold/outbox.
    The receipt verifier and durable prior-attempt journal are candidates with
    real SQL/fixture transport proofs. Shared cross-rail claims now integrate with

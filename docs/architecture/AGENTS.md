@@ -308,6 +308,13 @@ validation, worker incentives, and trust boundaries.
   fixture/verifier; the corrected exact indexed topic/data contract now passes
   copied Safe/USDC execution, SQL refund closure and both replay controls.
   Loopback-only simulation is not live payment, independent RPC or funded proof.
+  The separate strict v2 envelope candidate now derives server requirements,
+  validates exact primitive fields and the quote's original inner signature,
+  and bounds canonical PAYMENT-SIGNATURE decoding before SDK construction.
+  Its optional resource descriptor is operator-controlled, not HTTP Host or
+  client authority. SDK-shaped ephemeral bodies are capabilities, never send
+  grants; no route/client/SQL/funding is added. Fixture compatibility does not
+  qualify a live facilitator or released SDK/Director payment transport.
 
 - Keep the live/dry-run/stub status explicit. If a checklist marks an item done,
   code and tests must support that claim.

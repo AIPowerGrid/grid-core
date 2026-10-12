@@ -28,6 +28,12 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 
 ## Local Contracts
 
+- Private video envelope validation is offline and unrouted. It derives v2
+  requirements from one immutable live quote and checks the original inner
+  signature after strict outer/header decoding. Returned facilitator JSON is
+  an ephemeral capability, not send permission or receipt-backed admission.
+  Authentication/owner loading, staged inputs, a winning durable attempt,
+  independent chain proof and atomic funding remain separate obligations.
 - The optional `0052` Safe refund journal is non-routable. It requires an owned
   proved payment and closed refund obligation, freezes the original payer/exact
   amount and one reviewed Safe nonce, and commits outbound receipt ownership
