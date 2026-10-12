@@ -8,6 +8,7 @@ are freshly generated only for the ephemeral payer. No production key is used.
 Two logical proof transports observe one fork, not independent provider trust.
 """
 
+import copy
 import os
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -17,12 +18,14 @@ import pytest
 import sqlalchemy as sa
 from eth_abi import encode
 from eth_account import Account
-from eth_account.messages import encode_typed_data
 from eth_utils import keccak
+from x402.http.utils import encode_payment_signature_header
+from x402.schemas import PaymentPayload
 
 from grid_api import database
 from grid_api.services import credits, video_prepaid, video_refunds
 from grid_api.services import video_payment_attempts as attempts
+from grid_api.services import video_payment_envelope as envelopes
 from grid_api.services import video_payment_proofs as rpc
 from grid_api.services.tests import test_video_prepaid as support
 from grid_api.services.tests.video_fork_support import LocalFork, LocalTransactionReverted, local_origin
@@ -99,17 +102,39 @@ async def test_real_fork_authorization_failed_job_refund_and_replays(db, admissi
         until = datetime.now(UTC) + timedelta(minutes=4)
         await support.attempt_tests.staging.stage(owner, quote["id"], plan, admission_until=until)
         payload = support.attempt_tests.proof_tests.binding_tests.sign(quote, payer)
-        original, winner = await attempts.begin(owner, quote["id"], payload, expected_payer=payer.address,
+        outer = {"x402Version": 2, "accepted": envelopes.requirements(quote), "payload": payload}
+        assert quote["snapshot"]["schema"] == "aipg.video-quote-binding.v3"
+        assert outer["accepted"]["extra"]["paymentFlow"] == "upfront"
+        assert outer["accepted"]["extra"]["assetTransferMethod"] == "eip3009"
+        sends_before = fork.calls.count("eth_sendTransaction")
+        for flow in (None, "authorization", "escrow"):
+            altered = copy.deepcopy(outer)
+            if flow is None:
+                altered["accepted"]["extra"].pop("paymentFlow")
+            else:
+                altered["accepted"]["extra"]["paymentFlow"] = flow
+            invalid_header = encode_payment_signature_header(PaymentPayload.model_validate(altered))
+            with pytest.raises(envelopes.VideoEnvelopeError):
+                envelopes.facilitator_request_from_header(quote, invalid_header, expected_payer=payer.address)
+            assert await attempts.lookup(owner, quote["id"]) is None
+        assert fork.calls.count("eth_sendTransaction") == sends_before
+        assert await fork.balance(asset, payer.address.lower()) == starting_payer
+        assert await fork.balance(asset, safe) == starting_safe
+        header = encode_payment_signature_header(PaymentPayload.model_validate(outer))
+        body = envelopes.facilitator_request_from_header(quote, header, expected_payer=payer.address)
+        assert body["paymentRequirements"] == outer["accepted"]
+        forwarded = body["paymentPayload"]["payload"]
+        assert forwarded == payload
+        original, winner = await attempts.begin(owner, quote["id"], forwarded, expected_payer=payer.address,
             confirmation_tag="safe", min_confirmations=12, admission_until=until)
         assert winner and original["status"] == "settling"
-        # Actual EIP-3009 signature/calldata, not a fabricated receipt.
-        typed = support.attempt_tests.proof_tests.binding_tests.bindings.signing_request(quote, payer=payer.address)["typed_data"]
-        signed = payer.sign_message(encode_typed_data(full_message=typed))
-        auth = typed["message"]
+        # Execute the exact forwarded capability, not a newly constructed signature.
+        auth = forwarded["authorization"]
+        signature = bytes.fromhex(forwarded["signature"][2:])
         data = "0x" + (keccak(text="transferWithAuthorization(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32)")[:4]
             + encode(["address", "address", "uint256", "uint256", "uint256", "bytes32", "uint8", "bytes32", "bytes32"],
                 [auth["from"], auth["to"], int(auth["value"]), int(auth["validAfter"]), int(auth["validBefore"]),
-                 bytes.fromhex(auth["nonce"][2:]), signed.v, signed.r.to_bytes(32, "big"), signed.s.to_bytes(32, "big")])).hex()
+                 bytes.fromhex(auth["nonce"][2:]), signature[64], signature[:32], signature[32:64]])).hex()
         relayer = (await fork.owners())[0]
         await fork.unlock(relayer)
         await fork.after(quote["snapshot"]["created"])
@@ -167,6 +192,10 @@ async def test_real_fork_authorization_failed_job_refund_and_replays(db, admissi
                 assert await session.scalar(sa.select(sa.func.count()).select_from(table)) == 0
             assert await session.scalar(sa.select(sa.func.count()).select_from(metadata.tables["grid_video_refunds"])) == 1
         record_property("simulated_paid_micro", quote["amount_micro"])
+        record_property("quote_binding_schema", quote["snapshot"]["schema"])
+        record_property("payment_flow", outer["accepted"]["extra"]["paymentFlow"])
+        record_property("strict_header_capability_executed", True)
+        record_property("altered_flow_no_attempt_or_transfer", True)
         record_property("local_only", True)
         record_property("payment_and_refund_replays_reverted", True)
         record_property("credit_and_reward_ledger_rows", 0)

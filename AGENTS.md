@@ -108,6 +108,12 @@ owning AGENTS.md and any affected parent Child DOX Index.
   Full local Python 3.13/PostgreSQL 14 regression passes 3,767 with 43 explicit
   skips and 139 inherited warnings. This is not exact-source Linux CI or a
   live token/facilitator/GPU payment canary.
+  A test-only follow-up executes the strict header's original v3/upfront
+  capability in the copied-contract fork. Altered flow produces no attempt/
+  transfer; exact payment, recovery, refund and both replay reverts pass.
+  The combined matrix passes 225 with one SQLite skip; unchanged-code repeat
+  passes 11 with the same skip. The full-suite result above is the prior
+  runtime revision, not a rerun of this test-only extension or remote CI.
 
 - Prior implicit-flow v2 envelope qualification used the locked SDK's real
   header encoder and verify/settle request shapes, plus actual offline ECDSA

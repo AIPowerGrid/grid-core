@@ -790,6 +790,28 @@ local Python 3.13/PostgreSQL 14 suite passes 3,603 with 43 explicit skips and
 passes two cases. Ruff and diff checks pass. Fresh exact-source
 Linux/PostgreSQL 16 CI remains required for this correction.
 
+The later binding-v3 follow-up now exercises the strict PAYMENT-SIGNATURE path,
+not just the inner authorization. The official SDK encodes the header; Core
+checks the exact upfront/EIP-3009 requirements, commits the winning attempt,
+then the local test executes that returned original signature/calldata against
+copied USDC. No replacement signature is generated for the transaction.
+Absent, authorization or escrow flow creates no payment attempt or transfer.
+Normal independent-proof code (through two logical adapters sharing the fork)
+recovers the lost transaction; failed-job obligation, copied Safe refund and
+both replay controls pass. This is no HTTP collector or live facilitator test.
+
+The envelope/refund/fork matrix passes 225 with one SQLite financial skip;
+an unchanged-code repeat passes 11 with the same skip. Snapshot restoration
+returns block, Safe nonce and copied token balance to their original values.
+The private XML SHA-256 is
+`df5a3d8551f4cdc17e00a17f30e6234be463d29012047a6103a4d16d2b889de4`;
+repeat SHA-256 is
+`8d3cf2f44a1bd3d4deebb4bf14596092267809b440f26c78e77316ccc8e9ce66`.
+This test-only extension changes no runtime, migration, price, route or flag.
+The 3,767-case full run remains evidence for the prior runtime revision;
+the extended fork is separately qualified, not relabeled as remote CI,
+GPU/storage, actual token payment or customer-funded acceptance.
+
 Primary interface references: [Safe 1.4.1 source](https://github.com/safe-global/safe-smart-account/blob/v1.4.1/contracts/Safe.sol),
 [Safe execution API](https://docs.safe.global/reference-smart-account/transactions/execTransaction)
 and [Safe transaction hash API](https://docs.safe.global/reference-smart-account/transactions/getTransactionHash).
