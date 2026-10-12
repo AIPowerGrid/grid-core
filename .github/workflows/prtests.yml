@@ -160,14 +160,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: AIPowerGrid/grid-sdk-python
-          ref: 2f599e1a0e308decb34b045a0fbb638c7c8a71e8
+          ref: d68f1d1ccec70ef0d342d453d0a4d3a212329d2f
           path: .integration/sdk-python
           persist-credentials: false
       - name: Checkout pinned JavaScript video SDK
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: AIPowerGrid/grid-sdk-js
-          ref: 60547a07384845e9a0d831bfa690bc2b1ac1b043
+          ref: c09dd2d7c5c4ce841a954eed878191aa0bb0c4b2
           path: .integration/sdk-js
           persist-credentials: false
       - name: Build pinned JavaScript video SDK

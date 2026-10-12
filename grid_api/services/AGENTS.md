@@ -11,6 +11,10 @@ content sanitization, and reward settlement.
   Derive exact amount/asset/network/payTo/domain/timeout/EIP-3009 method from
   the immutable live quote, never client requirements. Freeze quote/envelope
   inputs before validation/serialization so caller mutation cannot rebind them.
+  Binding-v3 commits upfront/EIP-3009 terms; wire `extra.paymentFlow=upfront`
+  requires settle then independent receipt proof before job admission, without
+  facilitator `/verify`. Locked 2.16.0 request-shape compatibility does not
+  qualify actual client/facilitator flow handling.
   Validate primitive types and exact fields before SDK construction; reject v1, extensions,
   coercion and client-selected resource metadata. Optional HTTPS descriptor
   must match an operator-controlled URL, never Host/request authority. Bounded
@@ -201,9 +205,12 @@ content sanitization, and reward settlement.
   Five-minute quotes freeze canonical owner/request key, normalized intent,
   source-byte commitments, selected seed/graph/units, undiscounted price-book
   snapshot, canonical Base USDC recipient/network and one derived nonce.
-  New binding-v2 snapshots also freeze the USDC EIP-712 name/version/chain/token
-  domain; old domainless v1 quotes remain readable/replayable without upgrade,
-  repricing or a replacement nonce, but cannot acquire signing authority.
+  New binding-v3 snapshots freeze the USDC EIP-712 name/version/chain/token
+  domain plus upfront flow/EIP-3009 method. Old v1/v2 remain readable/replayable
+  without upgrade, repricing or replacement nonces; only v3 permits fresh
+  signing. Prior v2 attempts retain historical proof and observation-only replay.
+  Upgrade every quote/staging/proof/refund/financial reader before v3 writes;
+  retain those readers/history on rollback, never downconvert existing rows.
   Reads verify the commitment and indexed fields; replay never recompiles or
   reprices. PostgreSQL globally serializes inserts and retained-row caps while
   account locks fence merges; no decoder/storage/network call runs under those
@@ -242,7 +249,7 @@ content sanitization, and reward settlement.
 - `video_eip3009.py` is an offline, admission-time exact EIP-3009 binding
   helper, not a payment endpoint. It builds unsigned SDK-compatible typed data
   including the mandatory JSON-RPC `EIP712Domain` type definitions,
-  and checks canonical 65-byte low-S signatures against one owner-loaded v2
+  and checks canonical 65-byte low-S signatures against one owner-loaded v3
   quote's amount/payer/recipient/nonce/domain/window. It rejects self-payments,
   compact/wrapped signatures, unbound SDK nonces and expired quotes. Core never
   signs or takes private keys; the bound result contains no signature or
