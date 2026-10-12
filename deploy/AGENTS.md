@@ -91,8 +91,9 @@ executes an immutable release selected through `/home/aipg/current`.
   `MEDIA_ASYNC_ADMISSION_MODE=pilot` is the default. A reviewed enabled pilot
   requires one to ten distinct private account UUIDs in
   `MEDIA_ASYNC_CANARY_ACCOUNTS` and an aware `MEDIA_ASYNC_CANARY_UNTIL` no more
-  than 24 hours ahead at startup. Expired metadata may remain only with new
-  admission disabled, preserving restart/recovery. Public `open` requires both
+  than 24 hours ahead at startup. Normal expiry closes new jobs, not Core
+  startup: recovery continues even if the enable flag remains set. Use a future
+  expiry for a new pilot. Public `open` requires both
   pilot fields cleared and separate approval; it cannot silently ignore a cohort.
   Contract-backed waiting/chat video is closed in pilot mode. These admission
   controls do not change global charging, tariffs or model-use clearance.

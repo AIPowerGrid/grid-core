@@ -627,8 +627,11 @@ or deployed, and worker-restart continuation remains a promotion gate.
 `MEDIA_ASYNC_ADMISSION_MODE` defaults to `pilot`, independently of global
 charging. Enabling async admission requires one to ten distinct private account
 UUIDs in `MEDIA_ASYNC_CANARY_ACCOUNTS` and an aware
-`MEDIA_ASYNC_CANARY_UNTIL` strictly in the future and at most 24 hours ahead at
-startup. Defaults remain disabled, empty and without an expiry. Public `open`
+`MEDIA_ASYNC_CANARY_UNTIL` at most 24 hours ahead at startup. Choose a future
+expiry for a new pilot. Normal expiry rejects new requests but does not prevent
+Core startup, even if the enable flag remains set; accepted-job recovery must
+survive an expired-pilot restart. Defaults remain disabled, empty and without an
+expiry. Public `open`
 mode is a separate release choice and rejects configured cohort/expiry fields;
 it cannot silently discard those restrictions. None of these controls promotes
 recipes, creates tariffs, grants credits or resolves model-use permission.
@@ -662,6 +665,14 @@ fixture failures are preserved as failed evidence, then rerun successfully
 after explicit isolated open-mode configuration. Skips do not qualify missing
 gates, and this local result does not replace new exact-source Linux/PostgreSQL16
 CI or actual purchased-credit/native acceptance.
+
+A subsequent startup follow-up accepts normally expired pilot metadata while
+keeping new admission closed, rather than taking all Core routes down on restart.
+Its focused API/settings and real Core-process/PostgreSQL suite passes 174 cases
+with one skip. Both dispatched and already settled jobs recover through an
+expired-pilot restart with one charge/completion and no new queue execution;
+fresh keys reject. The full 2,823-pass result above predates this follow-up;
+fresh complete Linux/PostgreSQL16 CI is still required for the new source.
 
 ### Submission and Recovery
 
