@@ -28,7 +28,11 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 
 ## Local Contracts
 
-- Private video envelope validation is offline and unrouted. It derives v2
+- Private video envelope validation is offline and unrouted. Binding-v3 freezes
+  upfront/EIP-3009 terms; the future flow settles then proves a receipt before
+  job admission, without facilitator `/verify`. Old v1/v2 retain read-only
+  recovery, not fresh signing. Upgrade all candidate readers before v3 writes
+  and retain them on rollback. The helper derives x402-v2
   requirements from one immutable live quote and checks the original inner
   signature after strict outer/header decoding. Returned facilitator JSON is
   an ephemeral capability, not send permission or receipt-backed admission.

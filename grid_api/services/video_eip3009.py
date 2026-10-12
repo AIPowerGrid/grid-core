@@ -56,8 +56,8 @@ def _now() -> datetime:
 
 def _live_quote(row: dict) -> dict:
     snapshot = quotes._validate_row(row)
-    if snapshot["schema"] != "aipg.video-quote-binding.v2":
-        raise VideoAuthorizationError("quote has no frozen signing domain")
+    if snapshot["schema"] != "aipg.video-quote-binding.v3":
+        raise VideoAuthorizationError("quote has no frozen upfront payment terms")
     now = int(_now().timestamp())
     if not snapshot["created"] <= now < snapshot["expires"] or now <= 0:
         raise VideoAuthorizationError("quote is outside its signing window")

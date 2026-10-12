@@ -210,6 +210,8 @@ def test_legacy_domainless_quotes_read_without_acquiring_signing_authority(prepa
     legacy = copy.deepcopy(row["snapshot"])
     legacy["schema"] = "aipg.video-quote-binding.v1"
     legacy["payment"].pop("eip712_domain")
+    legacy["payment"].pop("payment_flow")
+    legacy["payment"].pop("asset_transfer_method")
     old_row = quotes.PreparedVideoQuote(quotes._canonical(legacy)).values
     assert quotes.view(old_row)["payment_enabled"] is False
     assert "eip712_domain" not in quotes.view(old_row)["payment"]
@@ -227,6 +229,38 @@ def test_domain_corruption_and_self_payments_are_not_authorized(prepared):
         bindings.signing_request(corrupt, payer=account.address)
     with pytest.raises(bindings.VideoAuthorizationError):
         bindings.signing_request(row, payer=row["snapshot"]["payment"]["pay_to"])
+
+
+@pytest.mark.parametrize("field,value", [("payment_flow", "authorization"), ("payment_flow", "escrow"),
+    ("payment_flow", None), ("asset_transfer_method", "permit2"), ("asset_transfer_method", None)])
+def test_upfront_terms_are_committed_and_cannot_be_reinterpreted(prepared, field, value):
+    row, account = prepared
+    assert row["snapshot"]["schema"] == "aipg.video-quote-binding.v3"
+    changed = copy.deepcopy(row["snapshot"])
+    if value is None:
+        changed["payment"].pop(field)
+    else:
+        changed["payment"][field] = value
+    altered = quotes.PreparedVideoQuote(quotes._canonical(changed)).values
+    assert altered["commitment"] != row["commitment"] and altered["authorization_nonce"] != row["authorization_nonce"]
+    with pytest.raises(bindings.VideoAuthorizationError):
+        bindings.signing_request(altered, payer=account.address)
+
+
+def test_v2_quote_cannot_acquire_fresh_upfront_signing_authority(prepared):
+    row, account = prepared
+    snapshot = copy.deepcopy(row["snapshot"])
+    snapshot["schema"] = "aipg.video-quote-binding.v2"
+    snapshot["payment"].pop("payment_flow")
+    snapshot["payment"].pop("asset_transfer_method")
+    legacy = quotes.PreparedVideoQuote(quotes._canonical(snapshot)).values
+    assert quotes.view(legacy)["payment_enabled"] is False
+    with pytest.raises(bindings.VideoAuthorizationError):
+        bindings.signing_request(legacy, payer=account.address)
+    snapshot["payment"]["payment_flow"] = "upfront"
+    retrofitted = quotes.PreparedVideoQuote(quotes._canonical(snapshot)).values
+    with pytest.raises(quotes.VideoQuoteError):
+        quotes.view(retrofitted)
 
 
 def test_verification_reads_only_the_frozen_snapshot_and_mutable_views_do_not_change_it(prepared, monkeypatch):

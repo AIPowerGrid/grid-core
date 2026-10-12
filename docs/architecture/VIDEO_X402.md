@@ -53,6 +53,17 @@ configuration is not proof. The
 defines payment authorization and settlement. Job binding and the async lifecycle
 below are Grid-specific additions, not standard x402 guarantees.
 
+Explicitly select `extra.assetTransferMethod=eip3009` and
+`extra.paymentFlow=upfront`. The current
+[x402 v2 payment-flow specification](https://github.com/x402-foundation/x402/blob/main/specs/x402-specification-v2.md#61-asset-transfer-methods-and-payment-flow-models)
+distinguishes default authorization (verify -> resource -> settle) from upfront
+(settle -> resource). Upfront omits facilitator `/verify`; settlement checks
+the payment. Grid additionally requires confirmed receipt proof and durable
+ownership before an executable job. No HTTP adapter implements that sequence
+yet. Locked x402 2.16.0 schemas preserve `extra`, but actual upfront client and
+selected-facilitator handling remain unqualified; do not confuse matching JSON
+with payment-flow support.
+
 Implemented candidate routes, **private and default-off, not deployed**:
 
 - `POST /v1/x402/videos/quotes`: scoped authenticated request, UUIDv4
@@ -68,9 +79,13 @@ Responses are `no-store`; they explicitly return `payment_enabled: false` and
 do not emit a `PAYMENT-REQUIRED` header. GET and identical replay remain available
 after disabling new quotes or expiry; expired identity never means reprice,
 extend, replace or mint a new nonce. Recovery uses GET, not another generation.
-The additive `binding_schema` names the stored quote-binding revision. New v2
-quotes include `payment.eip712_domain`; domainless v1 quotes remain recoverable
-with their original commitment/nonce and cannot be upgraded into signing quotes.
+The additive `binding_schema` names the stored quote-binding revision. New v3
+includes `payment.eip712_domain`, `payment.payment_flow=upfront` and
+`payment.asset_transfer_method=eip3009`. Old v1/v2 remain recoverable with their
+original commitment/nonce, never upgraded into fresh signing quotes. Prior v2
+attempts retain historical proof and observation-only replay, not another send.
+Upgrade every quote/staging/proof/refund/financial reader before writing v3;
+retain those readers/history on rollback, never downconvert existing rows.
 
 **Not implemented:** `POST /v1/x402/videos/quotes/{quote_id}/pay`. The future
 route must bind the identical intent and signed exact payment, with no alternate
@@ -129,8 +144,9 @@ admission; neither may silently allow expired keys to become new payments.
 Commit canonical owner, hashed idempotency key, normalized request hash, source
 byte/role/timing commitments, one selected seed, resolved graph/recipe commitment,
 execution units, price version, exact micro-USDC amount, recipient, chain/token
-and deadline in an immutable quote. New binding-v2 snapshots additionally freeze
-the token's EIP-712 name/version/chain/verifying-contract domain. This binding is implemented for private
+and deadline in an immutable quote. New binding-v3 snapshots additionally freeze
+the token's EIP-712 domain and explicit upfront/EIP-3009 terms. Altering these
+terms changes the commitment-derived authorization nonce. This binding is implemented for private
 quotation; the existing request hash alone does not
 freeze a generated seed or compiled graph; never resolve either after payment.
 
@@ -161,8 +177,8 @@ not a mocked recovery function. They prove compatible typed-data hashes and
 signatures when the quote nonce/deadline are selected before signing, and reject
 the stock client's random nonce or alteration of its already-signed payload.
 Separate SDK candidates now implement the opt-in preparation and explicit
-signer-callback sequence: Python `2f599e1a` (`0.2.0a2`) and JavaScript `60547a07`
-(`0.2.0-preview.2`). They independently implement the public wire contract under
+signer-callback sequence. Current local Python `0.2.0a3` and JavaScript
+`0.2.0-preview.3` require binding-v3 upfront quotes. They implement the wire contract under
 MIT, without copying AGPL runtime code or adding crypto dependencies. This is
 **not a package release or an enabled payment rail**.
 
@@ -172,11 +188,15 @@ canonical domain, exact integers and signing window before returning unsigned
 JSON-RPC data, including mandatory `EIP712Domain` definitions. Never use a copied
 response hash as independent intent verification or claim to prove the hidden
 execution plan. Current `payment_enabled:false` blocks signer callbacks.
+Even enabled quotes require explicit `accept_upfront_payment=True` in Python
+or `acceptUpfrontPayment:true` in JS before wallet callbacks. Default/false
+refuse signing; consent is frozen before asynchronous work. This is client
+policy, not server activation or permission to spend real funds.
 Explicit future-enabled callbacks sign only, with expiry rechecked afterwards;
 private signed capabilities are not exposed by ordinary repr/JSON. No SDK HTTP,
 payment sender, fallback, retries or key handling is added.
 
-Private SQLite/PostgreSQL quote HTTP/auth plus both SDKs pass twelve generated/
+The prior binding-v2 SDK pins (`2f599e1a` / `60547a07`) passed twelve generated/
 audio/video and Base/Base-Sepolia protocol cases. Actual preview signing is
 refused; only test-local future-enabled copies exercise new unfunded signatures,
 private two-phase IPC and Core's real verifier. Every case leaves balance
@@ -187,9 +207,24 @@ a live wallet, funded contract/facilitator, production, GPU or real payment.
 The exact SDK candidates also pass GitHub Python 3.9..3.12 and Node 18/20/22/24
 runtime/package/security matrices. The combined existing video HTTP/recovery
 and new signing qualification passes 68 cases locally on SQLite/PostgreSQL.
-Core CI now pins those exact SDK commits and runs both suites; the fresh Core
+Core CI pinned those exact SDK commits and ran both suites; the historical Core
 `0019bfde` revision passes its exact Linux/PostgreSQL 16 CI gate. Later changes
-still require their own exact-revision result.
+still require their own exact-revision result. These historical passes do not
+qualify new v3 terms/consent; its local tests and exact-source CI are separate.
+The local v3 SDK candidates are Python `d68f1d1ccec70ef0d342d453d0a4d3a212329d2f`
+and JS `c09dd2d7c5c4ce841a954eed878191aa0bb0c4b2`. Core CI now references these
+immutable pins, with no fallback to old/moving source. Publication is still
+owner-gated; those checkouts cannot pass remotely until the pins are approved
+and available. Local qualification passes 68 cases against actual isolated
+HTTP/SQL/Core verification with omitted/false-consent refusal in both clients.
+Current unit suites pass Python 128 and JS 118; the compiled runtime passes two
+cases on each of Node 18/20/22/24. Python wheel construction, JS build/package
+inspection and scoped payment-module typing pass locally. This is neither
+exact-source Linux CI nor actual payment/GPU/storage proof.
+The full local binding-v3 Core regression passes 3,767 with 43 explicit skips
+and 139 inherited warnings in 497.14 seconds on Python 3.13/PostgreSQL 14.
+This does not rerun the earlier copied-contract fork, native GPU/R2 or funded
+customer acceptance. Exact-revision Linux/PostgreSQL 16 CI remains required.
 
 Verification requires a caller-owned, authenticated SQL quote and an expected
 payer. It accepts exactly the inner `authorization` and `signature` fields with
@@ -220,8 +255,8 @@ permission to discard a refund/recovery obligation. No live payment route exists
 `services/video_payment_envelope.py` is an offline, unrouted v2 boundary, not
 an HTTP collector or payment sender. It derives SDK `PaymentRequirements` from
 the owner-loaded immutable live quote: exact canonical USDC/network, amount,
-payTo, quote lifetime, signing-domain name/version and explicit EIP-3009 transfer
-method. Client echoes must match every field and primitive type; missing/
+payTo, quote lifetime, signing-domain name/version, EIP-3009 method and upfront
+flow. Client echoes must match every field and primitive type; missing/
 additional fields, legacy amount names, other schemes/networks/assets,
 discounts, coercible versions/timeouts and extensions reject before SDK model
 construction. Checksum addresses normalize without changing the server's
@@ -237,7 +272,8 @@ The optional wire adapter bounds PAYMENT-SIGNATURE at 8,192 characters and
 requires canonical standard base64 plus UTF-8 JSON. Duplicate keys, floats,
 nonfinite numbers, invalid/deep/oversized input, omitted/coercible versions and
 legacy shapes reject without reflecting the header/capability. SDK header
-encoding and verify/settle request schemas match the generated body. Returned
+encoding and settle request schemas match the generated body. Verify shares
+that JSON shape but must not run in the upfront flow. Returned
 facilitator JSON contains the original signature only ephemerally: never log or
 persist it, and do not contact a facilitator without winning the committed
 attempt and confirming ready inputs. A successfully constructed body is not
@@ -248,7 +284,7 @@ changes to the caller's shared objects cannot replace the checked authorization
 or requirements. Returned mutable JSON is still a caller-owned capability,
 not a persisted grant or trustworthy financial state.
 
-The envelope-only matrix passes 136 cases on both canonical Base domains with
+The prior implicit-flow envelope matrix passed 136 cases on both Base domains with
 actual offline ECDSA and the locked x402 2.16.0 header/request helpers. Combined
 envelope/signature/journal qualification passes 281 with three explicit SQLite
 skips and real PostgreSQL counterparts. Mutation isolation, metadata changes,

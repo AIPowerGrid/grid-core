@@ -33,7 +33,8 @@ def _requirements(row: dict) -> PaymentRequirements:
     return PaymentRequirements(scheme="exact", network=payment["network"], asset=payment["asset"],
         amount=str(payment["amount_micro"]), pay_to=payment["pay_to"],
         max_timeout_seconds=snapshot["expires"] - snapshot["created"],
-        extra={"name": domain["name"], "version": domain["version"], "assetTransferMethod": "eip3009"})
+        extra={"name": domain["name"], "version": domain["version"],
+               "assetTransferMethod": payment["asset_transfer_method"], "paymentFlow": payment["payment_flow"]})
 
 
 def requirements(row: dict) -> dict:
@@ -102,11 +103,12 @@ def validate(row: dict, envelope: dict, *, expected_payer: str,
 
 def facilitator_request(row: dict, envelope: dict, *, expected_payer: str,
                         resource_url: str | None = None) -> dict:
-    """SDK-shaped verify/settle body only; no client, send, SQL or grant.
+    """SDK-shaped upfront settle body only; no client, send, SQL or grant.
 
     The signature stays solely in the returned ephemeral request. Winning
     journal begin, ready inputs, independent receipt proof and atomic funded
     admission remain separate mandatory boundaries. Replay is not send consent.
+    The upfront flow does not call the facilitator's read-only /verify endpoint.
     """
     try:
         row, envelope = copy.deepcopy(row), copy.deepcopy(envelope)

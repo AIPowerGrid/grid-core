@@ -118,7 +118,7 @@ def _topic_address(value) -> str:
 
 def _expectation(row: dict, payer: str) -> tuple[dict, dict]:
     snapshot = quotes._validate_row(row)
-    if snapshot["schema"] != "aipg.video-quote-binding.v2":
+    if snapshot["schema"] not in {"aipg.video-quote-binding.v2", "aipg.video-quote-binding.v3"}:
         raise VideoPaymentProofError("quote has no frozen payment domain")
     authorization = bindings._authorization(snapshot, payer)
     # Deliberately no current-window check: this is historical reconciliation.

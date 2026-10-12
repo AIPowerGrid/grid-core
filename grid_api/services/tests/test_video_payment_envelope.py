@@ -56,6 +56,7 @@ def test_exact_requirements_and_sdk_body_without_authority_or_network(prepared, 
     assert VerifyRequest.model_validate(body).model_dump(by_alias=True, exclude_none=True) == body
     assert SettleRequest.model_validate(body).model_dump(by_alias=True, exclude_none=True) == body
     assert body["paymentRequirements"]["extra"]["assetTransferMethod"] == "eip3009"
+    assert body["paymentRequirements"]["extra"]["paymentFlow"] == "upfront"
     assert body["paymentRequirements"]["maxTimeoutSeconds"] == support.quotes.TTL_SECONDS
     assert supplied == original
     body["paymentPayload"]["payload"]["authorization"]["value"] = "1"
@@ -75,6 +76,18 @@ def test_client_requirements_cannot_replace_server_quote(prepared, field, value)
     row, account = prepared
     supplied = envelope(row, account)
     supplied["accepted"][field] = value
+    with pytest.raises(envelopes.VideoEnvelopeError):
+        envelopes.facilitator_request(row, supplied, expected_payer=account.address)
+
+
+@pytest.mark.parametrize("flow", [None, "authorization", "escrow", "UPFRONT", True])
+def test_client_cannot_omit_or_change_upfront_payment_flow(prepared, flow):
+    row, account = prepared
+    supplied = envelope(row, account)
+    if flow is None:
+        supplied["accepted"]["extra"].pop("paymentFlow")
+    else:
+        supplied["accepted"]["extra"]["paymentFlow"] = flow
     with pytest.raises(envelopes.VideoEnvelopeError):
         envelopes.facilitator_request(row, supplied, expected_payer=account.address)
 

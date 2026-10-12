@@ -96,7 +96,20 @@ owning AGENTS.md and any affected parent Child DOX Index.
 
 ## Verification
 
-- Private v2 video-envelope qualification uses the locked x402 SDK's real
+- New private binding-v3 video quotes commit upfront/EIP-3009 terms. Fresh
+  signatures and both SDK callbacks require explicit upfront acceptance;
+  existing v1/v2 identities retain recovery and v2 historical proof, never
+  retrofit or another send. The focused quote/signature/envelope/proof/journal/
+  prepaid/refund matrix passes 659 with ten explicit SQLite skips and real
+  PostgreSQL counterparts. Cross-SDK isolated HTTP/SQL/signature/consent checks
+  pass 68. New SDK pins are local-only until authorized publication; exact-
+  revision Linux/PostgreSQL 16 CI and selected-facilitator flow handling remain
+  required. No sender, public activation or production configuration changes.
+  Full local Python 3.13/PostgreSQL 14 regression passes 3,767 with 43 explicit
+  skips and 139 inherited warnings. This is not exact-source Linux CI or a
+  live token/facilitator/GPU payment canary.
+
+- Prior implicit-flow v2 envelope qualification used the locked SDK's real
   header encoder and verify/settle request shapes, plus actual offline ECDSA
   on both Base domains. The envelope-only matrix passes 136 cases; combined
   envelope/signature/journal coverage passes 281 with three explicit SQLite
