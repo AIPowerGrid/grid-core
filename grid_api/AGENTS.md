@@ -17,7 +17,8 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - `models/` - Pydantic request/response models for OpenAI-compatible requests
   and worker structures.
 - `abis/` / `_abi.py` - local contract ABI loaders used by background sync.
-- `main.py` - lifecycle: DB/Redis init, stale-job reclaimer, reservation and
+- `main.py` - lifecycle: DB/Redis init, stale-job reclaimer, bounded async-media
+  outbox and exact private-input cleanup (both continue after admission rollback), reservation and
   billing invariant monitors, OAuth operational-state retention, validator operational-history pruning,
   disabled-by-default validator shadow outbox collection,
   default-off read-only treasury balance warnings through the billing monitor,
@@ -35,6 +36,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - **Dispatch:** exactly one live job queue - `services/job_queue.py` (Redis streams). The
   `services/p2p/` variants are default-off scaffolding and must not become the
   production path without a dedicated design/test pass.
+  Candidate compatibility routing transfers the original pending delivery to
+  a fully compatible live peer, using bounded one-use inbox notifications.
+  Those notifications are not another payload queue or financial authority.
+  Server-owned registry protocol markers exclude older Core receivers.
 - **On-chain:** read via background sync loops or offline jobs, cached; never
   perform Base RPC calls on the hot request path.
 - The validator bond loop may update only existing reviewed reference rows. It
@@ -51,6 +56,37 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   local file. Never infer this authority from `GRID_DIAMOND_ADDRESS`.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
+- **Async video:** `MEDIA_ASYNC_ENABLED=0` closes new async admission only.
+  Admission defaults to `pilot`: enabling requires one to ten distinct private
+  account UUIDs and an aware expiry no more than 24 hours ahead at startup.
+  A normally expired pilot can restart with its flag still set; runtime admission
+  stays closed, while all Core routes and accepted-job recovery remain available.
+  New holds recheck the captured deadline after account/balance locks and
+  journal insertion; expiry
+  rolls back paid writes and restores separately drawn pockets. Existing
+  replay/status/outbox work survives expiry or cohort removal. Contract-backed
+  waiting/chat video routes reject in pilot mode, even when async is disabled.
+  Explicit `open` mode requires clearing both cohort and expiry; it does not
+  bypass recipe, feature, pricing, credit, worker or model-permission gates.
+  Audio/video conditioning adds separately default-dark `audio-to-video` and
+  `video-to-video` admission; Ingredients appearance adds `appearance-to-video`.
+  Do not infer these gates from the base video path,
+  charging mode or health features. MP4 source verification needs FFmpeg/ffprobe;
+  missing tools reject rather than bypassing validation.
+  Governed LTX image/audio/video inputs require an explicit separate
+  `MEDIA_PRIVATE_SOURCE_BUCKET`; missing/shared output storage rejects before
+  quota or uploads. Operators must verify no public bucket endpoint and the
+  one-day input lifecycle. Signed links alone do not make output-bucket objects
+  private. Existing legacy image ingest is not silently migrated here.
+  Apply migrations through `0045` before starting this candidate even with the flag off:
+  the outbox reads its journal. Typed settings bound held async concurrency,
+  batch size, lease and cadence. Retain the schema and irreversible execution
+  fence on rollback; never rerender a claimed job based on queue loss alone.
+  Original-worker continuation uses a separate renewable Core execution lease,
+  not another queue attempt. Expired/replaced sessions cannot settle or refund.
+  Rig-scoped read-only `/v1/workers/self/media-jobs` confirms irreversible
+  closure for local-cache retention, including lost ACKs after settlement. It
+  remains available on admission rollback; unknown/expired is not closed.
 - An enrolled worker's verified signing authority is independent of later
   account payout-preference changes. Reconnection retains the exact owned
   delegation with fresh proof, never arbitrary old wallets or another account's

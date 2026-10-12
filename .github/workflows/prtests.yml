@@ -82,8 +82,16 @@ jobs:
             fi
           done
           sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client shellcheck redis-server
+          sudo apt-get install -y -qq postgresql-client shellcheck redis-server ffmpeg
           shellcheck -x scripts/backup_postgres.sh scripts/prove_postgres_restore.sh deploy/bootstrap.sh
+      - name: Media source decoder proof
+        run: |
+          set -euo pipefail
+          command -v ffmpeg
+          command -v ffprobe
+          ffmpeg -version
+          ffprobe -version
+          python -m pytest grid_api/services/tests/test_video_sources.py -q -rs
       - name: Shadow outbox Redis proof
         run: |
           set -euo pipefail
@@ -129,7 +137,35 @@ jobs:
         run: |
           alembic upgrade head
           alembic check
+      - name: Checkout reviewed media-worker adapter
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: AIPowerGrid/grid-media-worker
+          ref: 1332fa20c6eba4f529a8b64c5689ea777f5c803f
+          path: .integration/media-worker
+          persist-credentials: false
+      - name: Install the media-worker's frozen test runtime
+        run: >-
+          uv sync --frozen --extra test --python "$(command -v python)"
+          --project .integration/media-worker
+      - name: Require all four Core/worker appearance cases without skips
+        env:
+          MEDIA_VIDEO_WORKER_SOURCE: ${{ github.workspace }}/.integration/media-worker
+        run: |
+          test "$(git -C "$MEDIA_VIDEO_WORKER_SOURCE" rev-parse HEAD)" = 1332fa20c6eba4f529a8b64c5689ea777f5c803f
+          python -m pytest \
+            grid_api/services/tests/test_ltx25_appearance.py::test_core_payload_reaches_actual_worker_appearance_adapter \
+            -q -rs --junitxml="$RUNNER_TEMP/video-worker-adapter.xml"
+          python - "$RUNNER_TEMP/video-worker-adapter.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          cases = ET.parse(sys.argv[1]).findall(".//testcase")
+          assert len(cases) == 4, "all four pinned appearance cases must execute"
+          assert all(case.find(tag) is None for case in cases for tag in ("skipped", "failure", "error")), "adapter cases must pass without skips"
+          PY
       - name: Offline test suite (grid_api)
+        env:
+          MEDIA_VIDEO_WORKER_SOURCE: ${{ github.workspace }}/.integration/media-worker
         run: python -m pytest grid_api -q
       - name: Checkout reviewed validator client
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -148,6 +184,30 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
+      - name: Checkout pinned Python video SDK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: AIPowerGrid/grid-sdk-python
+          ref: 0680b5155b81cda64a3afd405c403697fcda9906
+          path: .integration/sdk-python
+          persist-credentials: false
+      - name: Checkout pinned JavaScript video SDK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: AIPowerGrid/grid-sdk-js
+          ref: 51c04c7f27d559266f54289216ef267f6fe7a8d9
+          path: .integration/sdk-js
+          persist-credentials: false
+      - name: Build pinned JavaScript video SDK
+        working-directory: .integration/sdk-js
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+      - name: PostgreSQL Core and real HTTP video SDK qualification
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          AIPG_JS_VIDEO_QUALIFICATION: ${{ github.workspace }}/.integration/sdk-js/qualification/core-wire.mjs
+        run: python -m pytest .integration/sdk-python/qualification/test_core_video_jobs.py -q -rs
       - name: Build pinned Console for local consent integration
         working-directory: .integration/console
         run: |

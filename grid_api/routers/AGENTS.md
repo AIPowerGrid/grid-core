@@ -14,6 +14,10 @@ transport, accounts, stats, health/metrics.
   collects worker output. The request model normalizes OpenAI's current
   `max_completion_tokens` field to the Grid's metered `max_tokens` worker cap;
   conflicting dual fields are rejected.
+  Authenticated `GET /v1/models/{model_id}/recipe` retains legacy recipe shape;
+  governed video entries add `video_contract` and separately expanded
+  `source_requirements` node/file inventories. Preserve the stored/base graph.
+  Inventory reads never enable admission or prove execution/fidelity.
   The x402 route is a separate default-off, accountless Base-USDC lane. It is
   non-streaming and text-only until a stream-aware settlement adapter exists.
 - `anthropic.py` - `POST /v1/messages` raw Anthropic Messages passthrough.
@@ -30,12 +34,108 @@ transport, accounts, stats, health/metrics.
   secret sanitization helpers.
 - `images.py` - `POST /v1/images/generations` native image jobs.
 - `videos.py` - `POST /v1/videos/generations` native video jobs.
+  Contract-backed LTX-2.5 candidates support exact 8n+1 frames and at most
+  sixteen ordered image pins, starting at frame zero. All images validate before
+  quota/upload; multi-pin jobs additionally require `video-timeline` admission
+  and the `recipe-image-bindings-v1` worker feature. Unsupported settings reject before quota/upload; the
+  Distilled recipes are promoted for a bounded pilot; deployment/canary evidence
+  is still required. Dev/Ingredients remain non-serving. See `LTX_2_5_VIDEO.md`.
+  Distilled candidates additionally accept explicit inline `reference_audio`
+  (complete exact-duration 48 kHz stereo PCM16 WAV) and `reference_video`
+  (fully decoded exact-frame 24 fps H.264 MP4 at the explicit requested size).
+  Motion references require a separate audio input; neither role is an opening
+  image. Both source modes are default-dark and require compatible workers.
+  All typed LTX inputs, including optional image pins, require the separate
+  private-source bucket before quota/uploads; no output-bucket fallback.
+  `_video_body.py` bounds both native video JSON routes to 64 MiB + 64 KiB
+  before parsing and redacts input-bearing validation errors. The combined
+  encoded source budget is 64 MiB, with stricter per-kind/image budgets.
+  Source byte hashes join durable normalized request identity; replay never
+  reuploads, trims or regenerates a source. Input roles/bytes must match the
+  governed graph before reserve. This is not character identity or lip accuracy.
+  The separate `LTX-2.5 Dev BF16 Ingredients` candidate accepts `reference_image`
+  as appearance-only PNG conditioning with source audio and optional motion
+  video, never `image`/`keyframes`. Its fixed 121-frame/768x448/40-step profile
+  cannot widen ordinary Dev. Finite `reference_strength`, optional
+  `reference_attention_strength` and video-only `motion_attention_strength`
+  join normalized intent; absent new fields preserve
+  existing request hashes. `appearance-to-video` is default-off and requires
+  `recipe-appearance-reference-v1` on the same worker as every other feature.
+  The recipe stays non-serving/unpriced; compiler tests do not qualify output.
+  Reference attention has no advertised default: omission keeps the original
+  appearance guide, while explicit (0, 1] selects Core's Advanced node only
+  there. The same node is required in both authenticated source inventories.
+- `video_jobs.py` - candidate `POST /v1/videos/jobs` and owner-only
+  `GET /v1/videos/jobs/{job_id}`, plus `GET /v1/videos/jobs` with the
+  `Idempotency-Key` header for lost initial replies. GET never admits, uploads,
+  dispatches or moves money; unknown/foreign keys return indistinguishable 404s
+  and merged duplicate keys fail 409. Key text is not a URL selector or bearer
+  capability. The private response adds the stored normalized `request_hash`
+  so a client can bind recovery to its own intent. New admission defaults off.
+  A separate default `pilot` mode admits only a configured private account
+  cohort before its <=24-hour expiry. Fresh blocked keys reject before source
+  decoding/staging; replay checks the original intent and does not charge or
+  upload again. Recheck admission after staging and capture the earlier deadline
+  for the credit transaction. Contract-backed legacy waiting/chat video cannot
+  bypass pilot mode; public `open` is an explicit, separately reviewed choice.
+  Scoped `inference.submit` authentication, a UUIDv4 `Idempotency-Key`, a positive
+  `max_cost_micro_usd` and a live credit hold are required. The typed body is
+  bounded before JSON parsing and input-bearing validation errors are redacted.
+  Replay/recovery remain available after admission rollback; changed intent
+  returns 409. One committed hold/journal accepts the request before the outbox
+  queues it. Returns 202 for pending/queued/uncertain execution and 200 for a
+  committed terminal, with `Location`, private `no-store`, and bounded polling.
+  Workers must themselves support every required feature, including
+  `async-video-resume-v1`; availability is not a union of unrelated workers'
+  features. Released/default workers do not advertise that new capability;
+  candidate opt-in startup requires matching authenticated recipe inventories.
+  Input validation is separate from staging. Async ingress compiles its private
+  immutable graph/seed/source snapshot before quota or any input upload, then
+  binds locations without re-resolving the recipe. Invalid compilation consumes
+  neither quota nor credits and uploads nothing. This in-memory execution plan
+  is not an immutable payment quote or durable x402 authority. The waiting
+  video route keeps its existing credit lifecycle and response shape; plain
+  opening images now also validate before quota, not during upload.
+  This is credit-only, not x402, cancellation or worker-restart qualification.
 - `audio.py` - `POST /v1/audio/generations` governed local ACE-Step jobs.
 - `worker_enrollment.py` - dark device-style manager pairing. Public create,
   intent, poll, and ACK endpoints are capability-bound by a high-entropy
   enrollment ID plus poll secret; prepare/approve require a recent scoped user
   token and a payout-wallet signature.
 - `worker_ws.py` - `/v1/workers/ws`: registration + dispatch + health/eviction + streaming.
+  Internally marked async video jobs require a committed `media_jobs` execution
+  claim before presigning or WS dispatch. Duplicate/closed jobs acknowledge only
+  the queue, never another worker payment or client DONE. Claim errors do not
+  dispatch or acknowledge the queue. Only the default-off scoped async ingress
+  creates these jobs; the fence remains required during admission rollback.
+  Mismatch/feature/format exhaustion, disconnect give-up and prefetch cleanup
+  use the unstarted-only release guard for marked jobs. Genuine render failures
+  must hold the current Core execution lease; a duplicate queue delivery cannot refund
+  an already-running worker's hold.
+  Model/feature/format mismatch first seeks one fully compatible live peer and
+  transfers the original pending delivery, even if that peer is busy. Core's
+  registry adds its own inbox-protocol marker; worker claims cannot opt an older
+  coordinator into receiving it. Exact fresh snapshots and consumer ownership
+  fence the handoff. No-peer search keeps the existing bounce cap; busy-peer
+  wait has a separate bounded deadline, checked again at dispatch after local
+  prefetch. Superseded pending owners cannot dispatch or refund that delivery.
+  Expiry sends no backend job/DONE or
+  worker payout and uses the same unstarted-only async release guard. Hard
+  targeting and soft-affinity policies are not relaxed by this candidate.
+  Candidate original-worker reconnect uses SQL, not Redis/model routing: the
+  exact worker UUID, checkpoint and features must still match. After the prior
+  60-second lease expires, the same job/graph/seed can receive `resume:true` and
+  fresh, attempt-isolated upload slots. Renewal stops at the original 30-minute
+  budget. Success and failure validate the private lease in the money transaction;
+  superseded sessions publish no DONE/error/ACK, DEN or success metrics. Frame
+  job IDs must match. Core never sends its private lease token to the worker.
+  Before a candidate async video's paid terminal, Core source-conditionally
+  copies its bounded upload to a unique key the worker cannot write and hashes
+  the frozen bytes. The committed result uses that copy. Invalid bytes refund
+  only under the current lease; storage uncertainty keeps the hold and sends
+  no success/ACK. This is byte integrity, not model fidelity or codec quality;
+  legacy media retains its existing HEAD/self-reported-hash path.
+  The worker must refuse a missing local journal instead of starting a render.
   Durable media recovery retains Core's dispatched recipe root for image and
   video as well as audio. Never replace it with the worker's reported root.
   Audio still requires its existing matching-root echo; image/video retention
@@ -76,6 +176,10 @@ transport, accounts, stats, health/metrics.
   scoped to the payout wallet), immutable deposit history/config, and deposit
   claims (USDC launch rail, bounded expiring-price AIPG, actual-USDC
   swap-receipt ETH, and operator-only buffered ETH).
+  Video quotes validate only shared exact timing, without requiring private
+  conditioning media. Ingredients quotes retain the fixed 121-frame profile
+  and unpriced status until an operator-reviewed rate exists; a quote never
+  uploads, reserves, dispatches or enables its default-dark admission.
   `GET /v1/workers/self` and `POST /v1/workers/self/canary` accept only a
   manager-issued `worker.connect`
   credential. The status route returns the exact bound rig's online/jobs/den
@@ -104,6 +208,9 @@ transport, accounts, stats, health/metrics.
   wallet, allowlisted frontend domain/URI, Base chain id, issue/expiry time, and
   a single-use nonce. `/wallet/nonce` remains for authenticated wallet-link
   proofs, not for minting a login session.
+- `worker_media.py` - `POST /v1/workers/self/media-jobs`, a private read-only
+  cache-reconciliation authority for the exact rig bound to a dedicated worker
+  credential. It does not grant account access, dispatch or financial writes.
 - `stats.py` - `GET /v1/workers`, progress polling, recipe-aware model status
   (raw worker checkpoints plus executable recipe-backed public model names), usage totals,
   model stats, wallet earnings, `GET /v1/payouts/public` (aggregate payout
@@ -168,6 +275,8 @@ transport, accounts, stats, health/metrics.
 - `styles.py` - `GET /v1/styles` for curated creative presets.
 - `health.py` - `GET /health`, including the immutable full release commit when
   the runtime can prove it from `GRID_BUILD_COMMIT` or a detached checkout.
+  `video-async-credit-jobs-v1` advertises the async credit/intent/recovery
+  contract, not enabled admission, available workers or financial qualification.
 - `metrics.py` - `GET /metrics` Prometheus exposition.
 - `oauth.py` - default-off OAuth discovery, bounded public-client registration,
   S256 authorization/token exchange, Console-only consent inspection/decision,
@@ -175,6 +284,18 @@ transport, accounts, stats, health/metrics.
 - `tests/` - router-level tests, including billing/settlement behavior.
 
 ## Local Contracts
+
+- Worker media-status accepts 1..32 unique canonical job UUIDs in a body bounded
+  to 2048 bytes before parsing. Require `worker.connect`, v2 `key_kind=worker`
+  and the exact `worker:{name}` label; resolve that registered worker only
+  within its proved account family. Do not compare the paying customer's
+  `media_jobs.account_id` to the worker owner. Only jobs whose original
+  `execution_worker_id` is this worker are visible. A committed `settled`
+  reservation is `closed`; a current held execution is `held`; missing,
+  foreign, expired, legacy or uncertain jobs are indistinguishable `unknown`.
+  Never infer closure from elapsed time. Return only worker/job IDs and these
+  states, use no-store and 120 reads/minute, and continue serving recovery with
+  new async admission disabled. DB ambiguity fails 503 without private details.
 
 - `GET /v1/account` remains `account.read` gated and returns `no-store`.
   Raw linked-identity display hints and sibling API-key metadata require both
@@ -185,6 +306,13 @@ transport, accounts, stats, health/metrics.
 - An omitted image model selects the exact advertised `FLUX.2 Klein 4B FP8`
   name. An explicit model or a style's model still takes precedence. Missing
   default capacity must fail before quota/dispatch, never silently switch models.
+- Image generation accepts an optional strict integer `max_cost_micro_usd`
+  (0..2^63-1). It limits the total discounted reservation across all credit
+  pockets, not just purchased spend. A price above it returns 402 before funds
+  or service exposure are reserved and before dispatch. Omission preserves
+  existing callers. `/health.features` advertises `image-max-cost-micro-usd-v1`
+  so agents do not mistake an older server's ignored extra field for protection.
+  This is a per-request ceiling, not project budgeting or dispatch idempotency.
 
 - `GET /v1/account/ownership` is private, read-only, `account.read` gated,
   rate-limited and `no-store`. Service keys must delegate a user. It accepts no
@@ -375,6 +503,28 @@ expired or out-of-scope pilots return 503 without revealing membership.
 - Keep request-size checks before sanitizer/tokenization for CPU and memory safety.
 
 ## Verification
+
+- `tests/test_video_jobs.py` covers request-key GET recovery with real scoped
+  keys and SQLite/PostgreSQL, including missing/foreign/scope-rejected keys,
+  no second quota/hold, admission rollback and redacted errors. The service
+  journal tests additionally prove alias recovery and merged-key ambiguity.
+  Synthetic distilled/dev normalized-intent fingerprints are pinned in Core
+  and Director; neither fixtures nor matching digests prove a live paid CLI job.
+  Ingredients coverage retains appearance/audio as distinct private roles with
+  one test-priced hold, new same-worker feature and no opening-image slot.
+  Replay after admission rollback uses neither another upload nor quota/hold;
+  a changed appearance strength conflicts instead of repricing the accepted job.
+
+- `tests/test_media_resume_process.py` kills real isolated Core after WS dispatch
+  or a committed settlement, erases only its private Redis database, restarts
+  with async admission disabled and proves same-worker recovery plus one hold,
+  charge, result and ledger completion. Its dedicated worker credential also
+  observes `held` before completion and `closed` after restart, including the
+  lost-ACK case. `tests/test_worker_media_status.py` covers real scoped keys,
+  SQLite/PostgreSQL rig isolation, legacy/expiry uncertainty, private errors,
+  body bounds and absence of money writes. Scoped auth and worker registration are
+  real; accelerated leases, worker output and R2 presence are fixtures. This is
+  not the joint native-worker/GPU/R2 crash canary or a production rollout.
 
 - `tests/test_validator_hostile_path.py` reuses the disposable Core process-crash
   fixture (`CREDITS_TEST_DB_URL`, local Redis). Real HTTP registration/scoped auth,

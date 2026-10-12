@@ -16,7 +16,7 @@ ReviewedValidatorVersion = Annotated[
 
 GenerationPath = Literal[
     "openai-chat", "openai-responses", "anthropic", "image", "image-to-image",
-    "image-batch", "video", "image-to-video", "video-timeline", "audio", "3d",
+    "image-batch", "video", "image-to-video", "video-timeline", "audio-to-video", "video-to-video", "appearance-to-video", "audio", "3d",
 ]
 
 
@@ -58,7 +58,9 @@ class GridSettings(BaseSettings):
 
     # Explicit JSON allowlist for new public inference. [] closes every path.
     # Existing holds still finalize; omission is permitted only before global charging.
-    generation_enabled_paths: frozenset[GenerationPath] = frozenset(get_args(GenerationPath))
+    generation_enabled_paths: frozenset[GenerationPath] = frozenset(get_args(GenerationPath)) - {
+        "audio-to-video", "video-to-video", "appearance-to-video",
+    }
 
     # Exact direct-service IDs only; never delegated users. Empty is dark.
     grid_charging_all_model_services: list[str] = Field(default_factory=list, max_length=20)
@@ -86,6 +88,19 @@ class GridSettings(BaseSettings):
     # private pilot may enable this after its exact-hardware canary; public
     # manager publication remains a separate, broader qualification gate.
     audio_enabled: bool = False
+    # New async admission is independently dark. The outbox still drains old
+    # journaled holds when admission is disabled; never roll back its schema/fence.
+    media_async_enabled: bool = False
+    media_async_admission_mode: Literal["pilot", "open"] = "pilot"
+    media_async_canary_accounts: list[UUID] = Field(default_factory=list, max_length=10, repr=False)
+    media_async_canary_until: AwareDatetime | None = Field(default=None, repr=False)
+    media_async_concurrency: int = Field(default=4, ge=1, le=16)
+    media_job_sweep_seconds: int = Field(default=10, ge=5, le=60)
+    media_job_dispatch_lease_seconds: int = Field(default=60, ge=30, le=300)
+    media_job_batch_size: int = Field(default=10, ge=1, le=50)
+    media_private_source_bucket: str = Field(
+        default="", pattern=r"^(?:[a-z0-9][a-z0-9-]{1,61}[a-z0-9])?$"
+    )
     # Native-manager device enrollment. Independently dark until the console
     # approval page and release manager are deployed together.
     worker_enrollment_enabled: bool = False
@@ -211,6 +226,21 @@ class GridSettings(BaseSettings):
     grid_treasury_monitor_token: str = Field(default="", pattern=r"^(?:0x[0-9a-fA-F]{40})?$")
     grid_treasury_min_eth_wei: int = Field(default=0, ge=0, le=2**256 - 1)
     grid_treasury_min_token_raw: int = Field(default=0, ge=0, le=2**256 - 1)
+
+    @model_validator(mode="after")
+    def validate_media_async_admission(self):
+        cohort, until = self.media_async_canary_accounts, self.media_async_canary_until
+        if len(cohort) != len(set(cohort)):
+            raise ValueError("Async video pilot accounts must be distinct")
+        if self.media_async_admission_mode == "open":
+            if cohort or until is not None:
+                raise ValueError("Open async admission cannot ignore configured pilot restrictions")
+        elif self.media_async_enabled:
+            now = datetime.now(UTC)
+            # Normal expiry closes new jobs, not Core startup or old-job recovery.
+            if not cohort or until is None or until > now + timedelta(hours=24):
+                raise ValueError("Async video pilot requires accounts and an expiry no more than 24 hours ahead")
+        return self
 
     @model_validator(mode="after")
     def validate_worker_reward_demand(self):

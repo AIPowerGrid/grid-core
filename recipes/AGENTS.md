@@ -14,6 +14,11 @@ knobs → validate → drop here).
 - `*.json` - ComfyUI workflow JSON with a `_grid` metadata block describing
   recipe name, job type, engine, required models, constraints, determinism, seed
   fields, and optional LoRA injection points.
+- The two `ltx-2.5-distilled-bf16-*-v1.json` files are exact copies of the
+  reviewed qualification graphs, promoted for the owner-approved bounded
+  credit pilot. Startup exposes their inventory; new jobs still require the
+  async enable/cohort/expiry, compatible worker, paid hold and generation gates.
+  Dev/Ingredients remain only in the nonrecursive qualification directory.
 
 ## Local Contracts
 
@@ -41,4 +46,5 @@ knobs → validate → drop here).
 
 ## Child DOX Index
 
-- None - leaf.
+- [qualification/AGENTS.md](qualification/AGENTS.md) - non-serving LTX-2.5
+  candidate recipes and promotion gates. Startup loading must stay nonrecursive.

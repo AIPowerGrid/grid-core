@@ -788,6 +788,64 @@ sa.Index("ix_grid_reservations_media_owner_ref", reservations.c.account_id,
          reservations.c.media_client_ref)
 
 
+# Private async media journal. Financial terminal state remains authoritative in
+# reservations; a durable execution claim is never cleared for an automatic retry.
+media_jobs = sa.Table(
+    "grid_media_jobs",
+    metadata,
+    sa.Column("job_id", sa.String(64), sa.ForeignKey("grid_reservations.job_id"), primary_key=True),
+    sa.Column("account_id", sa.Uuid, sa.ForeignKey("grid_accounts.id"), nullable=False),
+    sa.Column("idempotency_hash", sa.String(64), nullable=False),
+    sa.Column("request_hash", sa.String(64), nullable=False),
+    sa.Column("payload_hash", sa.String(64), nullable=False),
+    sa.Column("model", sa.String(255), nullable=False),
+    sa.Column("payload", sa.JSON, nullable=False),
+    sa.Column("route_models", sa.JSON, nullable=False),
+    sa.Column("preferred_worker", sa.String(255), nullable=False, server_default=""),
+    sa.Column("max_cost_micro", sa.BigInteger, nullable=False),
+    sa.Column("dispatch_state", sa.String(16), nullable=False, server_default="ready"),
+    sa.Column("dispatch_token", sa.String(36), nullable=True),
+    sa.Column("dispatch_deadline", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("dispatch_attempts", sa.Integer, nullable=False, server_default="0"),
+    sa.Column("queue_message_id", sa.String(64), nullable=True),
+    sa.Column("execution_worker_id", sa.Uuid, nullable=True),
+    sa.Column("execution_started", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("execution_model", sa.String(255), nullable=True),
+    sa.Column("execution_token", sa.String(36), nullable=True),
+    sa.Column("execution_deadline", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("source_objects", sa.JSON(none_as_null=True), nullable=True),
+    sa.Column("source_cleanup_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("source_cleanup_attempted_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+    sa.UniqueConstraint("account_id", "idempotency_hash", name="uq_grid_media_jobs_owner_key"),
+    sa.CheckConstraint("length(idempotency_hash) = 64 AND length(request_hash) = 64 AND length(payload_hash) = 64",
+                       name="ck_grid_media_jobs_hashes"),
+    sa.CheckConstraint("max_cost_micro > 0 AND dispatch_attempts >= 0", name="ck_grid_media_jobs_bounds"),
+    sa.CheckConstraint("dispatch_state IN ('ready', 'dispatching', 'queued')", name="ck_grid_media_jobs_dispatch"),
+    sa.CheckConstraint("(dispatch_token IS NULL AND dispatch_deadline IS NULL) OR "
+                       "(dispatch_token IS NOT NULL AND dispatch_deadline IS NOT NULL)",
+                       name="ck_grid_media_jobs_lease"),
+    sa.CheckConstraint("(execution_worker_id IS NULL AND execution_started IS NULL) OR "
+                       "(execution_worker_id IS NOT NULL AND execution_started IS NOT NULL)",
+                       name="ck_grid_media_jobs_execution"),
+    sa.CheckConstraint("(execution_model IS NULL AND execution_token IS NULL AND execution_deadline IS NULL) OR "
+                       "(execution_model IS NOT NULL AND length(execution_model) > 0 AND "
+                       "execution_token IS NOT NULL AND length(execution_token) = 36 AND "
+                       "execution_deadline IS NOT NULL AND execution_started IS NOT NULL)",
+                       name="ck_grid_media_jobs_execution_lease"),
+    sa.CheckConstraint("source_cleanup_at IS NULL OR source_objects IS NOT NULL",
+                       name="ck_grid_media_jobs_source_cleanup"),
+)
+sa.Index("ix_grid_media_jobs_dispatch", media_jobs.c.dispatch_state, media_jobs.c.dispatch_deadline,
+         media_jobs.c.created)
+sa.Index("ix_grid_media_jobs_resume", media_jobs.c.execution_worker_id, media_jobs.c.execution_deadline,
+         media_jobs.c.created)
+sa.Index("ix_grid_media_jobs_source_cleanup", media_jobs.c.source_cleanup_attempted_at,
+         media_jobs.c.created, media_jobs.c.job_id,
+         postgresql_where=sa.text("source_objects IS NOT NULL AND source_cleanup_at IS NULL"),
+         sqlite_where=sa.text("source_objects IS NOT NULL AND source_cleanup_at IS NULL"))
+
+
 # x402 is a post-response on-chain settlement rail. A verified authorization is
 # recorded before dispatch. The before-settle hook durably records the exact
 # attempted amount before the facilitator can touch chain. Facilitator success

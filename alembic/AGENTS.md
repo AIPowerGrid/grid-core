@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0042`
+- `versions/` - ordered migration revisions. Current source head: `0045`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -55,8 +55,31 @@ production database match the Grid-owned schema contracts without relying on
   changing historical credit, completion, reward, or identity records.
   `0041` adds empty immutable hourly worker payout plans. It adopts no historical
   payout row and does not enable any sender or timer.
+  `0042` adds zero-default externally funded credit lineage.
+  `0043` adds empty private async media request/execution journals. Candidate
+  submission defaults off; the bounded outbox still drains accepted work.
+  `0044` adds nullable original-model/session leases and an original-worker
+  recovery index without reconstructing any historical execution authority.
+  `0045` adds nullable exact private-source retention authority and cleanup
+  timestamps, without adopting historical URLs or changing economic records.
 
 ## Local Contracts
+
+- Apply through `0045` before starting this candidate, even with admission off.
+  Ordinary journal reads and the independent source-cleanup loop select the new
+  columns. Retain them on application rollback. Downgrade refuses recorded
+  source authority or cleanup history, including completed/refunded jobs.
+
+- Apply through `0044` before starting this candidate, even dark. Downgrade
+  refuses any stored lease, including terminal jobs. Retain both lease-aware
+  financial and worker transport code on rollback after first use; older writers
+  could let a replaced connection charge or refund its successor. Existing NULL
+  lease rows stay uncertain until the existing financial backstop closes them.
+
+- Apply `0043` before creating any async media job. No history is backfilled,
+  paid job is queued or API is enabled by migration. Retain the table and
+  execution-fence-aware worker transport on rollback after its first use;
+  downgrade refuses any stored identity, including refunded or completed jobs.
 
 - `0042` adds zero-default funded balance/ledger metadata and the funded-subset
   constraint without changing spendable balances. Drain holds and pause credit
