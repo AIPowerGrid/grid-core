@@ -49,17 +49,36 @@ def test_only_distinct_checkpoint_and_identity_change(mode):
     assert promoted == nvfp4
 
 
-def test_startup_inventory_cannot_enable_admission_or_waiting_routes(monkeypatch):
+@pytest.mark.parametrize("model", [MODEL, "LTX-2.5 Distilled BF16"])
+@pytest.mark.parametrize("mode", ["pilot", "open"])
+def test_startup_inventory_cannot_enable_admission_or_waiting_routes(monkeypatch, model, mode):
     recipes.load_local_recipes(str(ROOT / "recipes"))
     assert MODEL in {record.model_name for record in recipes._LOCAL_RECIPES.values()}
-    settings = GridSettings(_env_file=None, media_async_enabled=False, media_async_admission_mode="pilot")
+    settings = GridSettings(_env_file=None, media_async_enabled=False, media_async_admission_mode=mode)
     monkeypatch.setattr(generation_admission, "get_settings", lambda: settings)
     with pytest.raises(HTTPException) as denied:
         generation_admission.require_async_video(settings, "00000000-0000-4000-8000-000000000001")
     assert denied.value.status_code == 503
     with pytest.raises(HTTPException) as waiting:
-        generation_admission.require_waiting_video(MODEL)
+        generation_admission.require_waiting_video(model)
     assert waiting.value.status_code == 503
+
+
+@pytest.mark.parametrize("model", [MODEL, "LTX-2.5 Distilled BF16"])
+@pytest.mark.parametrize("enabled,waiting,admitted", [(True, False, False), (True, True, True), (False, True, False)])
+def test_public_async_does_not_silently_open_typed_waiting(monkeypatch, model, enabled, waiting, admitted):
+    settings = GridSettings(_env_file=None, media_async_enabled=enabled,
+                            media_async_admission_mode="open", typed_video_waiting_enabled=waiting)
+    monkeypatch.setattr(generation_admission, "get_settings", lambda: settings)
+    if admitted:
+        assert generation_admission.require_waiting_video(model) is None
+    else:
+        with pytest.raises(HTTPException) as denied:
+            generation_admission.require_waiting_video(model)
+        assert denied.value.status_code == 503
+    assert generation_admission.require_waiting_video("LTX-2.3") is None
+    if enabled:
+        assert generation_admission.require_async_video(settings, "00000000-0000-4000-8000-000000000001") is None
 
 
 @pytest.mark.parametrize("image", [False, True])

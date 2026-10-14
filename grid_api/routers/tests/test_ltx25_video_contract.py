@@ -97,7 +97,8 @@ async def test_startup_recipe_inventory_includes_governed_source_requirements(
 def setup(monkeypatch):
     from grid_api.config import GridSettings
     monkeypatch.setattr(videos.generation_admission, "get_settings", lambda: GridSettings(
-        _env_file=None, media_async_admission_mode="open"))
+        _env_file=None, media_async_enabled=True, media_async_admission_mode="open",
+        typed_video_waiting_enabled=True))
     monkeypatch.setattr(videos.limiter, "enabled", False)
     for name in ("_BY_ROOT", "_BY_NAME", "_BY_ID", "_BY_MODEL", "_LOCAL_RECIPES", "_ONCHAIN_RECIPES"):
         monkeypatch.setattr(recipes, name, {})
@@ -125,10 +126,12 @@ async def post(app, payload):
 
 
 @pytest.mark.asyncio
-async def test_pilot_cannot_bypass_async_admission_through_waiting_route(setup, monkeypatch):
+@pytest.mark.parametrize("public", [False, True])
+async def test_pilot_cannot_bypass_async_admission_through_waiting_route(setup, monkeypatch, public):
     from grid_api.config import GridSettings
     app, submit, quota = setup
-    monkeypatch.setattr(videos.generation_admission, "get_settings", lambda: GridSettings(_env_file=None))
+    monkeypatch.setattr(videos.generation_admission, "get_settings", lambda: GridSettings(
+        _env_file=None, media_async_enabled=public, media_async_admission_mode="open" if public else "pilot"))
     response = await post(app, {"image": "invalid-inline-data"})
     assert response.status_code == 503
     submit.assert_not_awaited()
@@ -139,9 +142,11 @@ async def test_pilot_cannot_bypass_async_admission_through_waiting_route(setup, 
 
 
 @pytest.mark.asyncio
-async def test_pilot_chat_and_shared_waiter_reject_before_upload_or_credit(setup, monkeypatch):
+@pytest.mark.parametrize("public", [False, True])
+async def test_pilot_chat_and_shared_waiter_reject_before_upload_or_credit(setup, monkeypatch, public):
     from grid_api.config import GridSettings
-    monkeypatch.setattr(videos.generation_admission, "get_settings", lambda: GridSettings(_env_file=None))
+    monkeypatch.setattr(videos.generation_admission, "get_settings", lambda: GridSettings(
+        _env_file=None, media_async_enabled=public, media_async_admission_mode="open" if public else "pilot"))
     source = AsyncMock()
     monkeypatch.setattr(media, "prepare_source_image", source)
     body = ChatCompletionRequest(model=MODEL, messages=[{"role": "user", "content": "synthetic"}])

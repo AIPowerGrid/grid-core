@@ -256,6 +256,11 @@ executes an immutable release selected through `/home/aipg/current`.
   Core recovery alone does not close Gallery/Director's restart/retry gate.
 
 - Env names in `env.template`, systemd, code, and docs must match exactly.
+- `TYPED_VIDEO_WAITING_ENABLED` defaults off and keeps contract-backed legacy
+  waiting/chat video separate from public async rollout. Enabling public
+  async jobs alone must not expose those distinct lifecycles. The waiting
+  opt-in additionally requires enabled open async admission; existing legacy
+  non-governed models, old receipt recovery and terminal settlement remain.
 - A billing incident must close new public generation, not merely disable
   charging. Gate exact generation routes, select explicit empty admission,
   and preserve settlement/recovery and stopped payouts. `GRID_CHARGING_MODE=off`
