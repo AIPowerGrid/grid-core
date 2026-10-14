@@ -5,6 +5,19 @@
 
 ## Status
 
+### Current Dark Production - 2026-10-14 UTC
+
+Core4e9864c8/0045 is deployed after exact-source PG16 CI, production restore
+and drained cutover. Its tree equals main53ebf374 (PR222). The private-source
+bucket is configured and independently verified; charging and all six prior
+workers/models/timers are preserved. Async admission remains off/pilot with
+an empty cohort and journal. Distinct BF16/NVFP4 tariffs areUSD0.020/effective
+second, not availability. Worker PR33 is merged and both owned installations
+are frozen staged, not enrolled. No canary spend or video x402 occurs. See
+`../../deploy/VIDEO_NVFP4_DARK_2026_10_14.md` for exact gates, procedure,
+client-specific postflight observations and rollback. Enrollment, funded
+USD1-total canary, bounded pilot and Gallery/Director wiring remain required.
+
 ### Distinct NVFP4 Candidate - 2026-10-13
 
 The owner selected the official Distilled NVFP4 backbone for the 32 GB 5090,
@@ -44,9 +57,9 @@ claim. Exact startup copies now prepare the owner-only funded canary after
 the native tests above, not public admission or completed billing proof.
 The matching worker candidate requires all four exact component
 filenames in Core's selected inventories and refuses a BF16 substitute.
-Fresh exact-source release CI for the geometry/startup correction and the
-USD 1.00 purchased-credit canary remain gates. No live configuration, worker
-enrollment, admission or x402 changes follow from these candidate files.
+Exact-source release CI and dark deployment now pass as recorded above.
+Worker enrollment and the USD1.00 purchased-credit canary remain gates;
+startup copies do not enable admission, qualify billing or activate x402.
 
 ### Owner-Approved Credit Pilot - 2026-10-12 UTC
 
