@@ -35,7 +35,7 @@ def test_startup_loads_only_promoted_distilled_recipes():
     assert MODEL in names
     assert "LTX-2.5 Dev BF16" not in names
     assert "LTX-2.5 Dev BF16 Ingredients" not in names
-    assert "LTX-2.5 Distilled NVFP4" not in names
+    assert "LTX-2.5 Distilled NVFP4" in names
     for mode in ("t2v", "i2v"):
         filename = f"ltx-2.5-distilled-bf16-{mode}-v1.json"
         promoted = json.loads((ROOT / "recipes" / filename).read_text())

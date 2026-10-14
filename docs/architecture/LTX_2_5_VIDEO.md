@@ -34,16 +34,17 @@ This proves those local workloads, not identity/lip-sync, a funded Grid job,
 production installation or broad capacity. Director owns the reversible patch;
 runtime identity must include both base source and patch digest.
 
-The candidate adds two non-serving qualification graphs for the explicit
+The candidate retains two qualification graphs for the explicit
 `LTX-2.5 Distilled NVFP4` identity and its own recipe roots. Their immutable
 backbone differs from BF16; schedule, exact timing, governed source expansion,
 encoder and VAEs remain unchanged. No request can select a weight or precision.
 Candidate book `2026-10-13-a` gives this distinct identity the approved
 USD 0.020/effective-second Distilled tariff, never an availability or fidelity
-claim. NVFP4 has no startup-directory copy, so normal loading cannot expose
-its recipes. The matching worker candidate requires all four exact component
+claim. Exact startup copies now prepare the owner-only funded canary after
+the native tests above, not public admission or completed billing proof.
+The matching worker candidate requires all four exact component
 filenames in Core's selected inventories and refuses a BF16 substitute.
-Promotion, fresh exact-source release CI for the geometry correction and the
+Fresh exact-source release CI for the geometry/startup correction and the
 USD 1.00 purchased-credit canary remain gates. No live configuration, worker
 enrollment, admission or x402 changes follow from these candidate files.
 
@@ -63,7 +64,7 @@ The first SKU is `LTX-2.5 Distilled BF16`, USD 0.020 per effective output
 second in price book `2026-10-12-a`. Separately generated images/text have
 their own charges. Dev/Ingredients remain unpriced/non-serving.
 
-Only the two reviewed Distilled text/image graphs are copied into the startup
+Only the reviewed BF16/NVFP4 Distilled text/image graphs are copied into the startup
 recipe directory. Their frames, sigma schedule, source modes and graph bytes
 are unchanged. The current default remains LTX-2.3 until the canary passes.
 No public admission, x402 collector, wallet sender or refund rail is enabled.

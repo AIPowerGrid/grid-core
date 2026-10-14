@@ -10,7 +10,8 @@ content sanitization, and reward settlement.
 - The owner-approved credit-first tariff is USD 0.020 per effective output
   second for distinct `LTX-2.5 Distilled BF16` and `LTX-2.5 Distilled NVFP4`
   identities in candidate book `2026-10-13-a`. Production still has the prior
-  `2026-10-12-a` book; NVFP4 recipes remain non-serving qualification files.
+  `2026-10-12-a` book; NVFP4 startup copies prepare only the owner-approved
+  bounded canary. Inventory never opens async or legacy waiting admission.
   Dev and
   Ingredients remain unpriced. Pricing never grants admission, validates a
   worker's model claim or changes rewards. Exact frames/FPS determine the hold;
