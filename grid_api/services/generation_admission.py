@@ -11,10 +11,12 @@ from fastapi import HTTPException
 from ..config import GridSettings, get_settings
 
 
-def require_async_video(settings: GridSettings, account_id: UUID | str) -> datetime | None:
+def require_async_video(settings: GridSettings, account_id: UUID | str, *, model: str = "LTX-2.5 Distilled BF16") -> datetime | None:
     """New jobs only; return the captured pilot deadline for the hold transaction."""
     if settings.media_async_enabled:
         if settings.media_async_admission_mode == "open":
+            if model != "LTX-2.5 Distilled BF16":
+                raise HTTPException(503, detail="This video model is not enabled for public async admission")
             return None
         try:
             owner = UUID(str(account_id))

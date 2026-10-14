@@ -81,6 +81,14 @@ def test_public_async_does_not_silently_open_typed_waiting(monkeypatch, model, e
         assert generation_admission.require_async_video(settings, "00000000-0000-4000-8000-000000000001") is None
 
 
+@pytest.mark.parametrize("model", [MODEL, "LTX-2.5 Dev BF16", "unknown-video"])
+def test_public_async_accepts_only_reviewed_bf16(model):
+    settings = GridSettings(_env_file=None, media_async_enabled=True, media_async_admission_mode="open")
+    with pytest.raises(HTTPException) as denied:
+        generation_admission.require_async_video(settings, "00000000-0000-4000-8000-000000000001", model=model)
+    assert denied.value.status_code == 503
+
+
 @pytest.mark.parametrize("image", [False, True])
 @pytest.mark.parametrize("source_mode", ["generated", "audio", "video"])
 @pytest.mark.parametrize("frames", [33, 81, 337])

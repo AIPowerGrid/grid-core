@@ -746,6 +746,9 @@ by default even in `open` mode. Their distinct lifecycle requires a separate
 async jobs alone do not grant that access; non-governed legacy models and old
 receipt recovery remain unchanged. Synthetic contract fixtures opt in only to
 exercise their validation/billing code, not to qualify native public operation.
+The initial public async policy accepts new `LTX-2.5 Distilled BF16` jobs only.
+Other model identities reject before private input decoding or staging; an
+existing private-pilot request still replays and recovers without a second hold.
 
 Source staging can still leave pre-admission private objects if admission
 expires or reserve fails. The provider's verified one-day input lifecycle

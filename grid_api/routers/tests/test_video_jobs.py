@@ -99,6 +99,46 @@ async def test_pilot_rejects_fresh_keys_before_input_work_without_bill_or_quota(
 
 
 @pytest.mark.asyncio
+async def test_public_admission_rejects_unqualified_models_before_private_input_work(api, monkeypatch):
+    _client, aid, _key, _settings, quota, available = api
+
+    def forbidden(_body):
+        pytest.fail("publicly blocked models must not decode private input")
+
+    monkeypatch.setattr(video_jobs, "request_hash", forbidden)
+    for model in ("LTX-2.5 Distilled NVFP4", "LTX-2.5 Dev BF16", "unknown-video"):
+        response = await post(api, body={"model": model, "image": "invalid-inline-data"})
+        assert response.status_code == 503, response.text
+    assert await counts() == (0, 0, 0) and await credits.get_balance(aid) == OPENING
+    quota.assert_not_awaited()
+    available.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_public_bf16_only_policy_keeps_private_nvfp4_replay_and_get(api):
+    client, aid, key, settings, quota, available = api
+    settings.media_async_admission_mode = "pilot"
+    settings.media_async_canary_accounts = [aid]
+    settings.media_async_canary_until = datetime.now(UTC) + timedelta(minutes=15)
+    available.return_value = ["LTX-2.5 Distilled NVFP4"]
+    request_key = uuid4()
+    body = {"model": "LTX-2.5 Distilled NVFP4"}
+    accepted = await post(api, key=request_key, body=body)
+    assert accepted.status_code == 202, accepted.text
+    balance = await credits.get_balance(aid)
+    settings.media_async_admission_mode = "open"
+    settings.media_async_canary_accounts = []
+    settings.media_async_canary_until = None
+    replay = await post(api, key=request_key, body=body)
+    assert replay.status_code == 202 and replay.json() == accepted.json()
+    status = await client.get(accepted.headers["location"], headers={"apikey": key})
+    assert status.status_code == 200 and status.json() == accepted.json()
+    assert (await post(api, body=body)).status_code == 503
+    assert await counts() == (1, 1, 0) and await credits.get_balance(aid) == balance
+    quota.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_expired_removed_pilot_retains_replay_and_get_recovery(api):
     client, aid, key, settings, quota, _available = api
     settings.media_async_admission_mode = "pilot"
@@ -542,6 +582,9 @@ async def test_ingredients_intent_retains_distinct_sources_and_one_hold_after_ro
 
     model = "LTX-2.5 Dev BF16 Ingredients"
     client, aid, credential, settings, quota, available = api
+    settings.media_async_admission_mode = "pilot"
+    settings.media_async_canary_accounts = [aid]
+    settings.media_async_canary_until = datetime.now(UTC) + timedelta(minutes=15)
     available.return_value = [model]
     # Test-only tariff; the real appearance candidate stays unpriced/dark.
     monkeypatch.setitem(pricing.PRICING, model.lower(), pricing.ModelPrice(0, 0, video_per_second=0.02))
