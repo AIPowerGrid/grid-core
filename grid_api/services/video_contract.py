@@ -119,6 +119,8 @@ def normalize(contract: LtxVideoContract, values: dict) -> dict:
         raise ValueError("motion attention requires a video reference")
     if inputs.width % 32 or inputs.height % 32:
         raise ValueError("LTX-2.5 dimensions must be multiples of 32")
+    if inputs.source_mode == "video" and (inputs.width % 64 or inputs.height % 64):
+        raise ValueError("Union video-reference dimensions must be multiples of 64")
     if inputs.width * inputs.height > contract.max_pixels:
         raise ValueError(f"LTX-2.5 size exceeds {contract.max_pixels} pixels")
     frames = normalize_timing(contract, frames=inputs.frames, seconds=inputs.seconds, fps=inputs.fps)["frames"]

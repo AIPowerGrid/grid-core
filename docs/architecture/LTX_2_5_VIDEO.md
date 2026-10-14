@@ -13,8 +13,26 @@ Comfy runtime now produces fully decoded 33-frame 512x320 and 81/337-frame
 960x544 clips at 24fps, all with AAC stereo 48kHz audio. Each trial has its own
 immutable receipt; original video services are restored and music is untouched.
 Private Director evidence records exact components, runtime, timing, sampled
-memory and retained failure history. This is not purchased billing, source-mode
-qualification, all-shape capacity or public enrollment.
+memory and retained failure history. This is not purchased billing,
+all-shape capacity or public enrollment.
+
+Separate native image/audio reference tests pass on the same owned 5090.
+The first 960x544 source-video trial fails Union latent geometry rather than
+memory: its twofold reference scaling cannot divide the latent height. Core
+and Director now reject source-video dimensions not divisible by 64 before
+decode, uploads or money. Generated/audio-only modes retain the 32-pixel rule;
+callers must explicitly prepare suitable source geometry, never silently resize.
+
+The aligned 337-frame 960x512 source-video trial renders and preserves all
+674,000 reference samples per channel, but strict QC finds MP4 edit-list
+rounding. A separately hash-bound native runtime overlay sets the MP4 movie
+timescale to 48,000. Actual CPU exporter fixtures at 33/81/337 frames and a
+fresh full-length GPU source-video trial then pass exact presentation clocks,
+full decode and aligned reference-audio comparison. Original video services
+and unit hashes are restored; music is unchanged. Failed receipts are retained.
+This proves those local workloads, not identity/lip-sync, a funded Grid job,
+production installation or broad capacity. Director owns the reversible patch;
+runtime identity must include both base source and patch digest.
 
 The candidate adds two non-serving qualification graphs for the explicit
 `LTX-2.5 Distilled NVFP4` identity and its own recipe roots. Their immutable
@@ -25,7 +43,7 @@ USD 0.020/effective-second Distilled tariff, never an availability or fidelity
 claim. NVFP4 has no startup-directory copy, so normal loading cannot expose
 its recipes. The matching worker candidate requires all four exact component
 filenames in Core's selected inventories and refuses a BF16 substitute.
-Native source qualification, promotion, exact-source release CI and the
+Promotion, fresh exact-source release CI for the geometry correction and the
 USD 1.00 purchased-credit canary remain gates. No live configuration, worker
 enrollment, admission or x402 changes follow from these candidate files.
 
