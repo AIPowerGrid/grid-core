@@ -1,5 +1,10 @@
 # LTX-2.5 NVFP4 Dark Deployment
 
+This is the initial02:09UTC dark-deployment snapshot. Subsequent worker
+enrollment, funded canaries, exporter installation and current closed-cohort
+state are recorded in [the paid-retest report](VIDEO_PAID_RETEST_2026_10_14.md).
+Its original empty-journal observations are historical, not current state.
+
 ## Source And Gates
 
 Core [PR222](https://github.com/AIPowerGrid/grid-core/pull/222) merged as
