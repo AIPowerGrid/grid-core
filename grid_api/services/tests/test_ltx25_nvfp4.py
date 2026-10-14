@@ -51,6 +51,8 @@ def test_only_distinct_checkpoint_and_identity_change(mode):
 @pytest.mark.parametrize("frames", [33, 81, 337])
 def test_execution_and_sources_cannot_fall_back_to_bf16(image, source_mode, frames):
     values = {"prompt": "synthetic scene", "frames": frames, "seed": 0, "source_mode": source_mode}
+    if source_mode == "video":
+        values["height"] = 512
     if image:
         values["keyframes"] = [{"frame": 0, "strength": 0.5}]
     result = recipes.resolve_for_model(MODEL, values, has_source=image)

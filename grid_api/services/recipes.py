@@ -407,6 +407,7 @@ def param_schema(ref: str | int) -> Optional[dict]:
         if "video" in source_modes:
             params["reference_video"] = {
                 "type": "video", "max_bytes": 32 * 1024 * 1024,
+                "size_multiple_of": 64,
                 "description": "Inline H.264 MP4 motion guide at the explicit requested size, 24 fps and exact frame count; requires reference_audio",
             }
             params["guide_strength"] = {"type": "number", "minimum_exclusive": 0, "maximum": 1, "default": 0.85}

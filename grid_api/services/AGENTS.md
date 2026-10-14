@@ -29,6 +29,10 @@ content sanitization, and reward settlement.
   Distilled candidates may declare audio/video source modes. Core expands only
   its fixed frozen-audio/Union-Canny scaffold, independently of optional opening
   image pins. A character portrait is not identity-only conditioning.
+  Union's twofold reference scaling requires both source-video dimensions to
+  be multiples of 64. Reject before graph expansion, source decoding, quota,
+  uploads or holds; generated/audio-only modes retain the 32-pixel rule. The
+  additive reference-video schema exposes this constraint separately.
   The distinct `ingredients-dev-v1` appearance profile is fixed to Dev BF16,
   768x448/121 frames/24 fps/40 steps/CFG2. It requires a separate appearance PNG
   and exact-duration audio, rejects opening pins, and chains Ingredients before
