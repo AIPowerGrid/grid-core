@@ -38,7 +38,8 @@ OPENING_MICRO = 1_000_000
 def synthetic_dependencies(monkeypatch):
     from grid_api.config import GridSettings
     monkeypatch.setattr(generation_admission, "get_settings", lambda: GridSettings(
-        _env_file=None, media_async_admission_mode="open"))
+        _env_file=None, media_async_enabled=True, media_async_admission_mode="open",
+        typed_video_waiting_enabled=True))
     for name in ("_BY_ROOT", "_BY_NAME", "_BY_ID", "_BY_MODEL", "_LOCAL_RECIPES", "_ONCHAIN_RECIPES"):
         monkeypatch.setattr(recipes, name, {})
     for path in (ROOT / "recipes/qualification").glob("*.json"):

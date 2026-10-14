@@ -20,7 +20,8 @@ MODEL = "LTX-2.5 Distilled BF16"
 @pytest.fixture(autouse=True)
 def registry(monkeypatch):
     monkeypatch.setattr(generation_admission, "get_settings", lambda: GridSettings(
-        _env_file=None, media_async_admission_mode="open"))
+        _env_file=None, media_async_enabled=True, media_async_admission_mode="open",
+        typed_video_waiting_enabled=True))
     for name in ("_BY_ROOT", "_BY_NAME", "_BY_ID", "_BY_MODEL", "_LOCAL_RECIPES", "_ONCHAIN_RECIPES"):
         monkeypatch.setattr(recipes, name, {})
     for path in (ROOT / "recipes/qualification").glob("*.json"):

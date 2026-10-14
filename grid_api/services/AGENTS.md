@@ -94,6 +94,11 @@ content sanitization, and reward settlement.
   credit hold and journal insert commit together. Live positive credit holds and
   explicit cost caps are required; dry-run never writes an async job.
   `generation_admission.py` owns the default-empty, expiring async-video cohort.
+  Public async mode must not silently admit typed legacy waiting/chat jobs.
+  Those distinct lifecycles require the separate default-off
+  `TYPED_VIDEO_WAITING_ENABLED` gate plus enabled open async admission.
+  Non-governed legacy video remains unchanged. Synthetic waiting-contract
+  fixtures explicitly opt in; they are not native or public qualification.
   It never changes global charging or approves a model. Captured pilot deadlines
   are transient server-only preparation metadata, not client intent or schema.
   Recheck after canonical-account locking, before hold insertion and after the

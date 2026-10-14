@@ -740,8 +740,12 @@ after cohort removal, expiry or admission shutdown. Authenticated GET recovery,
 outbox work and terminal settlement continue; no new upload or hold is needed.
 Contract-backed legacy waiting-video and chat-media ingress reject in pilot
 mode, preventing a cohort bypass. Existing non-governed models are unchanged.
-In explicit public `open` mode those older routes retain their own lifecycle;
-the async switch alone does not close them.
+The public-rollout candidate keeps those older typed waiting/chat routes closed
+by default even in `open` mode. Their distinct lifecycle requires a separate
+`TYPED_VIDEO_WAITING_ENABLED` opt-in and enabled open async admission. Public
+async jobs alone do not grant that access; non-governed legacy models and old
+receipt recovery remain unchanged. Synthetic contract fixtures opt in only to
+exercise their validation/billing code, not to qualify native public operation.
 
 Source staging can still leave pre-admission private objects if admission
 expires or reserve fails. The provider's verified one-day input lifecycle
