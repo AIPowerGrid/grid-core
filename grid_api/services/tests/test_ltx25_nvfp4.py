@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Distinct, non-serving NVFP4 contracts; fixtures are not native qualification."""
+"""Distinct bounded-pilot NVFP4 contracts; fixtures are not native qualification."""
 
 import copy
 import json
@@ -13,9 +13,11 @@ from unittest.mock import AsyncMock
 import pytest
 import httpx
 from fastapi import FastAPI
+from fastapi import HTTPException
 
 from grid_api.routers import openai
-from grid_api.services import credits, recipes
+from grid_api.config import GridSettings
+from grid_api.services import credits, generation_admission, recipes
 from grid_api.services.recipe_import import recipe_root, validate_recipe
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -43,7 +45,21 @@ def test_only_distinct_checkpoint_and_identity_change(mode):
     assert nvfp4 == expected
     assert validate_recipe(nvfp4) == []
     assert recipe_root(nvfp4) != recipe_root(bf16)
-    assert not (ROOT / "recipes" / f"ltx-2.5-distilled-nvfp4-{mode}-v1.json").exists()
+    promoted = json.loads((ROOT / "recipes" / f"ltx-2.5-distilled-nvfp4-{mode}-v1.json").read_text())
+    assert promoted == nvfp4
+
+
+def test_startup_inventory_cannot_enable_admission_or_waiting_routes(monkeypatch):
+    recipes.load_local_recipes(str(ROOT / "recipes"))
+    assert MODEL in {record.model_name for record in recipes._LOCAL_RECIPES.values()}
+    settings = GridSettings(_env_file=None, media_async_enabled=False, media_async_admission_mode="pilot")
+    monkeypatch.setattr(generation_admission, "get_settings", lambda: settings)
+    with pytest.raises(HTTPException) as denied:
+        generation_admission.require_async_video(settings, "00000000-0000-4000-8000-000000000001")
+    assert denied.value.status_code == 503
+    with pytest.raises(HTTPException) as waiting:
+        generation_admission.require_waiting_video(MODEL)
+    assert waiting.value.status_code == 503
 
 
 @pytest.mark.parametrize("image", [False, True])

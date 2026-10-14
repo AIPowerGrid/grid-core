@@ -6,7 +6,7 @@ Versioned media candidates retained for testing, not startup advertisement.
 `load_local_recipes()` reads only the direct `recipes/*.json` children. Never
 make it recursive: placing a workflow here must not activate it.
 
-The two Distilled graphs now also have exact promoted copies in `recipes/`
+The BF16 and NVFP4 Distilled graphs now also have exact promoted copies in `recipes/`
 for the bounded credit pilot. Keep those copies byte-semantically identical;
 no Dev/Ingredients promotion follows. The retained candidates are not loaded
 recursively, and inventory alone does not enable job admission.
@@ -20,8 +20,10 @@ recursively, and inventory alone does not enable job admission.
   appearance/source candidate, not a replacement for standard Dev or I2V.
 - The two `ltx-2.5-distilled-nvfp4-*-v1.json` candidates retain the Distilled
   schedule and source scaffold with a distinct model/name/root and official
-  NVFP4 backbone. Encoder/VAEs stay BF16. They are not copied to startup recipes;
-  source-mode and purchased-credit qualification remain promotion gates.
+  NVFP4 backbone. Encoder/VAEs stay BF16. Exact startup copies prepare only
+  the owner-approved bounded credit canary after native generated/reference
+  qualification. Fresh CI, deployment, enrollment and purchased-credit proof
+  remain gates; these copies cannot open admission or legacy waiting routes.
 
 ## Contracts
 
