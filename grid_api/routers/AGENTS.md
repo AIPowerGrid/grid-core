@@ -78,6 +78,9 @@ transport, accounts, stats, health/metrics.
   upload again. Recheck admission after staging and capture the earlier deadline
   for the credit transaction. Contract-backed legacy waiting/chat video cannot
   bypass pilot mode; public `open` is an explicit, separately reviewed choice.
+  Public async admission permits new Distilled BF16 jobs only. Other model
+  identities reject before private source decoding, while existing pilot
+  intent replay and owner-only GET recovery remain available.
   Scoped `inference.submit` authentication, a UUIDv4 `Idempotency-Key`, a positive
   `max_cost_micro_usd` and a live credit hold are required. The typed body is
   bounded before JSON parsing and input-bearing validation errors are redacted.

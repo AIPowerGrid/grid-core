@@ -11,10 +11,12 @@ from fastapi import HTTPException
 from ..config import GridSettings, get_settings
 
 
-def require_async_video(settings: GridSettings, account_id: UUID | str) -> datetime | None:
+def require_async_video(settings: GridSettings, account_id: UUID | str, *, model: str = "LTX-2.5 Distilled BF16") -> datetime | None:
     """New jobs only; return the captured pilot deadline for the hold transaction."""
     if settings.media_async_enabled:
         if settings.media_async_admission_mode == "open":
+            if model != "LTX-2.5 Distilled BF16":
+                raise HTTPException(503, detail="This video model is not enabled for public async admission")
             return None
         try:
             owner = UUID(str(account_id))
@@ -29,13 +31,15 @@ def require_async_video(settings: GridSettings, account_id: UUID | str) -> datet
 
 
 def require_waiting_video(model: str) -> None:
-    """A governed pilot must not leak through waiting/chat media entry points."""
+    """Typed waiting/chat needs its own opt-in, not just public async admission."""
     from . import recipes
 
-    if (any(recipes.video_contract_for_model(model, has_source=source) is not None
-            for source in (False, True))
-            and get_settings().media_async_admission_mode != "open"):
-        raise HTTPException(503, detail="This video model requires the controlled async video job endpoint")
+    if any(recipes.video_contract_for_model(model, has_source=source) is not None
+           for source in (False, True)):
+        settings = get_settings()
+        if not (settings.media_async_enabled and settings.media_async_admission_mode == "open"
+                and settings.typed_video_waiting_enabled):
+            raise HTTPException(503, detail="This video model requires the controlled async video job endpoint")
 
 
 def validate_rollout(charging_mode: str) -> None:

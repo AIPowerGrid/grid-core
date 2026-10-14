@@ -131,6 +131,11 @@ owning AGENTS.md and any affected parent Child DOX Index.
   scoped fixture keys, synthetic media and test balances never reach production.
   One POST, GET-only recovery after reply loss/rollback and 401/403/404 isolation
   are required. This does not prove GPU output, funded storage or video x402.
+  Python fixture pin `840df33c71beb69008ffc9951cda740f0a3076ee` places
+  Ingredients-only qualification in an explicit expiring synthetic pilot;
+  ordinary BF16 fixture cases retain public admission. The runtime SDK is
+  unchanged from the previous pin; never widen production admission to fix a
+  synthetic private-profile test.
 - Router billing/settlement coverage: `pytest grid_api/routers/`.
 - Legacy smoke tests live under `tests/` and may skip without external services.
 - For docs-only changes, run at least `git diff --check` and inspect the DOX

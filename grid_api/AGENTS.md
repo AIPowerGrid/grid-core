@@ -65,7 +65,9 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   journal insertion; expiry
   rolls back paid writes and restores separately drawn pockets. Existing
   replay/status/outbox work survives expiry or cohort removal. Contract-backed
-  waiting/chat video routes reject in pilot mode, even when async is disabled.
+  waiting/chat video routes reject by default in both pilot and open mode.
+  Their separate `TYPED_VIDEO_WAITING_ENABLED` opt-in also requires enabled
+  public async admission; it is not part of the first public durable rollout.
   Explicit `open` mode requires clearing both cohort and expiry; it does not
   bypass recipe, feature, pricing, credit, worker or model-permission gates.
   Audio/video conditioning adds separately default-dark `audio-to-video` and
