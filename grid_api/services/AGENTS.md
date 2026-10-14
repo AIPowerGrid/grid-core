@@ -17,6 +17,10 @@ content sanitization, and reward settlement.
   worker's model claim or changes rewards. Exact frames/FPS determine the hold;
   positive fractions round up to one micro-USD. No legacy model is relabeled.
 
+- Public async video admission is BF16-only for fresh requests. Callers must
+  pass the requested model to the shared gate before private input processing
+  and again before reserve; a model restriction never closes receipt recovery.
+
 - `video_contract.py` owns the candidate strict LTX-2.5 execution/timing
   contract. Only recipes declaring `_grid.videoContract` use it. Qualified
   graphs are snapshotted before reserve; steps/frames/duration and quote units
