@@ -59,8 +59,8 @@ def test_turbo_image_prices_scale_per_output():
     assert pricing.quote_image("krea 2 turbo", 4) == 20_000
 
 
-def test_distilled_video_tariff_uses_effective_output_duration():
-    model = "LTX-2.5 Distilled BF16"
+@pytest.mark.parametrize("model", ["LTX-2.5 Distilled BF16", "LTX-2.5 Distilled NVFP4"])
+def test_distilled_video_tariff_uses_effective_output_duration(model):
     assert pricing.is_priced_for(model, "video")
     assert pricing.quote_video(model, 81 / 24) == 67_500
     assert pricing.quote_video(model, 337 / 24) == 280_834
@@ -72,10 +72,11 @@ def test_distilled_video_tariff_uses_effective_output_duration():
         assert not pricing.is_priced_for(unapproved, "video")
 
 
-def test_distilled_video_catalog_does_not_claim_availability_or_comparison():
+@pytest.mark.parametrize("model", ["ltx-2.5 distilled bf16", "ltx-2.5 distilled nvfp4"])
+def test_distilled_video_catalog_does_not_claim_availability_or_comparison(model):
     catalog = pricing.public_catalog()
     row = next(item for item in catalog["price_book"]["models"]
-               if item["model"] == "ltx-2.5 distilled bf16")
+               if item["model"] == model)
     assert row["rates"]["per_video_second_usd"] == 0.02
     assert all(row["rates"][key] is None for key in row["rates"]
                if key != "per_video_second_usd")

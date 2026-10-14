@@ -91,6 +91,18 @@ async def test_validation_and_compilation_are_side_effect_free(admission, mode, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("model", [MODEL, "LTX-2.5 Distilled NVFP4"])
+@pytest.mark.parametrize("size", ["960x544", "544x960", "480x832"])
+async def test_union_geometry_rejects_before_source_decode_or_side_effects(admission, mp4, monkeypatch, model, size):
+    monkeypatch.setattr(videos, "get_available_models", AsyncMock(return_value=[model]))
+    monkeypatch.setattr(videos.video_sources, "validate_sources", forbidden)
+    with pytest.raises(HTTPException) as error:
+        await videos.validate_video(request("video", video=mp4, model=model, size=size), {}, async_submission=True)
+    assert error.value.status_code == 422
+    assert error.value.detail == "Invalid LTX-2.5 inputs; consult the model parameter contract"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["generated", "audio", "video"])
 @pytest.mark.parametrize("pin", [False, True])
 async def test_staging_uses_the_frozen_graph_after_recipe_changes(admission, mode, pin, mp4, monkeypatch):

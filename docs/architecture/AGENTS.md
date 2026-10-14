@@ -85,6 +85,7 @@ validation, worker incentives, and trust boundaries.
   graph (`_grid` node map), the importer CLI, authoring steps, dispatch flow, and
   the coordinator/worker split. Start here to add an image/video model.
 - `LTX_2_5_VIDEO.md` - owner-approved Distilled credit pilot and retained
+  distinct NVFP4 qualification identity/tariff with no startup promotion,
   non-serving Dev/Ingredients candidates, typed frame
   and bounded image-pin contract, exact execution/quote/reward units, owned-rig
   observations, reference-film recreation/audio-preservation benchmark and

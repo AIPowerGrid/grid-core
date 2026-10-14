@@ -8,7 +8,11 @@ content sanitization, and reward settlement.
 ## Ownership
 
 - The owner-approved credit-first tariff is USD 0.020 per effective output
-  second for `LTX-2.5 Distilled BF16` in book `2026-10-12-a`. Dev and
+  second for distinct `LTX-2.5 Distilled BF16` and `LTX-2.5 Distilled NVFP4`
+  identities in candidate book `2026-10-13-a`. Production still has the prior
+  `2026-10-12-a` book; NVFP4 startup copies prepare only the owner-approved
+  bounded canary. Inventory never opens async or legacy waiting admission.
+  Dev and
   Ingredients remain unpriced. Pricing never grants admission, validates a
   worker's model claim or changes rewards. Exact frames/FPS determine the hold;
   positive fractions round up to one micro-USD. No legacy model is relabeled.
@@ -26,6 +30,10 @@ content sanitization, and reward settlement.
   Distilled candidates may declare audio/video source modes. Core expands only
   its fixed frozen-audio/Union-Canny scaffold, independently of optional opening
   image pins. A character portrait is not identity-only conditioning.
+  Union's twofold reference scaling requires both source-video dimensions to
+  be multiples of 64. Reject before graph expansion, source decoding, quota,
+  uploads or holds; generated/audio-only modes retain the 32-pixel rule. The
+  additive reference-video schema exposes this constraint separately.
   The distinct `ingredients-dev-v1` appearance profile is fixed to Dev BF16,
   768x448/121 frames/24 fps/40 steps/CFG2. It requires a separate appearance PNG
   and exact-duration audio, rejects opening pins, and chains Ingredients before

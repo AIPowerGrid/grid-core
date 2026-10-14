@@ -53,7 +53,7 @@ def test_unqualified_recipe_cannot_acquire_source_mode_by_caller_claim():
 
 def test_control_strength_is_explicit_and_does_not_change_opening_image_strength():
     result = recipes.resolve_for_model("LTX-2.5 Distilled BF16", {
-        "source_mode": "video", "guide_strength": 0.7, "keyframes": [{"frame": 0, "strength": 0.2}],
+        "source_mode": "video", "height": 512, "guide_strength": 0.7, "keyframes": [{"frame": 0, "strength": 0.2}],
     }, has_source=True)
     assert result["spec"]["video_guide"]["inputs"]["strength"] == 0.7
     assert result["spec"]["first_0"]["inputs"]["strength"] == 0.2
@@ -62,3 +62,25 @@ def test_control_strength_is_explicit_and_does_not_change_opening_image_strength
 def test_source_expansion_refuses_non_governed_scaffold():
     with pytest.raises(ValueError):
         video_contract.expand_sources({}, "video")
+
+
+@pytest.mark.parametrize("model", ["LTX-2.5 Distilled BF16", "LTX-2.5 Distilled NVFP4"])
+@pytest.mark.parametrize("size", [(960, 544), (544, 960), (480, 832)])
+def test_union_invalid_geometry_rejects_before_expanding_graph(model, size, monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("invalid source geometry must not compile a guide")
+    monkeypatch.setattr(video_contract, "expand_sources", forbidden)
+    with pytest.raises(recipes.RecipeError):
+        recipes.resolve_for_model(model, {"width": size[0], "height": size[1], "source_mode": "video"})
+
+
+@pytest.mark.parametrize("mode", ["generated", "audio"])
+def test_union_geometry_does_not_restrict_generated_or_audio_work(mode):
+    result = recipes.resolve_for_model("LTX-2.5 Distilled BF16", {"source_mode": mode})
+    assert result["execution"]["height"] == 544
+
+
+def test_union_source_geometry_is_advertised_separately_from_base_size():
+    schema = recipes.param_schema("LTX-2.5 Distilled NVFP4")
+    assert schema["params"]["size"]["multiple_of"] == 32
+    assert schema["params"]["reference_video"]["size_multiple_of"] == 64

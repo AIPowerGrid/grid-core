@@ -14,11 +14,14 @@ knobs → validate → drop here).
 - `*.json` - ComfyUI workflow JSON with a `_grid` metadata block describing
   recipe name, job type, engine, required models, constraints, determinism, seed
   fields, and optional LoRA injection points.
-- The two `ltx-2.5-distilled-bf16-*-v1.json` files are exact copies of the
+- The four `ltx-2.5-distilled-{bf16,nvfp4}-*-v1.json` files are exact copies of the
   reviewed qualification graphs, promoted for the owner-approved bounded
   credit pilot. Startup exposes their inventory; new jobs still require the
   async enable/cohort/expiry, compatible worker, paid hold and generation gates.
   Dev/Ingredients remain only in the nonrecursive qualification directory.
+  The distinct NVFP4 copies prepare the owner-only purchased-credit canary
+  after local generated/image/audio/video qualification, not public admission.
+  Both models remain blocked from legacy waiting/chat in pilot mode.
 
 ## Local Contracts
 

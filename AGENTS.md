@@ -93,8 +93,9 @@ owning AGENTS.md and any affected parent Child DOX Index.
 ## Verification
 
 - Credit-first release CI uses reviewed media-worker
-  `1332fa20c6eba4f529a8b64c5689ea777f5c803f`. All four actual appearance
-  adapter cases must pass without skips; the complete suite uses that same
+  `629a47cb4833a0089bfb07660c8857159ffe0212`. All four actual appearance
+  adapter and two NVFP4 Core-inventory/worker-startup cases must pass without
+  skips; the complete suite uses that same
   source. Synthetic HTTP does not establish a funded GPU/storage canary.
 
 - Full Python sanity: `pytest` from `system-core`.
