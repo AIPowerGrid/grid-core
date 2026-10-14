@@ -7,6 +7,12 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Ownership
 
+- `VIDEO_PAID_RETEST_2026_10_14.md` - subsequent funded-account exporter
+  deployment/retest and closed cohort, exact paid completion/clock evidence,
+  preserved unsuccessful interruption control, scoped key401 cleanup and
+  still-open real refund/consumer gates. The original dark-deploy document
+  remains its historical initial snapshot, not the current journal count.
+
 - `VIDEO_NVFP4_DARK_2026_10_14.md` - exact4e9864c8/0045 dark cutover,
   main-tree identity, fresh PG16 and production restore proof, private-source
   wiring and preserved charging/models/timers. Async remains off; no funded
@@ -92,7 +98,11 @@ executes an immutable release selected through `/home/aipg/current`.
   client GPT backend. No broad opening follows from the approval or tariff
   commit; current-source CI, restore proof and actual canary must pass first.
   FFmpeg/ffprobe and the separately verified private-source bucket are now
-  configured at4e9864c8/0045; async remains off pending the funded canary.
+  configured at4e9864c8/0045. The funded canary and corrected BF16 clock
+  retest have now run; the owner cohort is closed and seven video records are
+  settled. The warm-render interruption control completed successfully, so
+  actual failure/refund is not proven. See `VIDEO_PAID_RETEST_2026_10_14.md`;
+  do not replace that control, erase history or silently enlarge the budget.
   Verify storage prerequisites before source-video admission, rather than
   bypassing input validation or using the public output bucket.
 
