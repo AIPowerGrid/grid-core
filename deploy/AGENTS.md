@@ -7,6 +7,11 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Ownership
 
+- `VIDEO_NVFP4_DARK_2026_10_14.md` - exact4e9864c8/0045 dark cutover,
+  main-tree identity, fresh PG16 and production restore proof, private-source
+  wiring and preserved charging/models/timers. Async remains off; no funded
+  canary, new worker enrollment, consumer rollout or video x402 activation.
+
 - `VIDEO_CREDIT_DARK_2026_10_12.md` - owner-approved Distilled tariff and
   credit-only PR217 merge, exact tested/main tree identity, actual production
   backup/restore and drained `b053b2ce` / `0045` cutover. All six workers return;
@@ -86,7 +91,8 @@ executes an immutable release selected through `/home/aipg/current`.
   Preserve global charging, payouts, other model services and the protected
   client GPT backend. No broad opening follows from the approval or tariff
   commit; current-source CI, restore proof and actual canary must pass first.
-  FFmpeg/ffprobe are now installed; a private-source bucket remains unconfigured.
+  FFmpeg/ffprobe and the separately verified private-source bucket are now
+  configured at4e9864c8/0045; async remains off pending the funded canary.
   Verify storage prerequisites before source-video admission, rather than
   bypassing input validation or using the public output bucket.
 
