@@ -8,7 +8,10 @@ content sanitization, and reward settlement.
 ## Ownership
 
 - The owner-approved credit-first tariff is USD 0.020 per effective output
-  second for `LTX-2.5 Distilled BF16` in book `2026-10-12-a`. Dev and
+  second for distinct `LTX-2.5 Distilled BF16` and `LTX-2.5 Distilled NVFP4`
+  identities in candidate book `2026-10-13-a`. Production still has the prior
+  `2026-10-12-a` book; NVFP4 recipes remain non-serving qualification files.
+  Dev and
   Ingredients remain unpriced. Pricing never grants admission, validates a
   worker's model claim or changes rewards. Exact frames/FPS determine the hold;
   positive fractions round up to one micro-USD. No legacy model is relabeled.
