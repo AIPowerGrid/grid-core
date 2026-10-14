@@ -18,10 +18,16 @@ recursively, and inventory alone does not enable job admission.
 - `docs/architecture/LTX_2_5_VIDEO.md` owns evidence and promotion gates.
 - `ltx-2.5-dev-bf16-ingredients-v1.json` is the separate fixed 121-frame
   appearance/source candidate, not a replacement for standard Dev or I2V.
+- The two `ltx-2.5-distilled-nvfp4-*-v1.json` candidates retain the Distilled
+  schedule and source scaffold with a distinct model/name/root and official
+  NVFP4 backbone. Encoder/VAEs stay BF16. They are not copied to startup recipes;
+  source-mode and purchased-credit qualification remain promotion gates.
 
 ## Contracts
 
 - Keep customer model IDs distinct from LTX-2.3 and between dev/distilled.
+- NVFP4 is a separate identity, never a caller-selected precision or BF16
+  alias. Pricing/inventory cannot authorize public enrollment or source modes.
 - No arbitrary executable nodes, filename selectors, precision switches,
   LoRAs or timeline JSON from clients. Typed image pins may expand
   only the Core-owned first-image scaffold; images bind through declared slots.

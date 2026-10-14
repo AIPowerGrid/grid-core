@@ -5,6 +5,30 @@
 
 ## Status
 
+### Distinct NVFP4 Candidate - 2026-10-13
+
+The owner selected the official Distilled NVFP4 backbone for the 32 GB 5090,
+retaining the separate BF16 Gemma4 encoder and audio/video VAEs. A staged pinned
+Comfy runtime now produces fully decoded 33-frame 512x320 and 81/337-frame
+960x544 clips at 24fps, all with AAC stereo 48kHz audio. Each trial has its own
+immutable receipt; original video services are restored and music is untouched.
+Private Director evidence records exact components, runtime, timing, sampled
+memory and retained failure history. This is not purchased billing, source-mode
+qualification, all-shape capacity or public enrollment.
+
+The candidate adds two non-serving qualification graphs for the explicit
+`LTX-2.5 Distilled NVFP4` identity and its own recipe roots. Their immutable
+backbone differs from BF16; schedule, exact timing, governed source expansion,
+encoder and VAEs remain unchanged. No request can select a weight or precision.
+Candidate book `2026-10-13-a` gives this distinct identity the approved
+USD 0.020/effective-second Distilled tariff, never an availability or fidelity
+claim. NVFP4 has no startup-directory copy, so normal loading cannot expose
+its recipes. The matching worker candidate requires all four exact component
+filenames in Core's selected inventories and refuses a BF16 substitute.
+Native source qualification, promotion, exact-source release CI and the
+USD 1.00 purchased-credit canary remain gates. No live configuration, worker
+enrollment, admission or x402 changes follow from these candidate files.
+
 ### Owner-Approved Credit Pilot - 2026-10-12 UTC
 
 The credit-only source is now merged and deployed dark at `b053b2ce` / `0045`,
