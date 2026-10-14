@@ -124,7 +124,7 @@ async def submit_video_job(
         user = await _authenticate(apikey, authorization, x_grid_user_assertion, x_grid_user_token)
         media_jobs.validate_idempotency_key(idempotency_key)
         try:
-            generation_admission.require_async_video(settings, user["account_id"])
+            generation_admission.require_async_video(settings, user["account_id"], model=body.model)
         except HTTPException:
             # Existing requests remain recoverable after cohort removal/expiry.
             # Fresh blocked keys must not reach private input decoding/staging.
@@ -134,7 +134,7 @@ async def submit_video_job(
         intent = request_hash(body)
         row = await media_jobs.lookup_request(user["account_id"], idempotency_key, intent)
         if row is None:
-            admission_deadline = generation_admission.require_async_video(settings, user["account_id"])
+            admission_deadline = generation_admission.require_async_video(settings, user["account_id"], model=body.model)
             native = body.model_dump(exclude_unset=True, exclude_none=True, exclude={"max_cost_micro_usd"})
             native["model"] = body.model
             inputs = await validate_video(VideoRequest.model_validate(native), user, async_submission=True)
@@ -142,7 +142,7 @@ async def submit_video_job(
             plan.check_inputs()
             await quota.check_and_consume(dict(user))
             payload = await plan.stage()
-            latest_deadline = generation_admission.require_async_video(settings, user["account_id"])
+            latest_deadline = generation_admission.require_async_video(settings, user["account_id"], model=body.model)
             if latest_deadline is not None:
                 admission_deadline = min(admission_deadline or latest_deadline, latest_deadline)
             prepared = media_jobs.prepare(account_id=user["account_id"], idempotency_key=idempotency_key,
