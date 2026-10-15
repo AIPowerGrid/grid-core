@@ -198,6 +198,11 @@ a different transaction for an already settled job.
 Base-mainnet startup fails closed without CDP facilitator credentials. Before
 enabling, run a Base Sepolia end-to-end payment, prove actual-amount settlement,
 exercise handler/facilitator/database failures, then run a small mainnet canary.
+The read-only `python -m grid_api.services.x402_payments --preflight` checks
+the actual receipt RPC's chain, matching canonical USDC configuration and
+facilitator support even while `GRID_X402_ENABLED=0`; it neither touches SQL nor
+enables payments. See the [canary runbook](FUNDING_CANARY_RUNBOOK.md#5-x402-canary)
+for isolated Sepolia settings, current evidence and the remaining paid gates.
 The implementation follows the x402 `upto` flow documented in the
 [x402 seller quickstart](https://docs.x402.org/getting-started/quickstart-for-sellers)
 and request-bound JWT authentication documented by
