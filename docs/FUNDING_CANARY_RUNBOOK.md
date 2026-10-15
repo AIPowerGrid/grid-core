@@ -306,6 +306,16 @@ disabled production rail. The updated targeted selection passed 208 cases
 (67 x402/concurrency/safe-log cases plus 141 adjacent money-path regressions)
 on the same locked Python 3.12/PostgreSQL 16 test setup.
 
+The real Sepolia protocol run was repeated on exact hardened source
+`1acd661f`. The facilitator accepted the unchanged signature with a leading-zero
+nonce; Core assigned it the canonical authorization identity. That paid retry
+returned 200 and independently settled exactly 23 micro-USDC in
+[block 48152961](https://sepolia.basescan.org/tx/0x8534d3bc40a7076fb34ce360e002a956fd7681714f9a62ce77aa8b44e1c87a46).
+Replaying the canonical nonce spelling returned 402 with still one job and
+one settlement attempt. The remaining allowance was again revoked and verified
+as zero. Both runs retain the same synthetic-worker/ASGI qualification boundary;
+neither is a mainnet or deployed-GPU claim.
+
 ## 6. Holds
 
 - **AIPG:** keep dark until a named price-epoch owner, expiry alert, refund
