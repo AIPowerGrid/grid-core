@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 SourceMode = Literal["generated", "audio", "video"]
+MAX_LTX_FRAMES = 481  # 20.0417 seconds on the 8n+1 / 24 fps grid.
 
 
 class LtxVideoContract(BaseModel):
@@ -17,7 +18,7 @@ class LtxVideoContract(BaseModel):
 
     contract_schema: Literal["aipg.ltx-video.v1"] = Field(alias="schema")
     variant: Literal["distilled", "dev"]
-    max_frames: int = Field(ge=9, le=337)
+    max_frames: int = Field(ge=9, le=MAX_LTX_FRAMES)
     max_pixels: int = Field(ge=256 * 256, le=960 * 544)
     max_keyframes: int = Field(default=0, ge=0, le=16)
     source_modes: list[Literal["audio", "video"]] = Field(default_factory=list, max_length=2)
@@ -43,7 +44,7 @@ class LtxVideoContract(BaseModel):
 class LtxKeyframe(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
-    frame: int = Field(ge=0, le=336)
+    frame: int = Field(ge=0, le=MAX_LTX_FRAMES - 1)
     strength: float = Field(default=1.0, ge=0, le=1)
 
 
@@ -56,8 +57,8 @@ class LtxVideoInputs(BaseModel):
     image: str | None = None  # Worker-bound upload filename, never fetched here.
     width: int = Field(default=960, ge=256, le=960)
     height: int = Field(default=544, ge=256, le=960)
-    frames: int | None = Field(default=None, ge=9, le=337)
-    seconds: float | None = Field(default=None, gt=0, le=337 / 24)
+    frames: int | None = Field(default=None, ge=9, le=MAX_LTX_FRAMES)
+    seconds: float | None = Field(default=None, gt=0, le=MAX_LTX_FRAMES / 24)
     keyframes: list[LtxKeyframe] = Field(default_factory=list, max_length=16)
     fps: Literal[24] = 24
     steps: int | None = Field(default=None, ge=4, le=40)

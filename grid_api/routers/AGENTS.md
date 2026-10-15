@@ -35,7 +35,11 @@ transport, accounts, stats, health/metrics.
 - `images.py` - `POST /v1/images/generations` native image jobs.
 - `videos.py` - `POST /v1/videos/generations` native video jobs.
   Contract-backed LTX-2.5 candidates support exact 8n+1 frames and at most
-  sixteen ordered image pins, starting at frame zero. All images validate before
+  sixteen ordered image pins, starting at frame zero. The BF16 duration-extension candidate accepts up to481 frames
+  (20.041667seconds), with identical exact-frame quote and journal units; NVFP4
+  remains337 and standard Dev81. Recipe bounds still apply after the shared
+  request parser; no source-path activation or native capacity proof follows.
+  All images validate before
   quota/upload; multi-pin jobs additionally require `video-timeline` admission
   and the `recipe-image-bindings-v1` worker feature. Unsupported settings reject before quota/upload; the
   Distilled recipes are promoted for a bounded pilot; deployment/canary evidence

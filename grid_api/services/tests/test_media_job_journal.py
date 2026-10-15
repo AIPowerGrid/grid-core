@@ -144,8 +144,8 @@ async def owner(amount=OPENING):
     return aid
 
 
-def prepared(aid, *, key=None, request_hash=INTENT_HASH, seed=0, cap=100_000):
-    resolved = recipes.resolve_for_model(MODEL, {"seed": seed, "prompt": "synthetic video"}, has_source=False)
+def prepared(aid, *, key=None, request_hash=INTENT_HASH, seed=0, cap=100_000, frames=81):
+    resolved = recipes.resolve_for_model(MODEL, {"seed": seed, "prompt": "synthetic video", "frames": frames}, has_source=False)
     execution = resolved["execution"]
     payload = {**execution, "n": 1, "prompt": "synthetic video", "seed": resolved["seed"],
                "recipe_engine": resolved["engine"], "recipe_spec": resolved["spec"],
@@ -190,6 +190,28 @@ async def test_reserve_replay_keeps_first_seed_and_one_funded_hold(db):
     assert debits[0]["funded_delta_micro"] == debits[0]["delta_micro"]
     assert await credits.get_balance(aid) == OPENING - hold["reserved_micro"]
     assert credits._promo_first.await_count == credits._free_first.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_long_clip_uses_one_exact_hold_and_replay_never_debits_again(db):
+    aid = await owner()
+    job = prepared(aid, frames=481, cap=400_834)
+    first = await jobs.reserve(job)
+    assert await jobs.reserve(job) == first
+    _, hold, debits = await snapshot(job)
+    assert hold["reserved_micro"] == 400_834
+    assert len(debits) == 1 and debits[0]["delta_micro"] == -400_834
+    assert await credits.get_balance(aid) == OPENING - 400_834
+    assert await counts() == (1, 1, 0)
+
+
+@pytest.mark.asyncio
+async def test_long_clip_rejects_ceiling_below_exact_charge_without_a_hold(db):
+    aid = await owner()
+    with pytest.raises(jobs.MediaJobPaymentRequired):
+        await jobs.reserve(prepared(aid, frames=481, cap=400_833))
+    assert await credits.get_balance(aid) == OPENING
+    assert await counts() == (0, 0, 0)
 
 
 @pytest.mark.asyncio
