@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import os
 import subprocess
 import sys
 
@@ -61,3 +62,25 @@ def test_real_linux_decoder_cannot_read_outside_its_workspace(tmp_path, mp4):
     assert media_decoder.run_tool("ffprobe", [*args, str(inside)], work, timeout=10, limit=32768)
     with pytest.raises((OSError, ValueError, subprocess.SubprocessError)):
         media_decoder.run_tool("ffprobe", [*args, str(outside)], work, timeout=10, limit=32768)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Requires actual Linux source sandbox")
+@pytest.mark.parametrize("utility,args", [
+    ("env", []), ("readlink", ["/proc/self/ns/net"]), ("cat", ["/proc/self/status"]),
+])
+def test_real_linux_launcher_strips_secrets_network_and_capabilities(monkeypatch, tmp_path, utility, args):
+    if not media_decoder.available():
+        pytest.fail("Linux source decoding requires FFmpeg, ffprobe, bubblewrap and prlimit")
+    # Exercise the actual production launcher with fixed trusted inspection
+    # utilities. Application code still accepts only its two codec tool names.
+    which = media_decoder.shutil.which
+    monkeypatch.setattr(media_decoder.shutil, "which", lambda name: which(utility if name == "ffprobe" else name))
+    monkeypatch.setenv("GRID_CODEC_FIXTURE_SECRET", "must-not-reach-codec")
+    output = media_decoder.run_tool("ffprobe", args, tmp_path, timeout=10, limit=32768).decode()
+    if utility == "env":
+        assert "GRID_CODEC_FIXTURE_SECRET" not in output
+        assert "OPENBLAS_NUM_THREADS=1" in output
+    elif utility == "readlink":
+        assert output.strip() != os.readlink("/proc/self/ns/net")
+    else:
+        assert "CapEff:\t0000000000000000\n" in output
