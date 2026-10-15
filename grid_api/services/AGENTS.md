@@ -761,6 +761,10 @@ content sanitization, and reward settlement.
   Ambiguous attempts go to `manual_review`. The initial route is Base USDC,
   `upto`, text-only, and non-streaming because the upstream middleware buffers
   the response before settlement.
+  Authorization identity must canonicalize the bounded decimal Permit2 nonce
+  as uint256 before hashing: JSON leading-zero spellings sign the same integer
+  and must never create independent reservations. Reject nondecimal, oversized
+  and out-of-range values. Ordinary canonical nonce IDs stay unchanged.
   The explicit `--preflight` action checks configuration even while disabled,
   canonical token/receipt-chain agreement, RPC chain ID and facilitator support
   without SQL, signing, settlement or flag changes. Use `GRID_BASE_RPC` for the
@@ -1024,6 +1028,8 @@ content sanitization, and reward settlement.
   or real GPU completion; keep that distinction in the funding canary runbook.
   `tests/test_credits_concurrency.py -k x402` separately requires a disposable
   PostgreSQL database for duplicate-authorization and single-attempt races.
+  The duplicate race uses twenty textual aliases of one numeric nonce. Unit
+  cases pin leading-zero identity, uint256 bounds and invalid input rejection.
 
 - `tests/test_ltx25_appearance.py` checks the separate fixed Ingredients profile,
   nonanimated/unrotated PNG decoding, default-dark admission, committed roles/

@@ -180,8 +180,12 @@ def payment_payload_details(payload, requirements) -> dict:
     payer = (auth or {}).get("from", "")
     payer = _address(payer, "x402 payer")
     nonce = str((auth or {}).get("nonce", "")).strip()
-    if not nonce:
-        raise RuntimeError("x402 Permit2 authorization nonce is required")
+    if not nonce or len(nonce) > 256 or not nonce.isascii() or not nonce.isdecimal():
+        raise RuntimeError("x402 Permit2 authorization nonce must be a decimal uint256")
+    # EIP-712 signs the integer, not its JSON spelling. Hash one canonical form.
+    nonce = nonce.lstrip("0") or "0"
+    if len(nonce) > 78 or int(nonce) >= 2**256:
+        raise RuntimeError("x402 Permit2 authorization nonce must fit uint256")
     authorization_id = hashlib.sha256(
         json.dumps(
             {
