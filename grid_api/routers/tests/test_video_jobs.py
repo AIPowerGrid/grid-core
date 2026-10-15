@@ -49,7 +49,9 @@ async def api(db, monkeypatch):
     key = await accounts.issue_key(aid, scopes=["inference.submit"])
     settings = SimpleNamespace(media_async_enabled=True, media_async_concurrency=4,
                                media_async_admission_mode="open", media_async_canary_accounts=[],
-                               media_async_canary_until=None)
+                               media_async_canary_until=None,
+                               media_async_source_admission_mode="open",
+                               media_async_source_canary_accounts=[], media_async_source_canary_until=None)
     monkeypatch.setattr(video_jobs, "get_settings", lambda: settings)
     monkeypatch.setattr(video_jobs.limiter, "enabled", False)
     available = AsyncMock(return_value=[MODEL])
@@ -109,6 +111,25 @@ async def test_public_admission_rejects_unqualified_models_before_private_input_
     for model in ("LTX-2.5 Distilled NVFP4", "LTX-2.5 Dev BF16", "unknown-video"):
         response = await post(api, body={"model": model, "image": "invalid-inline-data"})
         assert response.status_code == 503, response.text
+    assert await counts() == (0, 0, 0) and await credits.get_balance(aid) == OPENING
+    quota.assert_not_awaited()
+    available.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_source_cohort_rejects_before_hash_decode_quota_upload_or_hold(api, monkeypatch):
+    _client, aid, _key, settings, quota, available = api
+    settings.media_async_source_admission_mode = "pilot"
+    settings.media_async_source_canary_accounts = [uuid4()]
+    settings.media_async_source_canary_until = datetime.now(UTC)+timedelta(minutes=15)
+
+    def forbidden(_body):
+        pytest.fail("source admission must precede private input processing")
+
+    monkeypatch.setattr(video_jobs, "request_hash", forbidden)
+    for source in ({"reference_audio": "invalid"}, {"reference_video": "invalid"}):
+        response = await post(api, body=source)
+        assert response.status_code == 503
     assert await counts() == (0, 0, 0) and await credits.get_balance(aid) == OPENING
     quota.assert_not_awaited()
     available.assert_not_awaited()
@@ -244,6 +265,46 @@ async def test_expiry_inside_credit_transaction_rolls_back_debit_hold_and_job(ap
     monkeypatch.setattr(media_jobs, "insert_in_session", insert)
     monkeypatch.setattr(media_jobs.media_source_retention, "capture", capture)
     response = await post(api)
+    assert response.status_code == 503, response.text
+    assert await counts() == (0, 0, 0) and await credits.get_balance(aid) == OPENING
+    from grid_api.v2.schema import credit_ledger
+    from grid_api.v2.schema import credits as balances
+    async with await database.new_session() as session:
+        assert await session.scalar(sa.select(balances.c.funded_balance_micro).where(
+            balances.c.account_id == aid)) == OPENING
+        assert await session.scalar(sa.select(sa.func.count()).select_from(credit_ledger).where(
+            credit_ledger.c.reason == "reserve:video")) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("point", ["before_insert", "after_insert"])
+async def test_source_expiry_inside_credit_transaction_rolls_back_all_writes(api, monkeypatch, point):
+    _client, aid, _key, settings, _quota, _available = api
+    settings.media_async_source_admission_mode = "pilot"
+    settings.media_async_source_canary_accounts = [aid]
+    deadline = settings.media_async_source_canary_until = datetime.now(UTC) + timedelta(minutes=15)
+    monkeypatch.setattr(videos.storage, "upload_private_source", lambda *_args:
+        "https://" + "a" * 32 + ".r2.cloudflarestorage.com/private-synthetic-source/source/"
+        + "b" * 32 + ".wav?X-Amz-Signature=synthetic")
+    original_insert = media_jobs.insert_in_session
+    original_capture = media_jobs.media_source_retention.capture
+
+    async def insert(session, job):
+        assert job.admission_deadline == deadline
+        if point == "before_insert":
+            monkeypatch.setattr(media_jobs, "_now", lambda: deadline + timedelta(seconds=1))
+        await original_insert(session, job)
+
+    def capture(payload):
+        result = original_capture(payload)
+        if point == "after_insert":
+            monkeypatch.setattr(media_jobs, "_now", lambda: deadline + timedelta(seconds=1))
+        return result
+
+    monkeypatch.setattr(media_jobs, "insert_in_session", insert)
+    monkeypatch.setattr(media_jobs.media_source_retention, "capture", capture)
+    response = await post(api, body={"frames": 33, "size": "256x256",
+        "reference_audio": base64.b64encode(wav(33)).decode("ascii")})
     assert response.status_code == 503, response.text
     assert await counts() == (0, 0, 0) and await credits.get_balance(aid) == OPENING
     from grid_api.v2.schema import credit_ledger
@@ -534,7 +595,8 @@ def test_audio_intent_matches_director_golden_and_commits_decoded_bytes():
 
 
 @pytest.mark.asyncio
-async def test_audio_replay_keeps_one_hold_without_another_source_upload_or_quota(api, monkeypatch):
+@pytest.mark.parametrize("closure", ["all_video", "source_only"])
+async def test_audio_replay_keeps_one_hold_without_another_source_upload_or_quota(api, monkeypatch, closure):
     client, aid, credential, settings, quota, _available = api
     uploaded = []
 
@@ -561,7 +623,10 @@ async def test_audio_replay_keeps_one_hold_without_another_source_upload_or_quot
         "async-video-resume-v1", "recipe-media-sources-v1"]
     assert await credits.get_balance(aid) == OPENING - 27_500
     assert len(uploaded) == 1 and uploaded[0] == (wav(33), "wav")
-    settings.media_async_enabled = False
+    if closure == "all_video":
+        settings.media_async_enabled = False
+    else:
+        settings.media_async_source_admission_mode = "off"
     quota.reset_mock()
 
     async def forbidden(*_args, **_kwargs):
@@ -573,6 +638,9 @@ async def test_audio_replay_keeps_one_hold_without_another_source_upload_or_quot
     assert len(uploaded) == 1 and quota.await_count == 0
     assert await counts() == (1, 1, 0)
     assert await credits.get_balance(aid) == OPENING - 27_500
+    status = await client.get(first.headers["location"], headers={"apikey": credential})
+    assert status.status_code == 200 and status.json()["job_id"] == job
+    assert (await post(api, body=body)).status_code == 503
 
 
 @pytest.mark.asyncio
