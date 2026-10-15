@@ -70,6 +70,11 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   public async admission; it is not part of the first public durable rollout.
   Explicit `open` mode requires clearing both cohort and expiry; it does not
   bypass recipe, feature, pricing, credit, worker or model-permission gates.
+  Public NVFP4 has an independent default-off `MEDIA_ASYNC_NVFP4_ENABLED`
+  rollout switch. Opt-in covers text/opening-image only, with the existing337
+  frame limit and all paid/worker gates. It never opens NVFP4 source uploads.
+  Receipt replay/GET must survive flag closure; qualify the actual runtime,
+  credential lifetime and native/purchased path before production activation.
   Audio/video conditioning adds separately default-dark `audio-to-video` and
   `video-to-video` admission; Ingredients appearance adds `appearance-to-video`.
   Do not infer these gates from the base video path,

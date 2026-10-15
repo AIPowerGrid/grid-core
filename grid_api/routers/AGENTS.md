@@ -78,7 +78,10 @@ transport, accounts, stats, health/metrics.
   upload again. Recheck admission after staging and capture the earlier deadline
   for the credit transaction. Contract-backed legacy waiting/chat video cannot
   bypass pilot mode; public `open` is an explicit, separately reviewed choice.
-  Public async admission permits new Distilled BF16 jobs only. Other model
+  Public async admission defaults to new Distilled BF16 jobs only. The separate
+  default-off `MEDIA_ASYNC_NVFP4_ENABLED` opt-in permits qualified NVFP4 text/
+  opening-image jobs, never uploaded audio/video. Its existing337-frame limit,
+  positive quote, one hold, model binding and recovery remain unchanged. Other model
   identities reject before private source decoding, while existing pilot
   intent replay and owner-only GET recovery remain available.
   Public-mode reference audio/video/image also passes the separate source

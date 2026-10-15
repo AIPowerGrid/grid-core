@@ -83,6 +83,32 @@ async def stored(job_id):
 
 
 @pytest.mark.asyncio
+async def test_explicit_public_nvfp4_rollout_keeps_one_hold_and_recovery_after_closure(api):
+    client, aid, key, settings, quota, available = api
+    settings.media_async_nvfp4_enabled = True
+    available.return_value = ["LTX-2.5 Distilled NVFP4"]
+    request_key = uuid4()
+    body = {"model": "LTX-2.5 Distilled NVFP4", "frames": 81, "seed": 0}
+    first = await post(api, key=request_key, body=body)
+    assert first.status_code == 202, first.text
+    job_id = first.json()["job_id"]
+    row = await stored(job_id)
+    assert row["payload"]["recipe_spec"]["model"]["inputs"]["unet_name"].endswith("-nvfp4.safetensors")
+    balance = await credits.get_balance(aid)
+    settings.media_async_nvfp4_enabled = False
+    replay = await post(api, key=request_key, body=body)
+    assert replay.status_code == 202 and replay.json()["job_id"] == job_id
+    recovered = await client.get(f"/v1/videos/jobs/{job_id}", headers={"apikey": key})
+    assert recovered.status_code == 200 and recovered.json()["job_id"] == job_id
+    assert await counts() == (1, 1, 0)
+    assert await credits.get_balance(aid) == balance
+    settings.media_async_nvfp4_enabled = True
+    denied = await post(api, body={**body, "reference_audio": "private-invalid-source"})
+    assert denied.status_code == 503
+    assert await counts() == (1, 1, 0)
+
+
+@pytest.mark.asyncio
 async def test_pilot_rejects_fresh_keys_before_input_work_without_bill_or_quota(api, monkeypatch):
     _client, aid, _key, settings, quota, available = api
     settings.media_async_admission_mode = "pilot"
