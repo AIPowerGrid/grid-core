@@ -19,6 +19,9 @@ for humans and agents.
   not paid settlement or enablement. The later paid Sepolia checkpoint and
   `X402_SEPOLIA_CANARY_2026_10_15.json` prove real testnet settlement with
   synthetic worker output, not a deployed GPU/mainnet/production-admission gate.
+  The later dark-deployment checkpoint links the exact `607d1c03` production
+  restore/cutover record and retained operator-probe rollbacks. x402 stays off;
+  ordinary prepaid charging stays on. Real-worker/mainnet gates remain open.
 - `VALIDATOR_SHADOW_RUNBOOK.md` - exact cohort-finalization, preview/apply,
   transport-drain, rollback, and evidence procedure for the economically inert
   seven-day validator run.
