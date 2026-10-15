@@ -27,6 +27,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import time
 from dataclasses import dataclass
@@ -247,6 +248,50 @@ def _job_id_from_context(context) -> str | None:
         (value for key, value in headers.items() if key.lower() == "x-grid-job-id"),
         None,
     )
+
+
+class _SettlementGuard:
+    """Keep facilitator exceptions inside the SDK's settlement-failure path."""
+
+    def __init__(self, client):
+        self.client = client
+
+    def get_supported(self):
+        return self.client.get_supported()
+
+    async def verify(self, payload, requirements):
+        return await self.client.verify(payload, requirements)
+
+    async def settle(self, payload, requirements):
+        import httpx
+        from x402.http.facilitator_client_base import FacilitatorResponseError
+        from x402.schemas import SettleResponse
+
+        try:
+            return await self.client.settle(payload, requirements)
+        except Exception as exc:
+            # The pinned SDK awaits facilitator calls outside its generator's
+            # try/except. Returning failure lets its normal hook retain job context.
+            reason = "facilitator_exception"
+            if isinstance(exc, httpx.TimeoutException):
+                reason = "facilitator_timeout"
+            elif isinstance(exc, FacilitatorResponseError):
+                reason = "facilitator_invalid_response"
+            elif isinstance(exc, httpx.HTTPStatusError):
+                reason = f"facilitator_http_{exc.response.status_code}"
+            elif isinstance(exc, ValueError):
+                # HTTPFacilitatorClient exposes non-200 status only in this
+                # fixed prefix. Never retain its response body or authenticated URL.
+                match = re.match(r"\AFacilitator settle failed \(([1-5][0-9]{2})\): ", str(exc))
+                if match:
+                    reason = f"facilitator_http_{match[1]}"
+            logger.error("x402 facilitator settlement failed category=%s error_type=%s", reason, error_type(exc))
+            return SettleResponse(
+                success=False,
+                error_reason=reason,
+                transaction="",
+                network=requirements.network,
+            )
 
 
 async def _before_settle(context) -> None:
@@ -615,7 +660,7 @@ def build_runtime() -> X402Runtime:
     facilitator = HTTPFacilitatorClient(
         {"url": FACILITATOR_URL, "create_headers": _facilitator_headers},
     )
-    server = x402ResourceServer(facilitator)
+    server = x402ResourceServer(_SettlementGuard(facilitator))
     server.register(NETWORK, UptoEvmServerScheme())
     server.on_before_settle(_before_settle)
     server.on_after_settle(_after_settle)

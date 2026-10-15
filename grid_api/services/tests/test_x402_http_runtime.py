@@ -100,7 +100,11 @@ async def runtime(monkeypatch):
             assert payload.accepted.amount == "50000"
             observed.settlements.append(int(requirements.amount))
             if observed.settle_mode == "timeout":
-                raise httpx.ReadTimeout("synthetic uncertain settlement")
+                raise httpx.ReadTimeout("synthetic-sensitive-facilitator-value")
+            if observed.settle_mode == "http401":
+                raise ValueError("Facilitator settle failed (401): synthetic-sensitive-facilitator-value")
+            if observed.settle_mode == "exception":
+                raise RuntimeError("synthetic-sensitive-facilitator-value")
             success = observed.settle_mode == "success"
             return SettleResponse(
                 success=success,
@@ -222,8 +226,8 @@ async def test_real_middleware_rejects_without_dispatch_or_settlement(runtime, m
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["failure", "timeout"])
-async def test_real_middleware_ambiguous_settlement_stays_payout_ineligible(runtime, mode):
+@pytest.mark.parametrize("mode", ["failure", "timeout", "http401", "exception"])
+async def test_real_middleware_ambiguous_settlement_stays_payout_ineligible(runtime, mode, caplog):
     client, observed = runtime
     headers = await challenge(client)
     observed.settle_mode = mode
@@ -238,7 +242,14 @@ async def test_real_middleware_ambiguous_settlement_stays_payout_ineligible(runt
     )
     assert response.status_code == 402
     (row,) = await payment_rows()
-    assert row["status"] in {"settling", "manual_review"}
+    assert row["status"] == "manual_review"
+    if mode != "failure":
+        expected = {"timeout": "facilitator_timeout", "http401": "facilitator_http_401", "exception": "facilitator_exception"}[mode]
+        assert row["error"] == expected
+        receipt = decode_payment_response_header(response.headers["payment-response"])
+        assert not receipt.success and receipt.transaction == "" and receipt.error_reason == expected
+        assert "synthetic-sensitive-facilitator-value" not in caplog.text
+        assert "synthetic-sensitive-facilitator-value" not in str(response.headers)
     assert await x402_payments.settled_amount(row["job_id"]) is None
     await client.post(x402_payments.ROUTE, headers=headers, json={"model": MODEL, "messages": []})
     assert observed.dispatches == len(observed.settlements) == 1
@@ -252,6 +263,45 @@ async def test_real_middleware_ambiguous_settlement_stays_payout_ineligible(runt
     await x402_payments.flag_stale_settlements()
     (row,) = await payment_rows()
     assert row["status"] == "manual_review"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [200, 401, 403, 429, 500])
+async def test_settlement_guard_classifies_actual_sdk_http_failure(status, caplog):
+    from x402.http import HTTPFacilitatorClient
+    from x402.http.facilitator_client_base import FacilitatorConfig
+    from x402.schemas import PaymentRequirements
+
+    calls = []
+
+    def fail(request):
+        calls.append(request)
+        return httpx.Response(status, json={"error": "synthetic-sensitive-facilitator-value"})
+
+    requirements = PaymentRequirements(
+        scheme="upto", network="eip155:84532", asset=USDC,
+        amount="7", pay_to=TREASURY, max_timeout_seconds=300,
+    )
+    payload = PaymentPayload(x402_version=2, accepted=requirements, payload={})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(fail)) as transport:
+        client = HTTPFacilitatorClient(FacilitatorConfig(url="https://facilitator.invalid", http_client=transport))
+        result = await x402_payments._SettlementGuard(client).settle(payload, requirements)
+    assert len(calls) == 1 and calls[0].url.path == "/settle"
+    assert not result.success and result.transaction == ""
+    assert result.error_reason == ("facilitator_invalid_response" if status == 200 else f"facilitator_http_{status}")
+    assert "synthetic-sensitive-facilitator-value" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_settlement_guard_does_not_swallow_cancellation():
+    import asyncio
+
+    class Canceled:
+        async def settle(self, payload, requirements):
+            raise asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await x402_payments._SettlementGuard(Canceled()).settle(None, None)
 
 
 @pytest.mark.asyncio
