@@ -21,7 +21,10 @@ for humans and agents.
   synthetic worker output, not a deployed GPU/mainnet/production-admission gate.
   The later dark-deployment checkpoint links the exact `607d1c03` production
   restore/cutover record and retained operator-probe rollbacks. x402 stays off;
-  ordinary prepaid charging stays on. Real-worker/mainnet gates remain open.
+  ordinary prepaid charging stays on. A subsequent separately approved private
+  attempt completed real worker usage but failed mainnet settlement; no credit
+  moved, payout eligibility is zero and the bounded allowance was revoked.
+  It is not a successful payment/replay proof; mainnet gates remain open.
 - `VALIDATOR_SHADOW_RUNBOOK.md` - exact cohort-finalization, preview/apply,
   transport-drain, rollback, and evidence procedure for the economically inert
   seven-day validator run.
