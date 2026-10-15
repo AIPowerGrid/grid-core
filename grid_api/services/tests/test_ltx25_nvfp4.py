@@ -35,12 +35,15 @@ def registry(monkeypatch):
 
 
 @pytest.mark.parametrize("mode", ["t2v", "i2v"])
-def test_only_distinct_checkpoint_and_identity_change(mode):
+def test_only_checkpoint_identity_and_reviewed_duration_limits_differ(mode):
     path = ROOT / "recipes/qualification"
     bf16 = json.loads((path / f"ltx-2.5-distilled-bf16-{mode}-v1.json").read_text())
     nvfp4 = json.loads((path / f"ltx-2.5-distilled-nvfp4-{mode}-v1.json").read_text())
     expected = copy.deepcopy(bf16)
     expected["_grid"].update(name=f"{MODEL} {mode} v1", modelName=MODEL, requiredModels=[MODEL])
+    assert expected["_grid"]["videoContract"]["max_frames"] == 481
+    expected["_grid"]["videoContract"]["max_frames"] = 337
+    expected["_grid"]["clamps"]["frames"] = [9, 337]
     expected["model"]["inputs"]["unet_name"] = CHECKPOINT
     assert nvfp4 == expected
     assert validate_recipe(nvfp4) == []

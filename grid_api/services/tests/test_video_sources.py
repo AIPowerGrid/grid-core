@@ -35,6 +35,18 @@ def test_audio_commits_exact_complete_stereo_pcm():
     assert video_sources.decode_inline("data:audio/wav;base64," + base64.b64encode(raw).decode(), "reference_audio") == raw
 
 
+def test_long_soundtrack_requires_the_complete_selected_window():
+    raw = wav(481)
+    source = video_sources.validate_audio(raw, 481)
+    assert source.commitment["samples"] == 962_000
+    assert source.commitment["frames"] == 481
+    for short in (wav(337), raw[:-4]):
+        with pytest.raises(HTTPException):
+            video_sources.validate_audio(short, 481)
+    with pytest.raises(HTTPException):
+        video_sources.validate_audio(wav(489), 489)
+
+
 @pytest.mark.parametrize("raw,frames", [
     (wav(17), 9), (wav(rate=44_100), 9), (wav(channels=1), 9), (wav(width=1), 9),
     (wav()[:-2], 9), (wav() + b"trailing payload", 9), (b"not-a-wav", 9), (wav(), True),

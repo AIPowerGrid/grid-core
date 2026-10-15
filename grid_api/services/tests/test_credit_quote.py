@@ -303,11 +303,11 @@ def test_quote_request_is_strict_and_bounded():
         )
 
 
-def test_quote_accepts_distilled_handoff_frame_ceiling():
-    form = accounts_router.CreditQuoteForm(model="ltx-2.5-distilled-bf16", modality="video", frames=337)
-    assert form.frames == 337
+def test_quote_accepts_extended_bf16_frame_ceiling():
+    form = accounts_router.CreditQuoteForm(model="ltx-2.5-distilled-bf16", modality="video", frames=481)
+    assert form.frames == 481
     with pytest.raises(ValidationError):
-        accounts_router.CreditQuoteForm(model=form.model, modality="video", frames=338)
+        accounts_router.CreditQuoteForm(model=form.model, modality="video", frames=482)
 
 
 @pytest.mark.asyncio

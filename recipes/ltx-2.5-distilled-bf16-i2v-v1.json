@@ -44,7 +44,7 @@
       ],
       "frames": [
         9,
-        337
+        481
       ],
       "cfg": [
         1,
@@ -63,7 +63,7 @@
     "videoContract": {
       "schema": "aipg.ltx-video.v1",
       "variant": "distilled",
-      "max_frames": 337,
+      "max_frames": 481,
       "max_keyframes": 16,
       "source_modes": ["audio", "video"],
       "max_pixels": 522240
