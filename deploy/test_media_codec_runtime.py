@@ -13,7 +13,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from media_codec_runtime import LOCK, SCHEMA, extract_source, extract_verified, name_ok, verify_archive, verify_source
+from media_codec_runtime import (
+    LOCK,
+    SCHEMA,
+    extract_source,
+    extract_verified,
+    freeze_modes,
+    inventory,
+    name_ok,
+    verify_archive,
+    verify_source,
+)
 
 COMMIT = "1" * 40
 
@@ -148,6 +158,19 @@ class CodecArchiveTests(unittest.TestCase):
         with patch("media_codec_runtime.MAX_UNPACKED", 64):
             with self.assertRaisesRegex(ValueError, "expansion"):
                 verify_archive(self.archive, COMMIT)
+
+    def test_packaging_normalizes_public_input_permissions_before_commitments(self):
+        root = self.root / "package"
+        (root / "bin").mkdir(parents=True)
+        (root / "source").mkdir()
+        for name in ("bin/ffmpeg", "source/copyright", "sbom.cdx.json"):
+            path = root / name
+            path.write_bytes(b"non-executable fixture")
+            path.chmod(0o640)
+        freeze_modes(root)
+        self.assertEqual(inventory(root)["bin/ffmpeg"]["mode"], 0o755)
+        self.assertEqual(inventory(root)["source/copyright"]["mode"], 0o644)
+        self.assertEqual(inventory(root)["sbom.cdx.json"]["mode"], 0o644)
 
 
 if __name__ == "__main__":
