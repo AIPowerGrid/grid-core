@@ -95,6 +95,9 @@ class GridSettings(BaseSettings):
     typed_video_waiting_enabled: bool = False
     media_async_canary_accounts: list[UUID] = Field(default_factory=list, max_length=10, repr=False)
     media_async_canary_until: AwareDatetime | None = Field(default=None, repr=False)
+    media_async_source_admission_mode: Literal["off", "pilot", "open"] = "off"
+    media_async_source_canary_accounts: list[UUID] = Field(default_factory=list, max_length=10, repr=False)
+    media_async_source_canary_until: AwareDatetime | None = Field(default=None, repr=False)
     media_async_concurrency: int = Field(default=4, ge=1, le=16)
     media_job_sweep_seconds: int = Field(default=10, ge=5, le=60)
     media_job_dispatch_lease_seconds: int = Field(default=60, ge=30, le=300)
@@ -241,6 +244,19 @@ class GridSettings(BaseSettings):
             # Normal expiry closes new jobs, not Core startup or old-job recovery.
             if not cohort or until is None or until > now + timedelta(hours=24):
                 raise ValueError("Async video pilot requires accounts and an expiry no more than 24 hours ahead")
+        return self
+
+    @model_validator(mode="after")
+    def validate_media_async_source_admission(self):
+        cohort, until = self.media_async_source_canary_accounts, self.media_async_source_canary_until
+        if len(cohort) != len(set(cohort)):
+            raise ValueError("Source video pilot accounts must be distinct")
+        if self.media_async_source_admission_mode == "open":
+            if cohort or until is not None:
+                raise ValueError("Open source admission cannot ignore configured pilot restrictions")
+        elif self.media_async_source_admission_mode == "pilot":
+            if not cohort or until is None or until > datetime.now(UTC) + timedelta(hours=24):
+                raise ValueError("Source video pilot requires accounts and an expiry no more than 24 hours ahead")
         return self
 
     @model_validator(mode="after")

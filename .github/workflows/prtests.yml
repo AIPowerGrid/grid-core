@@ -82,8 +82,20 @@ jobs:
             fi
           done
           sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client shellcheck redis-server ffmpeg
+          sudo apt-get install -y -qq postgresql-client shellcheck redis-server ffmpeg bubblewrap util-linux apparmor-profiles
           shellcheck -x scripts/backup_postgres.sh scripts/prove_postgres_restore.sh deploy/bootstrap.sh
+      - name: Load the distribution Bubblewrap namespace policy
+        run: |
+          set -euo pipefail
+          restriction=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ -r "$restriction" ] && [ "$(cat "$restriction")" = 1 ]; then
+            profile=/etc/apparmor.d/bwrap-userns-restrict
+            if [ ! -f "$profile" ]; then
+              sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict "$profile"
+            fi
+            sudo apparmor_parser -r "$profile"
+            test "$(cat "$restriction")" = 1
+          fi
       - name: Media source decoder proof
         run: |
           set -euo pipefail
@@ -91,7 +103,7 @@ jobs:
           command -v ffprobe
           ffmpeg -version
           ffprobe -version
-          python -m pytest grid_api/services/tests/test_video_sources.py -q -rs
+          python -m pytest grid_api/services/tests/test_video_sources.py grid_api/services/tests/test_media_decoder.py -q -rs
       - name: Shadow outbox Redis proof
         run: |
           set -euo pipefail

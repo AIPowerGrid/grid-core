@@ -11,12 +11,25 @@ from fastapi import HTTPException
 from ..config import GridSettings, get_settings
 
 
-def require_async_video(settings: GridSettings, account_id: UUID | str, *, model: str = "LTX-2.5 Distilled BF16") -> datetime | None:
+def require_async_video(settings: GridSettings, account_id: UUID | str, *, model: str = "LTX-2.5 Distilled BF16", has_source: bool = False) -> datetime | None:
     """New jobs only; return the captured pilot deadline for the hold transaction."""
     if settings.media_async_enabled:
         if settings.media_async_admission_mode == "open":
             if model != "LTX-2.5 Distilled BF16":
                 raise HTTPException(503, detail="This video model is not enabled for public async admission")
+            if has_source:
+                if settings.media_async_source_admission_mode == "open":
+                    return None
+                try:
+                    owner = UUID(str(account_id))
+                except (ValueError, TypeError, AttributeError):
+                    owner = None
+                until = settings.media_async_source_canary_until
+                if (settings.media_async_source_admission_mode == "pilot" and owner is not None
+                        and owner in settings.media_async_source_canary_accounts and until is not None
+                        and datetime.now(UTC) < until):
+                    return until
+                raise HTTPException(503, detail="Source video admission is unavailable; recover any existing receipt")
             return None
         try:
             owner = UUID(str(account_id))
