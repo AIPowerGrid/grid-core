@@ -285,6 +285,18 @@ class _SettlementGuard:
                 match = re.match(r"\AFacilitator settle failed \(([1-5][0-9]{2})\): ", str(exc))
                 if match:
                     reason = f"facilitator_http_{match[1]}"
+                    body = str(exc)[match.end():match.end() + 16_385]
+                    if match[1] == "400" and len(body) <= 16_384:
+                        try:
+                            failure = json.loads(body)
+                        except (ValueError, RecursionError):
+                            failure = None
+                        if (
+                            isinstance(failure, dict)
+                            and failure.get("success") is False
+                            and failure.get("errorReason") == "amount_too_low"
+                        ):
+                            reason = "facilitator_amount_too_low"
             logger.error("x402 facilitator settlement failed category=%s error_type=%s", reason, error_type(exc))
             return SettleResponse(
                 success=False,

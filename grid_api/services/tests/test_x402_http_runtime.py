@@ -103,6 +103,12 @@ async def runtime(monkeypatch):
                 raise httpx.ReadTimeout("synthetic-sensitive-facilitator-value")
             if observed.settle_mode == "http401":
                 raise ValueError("Facilitator settle failed (401): synthetic-sensitive-facilitator-value")
+            if observed.settle_mode == "amount_too_low":
+                raise ValueError("Facilitator settle failed (400): " + json.dumps({
+                    "success": False,
+                    "errorReason": "amount_too_low",
+                    "errorMessage": "synthetic-sensitive-facilitator-value",
+                }))
             if observed.settle_mode == "exception":
                 raise RuntimeError("synthetic-sensitive-facilitator-value")
             success = observed.settle_mode == "success"
@@ -226,7 +232,7 @@ async def test_real_middleware_rejects_without_dispatch_or_settlement(runtime, m
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["failure", "timeout", "http401", "exception"])
+@pytest.mark.parametrize("mode", ["failure", "timeout", "http401", "exception", "amount_too_low"])
 async def test_real_middleware_ambiguous_settlement_stays_payout_ineligible(runtime, mode, caplog):
     client, observed = runtime
     headers = await challenge(client)
@@ -244,7 +250,12 @@ async def test_real_middleware_ambiguous_settlement_stays_payout_ineligible(runt
     (row,) = await payment_rows()
     assert row["status"] == "manual_review"
     if mode != "failure":
-        expected = {"timeout": "facilitator_timeout", "http401": "facilitator_http_401", "exception": "facilitator_exception"}[mode]
+        expected = {
+            "timeout": "facilitator_timeout",
+            "http401": "facilitator_http_401",
+            "exception": "facilitator_exception",
+            "amount_too_low": "facilitator_amount_too_low",
+        }[mode]
         assert row["error"] == expected
         receipt = decode_payment_response_header(response.headers["payment-response"])
         assert not receipt.success and receipt.transaction == "" and receipt.error_reason == expected
@@ -302,6 +313,36 @@ async def test_settlement_guard_does_not_swallow_cancellation():
 
     with pytest.raises(asyncio.CancelledError):
         await x402_payments._SettlementGuard(Canceled()).settle(None, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body,expected", [
+    ({"success": False, "errorReason": "amount_too_low"}, "facilitator_amount_too_low"),
+    ({"success": False, "errorReason": "synthetic-sensitive-facilitator-value"}, "facilitator_http_400"),
+    ({"success": True, "errorReason": "amount_too_low"}, "facilitator_http_400"),
+    (["amount_too_low"], "facilitator_http_400"),
+    ("invalid JSON", "facilitator_http_400"),
+    ({"success": False, "errorReason": "amount_too_low", "padding": "x" * 20_000}, "facilitator_http_400"),
+])
+async def test_actual_sdk_minimum_rejection_is_bounded_and_allowlisted(body, expected, caplog):
+    from x402.http import HTTPFacilitatorClient
+    from x402.http.facilitator_client_base import FacilitatorConfig
+    from x402.schemas import PaymentRequirements
+
+    def fail(request):
+        return httpx.Response(400, content=body if isinstance(body, str) else json.dumps(body))
+
+    requirements = PaymentRequirements(
+        scheme="upto", network="eip155:8453", asset=USDC,
+        amount="7", pay_to=TREASURY, max_timeout_seconds=300,
+    )
+    payload = PaymentPayload(x402_version=2, accepted=requirements, payload={})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(fail)) as transport:
+        client = HTTPFacilitatorClient(FacilitatorConfig(url="https://facilitator.invalid", http_client=transport))
+        result = await x402_payments._SettlementGuard(client).settle(payload, requirements)
+    assert not result.success and result.transaction == ""
+    assert result.error_reason == expected
+    assert "synthetic-sensitive-facilitator-value" not in caplog.text
 
 
 @pytest.mark.asyncio

@@ -316,6 +316,40 @@ one settlement attempt. The remaining allowance was again revoked and verified
 as zero. Both runs retain the same synthetic-worker/ASGI qualification boundary;
 neither is a mainnet or deployed-GPU claim.
 
+### Mainnet minimum discovery: October 15, 2026
+
+The owner-approved private real-worker canary on `607d1c03` completed
+`gpt-oss-120b` inference with trusted usage of 7 micro-USDC, but the paid
+response was 402 with one settlement attempt and no transaction hash.
+No successful settlement/replay proof is claimed. The original facilitator
+error body was not retained. Production's existing timeout monitor later
+moved this row from `settling` to `manual_review`; read-only reconciliation
+still finds zero credit-ledger movements and zero payout-eligible jobs.
+
+Subsequent authenticated provider checks used a dummy payer, an already
+expired deadline of 1 and a 65-byte all-zero signature. No private key was
+loaded, usable authorization created, Grid job dispatched or money sent:
+
+| Actual amount (micro-USDC) | HTTP | Provider error |
+| --- | --- | --- |
+| 7 | 400 | `amount_too_low` |
+| 999 | 400 | `amount_too_low` |
+| 1000 | 400 | `invalid_exact_evm_permit2_payload_deadline` |
+| 1001 | 400 | `invalid_exact_evm_permit2_payload_deadline` |
+
+Thus the real usage amount hits a reproducible USD 0.001 provider floor.
+Passing the floor is not signature, transfer or receipt qualification; the
+expired controls intentionally cannot pay. The diagnostic candidate preserves
+the bounded `amount_too_low` category and immediate job-bound failure review.
+190 focused local tests pass, including actual SDK HTTP-client controls with
+synthetic responses; these are not a second paid production canary.
+
+Public x402 remains off and the dedicated payer's last independently checked
+balance is USD 0.05 USDC with Permit2 allowance zero. No automatic retry or
+pricing change follows. Decide explicitly between disclosed x402 minimum
+pricing and preserving exact usage through another payment design; then test
+the reviewed implementation with a separately approved fresh capped payment.
+
 ## 6. Holds
 
 - **AIPG:** keep dark until a named price-epoch owner, expiry alert, refund

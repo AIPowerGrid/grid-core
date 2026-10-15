@@ -776,6 +776,10 @@ content sanitization, and reward settlement.
   hook immediately. No retry, success or revenue may be inferred from that
   conversion. Never expose facilitator response bodies or authenticated URLs;
   cancellation propagates and stale reconciliation remains the crash fallback.
+  Only the exact `amount_too_low` code in a <=16-KiB JSON failure body is
+  allowlisted from HTTP 400 responses. Provider checks reproduced a 1,000
+  micro-USDC Coinbase minimum without usable signatures or payments. That
+  constraint is not authority to round usage up or change tariffs silently.
 - Media billing reserves exact deterministic cost before dispatch and refunds on
   non-running paths; text billing reserves max cost and reconciles against trusted
   usage.

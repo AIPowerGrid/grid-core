@@ -166,8 +166,24 @@ exceptions into bounded failure categories, preserving the official SDK's
 job-bound failure hook. A failed attempt enters `manual_review` immediately;
 crash/cancellation still uses stale reconciliation. No error body, credential
 or authenticated URL is retained by that guard. It never retries or declares
-payment success. These diagnostics are not a fix or proof for the unresolved
-mainnet settlement failure; a fresh approved canary is still required.
+payment success. The guard recognizes only the explicitly allowlisted
+`amount_too_low` code from a bounded JSON failure body; arbitrary upstream
+messages/codes remain generic HTTP failures.
+
+The October 15 no-spend provider checks reproduce Coinbase's settlement floor:
+7 and 999 micro-USDC return `amount_too_low`; 1,000 and 1,001 pass that check
+and reject the deliberately expired, zero-signature authorization instead.
+The real canary's trusted 7-micro usage is below that floor. This establishes
+a provider constraint, not a successful signed settlement. The original
+canary response was not retained, so no claim is made about its exact body.
+
+Do not silently round small calls up or alter prepaid-credit pricing. A
+disclosed x402-only minimum needs an owner-approved pricing policy, immutable
+per-job terms, ceiling enforcement and independent receipt/reward tests.
+Preserving exact sub-minimum usage instead needs another reviewed facilitator
+or a separately designed prepaid top-up rail. Neither policy is activated by
+this diagnostic fix. Public x402 remains off pending that decision and a fresh
+bounded paid canary.
 
 The first route is deliberately non-streaming and text-only. x402's current
 FastAPI middleware buffers the full response before settlement; advertising
