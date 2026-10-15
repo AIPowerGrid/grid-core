@@ -20,6 +20,11 @@ content sanitization, and reward settlement.
 - Public async video admission is BF16-only for fresh requests. Callers must
   pass the requested model to the shared gate before private input processing
   and again before reserve; a model restriction never closes receipt recovery.
+  Uploaded audio/video in public async mode has a separate default-off source
+  admission mode and independently bounded pilot accounts/expiry. Pass whether
+  the typed request contains reference sources at every new-admission check;
+  the captured source expiry uses the existing transactional deadline fence.
+  Generated/opening-image video remains public while this source pilot closes.
 
 - `video_contract.py` owns the candidate strict LTX-2.5 execution/timing
   contract. Only recipes declaring `_grid.videoContract` use it. Qualified
@@ -62,7 +67,16 @@ content sanitization, and reward settlement.
   dimension commitments; it never enters the opening-image source list.
   MP4 verification has two process-local slots;
   cancelled callers retain their slot until their decoder task finishes.
-  FFmpeg time/individual-allocation limits are not a complete OS sandbox.
+  `media_decoder.py` now runs Linux MP4 tools through bubblewrap/prlimit with
+  isolated host networking/filesystem/environment and bounded CPU/address-space/
+  file/descriptor use. Captured output uses private files and bounded reads,
+  not unbounded parent buffers. Missing isolation rejects source verification;
+  actual Linux namespace/service proof remains required before activation.
+  Non-root macOS decoder tests establish codec shape, not Linux isolation.
+  Restricted Ubuntu namespaces require the distribution's reviewed
+  `bwrap-userns-restrict` AppArmor policy, including capability-denying child
+  stacking. CI explicitly loads the packaged policy without disabling the
+  host-wide restriction; production still needs actual service-user proof.
   Source retention/privacy and joint native/billing qualification remain gates.
   Governed audio/video sources and typed LTX image pins use
   `storage.upload_private_source`, never the output bucket. Its typed private

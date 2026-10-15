@@ -113,6 +113,52 @@ def test_unknown_path_configuration_rejected():
         GridSettings(_env_file=None, generation_enabled_paths=["image", "typo"])
 
 
+def test_public_generated_video_does_not_implicitly_open_source_modes():
+    account, other = uuid4(), uuid4()
+    until = datetime.now(UTC) + timedelta(minutes=15)
+    settings = GridSettings(_env_file=None, media_async_enabled=True, media_async_admission_mode="open")
+    assert generation_admission.require_async_video(settings, account) is None
+    with pytest.raises(HTTPException):
+        generation_admission.require_async_video(settings, account, has_source=True)
+    settings.media_async_source_admission_mode = "pilot"
+    settings.media_async_source_canary_accounts = [account]
+    settings.media_async_source_canary_until = until
+    assert generation_admission.require_async_video(settings, account, has_source=True) == until
+    assert generation_admission.require_async_video(settings, other) is None
+    for owner in (other, "invalid", None):
+        with pytest.raises(HTTPException) as error:
+            generation_admission.require_async_video(settings, owner, has_source=True)
+        assert str(account) not in str(error.value.detail)
+    settings.media_async_source_canary_until = datetime.now(UTC) - timedelta(seconds=1)
+    with pytest.raises(HTTPException):
+        generation_admission.require_async_video(settings, account, has_source=True)
+
+
+@pytest.mark.parametrize("change", [
+    {}, {"media_async_source_canary_until": datetime.now(UTC) + timedelta(hours=25)},
+    {"media_async_source_canary_until": datetime.now().replace(tzinfo=None)},
+    {"media_async_source_canary_accounts": [uuid4() for _ in range(11)]},
+    {"media_async_source_admission_mode": "typo"},
+])
+def test_source_cohort_configuration_is_explicit_and_bounded(change):
+    values = {"media_async_source_admission_mode": "pilot"}
+    if change:
+        values.update(media_async_source_canary_accounts=[uuid4()], media_async_source_canary_until=datetime.now(UTC)+timedelta(minutes=15))
+    with pytest.raises(ValidationError):
+        GridSettings(_env_file=None, **{**values, **change})
+
+
+def test_source_open_cannot_ignore_pilot_restrictions_and_expiry_keeps_startup():
+    owner = uuid4()
+    expired = datetime.now(UTC)-timedelta(hours=1)
+    assert GridSettings(_env_file=None, media_async_source_admission_mode="pilot", media_async_source_canary_accounts=[owner], media_async_source_canary_until=expired)
+    for restrictions in ({"media_async_source_canary_accounts": [owner]}, {"media_async_source_canary_until": expired}):
+        with pytest.raises(ValidationError):
+            GridSettings(_env_file=None, media_async_source_admission_mode="open", **restrictions)
+    settings = GridSettings(_env_file=None, media_async_enabled=True, media_async_admission_mode="open", media_async_source_admission_mode="open")
+    assert generation_admission.require_async_video(settings, owner, has_source=True) is None
+
+
 def test_environment_json_allowlist_and_empty_deny_all(monkeypatch):
     monkeypatch.setenv("GENERATION_ENABLED_PATHS", '["image"]')
     assert GridSettings(_env_file=None).generation_enabled_paths == frozenset({"image"})
