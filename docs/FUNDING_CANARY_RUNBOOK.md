@@ -138,6 +138,43 @@ the on-chain sender is not that account's linked wallet.
 
 ## 5. x402 canary
 
+### Read-only checks while disabled
+
+Keep `GRID_X402_ENABLED=0` until the configuration and supervised payment
+canaries are approved. With the intended environment loaded, run:
+
+```bash
+.venv/bin/python -m grid_api.services.x402_payments --preflight
+```
+
+This command checks the recipient/token configuration, receipt verifier's
+chain and canonical USDC, the actual RPC chain ID, and the facilitator's
+advertised v2 `upto` support. It works while the rail is disabled. It does not
+connect to the database, dispatch inference, sign a payment, send funds, or
+enable the rail. A nonzero exit reports only a bounded error type, not raw
+SDK/RPC exceptions or authenticated URLs. The successful report's `enabled`
+field reflects the existing flag, not a change to it.
+
+For an isolated Sepolia deployment, configure **all** of:
+
+- `GRID_X402_NETWORK=eip155:84532`
+- `GRID_BASE_CHAIN_ID=84532`
+- `GRID_BASE_RPC=https://sepolia.base.org` (or a reviewed Sepolia RPC)
+- `GRID_USDC_CONTRACT=0x036cbd53842c5426634e7929541ec2318f3dcf7e`
+- `GRID_X402_FACILITATOR_URL=https://x402.org/facilitator`
+- `GRID_X402_PAY_TO=<reviewed Sepolia recipient>`
+- `GRID_X402_MAX_AUTH_MICRO=50000`
+
+Use a dedicated staging environment/database. Do not change the shared
+production deposit verifier's chain or token to testnet. `GRID_BASE_RPC` is the
+receipt verifier setting; another component's `BASE_RPC_URL` does not configure
+it. The public test facilitator advertises Sepolia support; Base mainnet uses
+the authenticated CDP facilitator and dedicated credentials. Do not reuse
+another project's CDP key. Restrict a new facilitator key to Core's verified
+outbound IP and leave unrelated wallet/portfolio permissions disabled.
+
+### Paid proof
+
 Do this only after the USDC deposit canary passes. Start on Base Sepolia with
 matching test USDC, facilitator, network, and treasury values. Use a fresh
 low-value payer and `GRID_X402_MAX_AUTH_MICRO=50000` ($0.05 maximum).
@@ -155,6 +192,12 @@ Evidence required:
    `manual_review`, then includes only independently proven `settled`.
 8. A forced ambiguous failure enters `manual_review` and alerts.
 
+Capture the exact candidate SHA, SDK version, network, capped authorization,
+trusted actual charge, Grid job ID, transaction hash and final receipt state.
+Never include signatures, payer private keys, API keys or JWTs in the evidence.
+A paid response lost after transfer must not be described as unpaid merely
+because the client received a 402: retain the durable attempt and reconcile it.
+
 For an ambiguous real transfer, reconcile only with the exact Base transaction:
 
 ```bash
@@ -166,6 +209,30 @@ For an ambiguous real transfer, reconcile only with the exact Base transaction:
 Repeat on Base mainnet with the same $0.05 ceiling only after Sepolia passes.
 Do not raise the ceiling or add streaming/media until an automated chain
 indexer/reconciler is deployed.
+
+### Verification checkpoint: October 14, 2026
+
+- Production was inspected with x402 disabled. Its unpaid route returned 404;
+  CDP facilitator credentials were absent. This is an observation, not an
+  authorization to change production configuration.
+- The real pinned x402 2.16.0 SDK returned an unpaid 402 challenge using the
+  official public Sepolia facilitator; the protected handler was not called.
+  The read-only preflight also passed against the real Sepolia RPC/facilitator
+  with the feature flag still off. No signatures or funds were used.
+- `test_x402_http_runtime.py` covers the actual SDK, production router and
+  FastAPI middleware with **synthetic facilitator verification/settlement and
+  worker output**. It checks actual-vs-ceiling settlement, replay rejection,
+  invalid/malformed payments, streaming rejection, durable attempt failures,
+  lost-receipt payout exclusion and redacted failure logs. It is not paid E2E.
+- The x402 duplicate-authorization and single-settlement races passed on a
+  disposable local PostgreSQL 16.15 instance. The targeted x402/credits race/
+  safe-logging suite passed 51 cases on Python 3.12.9 with hash-locked production
+  dependencies; adjacent deposit/credit/free-allowance/quote/payout regressions
+  passed another 141 cases. These are targeted checks, not the full Grid suite.
+  No live financial tables were used.
+- **Not yet proven:** a paid Sepolia transaction, a paid mainnet completion,
+  or a real worker/chain/receipt end-to-end result. Production enablement and
+  mainnet spending require separate explicit operator approval.
 
 ## 6. Holds
 
