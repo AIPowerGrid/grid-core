@@ -77,6 +77,9 @@ content sanitization, and reward settlement.
   `bwrap-userns-restrict` AppArmor policy, including capability-denying child
   stacking. CI explicitly loads the packaged policy without disabling the
   host-wide restriction; production still needs actual service-user proof.
+  Linux launcher tests inspect network namespace, cleared environment and zero
+  effective capabilities using fixed trusted utilities; separate codec tests
+  decode actual MP4 and reject an otherwise valid file outside the workspace.
   Source retention/privacy and joint native/billing qualification remain gates.
   Governed audio/video sources and typed LTX image pins use
   `storage.upload_private_source`, never the output bucket. Its typed private
