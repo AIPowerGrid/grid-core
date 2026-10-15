@@ -253,8 +253,10 @@ indexer/reconciler is deployed.
 - `GRID_X402_ENABLED=0` remains unchanged. No verify/settle request, wallet
   signature, payment, inference job, deployment or service restart was performed.
   Authentication/support discovery is not a paid end-to-end proof; the paid
-  Sepolia/mainnet gates above remain open. Disabling the inaccessible original
-  key is a separate operator-approved access change, not implied by replacement.
+  Sepolia/mainnet gates above remain open.
+- After separate explicit owner approval, the inaccessible original credential
+  was disabled, not deleted. The replacement remained enabled and passed the
+  authenticated facilitator/RPC check again. Other projects' keys were unchanged.
 
 ## 6. Holds
 
