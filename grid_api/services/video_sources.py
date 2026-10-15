@@ -126,8 +126,10 @@ def validate_audio(raw: bytes, frames: int) -> Source:
 
 def validate_video(raw: bytes, frames: int, width: int, height: int) -> Source:
     """Independently probe and decode a contained H.264 MP4, never a URL."""
+    from . import media_decoder
+
     probe, decoder = shutil.which("ffprobe"), shutil.which("ffmpeg")
-    if not probe or not decoder:
+    if not probe or not decoder or not media_decoder.available():
         raise HTTPException(503, detail="Video source verification is unavailable")
     try:
         if (len(raw) > MAX_VIDEO_BYTES or len(raw) < 16 or raw[4:8] != b"ftyp"
@@ -139,17 +141,15 @@ def validate_video(raw: bytes, frames: int, width: int, height: int) -> Source:
             path = Path(directory) / "source.mp4"
             path.write_bytes(raw)
             path.chmod(0o600)
-            result = subprocess.run([
-                probe, "-v", "error", "-max_alloc", "67108864", "-threads", "1",
+            result = media_decoder.run_tool("ffprobe", [
+                "-v", "error", "-max_alloc", "67108864", "-threads", "1",
                 "-protocol_whitelist", "file,pipe", "-enable_drefs", "0", "-use_absolute_path", "0", "-f", "mov",
                 "-show_entries", ("stream=codec_type,codec_name,width,height,pix_fmt,avg_frame_rate,r_frame_rate,"
                                   "nb_frames,sample_rate,channels,start_time:stream_side_data=rotation:"
                                   "stream_disposition=attached_pic:format=format_name,duration,start_time"),
                 "-of", "json", str(path),
-            ], capture_output=True, timeout=10, check=True)
-            if len(result.stdout) > 32 * 1024 or result.stderr:
-                raise ValueError
-            metadata = json.loads(result.stdout)
+            ], Path(directory), timeout=10, limit=32*1024)
+            metadata = json.loads(result)
             streams = metadata["streams"]
             video = [item for item in streams if item["codec_type"] == "video"]
             audio = [item for item in streams if item["codec_type"] == "audio"]
@@ -169,16 +169,14 @@ def validate_video(raw: bytes, frames: int, width: int, height: int) -> Source:
             duration = float(metadata["format"]["duration"])
             if not math.isfinite(duration) or abs(duration - frames / 24) > 0.05:
                 raise ValueError
-            decoded = subprocess.run([
-                decoder, "-v", "error", "-nostdin", "-xerror", "-err_detect", "explode",
+            decoded = media_decoder.run_tool("ffmpeg", [
+                "-v", "error", "-nostdin", "-xerror", "-err_detect", "explode",
                 "-max_alloc", "67108864", "-threads", "1", "-protocol_whitelist", "file,pipe",
                 "-enable_drefs", "0", "-use_absolute_path", "0", "-f", "mov", "-i", str(path),
                 "-map", "0:v:0", "-an", "-sn", "-dn", "-threads", "1", "-frames:v", str(frames + 1), "-fps_mode", "passthrough",
                 "-f", "framemd5", "-",
-            ], capture_output=True, timeout=30, check=True)
-            if len(decoded.stdout) > 64 * 1024 or decoded.stderr:
-                raise ValueError
-            lines = decoded.stdout.decode("ascii").splitlines()
+            ], Path(directory), timeout=30, limit=64*1024)
+            lines = decoded.decode("ascii").splitlines()
             if "#tb 0: 1/24" not in lines:
                 raise ValueError
             rows = [line.split(",") for line in lines if line and not line.startswith("#")]

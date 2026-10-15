@@ -75,6 +75,13 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   Do not infer these gates from the base video path,
   charging mode or health features. MP4 source verification needs FFmpeg/ffprobe;
   missing tools reject rather than bypassing validation.
+  Public async source requests additionally require
+  `MEDIA_ASYNC_SOURCE_ADMISSION_MODE=off|pilot|open`, default off. Its private
+  source cohort/deadline is independent of public generated video. Capture its
+  expiry through the existing locked hold/journal transaction; reject fresh
+  source requests before intent decoding/quota/uploads. Existing replay and
+  cleanup remain available. The older fully private async cohort keeps its
+  existing source behavior, not an implicit public source grant.
   Governed LTX image/audio/video inputs require an explicit separate
   `MEDIA_PRIVATE_SOURCE_BUCKET`; missing/shared output storage rejects before
   quota or uploads. Operators must verify no public bucket endpoint and the

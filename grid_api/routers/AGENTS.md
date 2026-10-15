@@ -81,6 +81,12 @@ transport, accounts, stats, health/metrics.
   Public async admission permits new Distilled BF16 jobs only. Other model
   identities reject before private source decoding, while existing pilot
   intent replay and owner-only GET recovery remain available.
+  Public-mode reference audio/video/image also passes the separate source
+  admission gate at all three fresh checks. Default off rejects before request
+  hashing/decoding/quota/uploads; an independent source pilot freezes its own
+  earlier deadline for the locked hold transaction. Text/opening-image work
+  remains public while this source gate closes. Existing source receipts stay
+  readable and replayable without another hold or upload.
   Scoped `inference.submit` authentication, a UUIDv4 `Idempotency-Key`, a positive
   `max_cost_micro_usd` and a live credit hold are required. The typed body is
   bounded before JSON parsing and input-bearing validation errors are redacted.

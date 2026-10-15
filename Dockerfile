@@ -24,7 +24,7 @@ ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpq5 \
+    && apt-get install -y --no-install-recommends libpq5 ffmpeg bubblewrap util-linux \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 aipg
 

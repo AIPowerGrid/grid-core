@@ -7,6 +7,13 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Ownership
 
+- `media_codec_runtime.py`, `media-codecs.lock.json`,
+  `media-codecs-jammy.sources`, `test_media_codec_runtime.py` and
+  `MEDIA_CODEC_RUNTIME.md` own the separate signed-source, static codec
+  candidate. Its workflow emits main-only provenance, not host installation
+  or admission. Verify the exact artifact and current security state before
+  selecting a versioned binary; preserve system libraries and rollback.
+
 - `VIDEO_PAID_RETEST_2026_10_14.md` - subsequent funded-account exporter
   deployment/retest and closed cohort, exact paid completion/clock evidence,
   preserved unsuccessful interruption control, scoped key401 cleanup and
@@ -115,6 +122,13 @@ executes an immutable release selected through `/home/aipg/current`.
   Core needs FFmpeg/ffprobe before MP4 source admission; package pinning,
   decoder isolation, input privacy/retention and joint qualification remain
   gates. Do not change production allowlists merely because schemas exist.
+  Linux MP4 verification requires Bubblewrap and prlimit as well as the codecs.
+  On restricted Ubuntu, review and load the distribution's
+  `bwrap-userns-restrict` policy from `apparmor-profiles` before an actual
+  service-user isolation test. Retain the host restriction and policy's
+  capability-denying child stack; do not use an unconfined custom profile,
+  privileged decoder or global namespace/AppArmor bypass. Tool installation
+  and CI policy success do not prove the production service can decode safely.
   `MEDIA_PRIVATE_SOURCE_BUCKET` defaults empty and must differ from output
   storage. Keep its r2.dev/custom-domain access disabled, verify anonymous
   denial and expiry, and review its one-day source lifecycle before admitting
@@ -261,6 +275,16 @@ executes an immutable release selected through `/home/aipg/current`.
   async jobs alone must not expose those distinct lifecycles. The waiting
   opt-in additionally requires enabled open async admission; existing legacy
   non-governed models, old receipt recovery and terminal settlement remain.
+- `MEDIA_ASYNC_SOURCE_ADMISSION_MODE` independently controls uploaded sources
+  under public async admission. Default off admits no new public source work.
+  A source `pilot` requires one to ten canonical accounts in
+  `MEDIA_ASYNC_SOURCE_CANARY_ACCOUNTS` and a fixed aware
+  `MEDIA_ASYNC_SOURCE_CANARY_UNTIL` within24hours; expiry preserves startup and
+  receipt recovery. Source `open` requires both pilot fields cleared. Keep the
+  generated-video gate and charging unchanged while qualifying this cohort.
+  Audio/video path flags remain separately required. Linux source verification
+  requires FFmpeg/ffprobe, bubblewrap and prlimit under actual service isolation;
+  never grant broad privileges or bypass the sandbox to make a canary pass.
 - A billing incident must close new public generation, not merely disable
   charging. Gate exact generation routes, select explicit empty admission,
   and preserve settlement/recovery and stopped payouts. `GRID_CHARGING_MODE=off`
