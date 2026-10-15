@@ -7,6 +7,13 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Ownership
 
+- `media_codec_runtime.py`, `media-codecs.lock.json`,
+  `media-codecs-jammy.sources`, `test_media_codec_runtime.py` and
+  `MEDIA_CODEC_RUNTIME.md` own the separate signed-source, static codec
+  candidate. Its workflow emits main-only provenance, not host installation
+  or admission. Verify the exact artifact and current security state before
+  selecting a versioned binary; preserve system libraries and rollback.
+
 - `VIDEO_PAID_RETEST_2026_10_14.md` - subsequent funded-account exporter
   deployment/retest and closed cohort, exact paid completion/clock evidence,
   preserved unsuccessful interruption control, scoped key401 cleanup and
