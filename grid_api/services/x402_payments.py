@@ -21,6 +21,7 @@ every other state.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -36,6 +37,7 @@ import sqlalchemy as sa
 from fastapi import HTTPException
 
 from ..database import new_session
+from ..safe_logging import error_type, opaque_id
 from ..v2.schema import x402_payments as payments_t
 from . import alerts
 
@@ -89,9 +91,9 @@ def _address(value: str, name: str) -> str:
     return value
 
 
-def validate_config() -> None:
+def validate_config(*, force: bool = False) -> None:
     """Fail startup when an enabled money rail is only half configured."""
-    if not ENABLED:
+    if not ENABLED and not force:
         return
     if NETWORK not in {"eip155:8453", "eip155:84532"}:
         raise RuntimeError("GRID_X402_NETWORK must be Base mainnet or Base Sepolia")
@@ -284,11 +286,7 @@ async def _after_settle(context) -> None:
         raise RuntimeError("x402 after-settle hook missing X-Grid-Job-ID")
     result = context.result
     tx_hash = str(result.transaction or "").lower()
-    if not (
-        tx_hash.startswith("0x")
-        and len(tx_hash) == 66
-        and all(char in "0123456789abcdef" for char in tx_hash[2:])
-    ):
+    if not (tx_hash.startswith("0x") and len(tx_hash) == 66 and all(char in "0123456789abcdef" for char in tx_hash[2:])):
         raise RuntimeError("x402 facilitator success omitted a valid transaction hash")
     try:
         async with await new_session() as session:
@@ -310,8 +308,12 @@ async def _after_settle(context) -> None:
             if updated.rowcount != 1:
                 raise RuntimeError(f"x402 payment {job_id} was not in settling state")
             await session.commit()
-    except Exception:
-        logger.exception("x402 settled receipt could not be persisted job=%s", job_id)
+    except Exception as exc:
+        logger.error(
+            "x402 settled receipt could not be persisted job=%s error_type=%s",
+            opaque_id(job_id),
+            error_type(exc),
+        )
         alerts.emit(
             "x402_receipt_persist_failed",
             "critical",
@@ -344,8 +346,12 @@ async def _on_settle_failure(context):
                 .values(status="manual_review", error=error),
             )
             await session.commit()
-    except Exception:
-        logger.exception("x402 failure state could not be persisted job=%s", job_id)
+    except Exception as exc:
+        logger.error(
+            "x402 failure state could not be persisted job=%s error_type=%s",
+            opaque_id(job_id),
+            error_type(exc),
+        )
         alerts.emit(
             "x402_failure_persist_failed",
             "critical",
@@ -447,25 +453,29 @@ async def reconcile_transaction(job_id: str, tx_hash: str) -> dict:
     tx_hash = deposits._normalize_tx_hash(tx_hash)
     async with await new_session() as session:
         row = (
-            await session.execute(
-                sa.select(
-                    payments_t.c.payer,
-                    payments_t.c.asset,
-                    payments_t.c.pay_to,
-                    payments_t.c.authorized_micro,
-                    payments_t.c.settled_micro,
-                    payments_t.c.tx_hash,
-                    payments_t.c.status,
-                    payments_t.c.last_attempt,
-                    reservations_t.c.actual_micro,
+            (
+                await session.execute(
+                    sa.select(
+                        payments_t.c.payer,
+                        payments_t.c.asset,
+                        payments_t.c.pay_to,
+                        payments_t.c.authorized_micro,
+                        payments_t.c.settled_micro,
+                        payments_t.c.tx_hash,
+                        payments_t.c.status,
+                        payments_t.c.last_attempt,
+                        reservations_t.c.actual_micro,
+                    )
+                    .join(
+                        reservations_t,
+                        reservations_t.c.job_id == payments_t.c.job_id,
+                    )
+                    .where(payments_t.c.job_id == job_id),
                 )
-                .join(
-                    reservations_t,
-                    reservations_t.c.job_id == payments_t.c.job_id,
-                )
-                .where(payments_t.c.job_id == job_id),
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
     if not row:
         raise RuntimeError("x402 payment job was not found")
     if row["status"] == "settled":
@@ -554,6 +564,42 @@ class X402Runtime:
     routes: dict
 
 
+async def preflight() -> dict:
+    """Read configuration, facilitator support and RPC chain without payment."""
+    from . import deposits
+
+    validate_config(force=True)
+    chain_id = int(NETWORK.split(":", 1)[1])
+    canonical_usdc = {
+        8453: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+        84532: "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+    }[chain_id]
+    if deposits.CHAIN_ID != chain_id:
+        raise RuntimeError("x402 and the settlement receipt verifier must use the same chain")
+    if USDC != canonical_usdc or deposits.USDC != canonical_usdc:
+        raise RuntimeError("x402 and the receipt verifier must use canonical USDC for that chain")
+    if int(await deposits._rpc("eth_chainId", []), 16) != chain_id:
+        raise RuntimeError("x402 receipt RPC returned the wrong chain")
+    runtime = build_runtime()
+    await asyncio.to_thread(runtime.server.initialize)
+    supported = runtime.server.get_supported_kind(2, NETWORK, "upto")
+    if supported is None or not (supported.extra or {}).get("facilitatorAddress"):
+        raise RuntimeError("facilitator does not advertise upto for the configured chain")
+    _address(supported.extra["facilitatorAddress"], "facilitator address")
+    return {
+        "status": "preflight_passed",
+        "enabled": ENABLED,
+        "network": NETWORK,
+        "scheme": "upto",
+        "asset": "USDC",
+        "max_authorized_micro": MAX_AUTH_MICRO,
+        "receipt_rpc_chain": chain_id,
+        "facilitator_support": True,
+        "payments_sent": 0,
+        "inference_dispatched": 0,
+    }
+
+
 def build_runtime() -> X402Runtime:
     """Build the official x402 resource server after strict config validation."""
     validate_config()
@@ -614,14 +660,33 @@ async def _run_reconcile_cli(job_id: str, tx_hash: str) -> None:
         await close_database()
 
 
-if __name__ == "__main__":
+def _main(argv: list[str] | None = None) -> int:
     import argparse
-    import asyncio
 
     parser = argparse.ArgumentParser(
-        description="Reconcile one ambiguous x402 job from a confirmed Base transaction.",
+        description="Preflight x402 without payment, or reconcile one confirmed transfer.",
     )
-    parser.add_argument("--reconcile-job", required=True, help="Grid job UUID")
-    parser.add_argument("--tx", required=True, help="Base transaction hash")
-    args = parser.parse_args()
-    asyncio.run(_run_reconcile_cli(args.reconcile_job, args.tx))
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--preflight", action="store_true", help="Read-only configuration/facilitator/RPC check")
+    action.add_argument("--reconcile-job", help="Grid job UUID")
+    parser.add_argument("--tx", help="Base transaction hash; required only for reconciliation")
+    args = parser.parse_args(argv)
+    if args.preflight:
+        if args.tx:
+            parser.error("--tx is only valid with --reconcile-job")
+        try:
+            report = asyncio.run(preflight())
+        except Exception as exc:
+            # SDK/RPC exceptions may contain authenticated URLs or response bodies.
+            print(json.dumps({"status": "preflight_failed", "error_type": error_type(exc)}))
+            return 1
+        print(json.dumps(report, sort_keys=True))
+    else:
+        if not args.tx:
+            parser.error("--reconcile-job requires --tx")
+        asyncio.run(_run_reconcile_cli(args.reconcile_job, args.tx))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
