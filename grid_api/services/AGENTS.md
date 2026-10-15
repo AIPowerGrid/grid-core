@@ -771,6 +771,11 @@ content sanitization, and reward settlement.
   receipt verifier; isolated Sepolia configuration must never replace the
   production deposit verifier's chain/token. Preflight errors and settlement
   persistence logs expose only bounded error types and opaque job IDs.
+  The facilitator settlement guard converts transport/SDK exceptions into
+  bounded failure categories so the pinned SDK invokes the job-bound failure
+  hook immediately. No retry, success or revenue may be inferred from that
+  conversion. Never expose facilitator response bodies or authenticated URLs;
+  cancellation propagates and stale reconciliation remains the crash fallback.
 - Media billing reserves exact deterministic cost before dispatch and refunds on
   non-running paths; text billing reserves max cost and reconciles against trusted
   usage.
@@ -1023,6 +1028,9 @@ content sanitization, and reward settlement.
   production FastAPI route/middleware with synthetic facilitator and worker
   dependencies: challenge, exact-usage override, replay/stream/malformed input,
   before-attempt DB failure, lost receipt, payout exclusion and safe logging.
+  Facilitator timeout/exception/non-200 failures must enter `manual_review`
+  immediately with one dispatch/attempt. Actual SDK HTTP-client fixtures also
+  pin 401/403/429/500 and malformed-200 redaction; cancellation must propagate.
   It also checks dark read-only preflight, chain/token mismatches and CLI
   action/error contracts. These tests do not establish a signed chain payment
   or real GPU completion; keep that distinction in the funding canary runbook.

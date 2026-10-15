@@ -138,7 +138,9 @@ ETH transfer button.
 ## x402 agent payments
 
 `POST /v1/x402/chat/completions` is the accountless agent rail. It is
-code-complete but default-off. The client receives an x402 `402 Payment
+implemented but default-off and not mainnet-qualified. The October 15 private
+real-worker canary completed inference but failed settlement; it did not
+establish paid end-to-end operation. The client receives an x402 `402 Payment
 Required`, authorizes up to `GRID_X402_MAX_AUTH_MICRO` in Base USDC, and retries
 with the payment signature. Core then:
 
@@ -158,6 +160,14 @@ No Grid account, API key, free allowance, promotional grant, or purchased
 balance is created. An authorized-but-unsettled x402 job is excluded from worker
 payout aggregation. This prevents a valid signature followed by failed
 on-chain settlement from creating a payable worker reward.
+
+The candidate facilitator guard converts settlement HTTP/transport/SDK
+exceptions into bounded failure categories, preserving the official SDK's
+job-bound failure hook. A failed attempt enters `manual_review` immediately;
+crash/cancellation still uses stale reconciliation. No error body, credential
+or authenticated URL is retained by that guard. It never retries or declares
+payment success. These diagnostics are not a fix or proof for the unresolved
+mainnet settlement failure; a fresh approved canary is still required.
 
 The first route is deliberately non-streaming and text-only. x402's current
 FastAPI middleware buffers the full response before settlement; advertising
