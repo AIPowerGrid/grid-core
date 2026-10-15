@@ -130,7 +130,7 @@ def test_parameter_schema_exposes_only_qualified_surface():
     schema = recipes.param_schema(MODEL)
     assert schema["params"]["size"]["multiple_of"] == 32
     assert schema["params"]["steps"]["minimum"] == schema["params"]["steps"]["maximum"] == 8
-    assert schema["params"]["frames"]["maximum"] == 481
+    assert schema["params"]["frames"]["maximum"] == 721
     assert schema["params"]["keyframes"]["max_items"] == 16
     assert schema["video_contract"]["schema"] == "aipg.ltx-video.v1"
     assert schema["video_contract"]["max_keyframes"] == 16
@@ -155,7 +155,7 @@ async def test_quote_reports_effective_duration_even_when_not_priced(monkeypatch
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("frames,cost", [(81, 67_500), (97, 80_834), (337, 280_834), (385, 320_834), (481, 400_834)])
+@pytest.mark.parametrize("frames,cost", [(81, 67_500), (97, 80_834), (337, 280_834), (385, 320_834), (481, 400_834), (721, 600_834)])
 async def test_approved_tariff_quotes_exact_frame_cost_without_debit(monkeypatch, frames, cost):
     summary = {
         "paid": {"balance_micro": 1_000_000},
@@ -179,19 +179,19 @@ async def test_approved_tariff_quotes_exact_frame_cost_without_debit(monkeypatch
 
 @pytest.mark.parametrize("source", [False, True])
 def test_long_bf16_clip_preserves_exact_graph_units_and_late_pin(source):
-    values = {"frames": 481, "seed": 0}
+    values = {"frames": 721, "seed": 0}
     if source:
-        values["keyframes"] = [{"frame": 0, "strength": 1.0}, {"frame": 480, "strength": 0.5}]
+        values["keyframes"] = [{"frame": 0, "strength": 1.0}, {"frame": 720, "strength": 0.5}]
     resolved = recipes.resolve_for_model(MODEL, values, has_source=source)
-    assert resolved["execution"]["frames"] == 481
-    assert resolved["execution"]["seconds"] == 481 / 24
-    assert resolved["spec"]["latent_audio"]["inputs"]["frames_number"] == 481
-    assert resolved["spec"]["latent_video"]["inputs"]["length"] == 481
+    assert resolved["execution"]["frames"] == 721
+    assert resolved["execution"]["seconds"] == 721 / 24
+    assert resolved["spec"]["latent_audio"]["inputs"]["frames_number"] == 721
+    assert resolved["spec"]["latent_video"]["inputs"]["length"] == 721
     if source:
-        assert resolved["spec"]["guide_1"]["inputs"]["frame_idx"] == 480
+        assert resolved["spec"]["guide_1"]["inputs"]["frame_idx"] == 720
 
 
-@pytest.mark.parametrize("model,frames", [(MODEL, 489), (MODEL, 480),
+@pytest.mark.parametrize("model,frames", [(MODEL, 729), (MODEL, 720),
                                          ("LTX-2.5 Distilled NVFP4", 345), ("LTX-2.5 Dev BF16", 89)])
 def test_duration_extension_does_not_widen_other_models_or_round_frames(model, frames):
     with pytest.raises(recipes.RecipeError):

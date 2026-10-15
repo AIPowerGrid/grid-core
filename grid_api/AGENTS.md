@@ -70,6 +70,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   public async admission; it is not part of the first public durable rollout.
   Explicit `open` mode requires clearing both cohort and expiry; it does not
   bypass recipe, feature, pricing, credit, worker or model-permission gates.
+  `MEDIA_ASYNC_NVFP4_ENABLED=0` separately keeps public NVFP4 closed by default.
+  Its opt-in candidate permits only generated/opening-image NVFP4, with its
+  unchanged337-frame recipe limit; source uploads remain BF16-only in public
+  mode. Do not enable it based on inventory or local-only tests.
   Audio/video conditioning adds separately default-dark `audio-to-video` and
   `video-to-video` admission; Ingredients appearance adds `appearance-to-video`.
   Do not infer these gates from the base video path,

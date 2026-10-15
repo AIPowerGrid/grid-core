@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 SourceMode = Literal["generated", "audio", "video"]
-MAX_LTX_FRAMES = 481  # 20.0417 seconds on the 8n+1 / 24 fps grid.
+MAX_LTX_FRAMES = 721  # 30.0417 seconds on the 8n+1 / 24 fps grid.
 
 
 class LtxVideoContract(BaseModel):

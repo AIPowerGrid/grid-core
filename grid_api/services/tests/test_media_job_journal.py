@@ -193,23 +193,25 @@ async def test_reserve_replay_keeps_first_seed_and_one_funded_hold(db):
 
 
 @pytest.mark.asyncio
-async def test_long_clip_uses_one_exact_hold_and_replay_never_debits_again(db):
+@pytest.mark.parametrize("frames,cost", [(481, 400_834), (721, 600_834)])
+async def test_long_clip_uses_one_exact_hold_and_replay_never_debits_again(db, frames, cost):
     aid = await owner()
-    job = prepared(aid, frames=481, cap=400_834)
+    job = prepared(aid, frames=frames, cap=cost)
     first = await jobs.reserve(job)
     assert await jobs.reserve(job) == first
     _, hold, debits = await snapshot(job)
-    assert hold["reserved_micro"] == 400_834
-    assert len(debits) == 1 and debits[0]["delta_micro"] == -400_834
-    assert await credits.get_balance(aid) == OPENING - 400_834
+    assert hold["reserved_micro"] == cost
+    assert len(debits) == 1 and debits[0]["delta_micro"] == -cost
+    assert await credits.get_balance(aid) == OPENING - cost
     assert await counts() == (1, 1, 0)
 
 
 @pytest.mark.asyncio
-async def test_long_clip_rejects_ceiling_below_exact_charge_without_a_hold(db):
+@pytest.mark.parametrize("frames,cost", [(481, 400_834), (721, 600_834)])
+async def test_long_clip_rejects_ceiling_below_exact_charge_without_a_hold(db, frames, cost):
     aid = await owner()
     with pytest.raises(jobs.MediaJobPaymentRequired):
-        await jobs.reserve(prepared(aid, frames=481, cap=400_833))
+        await jobs.reserve(prepared(aid, frames=frames, cap=cost - 1))
     assert await credits.get_balance(aid) == OPENING
     assert await counts() == (0, 0, 0)
 
