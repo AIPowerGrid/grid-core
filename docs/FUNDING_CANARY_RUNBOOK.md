@@ -234,6 +234,28 @@ indexer/reconciler is deployed.
   or a real worker/chain/receipt end-to-end result. Production enablement and
   mainnet spending require separate explicit operator approval.
 
+### Credential checkpoint: October 15, 2026
+
+- The owner approved a dedicated CDP facilitator credential with Core's
+  verified outbound-IP allowlist and no portfolio/wallet permissions. The
+  original credential's one-time secret was not retained, so an equivalent
+  replacement was created after owner-completed Coinbase verification.
+- The replacement was matched to the open Coinbase key window, transferred
+  over SSH stdin, and installed only as `CDP_API_KEY_ID` and
+  `CDP_API_KEY_SECRET` in root-owned mode-0600 `/etc/aipg/grid.env`. The install
+  preserved every other parsed environment field, retained a root-only backup,
+  and did not restart any service. Temporary local credential copies were
+  removed after verification. Codebase credentials were not reused or changed.
+- A separate read-only process using the deployed `1bca2948` release and the
+  protected environment successfully authenticated the CDP facilitator's
+  `/supported` request, confirmed v2 `upto` support on `eip155:8453`, and checked
+  the actual receipt RPC chain ID and canonical Base USDC configuration.
+- `GRID_X402_ENABLED=0` remains unchanged. No verify/settle request, wallet
+  signature, payment, inference job, deployment or service restart was performed.
+  Authentication/support discovery is not a paid end-to-end proof; the paid
+  Sepolia/mainnet gates above remain open. Disabling the inaccessible original
+  key is a separate operator-approved access change, not implied by replacement.
+
 ## 6. Holds
 
 - **AIPG:** keep dark until a named price-epoch owner, expiry alert, refund
