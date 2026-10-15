@@ -19,6 +19,8 @@ deploying from an agent or moving money.
 Specialized procedures:
 
 - [Demand billing](DEMAND_BILLING_RUNBOOK.md) - charging rollout and rollback.
+- [x402 dark deployment](X402_DARK_2026_10_15.md) - exact release, restore and
+  preserved x402-off posture; real-worker/mainnet qualification remains gated.
 - [Validator cohort](VALIDATOR_COHORT_RUNBOOK.md) - private maintainer review
   and 72-hour independent-operator qualification.
 

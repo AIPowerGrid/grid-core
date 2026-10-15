@@ -7,6 +7,15 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Ownership
 
+- `X402_DARK_2026_10_15.md` - owner-approved PR228 merge, immutable candidate
+  staging, fresh production restore and drained `607d1c03` / `0045` cutover.
+  Eight workers/models and runtime controls are preserved; x402 stays off.
+  Retained controller-probe rollbacks are not Core test failures or payment
+  evidence. A subsequent separately approved private mainnet attempt completed
+  real worker usage but failed settlement; allowance is zero, USDC remains,
+  no credit moved and the job is payout-ineligible. No blind paid retry.
+  Mainnet qualification and public admission remain gated.
+
 - `media_codec_runtime.py`, `media-codecs.lock.json`,
   `media-codecs-jammy.sources`, `test_media_codec_runtime.py` and
   `MEDIA_CODEC_RUNTIME.md` own the separate signed-source, static codec

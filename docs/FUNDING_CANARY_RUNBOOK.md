@@ -316,6 +316,32 @@ one settlement attempt. The remaining allowance was again revoked and verified
 as zero. Both runs retain the same synthetic-worker/ASGI qualification boundary;
 neither is a mainnet or deployed-GPU claim.
 
+### Dark deployment checkpoint: October 15, 2026
+
+The owner-approved PR228 tree is deployed as exact main commit
+`607d1c03bdab58350e63b8e966555d593b5b1565` / Alembic `0045` after green PR
+and main checks, fresh production restore proof and a drained cutover. Eight
+workers/models and all existing runtime controls are preserved. Independent
+origin/public checks and the selected release's read-only preflight pass.
+Ordinary credit charging remains on; x402 remains off with no payment rows.
+See [the deployment record](../deploy/X402_DARK_2026_10_15.md), including the
+retained operator-probe rollbacks. No real-GPU or mainnet canary is claimed;
+those require separate bounded approval before any public admission.
+
+### Private mainnet checkpoint: October 15, 2026
+
+A subsequent owner-approved USD 0.03 USDC / USD 0.10 gas private test on the
+same deployed source completed real `gpt-oss-120b` worker usage, but returned
+402 during settlement. The payment has one attempt, actual usage 7 micro-USDC
+and no transaction hash; it is not revenue or payout-eligible. No user credit
+ledger entry moved. The full dedicated USD 0.05 USDC balance remains and its
+Permit2 allowance is independently verified zero after revocation. Approval
+and cleanup used approximately USD 0.00131 gas. Replay was not exercised;
+no paid retry or public enablement occurred. See the deployment record's
+[failed mainnet attempt](../deploy/X402_DARK_2026_10_15.md#subsequent-private-mainnet-attempt-settlement-failed)
+for retained evidence, diagnostic limitations and remaining gates. This
+supersedes the empty-payment-table observation at the earlier dark cutover.
+
 ## 6. Holds
 
 - **AIPG:** keep dark until a named price-epoch owner, expiry alert, refund
