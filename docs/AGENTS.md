@@ -16,7 +16,9 @@ for humans and agents.
 - `FUNDING_CANARY_RUNBOOK.md` - dark deploy, real-money canary evidence, and
   rollback gates. Its October15 x402 credential checkpoint proves authenticated
   read-only facilitator/RPC discovery and separately approved old-key disablement,
-  not paid settlement or enablement.
+  not paid settlement or enablement. The later paid Sepolia checkpoint and
+  `X402_SEPOLIA_CANARY_2026_10_15.json` prove real testnet settlement with
+  synthetic worker output, not a deployed GPU/mainnet/production-admission gate.
 - `VALIDATOR_SHADOW_RUNBOOK.md` - exact cohort-finalization, preview/apply,
   transport-drain, rollback, and evidence procedure for the economically inert
   seven-day validator run.

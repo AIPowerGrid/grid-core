@@ -258,6 +258,54 @@ indexer/reconciler is deployed.
   was disabled, not deleted. The replacement remained enabled and passed the
   authenticated facilitator/RPC check again. Other projects' keys were unchanged.
 
+### Paid Sepolia checkpoint: October 15, 2026
+
+The isolated protocol canary passed using source `3fbd48a3`, pinned x402 2.16.0,
+Python 3.12.9 and a private local PostgreSQL 16.15 instance. See the
+[public structured evidence](X402_SEPOLIA_CANARY_2026_10_15.json).
+
+- Coinbase's free faucet funded a fresh disposable testnet payer. No Ledger,
+  production payer, live financial database or mainnet funds were used.
+- The actual Core router and official SDK/FastAPI middleware returned initial
+  402, accepted an SDK-created signed `upto` authorization, and returned 200
+  after the real public facilitator settled canonical Sepolia USDC.
+- The authorization ceiling was 50,000 micro-USDC. Trusted fixture terminal
+  usage settled 23 micro-USDC, independently verified as exactly one payer-to-
+  recipient Transfer in block 48152592. The
+  [settlement transaction](https://sepolia.basescan.org/tx/0x935b414e922a444c3aa7abccc9490a3644fe58a11b13462d5da647518d091e48)
+  passed Core's own receipt/confirmation verifier before becoming `settled`.
+- Observed states were `verified -> settling -> reported -> settled`. A replay
+  returned 402 with still one job, reservation, payment row and settlement
+  attempt; neither balances nor transfer count changed again. No purchased
+  credits or credit-ledger rows were created.
+- The synthetic worker's ledger entry was excluded from aggregation while
+  `reported` and included only after independent chain proof. No actual worker
+  or validator payout was sent.
+- The remaining test-USDC Permit2 allowance was
+  [revoked](https://sepolia.basescan.org/tx/0x186094b8e2ed165fc566a6355528f7d2d788e6741b595df114901d83407aa5bd)
+  and independently read back as zero. Immediate public-RPC state reads lagged
+  mined approval receipts; subsequent read-only checks confirmed both approval
+  and revocation without broadcasting duplicates.
+
+**Boundary:** HTTP used in-process ASGI, not a publicly deployed Core instance.
+The worker account, output, usage and ledger entry were explicit synthetic
+fixtures; no real model/GPU or Grid worker transport ran. Real signatures,
+facilitator calls, test tokens, chain settlement and receipt reconciliation were
+not mocked. This closes the paid Sepolia protocol gate only. The real worker,
+bounded mainnet canary and deployment/admission gates remain open. Production
+x402 stayed disabled and no production configuration changed for this canary.
+
+The post-canary replay review found that the original Core fingerprint used
+the nonce's JSON text, whereas the SDK's EIP-712 message uses its uint256 value.
+Leading-zero aliases produced different authorization IDs in two reproduced
+failing regressions. The candidate now validates a bounded ASCII decimal
+uint256 and hashes its canonical numeric spelling. SQLite reservation and
+twenty-way PostgreSQL alias races pin one job per numeric authorization. This
+is a candidate hardening change, not a claim that an attacker exploited the
+disabled production rail. The updated targeted selection passed 208 cases
+(67 x402/concurrency/safe-log cases plus 141 adjacent money-path regressions)
+on the same locked Python 3.12/PostgreSQL 16 test setup.
+
 ## 6. Holds
 
 - **AIPG:** keep dark until a named price-epoch owner, expiry alert, refund
