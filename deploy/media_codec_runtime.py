@@ -115,6 +115,14 @@ def inventory(root):
     return result
 
 
+def freeze_modes(root):
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("Codec packaging cannot normalize a symlink")
+        if path.is_file():
+            path.chmod(0o755 if path.relative_to(root).parts[0] == "bin" else 0o644)
+
+
 def _verify_reader(reader, expected_commit):
     members = []
     for member in reader:
@@ -159,7 +167,7 @@ def _verify_reader(reader, expected_commit):
             or not isinstance(entry.get("sha256"), str)
             or not re.fullmatch(r"[0-9a-f]{64}", entry.get("sha256", ""))
         ):
-            raise ValueError("Invalid codec file commitment")
+            raise ValueError("Invalid codec file commitment: " + member.name)
         with reader.extractfile(member) as stream:
             if stream_digest(stream) != entry["sha256"]:
                 raise ValueError("Codec runtime hash mismatch")
@@ -295,6 +303,7 @@ def build(output):
         (package / "sbom.cdx.json").write_text(
             json.dumps({"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1, "components": components}, indent=2) + "\n",
         )
+        freeze_modes(package)
         manifest = {
             "schema": SCHEMA,
             "commit": commit,
@@ -307,6 +316,7 @@ def build(output):
             "files": inventory(package),
         }
         (package / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+        (package / "manifest.json").chmod(0o644)
         archive = output / ("media-codecs-" + commit + ".tar.gz")
         with tarfile.open(archive, "w:gz") as writer:
             for path in sorted(package.rglob("*")):
