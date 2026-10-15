@@ -1,0 +1,9 @@
+{
+  "schema": "aipg.media-codec-source.v1",
+  "version": "9.0.2",
+  "sha256": "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e",
+  "signing_fingerprint": "FCF986EA15E6E293A5644F10B4322F04D67658D8",
+  "archive": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",
+  "signature": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz.asc",
+  "key": "https://ffmpeg.org/ffmpeg-devel.asc"
+}

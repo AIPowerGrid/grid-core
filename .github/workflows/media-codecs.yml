@@ -1,0 +1,110 @@
+name: Media codec runtime
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/media-codecs.yml'
+      - 'deploy/media*codec*'
+      - 'deploy/test_media_codec_runtime.py'
+      - 'grid_api/services/media_decoder.py'
+      - 'grid_api/services/tests/test_media_decoder.py'
+      - 'grid_api/services/video_sources.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/media-codecs.yml'
+      - 'deploy/media*codec*'
+      - 'deploy/test_media_codec_runtime.py'
+      - 'grid_api/services/media_decoder.py'
+      - 'grid_api/services/tests/test_media_decoder.py'
+      - 'grid_api/services/video_sources.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: media-codec-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and qualify offline codecs
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install verified distribution build and isolation inputs
+        run: |
+          set -euo pipefail
+          for source in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            [ -f "$source" ] || continue
+            if grep -Fq 'dl.google.com/linux/chrome' "$source"; then
+              sudo mv "$source" "$RUNNER_TEMP/$(basename "$source").disabled"
+            fi
+          done
+          sudo install -m 0644 deploy/media-codecs-jammy.sources /etc/apt/sources.list.d/aipg-codec-source.sources
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential nasm pkg-config libx264-dev zlib1g-dev gnupg bubblewrap util-linux
+      - name: Test archive, identity and signature negative controls
+        run: python -m unittest discover -s deploy -p test_media_codec_runtime.py -v
+      - name: Build the signed and hash-pinned FFmpeg source without app credentials
+        run: python deploy/media_codec_runtime.py build --output "$RUNNER_TEMP/codec-publish"
+      - name: Verify before extracting the actual candidate
+        run: |
+          set -euo pipefail
+          python deploy/media_codec_runtime.py verify \
+            --archive "$RUNNER_TEMP/codec-publish/media-codecs-$(git rev-parse HEAD).tar.gz" \
+            --commit "$(git rev-parse HEAD)" --extract "$RUNNER_TEMP/codec-check"
+          echo "$RUNNER_TEMP/codec-check/bin" >> "$GITHUB_PATH"
+      - name: Install only the production lock and test runner
+        run: >-
+          pip install --require-hashes --only-binary=:all:
+          -r requirements-grid.lock && pip install pytest pytest-asyncio
+      - name: Require actual pinned codecs and real Linux isolation
+        run: |
+          set -euo pipefail
+          test "$(command -v ffmpeg)" = "$RUNNER_TEMP/codec-check/bin/ffmpeg"
+          test "$(command -v ffprobe)" = "$RUNNER_TEMP/codec-check/bin/ffprobe"
+          ffmpeg -version
+          ffprobe -version
+          python -m pytest grid_api/services/tests/test_video_sources.py grid_api/services/tests/test_media_decoder.py -q -rs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: media-codecs-linux-x64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/codec-publish/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  provenance:
+    name: Main codec provenance
+    needs: [build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: media-codecs-linux-x64-${{ github.sha }}
+          path: codecs
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        id: provenance
+        with:
+          subject-path: codecs/*
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: media-codecs-provenance-${{ github.sha }}
+          path: ${{ steps.provenance.outputs.bundle-path }}
+          if-no-files-found: error
+          retention-days: 14

@@ -25,6 +25,8 @@ def run_tool(tool: str, args: list[str], directory: Path, *, timeout: int, limit
     assert program is not None
     command = [program, *args]
     if sys.platform == "linux":
+        if not Path(program).is_absolute():
+            raise OSError("Media decoder executable must be absolute")
         mapped = ["/work/" + Path(value).name if value.startswith(str(directory) + "/") else value for value in args]
         command = [
             "prlimit", "--as=1073741824", "--cpu=30", "--fsize=1048576", "--nofile=64", "--", "bwrap",
@@ -36,7 +38,8 @@ def run_tool(tool: str, args: list[str], directory: Path, *, timeout: int, limit
             "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
             "--ro-bind", str(directory), "/work", "--chdir", "/work", "--clearenv",
             "--setenv", "PATH", "/usr/bin:/bin", "--setenv", "HOME", "/tmp",
-            "--setenv", "OPENBLAS_NUM_THREADS", "1", "--setenv", "OMP_NUM_THREADS", "1", "--", program, *mapped,
+            "--setenv", "OPENBLAS_NUM_THREADS", "1", "--setenv", "OMP_NUM_THREADS", "1",
+            "--ro-bind", program, "/codec/tool", "--", "/codec/tool", *mapped,
         ]
     # Child output goes to bounded-on-Linux files, never an unbounded parent
     # capture buffer. No tool diagnostics or private source paths escape.

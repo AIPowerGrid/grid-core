@@ -92,6 +92,11 @@ owning AGENTS.md and any affected parent Child DOX Index.
 
 ## Verification
 
+- `Media codec runtime` is a separate candidate/provenance workflow for the
+  pinned static upload codecs. Its Linux source-decoder controls and manifest
+  checks do not replace ordinary PostgreSQL/release checks or qualify the
+  Gallery host. Read `deploy/MEDIA_CODEC_RUNTIME.md` before selecting tools.
+
 - Credit-first release CI uses reviewed media-worker
   `629a47cb4833a0089bfb07660c8857159ffe0212`. All four actual appearance
   adapter and two NVFP4 Core-inventory/worker-startup cases must pass without

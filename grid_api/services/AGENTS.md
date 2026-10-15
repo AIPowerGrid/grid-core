@@ -80,6 +80,10 @@ content sanitization, and reward settlement.
   Linux launcher tests inspect network namespace, cleared environment and zero
   effective capabilities using fixed trusted utilities; separate codec tests
   decode actual MP4 and reject an otherwise valid file outside the workspace.
+  Only the resolved executable is bound at `/codec/tool`, so a separately
+  verified static codec can run without exposing its parent directory. Runtime
+  PATH selection belongs to the deployment's exact manifest/hash proof; never
+  silently accept an unpatched system fallback during activation.
   Source retention/privacy and joint native/billing qualification remain gates.
   Governed audio/video sources and typed LTX image pins use
   `storage.upload_private_source`, never the output bucket. Its typed private
