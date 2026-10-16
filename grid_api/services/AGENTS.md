@@ -776,6 +776,23 @@ content sanitization, and reward settlement.
   receipt verifier; isolated Sepolia configuration must never replace the
   production deposit verifier's chain/token. Preflight errors and settlement
   persistence logs expose only bounded error types and opaque job IDs.
+  The facilitator settlement guard converts transport/SDK exceptions into
+  bounded failure categories so the pinned SDK invokes the job-bound failure
+  hook immediately. No retry, success or revenue may be inferred from that
+  conversion. Never expose facilitator response bodies or authenticated URLs;
+  cancellation propagates and stale reconciliation remains the crash fallback.
+  Only the exact `amount_too_low` code in a <=16-KiB JSON failure body is
+  allowlisted from HTTP 400 responses. Provider checks reproduced a 1,000
+  micro-USDC Coinbase minimum without usable signatures or payments. That
+  constraint is not authority to round usage up or change tariffs silently.
+  The owner subsequently approved USD 0.001 minimum pricing for new successful
+  x402 calls only. The challenge description and `extra.minimumCharge` /
+  `extra.pricingPolicy` disclose it; both accepted and Core-owned terms must
+  match before reserve/dispatch. `0046` stores `minimum_charge_micro` with the
+  verified payment. Authorization covers max(usage quote, minimum), and terminal
+  plus stale-hold recovery use max(actual usage, frozen minimum), within the
+  original hold. Failure release is zero; old zero-minimum receipts and ordinary
+  credits are not repriced. Provider success still needs exact transfer proof.
 - Media billing reserves exact deterministic cost before dispatch and refunds on
   non-running paths; text billing reserves max cost and reconciles against trusted
   usage.
@@ -1028,6 +1045,14 @@ content sanitization, and reward settlement.
   production FastAPI route/middleware with synthetic facilitator and worker
   dependencies: challenge, exact-usage override, replay/stream/malformed input,
   before-attempt DB failure, lost receipt, payout exclusion and safe logging.
+  Facilitator timeout/exception/non-200 failures must enter `manual_review`
+  immediately with one dispatch/attempt. Actual SDK HTTP-client fixtures also
+  pin 401/403/429/500 and malformed-200 redaction; cancellation must propagate.
+  Minimum tests additionally cover disclosed/echoed terms, pre-dispatch
+  rejection, exact ceiling, no minimum on worker failure, larger usage and
+  frozen completion/recovery across settings changes. `test_x402_minimum_migration.py`
+  proves SQLite upgrade/rollback/history guards; PG concurrency tests include
+  a real terminal, duplicate completion, snapshot and payout-exclusion proof.
   It also checks dark read-only preflight, chain/token mismatches and CLI
   action/error contracts. These tests do not establish a signed chain payment
   or real GPU completion; keep that distinction in the funding canary runbook.

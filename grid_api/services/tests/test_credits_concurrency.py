@@ -29,6 +29,7 @@ from grid_api.v2.schema import ledger as ledger_t
 from grid_api.v2.schema import metadata as v2_metadata
 from grid_api.v2.schema import reservations as reservations_t
 from grid_api.v2.schema import x402_payments as x402_payments_t
+from grid_api.v2.schema import workers as workers_t
 
 
 async def _seed_account() -> uuid.UUID:
@@ -255,7 +256,7 @@ async def test_x402_authorization_cannot_open_multiple_jobs_under_race(pg, monke
     usdc = "0x2222222222222222222222222222222222222222"
     treasury = "0x3333333333333333333333333333333333333333"
     model = "gpt-oss-120b"
-    maximum = pricing.quote_text(model, 100, 500)
+    maximum = max(x402_payments.MIN_CHARGE_MICRO, pricing.quote_text(model, 100, 500))
     monkeypatch.setattr(x402_payments, "ENABLED", True)
     monkeypatch.setattr(x402_payments, "NETWORK", "eip155:8453")
     monkeypatch.setattr(x402_payments, "USDC", usdc)
@@ -265,6 +266,7 @@ async def test_x402_authorization_cannot_open_multiple_jobs_under_race(pg, monke
         asset=usdc,
         pay_to=treasury,
         amount=str(maximum),
+        extra=x402_payments.pricing_terms(),
     )
 
     results = await asyncio.gather(
@@ -276,6 +278,7 @@ async def test_x402_authorization_cannot_open_multiple_jobs_under_race(pg, monke
                 str(uuid.uuid4()),
                 payment_payload=SimpleNamespace(
                     payload={"permit2Authorization": {"from": payer, "nonce": "0" * index + "12345"}},
+                    accepted=SimpleNamespace(extra=x402_payments.pricing_terms()),
                 ),
                 payment_requirements=requirements,
             )
@@ -294,20 +297,22 @@ async def test_x402_settlement_attempt_is_claimed_once_under_race(pg, monkeypatc
     treasury = "0x3333333333333333333333333333333333333333"
     model = "gpt-oss-120b"
     job_id = str(uuid.uuid4())
-    maximum = pricing.quote_text(model, 100, 500)
-    actual = pricing.quote_text(model, 100, 50)
+    maximum = max(x402_payments.MIN_CHARGE_MICRO, pricing.quote_text(model, 100, 500))
+    actual = max(x402_payments.MIN_CHARGE_MICRO, pricing.quote_text(model, 100, 50))
     monkeypatch.setattr(x402_payments, "ENABLED", True)
     monkeypatch.setattr(x402_payments, "NETWORK", "eip155:8453")
     monkeypatch.setattr(x402_payments, "USDC", usdc)
     monkeypatch.setattr(x402_payments, "PAY_TO", treasury)
     payload = SimpleNamespace(
         payload={"permit2Authorization": {"from": payer, "nonce": "67890"}},
+        accepted=SimpleNamespace(extra=x402_payments.pricing_terms()),
     )
     requirements = SimpleNamespace(
         network="eip155:8453",
         asset=usdc,
         pay_to=treasury,
         amount=str(maximum),
+        extra=x402_payments.pricing_terms(),
     )
     assert (
         await credits.authorize_x402_request(
@@ -344,6 +349,51 @@ async def test_x402_settlement_attempt_is_claimed_once_under_race(pg, monkeypatc
             )
         ).one()
     assert row == ("settling", actual, 1)
+
+
+@pytest.mark.asyncio
+async def test_x402_minimum_terminal_snapshot_and_duplicate_on_postgres(pg, monkeypatch):
+    from grid_api.services.settlement.aggregate import _funded_job
+
+    payer = "0x1111111111111111111111111111111111111111"
+    usdc = "0x2222222222222222222222222222222222222222"
+    treasury = "0x3333333333333333333333333333333333333333"
+    model, job, worker = "gpt-oss-120b", str(uuid.uuid4()), uuid.uuid4()
+    owner = await _seed_account()
+    await credits.credit(owner, 5000, "seed", ref=f"minimum-seed:{job}")
+    for name, value in {"ENABLED": True, "NETWORK": "eip155:8453", "USDC": usdc, "PAY_TO": treasury}.items():
+        monkeypatch.setattr(x402_payments, name, value)
+    async with await database.new_session() as session:
+        await session.execute(sa.insert(workers_t).values(
+            id=worker, account_id=owner, name=f"minimum-{job}", type="text", wallet=payer,
+            models=[model], capabilities={}, first_seen=datetime.now(UTC), jobs_completed=0, den_earned=0,
+        ))
+        await session.commit()
+    payload = SimpleNamespace(
+        payload={"permit2Authorization": {"from": payer, "nonce": "98765"}},
+        accepted=SimpleNamespace(extra=x402_payments.pricing_terms()),
+    )
+    requirements = SimpleNamespace(
+        network="eip155:8453", asset=usdc, pay_to=treasury, amount="50000", extra=x402_payments.pricing_terms(),
+    )
+    authorized = await credits.authorize_x402_request(
+        model, 100, 500, job, payment_payload=payload, payment_requirements=requirements,
+    )
+    assert authorized["ok"] and authorized["reserved"] == 1000
+    monkeypatch.setattr(x402_payments, "MIN_CHARGE_MICRO", 9_000_000)
+    event = {
+        "job_id": job, "worker_id": str(worker), "wallet": payer, "model": model,
+        "job_type": "text", "den": 25.0, "output_units": 19,
+        "prompt_hash": None, "result_hash": None,
+    }
+    assert await credits.record_and_settle(ledger_values=event, completion_tokens=19) == "settled"
+    await credits.record_and_settle(ledger_values=event, completion_tokens=19)
+    assert await credits.reservation_actual_micro(job) == 1000
+    assert await credits.get_balance(owner) == 5000
+    async with await database.new_session() as session:
+        assert await session.scalar(sa.select(x402_payments_t.c.minimum_charge_micro).where(x402_payments_t.c.job_id == job)) == 1000
+        assert await session.scalar(sa.select(sa.func.count()).select_from(ledger_t).where(ledger_t.c.job_id == uuid.UUID(job))) == 1
+        assert await session.scalar(sa.select(sa.func.count()).select_from(ledger_t).where(ledger_t.c.job_id == uuid.UUID(job), _funded_job())) == 0
 
 
 @pytest.mark.asyncio

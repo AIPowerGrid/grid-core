@@ -21,6 +21,7 @@ from sqlalchemy.pool import StaticPool
 from x402.http import (
     decode_payment_required_header,
     decode_payment_response_header,
+    decode_payment_signature_header,
     encode_payment_signature_header,
 )
 from x402.http.middleware.fastapi import set_settlement_overrides
@@ -70,7 +71,7 @@ async def runtime(monkeypatch):
     }.items():
         monkeypatch.setattr(x402_payments, name, value)
     monkeypatch.setattr(openai.limiter, "enabled", False)
-    observed = SimpleNamespace(verify_calls=0, settlements=[], dispatches=0, valid=True, settle_mode="success")
+    observed = SimpleNamespace(verify_calls=0, settlements=[], dispatches=0, valid=True, settle_mode="success", worker_error=False)
 
     class Facilitator:
         def get_supported(self):
@@ -100,7 +101,17 @@ async def runtime(monkeypatch):
             assert payload.accepted.amount == "50000"
             observed.settlements.append(int(requirements.amount))
             if observed.settle_mode == "timeout":
-                raise httpx.ReadTimeout("synthetic uncertain settlement")
+                raise httpx.ReadTimeout("synthetic-sensitive-facilitator-value")
+            if observed.settle_mode == "http401":
+                raise ValueError("Facilitator settle failed (401): synthetic-sensitive-facilitator-value")
+            if observed.settle_mode == "amount_too_low":
+                raise ValueError("Facilitator settle failed (400): " + json.dumps({
+                    "success": False,
+                    "errorReason": "amount_too_low",
+                    "errorMessage": "synthetic-sensitive-facilitator-value",
+                }))
+            if observed.settle_mode == "exception":
+                raise RuntimeError("synthetic-sensitive-facilitator-value")
             success = observed.settle_mode == "success"
             return SettleResponse(
                 success=success,
@@ -128,7 +139,10 @@ async def runtime(monkeypatch):
         if not authorized["ok"]:
             raise HTTPException(status_code=402, detail=authorized["reason"])
         observed.dispatches += 1
-        actual = pricing.quote_text(MODEL, 100, 50)
+        if observed.worker_error:
+            await credits.release_job(job)
+            raise HTTPException(status_code=503, detail="synthetic worker failed without output")
+        actual = max(x402_payments.MIN_CHARGE_MICRO, pricing.quote_text(MODEL, 100, 50))
         async with await database.new_session() as session:
             await session.execute(
                 sa.update(reservations)
@@ -164,6 +178,9 @@ async def challenge(client):
     assert requirement.amount == "50000"
     assert requirement.pay_to == TREASURY
     assert requirement.extra["facilitatorAddress"] == FACILITATOR
+    assert requirement.extra["minimumCharge"] == "1000"
+    assert requirement.extra["pricingPolicy"] == x402_payments.PRICING_POLICY
+    assert "$0.001 minimum" in required.resource.description
     payload = PaymentPayload(x402_version=2, accepted=requirement, payload={"permit2Authorization": {"from": PAYER, "nonce": "12345"}})
     return {"payment-signature": encode_payment_signature_header(payload)}
 
@@ -186,11 +203,12 @@ async def test_real_middleware_settles_only_actual_and_blocks_replay(runtime):
     assert response.json()["choices"][0]["message"]["content"] == "synthetic reply"
     settled = decode_payment_response_header(response.headers["payment-response"])
     assert settled.success and settled.transaction == TX
-    actual = pricing.quote_text(MODEL, 100, 50)
+    actual = max(x402_payments.MIN_CHARGE_MICRO, pricing.quote_text(MODEL, 100, 50))
     assert observed.settlements == [actual]
     assert actual < 50_000
     (row,) = await payment_rows()
     assert row["status"] == "reported"
+    assert row["minimum_charge_micro"] == actual == 1000
     assert await x402_payments.settled_amount(row["job_id"]) is None
     repeated = await client.post(x402_payments.ROUTE, json=body, headers=headers)
     assert repeated.status_code == 402
@@ -199,6 +217,39 @@ async def test_real_middleware_settles_only_actual_and_blocks_replay(runtime):
     async with await database.new_session() as session:
         assert (await session.execute(sa.select(sa.func.count()).select_from(accounts))).scalar() == 0
         assert (await session.execute(sa.select(sa.func.count()).select_from(credit_ledger))).scalar() == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terms", [{}, {"minimumCharge": "1"}, {"minimumCharge": "1000", "pricingPolicy": "old"}])
+async def test_real_middleware_rejects_undisclosed_or_changed_minimum_before_dispatch(runtime, terms):
+    client, observed = runtime
+    headers = await challenge(client)
+    payload = decode_payment_signature_header(headers["payment-signature"])
+    payload.accepted.extra = {**payload.accepted.extra, **terms}
+    if not terms:
+        payload.accepted.extra.pop("minimumCharge")
+    headers["payment-signature"] = encode_payment_signature_header(payload)
+    response = await client.post(x402_payments.ROUTE, json={"model": MODEL, "messages": []}, headers=headers)
+    assert response.status_code == 402
+    assert "fresh payment challenge" in response.text
+    assert observed.dispatches == 0 and observed.settlements == []
+    assert await payment_rows() == []
+
+
+@pytest.mark.asyncio
+async def test_failed_worker_never_charges_the_minimum(runtime):
+    client, observed = runtime
+    headers = await challenge(client)
+    observed.worker_error = True
+    response = await client.post(x402_payments.ROUTE, json={"model": MODEL, "messages": []}, headers=headers)
+    assert response.status_code == 503
+    assert observed.dispatches == 1 and observed.settlements == []
+    (payment,) = await payment_rows()
+    assert payment["status"] == "verified" and payment["attempts"] == 0
+    assert payment["settled_micro"] is None
+    async with await database.new_session() as session:
+        assert await session.scalar(sa.select(reservations.c.actual_micro)) == 0
+        assert await session.scalar(sa.select(sa.func.count()).select_from(credit_ledger)) == 0
 
 
 @pytest.mark.asyncio
@@ -222,8 +273,8 @@ async def test_real_middleware_rejects_without_dispatch_or_settlement(runtime, m
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["failure", "timeout"])
-async def test_real_middleware_ambiguous_settlement_stays_payout_ineligible(runtime, mode):
+@pytest.mark.parametrize("mode", ["failure", "timeout", "http401", "exception", "amount_too_low"])
+async def test_real_middleware_ambiguous_settlement_stays_payout_ineligible(runtime, mode, caplog):
     client, observed = runtime
     headers = await challenge(client)
     observed.settle_mode = mode
@@ -238,7 +289,19 @@ async def test_real_middleware_ambiguous_settlement_stays_payout_ineligible(runt
     )
     assert response.status_code == 402
     (row,) = await payment_rows()
-    assert row["status"] in {"settling", "manual_review"}
+    assert row["status"] == "manual_review"
+    if mode != "failure":
+        expected = {
+            "timeout": "facilitator_timeout",
+            "http401": "facilitator_http_401",
+            "exception": "facilitator_exception",
+            "amount_too_low": "facilitator_amount_too_low",
+        }[mode]
+        assert row["error"] == expected
+        receipt = decode_payment_response_header(response.headers["payment-response"])
+        assert not receipt.success and receipt.transaction == "" and receipt.error_reason == expected
+        assert "synthetic-sensitive-facilitator-value" not in caplog.text
+        assert "synthetic-sensitive-facilitator-value" not in str(response.headers)
     assert await x402_payments.settled_amount(row["job_id"]) is None
     await client.post(x402_payments.ROUTE, headers=headers, json={"model": MODEL, "messages": []})
     assert observed.dispatches == len(observed.settlements) == 1
@@ -252,6 +315,75 @@ async def test_real_middleware_ambiguous_settlement_stays_payout_ineligible(runt
     await x402_payments.flag_stale_settlements()
     (row,) = await payment_rows()
     assert row["status"] == "manual_review"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [200, 401, 403, 429, 500])
+async def test_settlement_guard_classifies_actual_sdk_http_failure(status, caplog):
+    from x402.http import HTTPFacilitatorClient
+    from x402.http.facilitator_client_base import FacilitatorConfig
+    from x402.schemas import PaymentRequirements
+
+    calls = []
+
+    def fail(request):
+        calls.append(request)
+        return httpx.Response(status, json={"error": "synthetic-sensitive-facilitator-value"})
+
+    requirements = PaymentRequirements(
+        scheme="upto", network="eip155:84532", asset=USDC,
+        amount="7", pay_to=TREASURY, max_timeout_seconds=300,
+    )
+    payload = PaymentPayload(x402_version=2, accepted=requirements, payload={})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(fail)) as transport:
+        client = HTTPFacilitatorClient(FacilitatorConfig(url="https://facilitator.invalid", http_client=transport))
+        result = await x402_payments._SettlementGuard(client).settle(payload, requirements)
+    assert len(calls) == 1 and calls[0].url.path == "/settle"
+    assert not result.success and result.transaction == ""
+    assert result.error_reason == ("facilitator_invalid_response" if status == 200 else f"facilitator_http_{status}")
+    assert "synthetic-sensitive-facilitator-value" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_settlement_guard_does_not_swallow_cancellation():
+    import asyncio
+
+    class Canceled:
+        async def settle(self, payload, requirements):
+            raise asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await x402_payments._SettlementGuard(Canceled()).settle(None, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body,expected", [
+    ({"success": False, "errorReason": "amount_too_low"}, "facilitator_amount_too_low"),
+    ({"success": False, "errorReason": "synthetic-sensitive-facilitator-value"}, "facilitator_http_400"),
+    ({"success": True, "errorReason": "amount_too_low"}, "facilitator_http_400"),
+    (["amount_too_low"], "facilitator_http_400"),
+    ("invalid JSON", "facilitator_http_400"),
+    ({"success": False, "errorReason": "amount_too_low", "padding": "x" * 20_000}, "facilitator_http_400"),
+])
+async def test_actual_sdk_minimum_rejection_is_bounded_and_allowlisted(body, expected, caplog):
+    from x402.http import HTTPFacilitatorClient
+    from x402.http.facilitator_client_base import FacilitatorConfig
+    from x402.schemas import PaymentRequirements
+
+    def fail(request):
+        return httpx.Response(400, content=body if isinstance(body, str) else json.dumps(body))
+
+    requirements = PaymentRequirements(
+        scheme="upto", network="eip155:8453", asset=USDC,
+        amount="7", pay_to=TREASURY, max_timeout_seconds=300,
+    )
+    payload = PaymentPayload(x402_version=2, accepted=requirements, payload={})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(fail)) as transport:
+        client = HTTPFacilitatorClient(FacilitatorConfig(url="https://facilitator.invalid", http_client=transport))
+        result = await x402_payments._SettlementGuard(client).settle(payload, requirements)
+    assert not result.success and result.transaction == ""
+    assert result.error_reason == expected
+    assert "synthetic-sensitive-facilitator-value" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -298,7 +430,7 @@ async def test_real_middleware_lost_receipt_stays_ineligible_without_secret_logg
     assert response.status_code == 402
     (row,) = await payment_rows()
     assert row["status"] == "settling" and row["attempts"] == 1
-    assert row["settled_micro"] == pricing.quote_text(MODEL, 100, 50)
+    assert row["settled_micro"] == max(x402_payments.MIN_CHARGE_MICRO, pricing.quote_text(MODEL, 100, 50))
     assert row["tx_hash"] is None
     repeated = await client.post(x402_payments.ROUTE, headers=headers, json={"model": MODEL, "messages": []})
     assert repeated.status_code == 402
@@ -352,6 +484,8 @@ async def test_preflight_is_read_only_and_rejects_network_mismatches(runtime, mo
             "scheme": "upto",
             "asset": "USDC",
             "max_authorized_micro": 50_000,
+            "minimum_charge_micro": 1000,
+            "pricing_policy": "x402-minimum-2026-10-15-v1",
             "receipt_rpc_chain": 84532,
             "facilitator_support": True,
             "payments_sent": 0,

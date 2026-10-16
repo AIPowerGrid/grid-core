@@ -138,15 +138,20 @@ ETH transfer button.
 ## x402 agent payments
 
 `POST /v1/x402/chat/completions` is the accountless agent rail. It is
-code-complete but default-off. The client receives an x402 `402 Payment
+implemented but default-off and not mainnet-qualified. The October 15 private
+real-worker canary completed inference but failed settlement; it did not
+establish paid end-to-end operation. The client receives an x402 `402 Payment
 Required`, authorizes up to `GRID_X402_MAX_AUTH_MICRO` in Base USDC, and retries
 with the payment signature. Core then:
 
 1. verifies the authorization through the configured facilitator;
 2. writes an external reservation plus `grid_x402_payments` receipt before
    dispatch;
-3. rejects requests whose maximum grid quote exceeds the signed ceiling;
-4. settles worker-side usage from grid-counted prompt/completion tokens;
+3. requires the accepted `extra.minimumCharge` and `extra.pricingPolicy` to
+   match the current disclosed terms, then rejects requests whose maximum
+   usage quote or minimum exceeds the signed ceiling;
+4. settles grid-counted prompt/completion usage subject to the minimum frozen
+   in that job's verified payment before dispatch;
 5. durably moves the receipt to `settling` with that exact amount before asking
    the facilitator to touch chain;
 6. asks the facilitator to transfer only that actual amount; and
@@ -158,6 +163,44 @@ No Grid account, API key, free allowance, promotional grant, or purchased
 balance is created. An authorized-but-unsettled x402 job is excluded from worker
 payout aggregation. This prevents a valid signature followed by failed
 on-chain settlement from creating a payable worker reward.
+
+The candidate facilitator guard converts settlement HTTP/transport/SDK
+exceptions into bounded failure categories, preserving the official SDK's
+job-bound failure hook. A failed attempt enters `manual_review` immediately;
+crash/cancellation still uses stale reconciliation. No error body, credential
+or authenticated URL is retained by that guard. It never retries or declares
+payment success. The guard recognizes only the explicitly allowlisted
+`amount_too_low` code from a bounded JSON failure body; arbitrary upstream
+messages/codes remain generic HTTP failures.
+
+The October 15 no-spend provider checks reproduce Coinbase's settlement floor:
+7 and 999 micro-USDC return `amount_too_low`; 1,000 and 1,001 pass that check
+and reject the deliberately expired, zero-signature authorization instead.
+The real canary's trusted 7-micro usage is below that floor. This establishes
+a provider constraint, not a successful signed settlement. The original
+canary response was not retained, so no claim is made about its exact body.
+
+The owner approved a **USD 0.001 minimum per successful x402 request**. The
+candidate challenge discloses it before signing, both in its description and
+as `extra.minimumCharge="1000"` / `extra.pricingPolicy="x402-minimum-2026-10-15-v1"`.
+The payer must echo those terms; old or modified terms reject before any hold
+or dispatch. Reservation and payment snapshots commit atomically. The final
+charge is `max(grid-counted usage, frozen minimum)`, never more than the
+original hold or signed authorization. Larger jobs retain usage pricing;
+failed jobs charge zero. No account credit is created, drawn or changed.
+
+Apply migration `0046` before deploying this candidate, even dark. Historical
+payments receive minimum zero and keep their recorded amounts; successful
+completion and stale-hold recovery use the stored minimum even after a flag,
+price-book or policy change. Database constraints reject negative/over-ceiling
+minimums and below-minimum attempted settlements. Downgrade refuses nonzero
+pricing history, including unpaid/failed jobs. Rollback keeps both the column
+and minimum-aware terminal/recovery writers until jobs drain.
+
+This is an x402-only tariff: ordinary prepaid-credit prices and all existing
+frontends are unchanged. Public x402 remains off pending exact-source CI,
+production restore/migration and a freshly approved bounded real-worker
+payment/replay proof. Pricing approval alone enables no endpoint or spending.
 
 The first route is deliberately non-streaming and text-only. x402's current
 FastAPI middleware buffers the full response before settlement; advertising

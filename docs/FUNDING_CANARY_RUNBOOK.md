@@ -183,7 +183,9 @@ Evidence required:
 
 1. Initial request returns a valid x402 payment requirement.
 2. Paid retry produces one non-streaming text completion.
-3. Reservation records grid-counted actual usage below the authorization.
+3. Reservation records max(grid-counted usage, the disclosed frozen minimum),
+   within the authorization. Keep raw token/rate evidence distinct from the
+   minimum-adjusted charge; do not label the floor as additional token usage.
 4. Payment transitions `verified -> settling -> reported -> settled`.
 5. Base receipt proves canonical USDC from payer to recipient for exactly
    `settled_micro`.
@@ -315,6 +317,72 @@ Replaying the canonical nonce spelling returned 402 with still one job and
 one settlement attempt. The remaining allowance was again revoked and verified
 as zero. Both runs retain the same synthetic-worker/ASGI qualification boundary;
 neither is a mainnet or deployed-GPU claim.
+
+### Mainnet minimum discovery: October 15, 2026
+
+The owner-approved private real-worker canary on `607d1c03` completed
+`gpt-oss-120b` inference with trusted usage of 7 micro-USDC, but the paid
+response was 402 with one settlement attempt and no transaction hash.
+No successful settlement/replay proof is claimed. The original facilitator
+error body was not retained. Production's existing timeout monitor later
+moved this row from `settling` to `manual_review`; read-only reconciliation
+still finds zero credit-ledger movements and zero payout-eligible jobs.
+
+Subsequent authenticated provider checks used a dummy payer, an already
+expired deadline of 1 and a 65-byte all-zero signature. No private key was
+loaded, usable authorization created, Grid job dispatched or money sent:
+
+| Actual amount (micro-USDC) | HTTP | Provider error |
+| --- | --- | --- |
+| 7 | 400 | `amount_too_low` |
+| 999 | 400 | `amount_too_low` |
+| 1000 | 400 | `invalid_exact_evm_permit2_payload_deadline` |
+| 1001 | 400 | `invalid_exact_evm_permit2_payload_deadline` |
+
+Thus the real usage amount hits a reproducible USD 0.001 provider floor.
+Passing the floor is not signature, transfer or receipt qualification; the
+expired controls intentionally cannot pay. The diagnostic candidate preserves
+the bounded `amount_too_low` category and immediate job-bound failure review.
+190 focused local tests pass, including actual SDK HTTP-client controls with
+synthetic responses; these are not a second paid production canary.
+
+Public x402 remains off and the dedicated payer's last independently checked
+balance is USD 0.05 USDC with Permit2 allowance zero. No automatic retry or
+pricing change follows. Decide explicitly between disclosed x402 minimum
+pricing and preserving exact usage through another payment design; then test
+the reviewed implementation with a separately approved fresh capped payment.
+
+### Approved minimum candidate
+
+The owner subsequently approved a disclosed USD 0.001 minimum per successful
+x402 call, without changing ordinary prepaid pricing. The candidate challenge
+publishes `minimumCharge="1000"` and policy `x402-minimum-2026-10-15-v1` plus
+a plain-language description before signing. Missing/changed accepted terms
+reject before reservation or dispatch. Authorization must cover both the
+maximum usage quote and minimum. Migration `0046` stores the minimum with the
+verified payment in the reservation transaction; history defaults to zero.
+
+Successful completion and stale-hold recovery charge max(trusted usage,
+frozen minimum), within the original hold. Failed jobs release at zero;
+ordinary credits do not use the new snapshot. A later process setting cannot
+raise an existing job's minimum. SQL bounds both the minimum and attempted
+settlement; rollback retains pricing-aware writers and nonzero snapshot history.
+Independent canonical-USDC receipt proof remains mandatory for payout eligibility.
+
+The focused SQLite/HTTP tests and real PostgreSQL 16 races cover disclosure,
+missing/changed terms, 999/1000 ceiling boundaries, larger usage, unchanged
+credit balances, failed work, frozen completion/recovery, duplicate terminals
+and payout exclusion. A fresh PG16 0045-to-0046 upgrade/schema check and SQLite
+roundtrip prove the old 7-micro fixture retains minimum zero. The SQLite
+downgrade guard refuses nonzero pricing history, including an unpaid job.
+
+Authenticated provider controls accept the candidate's two new extra fields
+through schema validation and reject the intentionally expired zero signature
+instead, for verify and 1,000-micro settlement. They use no wallet key or valid
+authorization and do not prove payment. No new paid request, production schema
+change or public enablement follows from the pricing approval. Exact candidate
+CI, production restore/migration, supervised deployment and a freshly approved
+capped real-worker settlement/replay test remain required.
 
 ## 6. Holds
 

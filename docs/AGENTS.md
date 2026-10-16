@@ -12,7 +12,14 @@ for humans and agents.
 - `architecture-migration/` - Flask-to-FastAPI/Redis-stream/worker migration
   planning.
 - `BLOCKCHAIN_INTEGRATION.md` - legacy/on-chain integration guide.
-- `FUNDING_RAIL.md` - Base asset acceptance and x402 architecture.
+- `FUNDING_RAIL.md` - Base asset acceptance and x402 architecture. The candidate
+  facilitator guard retains bounded settlement error categories without
+  automatic retry; the failed real-worker mainnet attempt is not qualification.
+  Expired zero-signature controls reproduce a 1,000-micro-USDC provider floor,
+  not successful payment. The owner subsequently approved USD 0.001 minimum
+  pricing for new successful x402 requests only; `0046` snapshots it without
+  repricing history. Deployment/canary/public admission remain separate, and
+  ordinary credit prices stay unchanged.
 - `FUNDING_CANARY_RUNBOOK.md` - dark deploy, real-money canary evidence, and
   rollback gates. Its October15 x402 credential checkpoint proves authenticated
   read-only facilitator/RPC discovery and separately approved old-key disablement,
