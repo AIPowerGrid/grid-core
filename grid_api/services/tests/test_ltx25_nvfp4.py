@@ -115,7 +115,7 @@ def test_execution_and_sources_cannot_fall_back_to_bf16(image, source_mode, fram
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("frames,cost", [(33, 27_500), (81, 67_500), (337, 280_834)])
+@pytest.mark.parametrize("frames,cost", [(33, 13_750), (81, 33_750), (337, 140_417)])
 async def test_exact_frame_quote_stays_in_distinct_nvfp4_identity(monkeypatch, frames, cost):
     monkeypatch.setattr(credits, "account_credit_summary", AsyncMock(return_value={
         "paid": {"balance_micro": 1_000_000}, "free": {"active": False, "remaining_micro": 0},

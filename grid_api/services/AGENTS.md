@@ -7,11 +7,12 @@ content sanitization, and reward settlement.
 
 ## Ownership
 
-- The owner-approved credit-first tariff is USD 0.020 per effective output
-  second for distinct `LTX-2.5 Distilled BF16` and `LTX-2.5 Distilled NVFP4`
-  identities in candidate book `2026-10-13-a`. Production still has the prior
-  `2026-10-12-a` book; NVFP4 startup copies prepare only the owner-approved
-  bounded canary. Inventory never opens async or legacy waiting admission.
+- Candidate book `2026-10-15-a` lowers `LTX-2.5 Distilled NVFP4` to USD 0.010
+  per effective output second; `LTX-2.5 Distilled BF16` stays USD 0.020.
+  This owner-requested budget tariff is not a measured runtime-cost comparison.
+  Quotes, new holds and the public catalog share the same book; accepted holds
+  retain their original amount. This source change is not deployment evidence.
+  Inventory never opens async or legacy waiting admission.
   Dev and
   Ingredients remain unpriced. Pricing never grants admission, validates a
   worker's model claim or changes rewards. Exact frames/FPS determine the hold;

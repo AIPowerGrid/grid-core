@@ -95,6 +95,8 @@ async def test_explicit_public_nvfp4_rollout_keeps_one_hold_and_recovery_after_c
     row = await stored(job_id)
     assert row["payload"]["recipe_spec"]["model"]["inputs"]["unet_name"].endswith("-nvfp4.safetensors")
     balance = await credits.get_balance(aid)
+    assert first.json()["reserved_micro"] == 33_750
+    assert balance == OPENING - 33_750
     settings.media_async_nvfp4_enabled = False
     replay = await post(api, key=request_key, body=body)
     assert replay.status_code == 202 and replay.json()["job_id"] == job_id
@@ -411,28 +413,41 @@ async def test_only_owner_with_inference_scope_can_recover(api):
 
 
 @pytest.mark.asyncio
-async def test_completed_result_recovers_after_admission_rollback(api):
-    client, aid, credential, settings, *_ = api
+@pytest.mark.parametrize("model,cost", [
+    (MODEL, 67_500), ("LTX-2.5 Distilled NVFP4", 33_750),
+])
+async def test_completed_result_recovers_after_admission_rollback(api, monkeypatch, model, cost):
+    from grid_api.services import pricing
+
+    client, aid, credential, settings, _quota, available = api
+    settings.media_async_nvfp4_enabled = True
+    available.return_value = [model]
     key = uuid4()
-    response = await post(api, key=key, body={"seed": 0})
+    body = {"model": model, "seed": 0}
+    response = await post(api, key=key, body=body)
+    assert response.status_code == 202, response.text
+    assert response.json()["reserved_micro"] == cost
     row = await stored(response.json()["job_id"])
+    # A changed book must never reprice an accepted fixed-cost video hold.
+    monkeypatch.setitem(pricing.PRICING, model.lower(), pricing.ModelPrice(0, 0, video_per_second=0.03))
     worker = uuid4()
     token = str(uuid4())
     assert await media_jobs.claim_execution(job_id=row["job_id"], payload=row["payload"],
-        route_models=row["route_models"], preferred_worker="", selected_model=MODEL,
+        route_models=row["route_models"], preferred_worker="", selected_model=model,
         worker_id=worker, job_type="video", execution_token=token) == "claimed"
     result = {"media": [{"url": "https://media.invalid/video.mp4", "key": "synthetic/video.mp4",
-                         "sha256": "a" * 64, "seed": 0}], "model": MODEL,
+                         "sha256": "a" * 64, "seed": 0}], "model": model,
               "worker": "synthetic-worker", "gen_time": 1.0, "recipe_root": row["payload"]["recipe_root"]}
-    values = dict(job_id=row["job_id"], worker_id=str(worker), wallet="", model=MODEL,
+    values = dict(job_id=row["job_id"], worker_id=str(worker), wallet="", model=model,
                   job_type="video", den=1.0, output_units=81, prompt_hash="b" * 64, result_hash="c" * 64)
     assert await credits.record_and_settle(ledger_values=values, exact=True, media_result=result,
                                           media_execution_token=token) == "settled"
     settings.media_async_enabled = False
     recovered = await client.get(response.headers["location"], headers={"apikey": credential})
     assert recovered.json()["state"] == "completed" and recovered.json()["result"] == result
-    assert recovered.json()["actual_micro"] == 67_500
-    replay = await post(api, key=key, body={"seed": 0})
+    assert recovered.json()["actual_micro"] == cost
+    assert await credits.get_balance(aid) == OPENING - cost
+    replay = await post(api, key=key, body=body)
     assert replay.status_code == 200 and replay.json()["result"] == result
     assert await counts() == (1, 1, 1)
 
