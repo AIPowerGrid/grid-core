@@ -7,6 +7,11 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Ownership
 
+- `X402_MINIMUM_DARK_2026_10_16.md` - immutable `f72ea937` / `0046`
+  backup/restore, drained cutover and independent postflight. Public x402 stays
+  off; the existing NVFP4 rollout, charging, payment history and timers are
+  preserved. No new payment or paid inference was sent by this deployment.
+
 - `media_codec_runtime.py`, `media-codecs.lock.json`,
   `media-codecs-jammy.sources`, `test_media_codec_runtime.py` and
   `MEDIA_CODEC_RUNTIME.md` own the separate signed-source, static codec
@@ -97,11 +102,13 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
-- The owner-approved x402-only USD 0.001 minimum is a candidate, not production
-  activation. Apply `0046` before starting its release, retain old receipts with
+- The owner-approved x402-only USD 0.001 minimum is deployed dark at `f72ea937`
+  / `0046`, not publicly activated. Apply `0046` before starting its release,
+  retain old receipts with
   zero minimum, and preserve minimum-aware completion/recovery on rollback.
-  CI plus a fresh production restore/migration proof precede deployment; a
-  separately capped real-worker payment/replay test precedes public admission.
+  Exact-tree CI and a fresh production restore/migration proof passed; a
+  separately capped real-worker payment/replay test still precedes public
+  admission.
   The prior `607d1c03` / `0045` deployment record remains historical evidence.
 
 - Public NVFP4 additionally requires `MEDIA_ASYNC_NVFP4_ENABLED=1` after
