@@ -5,6 +5,18 @@
 
 ## Status
 
+### NVFP4 Budget Tariff Candidate - 2026-10-15 Eastern
+
+The owner requested cheaper NVFP4 pricing after its public rollout. Candidate
+book `2026-10-15-a` prices Distilled NVFP4 at USD 0.010 per effective output
+second, half the unchanged BF16 USD 0.020 rate. A ten-second NVFP4 output is
+USD 0.10; exact frame/FPS durations round upward to an integer micro-USD.
+The public catalog, credit estimate and new reservation use the same tariff.
+Accepted holds and historical charges keep their original amounts. Worker den
+weights, admission gates and clip limits are unchanged. This is a commercial
+decision, not a claim of measured speed, cost or fidelity parity. This candidate
+is not yet deployment proof; the dated rollout records below are historical.
+
 ### Current Dark Production - 2026-10-14 UTC
 
 Core4e9864c8/0045 is deployed after exact-source PG16 CI, production restore
