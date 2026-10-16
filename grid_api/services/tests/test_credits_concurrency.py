@@ -25,10 +25,10 @@ from grid_api import database
 from grid_api.services import credits, deposits, identities, pricing, x402_payments
 from grid_api.v2.schema import accounts as accounts_t
 from grid_api.v2.schema import deposits as deposits_t
-from grid_api.v2.schema import metadata as v2_metadata
-from grid_api.v2.schema import x402_payments as x402_payments_t
 from grid_api.v2.schema import ledger as ledger_t
+from grid_api.v2.schema import metadata as v2_metadata
 from grid_api.v2.schema import reservations as reservations_t
+from grid_api.v2.schema import x402_payments as x402_payments_t
 
 
 async def _seed_account() -> uuid.UUID:
@@ -260,14 +260,6 @@ async def test_x402_authorization_cannot_open_multiple_jobs_under_race(pg, monke
     monkeypatch.setattr(x402_payments, "NETWORK", "eip155:8453")
     monkeypatch.setattr(x402_payments, "USDC", usdc)
     monkeypatch.setattr(x402_payments, "PAY_TO", treasury)
-    payload = SimpleNamespace(
-        payload={
-            "permit2Authorization": {
-                "from": payer,
-                "nonce": "same-signed-permit",
-            },
-        },
-    )
     requirements = SimpleNamespace(
         network="eip155:8453",
         asset=usdc,
@@ -282,10 +274,12 @@ async def test_x402_authorization_cannot_open_multiple_jobs_under_race(pg, monke
                 100,
                 500,
                 str(uuid.uuid4()),
-                payment_payload=payload,
+                payment_payload=SimpleNamespace(
+                    payload={"permit2Authorization": {"from": payer, "nonce": "0" * index + "12345"}},
+                ),
                 payment_requirements=requirements,
             )
-            for _ in range(20)
+            for index in range(20)
         ],
     )
 
@@ -307,7 +301,7 @@ async def test_x402_settlement_attempt_is_claimed_once_under_race(pg, monkeypatc
     monkeypatch.setattr(x402_payments, "USDC", usdc)
     monkeypatch.setattr(x402_payments, "PAY_TO", treasury)
     payload = SimpleNamespace(
-        payload={"permit2Authorization": {"from": payer, "nonce": "one-attempt"}},
+        payload={"permit2Authorization": {"from": payer, "nonce": "67890"}},
     )
     requirements = SimpleNamespace(
         network="eip155:8453",

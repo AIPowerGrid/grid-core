@@ -273,7 +273,8 @@ content sanitization, and reward settlement.
   `deposits.py` (atomic Base funding receipts from verified account wallets
   plus USDC, bounded AIPG, and conversion-gated ETH claims),
   `x402_payments.py` (default-off accountless
-  Base USDC authorization and settlement receipts), `model_registry.py`
+  Base USDC authorization and settlement receipts, plus the read-only
+  `--preflight` operator check), `model_registry.py`
   (ModelVault sync).
 - `funding_lineage.py` is the offline migration-0042 opening reconciler.
   Preview replays deposit-bound history, debits, refunds and paired merges;
@@ -765,6 +766,16 @@ content sanitization, and reward settlement.
   Ambiguous attempts go to `manual_review`. The initial route is Base USDC,
   `upto`, text-only, and non-streaming because the upstream middleware buffers
   the response before settlement.
+  Authorization identity must canonicalize the bounded decimal Permit2 nonce
+  as uint256 before hashing: JSON leading-zero spellings sign the same integer
+  and must never create independent reservations. Reject nondecimal, oversized
+  and out-of-range values. Ordinary canonical nonce IDs stay unchanged.
+  The explicit `--preflight` action checks configuration even while disabled,
+  canonical token/receipt-chain agreement, RPC chain ID and facilitator support
+  without SQL, signing, settlement or flag changes. Use `GRID_BASE_RPC` for the
+  receipt verifier; isolated Sepolia configuration must never replace the
+  production deposit verifier's chain/token. Preflight errors and settlement
+  persistence logs expose only bounded error types and opaque job IDs.
 - Media billing reserves exact deterministic cost before dispatch and refunds on
   non-running paths; text billing reserves max cost and reconciles against trusted
   usage.
@@ -1012,6 +1023,18 @@ content sanitization, and reward settlement.
   over a newer cached block.
 
 ## Verification
+
+- `tests/test_x402_http_runtime.py` exercises the pinned official SDK and
+  production FastAPI route/middleware with synthetic facilitator and worker
+  dependencies: challenge, exact-usage override, replay/stream/malformed input,
+  before-attempt DB failure, lost receipt, payout exclusion and safe logging.
+  It also checks dark read-only preflight, chain/token mismatches and CLI
+  action/error contracts. These tests do not establish a signed chain payment
+  or real GPU completion; keep that distinction in the funding canary runbook.
+  `tests/test_credits_concurrency.py -k x402` separately requires a disposable
+  PostgreSQL database for duplicate-authorization and single-attempt races.
+  The duplicate race uses twenty textual aliases of one numeric nonce. Unit
+  cases pin leading-zero identity, uint256 bounds and invalid input rejection.
 
 - `tests/test_ltx25_appearance.py` checks the separate fixed Ingredients profile,
   nonanimated/unrotated PNG decoding, default-dark admission, committed roles/
