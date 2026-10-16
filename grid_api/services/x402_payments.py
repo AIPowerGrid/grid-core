@@ -6,7 +6,7 @@ The first production surface is deliberately narrow:
 
 * Base USDC only;
 * the x402 ``upto`` scheme, so the payer authorizes a fixed ceiling while the
-  Grid settles only trusted, grid-counted usage;
+  Grid settles trusted usage subject to its disclosed per-request minimum;
 * non-streaming OpenAI chat only, because the upstream FastAPI middleware
   buffers response bodies before settlement;
 * disabled unless every required operator setting is present.
@@ -75,6 +75,8 @@ STALE_SECONDS = max(
     int(os.getenv("GRID_X402_STALE_SECONDS", "900") or 900),
 )
 ROUTE = "/v1/x402/chat/completions"
+MIN_CHARGE_MICRO = 1_000
+PRICING_POLICY = "x402-minimum-2026-10-15-v1"
 
 
 def _now() -> datetime:
@@ -100,6 +102,8 @@ def validate_config(*, force: bool = False) -> None:
         raise RuntimeError("GRID_X402_NETWORK must be Base mainnet or Base Sepolia")
     _address(PAY_TO, "GRID_X402_PAY_TO/GRID_USDC_TREASURY")
     _address(USDC, "GRID_USDC_CONTRACT")
+    if MAX_AUTH_MICRO < MIN_CHARGE_MICRO:
+        raise RuntimeError("GRID_X402_MAX_AUTH_MICRO must cover the disclosed x402 minimum")
     parsed = urlparse(FACILITATOR_URL)
     if parsed.scheme != "https" or not parsed.netloc:
         raise RuntimeError("GRID_X402_FACILITATOR_URL must be an https URL")
@@ -209,6 +213,21 @@ def payment_payload_details(payload, requirements) -> dict:
     }
 
 
+def pricing_terms() -> dict[str, str]:
+    return {"minimumCharge": str(MIN_CHARGE_MICRO), "pricingPolicy": PRICING_POLICY}
+
+
+def verified_minimum(payload, requirements) -> int:
+    """Require the payer to echo the disclosed Core-owned pricing terms."""
+    expected = pricing_terms()
+    accepted = getattr(payload, "accepted", None)
+    for source in (accepted, requirements):
+        extra = getattr(source, "extra", None)
+        if not isinstance(extra, dict) or any(extra.get(key) != value for key, value in expected.items()):
+            raise ValueError("x402 pricing terms changed; obtain and accept a fresh payment challenge")
+    return MIN_CHARGE_MICRO
+
+
 async def insert_verified_in_session(session, *, job_id: str, details: dict) -> None:
     """Persist verified authorization in the caller's reservation transaction."""
     await session.execute(
@@ -220,6 +239,7 @@ async def insert_verified_in_session(session, *, job_id: str, details: dict) -> 
             asset=details["asset"],
             pay_to=details["pay_to"],
             authorized_micro=int(details["authorized_micro"]),
+            minimum_charge_micro=int(details["minimum_charge_micro"]),
             status="verified",
             created=_now(),
         ),
@@ -323,6 +343,7 @@ async def _before_settle(context) -> None:
                     payments_t.c.job_id == str(job_id),
                     payments_t.c.status == "verified",
                     amount <= payments_t.c.authorized_micro,
+                    amount >= payments_t.c.minimum_charge_micro,
                 ),
             )
             .values(
@@ -654,6 +675,8 @@ async def preflight() -> dict:
         "scheme": "upto",
         "asset": "USDC",
         "max_authorized_micro": MAX_AUTH_MICRO,
+        "minimum_charge_micro": MIN_CHARGE_MICRO,
+        "pricing_policy": PRICING_POLICY,
         "receipt_rpc_chain": chain_id,
         "facilitator_support": True,
         "payments_sent": 0,
@@ -682,12 +705,12 @@ def build_runtime() -> X402Runtime:
             accepts=PaymentOption(
                 scheme="upto",
                 pay_to=PAY_TO,
-                price={"amount": str(MAX_AUTH_MICRO), "asset": USDC},
+                price={"amount": str(MAX_AUTH_MICRO), "asset": USDC, "extra": pricing_terms()},
                 network=NETWORK,
                 max_timeout_seconds=300,
             ),
             resource=ROUTE,
-            description="Non-streaming OpenAI-compatible Grid inference paid in Base USDC.",
+            description="Non-streaming Grid inference in Base USDC. Each successful request costs actual usage or a $0.001 minimum, whichever is higher.",
             mime_type="application/json",
             service_name="AI Power Grid",
             tags=["ai", "inference", "base", "usdc"],

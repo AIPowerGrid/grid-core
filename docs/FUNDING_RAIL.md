@@ -147,8 +147,11 @@ with the payment signature. Core then:
 1. verifies the authorization through the configured facilitator;
 2. writes an external reservation plus `grid_x402_payments` receipt before
    dispatch;
-3. rejects requests whose maximum grid quote exceeds the signed ceiling;
-4. settles worker-side usage from grid-counted prompt/completion tokens;
+3. requires the accepted `extra.minimumCharge` and `extra.pricingPolicy` to
+   match the current disclosed terms, then rejects requests whose maximum
+   usage quote or minimum exceeds the signed ceiling;
+4. settles grid-counted prompt/completion usage subject to the minimum frozen
+   in that job's verified payment before dispatch;
 5. durably moves the receipt to `settling` with that exact amount before asking
    the facilitator to touch chain;
 6. asks the facilitator to transfer only that actual amount; and
@@ -177,13 +180,27 @@ The real canary's trusted 7-micro usage is below that floor. This establishes
 a provider constraint, not a successful signed settlement. The original
 canary response was not retained, so no claim is made about its exact body.
 
-Do not silently round small calls up or alter prepaid-credit pricing. A
-disclosed x402-only minimum needs an owner-approved pricing policy, immutable
-per-job terms, ceiling enforcement and independent receipt/reward tests.
-Preserving exact sub-minimum usage instead needs another reviewed facilitator
-or a separately designed prepaid top-up rail. Neither policy is activated by
-this diagnostic fix. Public x402 remains off pending that decision and a fresh
-bounded paid canary.
+The owner approved a **USD 0.001 minimum per successful x402 request**. The
+candidate challenge discloses it before signing, both in its description and
+as `extra.minimumCharge="1000"` / `extra.pricingPolicy="x402-minimum-2026-10-15-v1"`.
+The payer must echo those terms; old or modified terms reject before any hold
+or dispatch. Reservation and payment snapshots commit atomically. The final
+charge is `max(grid-counted usage, frozen minimum)`, never more than the
+original hold or signed authorization. Larger jobs retain usage pricing;
+failed jobs charge zero. No account credit is created, drawn or changed.
+
+Apply migration `0046` before deploying this candidate, even dark. Historical
+payments receive minimum zero and keep their recorded amounts; successful
+completion and stale-hold recovery use the stored minimum even after a flag,
+price-book or policy change. Database constraints reject negative/over-ceiling
+minimums and below-minimum attempted settlements. Downgrade refuses nonzero
+pricing history, including unpaid/failed jobs. Rollback keeps both the column
+and minimum-aware terminal/recovery writers until jobs drain.
+
+This is an x402-only tariff: ordinary prepaid-credit prices and all existing
+frontends are unchanged. Public x402 remains off pending exact-source CI,
+production restore/migration and a freshly approved bounded real-worker
+payment/replay proof. Pricing approval alone enables no endpoint or spending.
 
 The first route is deliberately non-streaming and text-only. x402's current
 FastAPI middleware buffers the full response before settlement; advertising

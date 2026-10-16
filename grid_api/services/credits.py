@@ -928,6 +928,11 @@ async def authorize_x402_request(
             "reason": "x402 payment uses the wrong recipient",
         }
 
+    try:
+        details["minimum_charge_micro"] = x402_payments.verified_minimum(payment_payload, payment_requirements)
+    except ValueError as exc:
+        return {"ok": False, "reserved": 0, "status": "pricing_terms_required", "reason": str(exc)}
+
     input_rate, output_rate = _snapshot_rates(model)
     cost = _quote_snapshot(prompt_tokens, max_tokens, input_rate, output_rate, 0)
     if cost <= 0:
@@ -937,6 +942,7 @@ async def authorize_x402_request(
             "status": "invalid_price",
             "reason": "x402 requires a positive quoted amount",
         }
+    cost = max(cost, details["minimum_charge_micro"])
     if cost > int(details["authorized_micro"]):
         return {
             "ok": False,
@@ -1354,6 +1360,15 @@ async def open_reservation(job_id, account_id, model: str, reserved_micro: int, 
         )
 
 
+async def _x402_actual_in_session(session, job_id, actual: int) -> int:
+    from ..v2.schema import x402_payments as payments_t
+
+    minimum = await session.scalar(sa.select(payments_t.c.minimum_charge_micro).where(payments_t.c.job_id == str(job_id)))
+    if minimum is None:
+        raise RuntimeError("x402 terminal is missing its frozen payment terms")
+    return max(actual, int(minimum))
+
+
 async def settle_job(job_id, completion_tokens: int, *, status: str = "ok",
                      only_if_unstarted_media: bool = False,
                      media_execution_token: str | None = None) -> bool:
@@ -1398,7 +1413,8 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok",
                           reservations_t.c.input_per_mtok_micro,
                           reservations_t.c.output_per_mtok_micro,
                           reservations_t.c.discount_bps,
-                          reservations_t.c.service_id)
+                          reservations_t.c.service_id,
+                          reservations_t.c.billing_source)
                 .where(reservations_t.c.job_id == str(job_id))
             )).first()
             if not row:
@@ -1422,6 +1438,13 @@ async def settle_job(job_id, completion_tokens: int, *, status: str = "ok",
             promo_held = int(row[5] or 0)
             paid_held = reserved - free_held - promo_held
             service_id = row[9]
+
+            if row[10] == "x402":
+                actual = 0
+                if status == "ok":
+                    actual = _quote_snapshot(prompt_toks, completion_tokens, int(row[6]), int(row[7]), int(row[8] or 0))
+                    actual = min(reserved, await _x402_actual_in_session(s, job_id, actual))
+                await s.execute(sa.update(reservations_t).where(reservations_t.c.job_id == str(job_id)).values(actual_micro=actual))
 
             if aid and reserved > 0:
                 # Two pockets, never converted: the paid refund moves in THIS txn;
@@ -1705,6 +1728,8 @@ async def record_and_settle(*, ledger_values: dict, completion_tokens: int = 0,
                 else:
                     # Compatibility for reservations opened before migration 0015.
                     actual = pricing.quote_text(model, prompt_toks, int(completion_tokens or 0))
+                if billing_source == "x402":
+                    actual = await _x402_actual_in_session(s, job_id, actual)
                 if actual > reserved and billing_source == "x402":
                     _economic_alert(
                         "x402_settlement_under_authorized",

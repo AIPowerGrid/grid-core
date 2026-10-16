@@ -97,6 +97,13 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- The owner-approved x402-only USD 0.001 minimum is a candidate, not production
+  activation. Apply `0046` before starting its release, retain old receipts with
+  zero minimum, and preserve minimum-aware completion/recovery on rollback.
+  CI plus a fresh production restore/migration proof precede deployment; a
+  separately capped real-worker payment/replay test precedes public admission.
+  The prior `607d1c03` / `0045` deployment record remains historical evidence.
+
 - The owner approved the credit-first LTX-2.5 rollout on 2026-10-12.
   PR217 stops at 0045; do not pull the later x402/refund migration stack into
   this release. Distilled alone is priced at USD 0.020/output-second, with a
