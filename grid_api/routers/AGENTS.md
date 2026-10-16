@@ -35,7 +35,11 @@ transport, accounts, stats, health/metrics.
 - `images.py` - `POST /v1/images/generations` native image jobs.
 - `videos.py` - `POST /v1/videos/generations` native video jobs.
   Contract-backed LTX-2.5 candidates support exact 8n+1 frames and at most
-  sixteen ordered image pins, starting at frame zero. All images validate before
+  sixteen ordered image pins, starting at frame zero. The BF16 duration-extension candidate accepts up to721 frames
+  (30.041667seconds), with identical exact-frame quote and journal units; NVFP4
+  remains337 and standard Dev81. Recipe bounds still apply after the shared
+  request parser; no source-path activation or native capacity proof follows.
+  All images validate before
   quota/upload; multi-pin jobs additionally require `video-timeline` admission
   and the `recipe-image-bindings-v1` worker feature. Unsupported settings reject before quota/upload; the
   Distilled recipes are promoted for a bounded pilot; deployment/canary evidence
@@ -78,7 +82,9 @@ transport, accounts, stats, health/metrics.
   upload again. Recheck admission after staging and capture the earlier deadline
   for the credit transaction. Contract-backed legacy waiting/chat video cannot
   bypass pilot mode; public `open` is an explicit, separately reviewed choice.
-  Public async admission permits new Distilled BF16 jobs only. Other model
+  Public async admission defaults to new Distilled BF16 jobs only. The separate
+  `MEDIA_ASYNC_NVFP4_ENABLED` candidate admits only NVFP4 generated/opening-image
+  work, never uploaded audio/video, after its release qualification. Other model
   identities reject before private source decoding, while existing pilot
   intent replay and owner-only GET recovery remain available.
   Public-mode reference audio/video/image also passes the separate source

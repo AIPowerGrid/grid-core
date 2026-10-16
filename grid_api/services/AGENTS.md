@@ -17,7 +17,11 @@ content sanitization, and reward settlement.
   worker's model claim or changes rewards. Exact frames/FPS determine the hold;
   positive fractions round up to one micro-USD. No legacy model is relabeled.
 
-- Public async video admission is BF16-only for fresh requests. Callers must
+- Public async video admission defaults to BF16-only for fresh requests.
+  The separate default-off `MEDIA_ASYNC_NVFP4_ENABLED` candidate can additionally
+  admit NVFP4 text/opening-image work after independent native/release review.
+  It never admits Dev or NVFP4 source audio/video; private pilot behavior and
+  original receipt recovery remain unchanged. Callers must
   pass the requested model to the shared gate before private input processing
   and again before reserve; a model restriction never closes receipt recovery.
   Uploaded audio/video in public async mode has a separate default-off source
@@ -31,8 +35,12 @@ content sanitization, and reward settlement.
   graphs are snapshotted before reserve; steps/frames/duration and quote units
   must match dispatch. `recipes/qualification/` is not loaded at startup.
   Typed pins are metadata, not executable nodes: the resolver expands the
-  governed first-image scaffold into a fixed LTX guide chain. Distilled permits
-  up to 337 frames, dev 81, both at most sixteen ordered pins starting at zero.
+  governed first-image scaffold into a fixed LTX guide chain. The Distilled
+  BF16 candidate permits up to721 frames (30.041667seconds at24fps); NVFP4
+  retains337, standard dev81. The shared parser ceiling is721, but each recipe
+  independently enforces its smaller bound. Up to sixteen ordered pins start at
+  zero. Longer BF16 capacity still needs native execution and release proof;
+  extending the contract does not qualify every size/duration combination.
   Source lists and bindings must agree before reserve; multi-pin dispatch requires
   `recipe-image-bindings-v1`. Old workers requeue without receiving the graph;
   mismatch exhaustion releases the hold through the existing terminal path.

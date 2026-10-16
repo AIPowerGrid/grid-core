@@ -39,7 +39,9 @@ recursively, and inventory alone does not enable job admission.
   validated upstream, hash-bound to roles and worker slots, never ignored.
   Opening images remain explicit/optional; no appearance-only identity claim.
   New source admission and public worker advertisement remain disabled.
-- Distilled ceiling is 337 frames; standard dev remains 81. Ingredients dev is
+- Distilled BF16 candidate ceiling is721 frames; NVFP4 remains337 and standard
+  dev81. The BF16 extension needs native execution and release qualification;
+  it is not a claim of every workload fitting GPU memory. Ingredients dev is
   fixed to 768x448/121/40 steps/CFG2 with no opening pins. Its appearance PNG
   binds only into Core's Ingredients expansion; source audio is mandatory and
   motion video optional. It has its own model ID, default-dark admission and

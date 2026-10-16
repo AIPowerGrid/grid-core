@@ -92,6 +92,7 @@ class GridSettings(BaseSettings):
     # journaled holds when admission is disabled; never roll back its schema/fence.
     media_async_enabled: bool = False
     media_async_admission_mode: Literal["pilot", "open"] = "pilot"
+    media_async_nvfp4_enabled: bool = False
     typed_video_waiting_enabled: bool = False
     media_async_canary_accounts: list[UUID] = Field(default_factory=list, max_length=10, repr=False)
     media_async_canary_until: AwareDatetime | None = Field(default=None, repr=False)

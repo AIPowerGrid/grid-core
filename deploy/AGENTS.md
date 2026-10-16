@@ -97,6 +97,13 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
+- `MEDIA_ASYNC_NVFP4_ENABLED=0` is an independent default-off public rollout
+  candidate for qualified NVFP4 text/opening-image jobs. It does not enable
+  source modes, widen NVFP4 beyond337frames or bypass base admission, pricing,
+  worker capability and credit holds. Verify the exact serving native exporter,
+  worker-only credential lifetime, real execution and compatible client release
+  before enabling; closing it preserves original receipt replay and GET.
+
 - The owner approved the credit-first LTX-2.5 rollout on 2026-10-12.
   PR217 stops at 0045; do not pull the later x402/refund migration stack into
   this release. Distilled alone is priced at USD 0.020/output-second, with a

@@ -35,12 +35,15 @@ def registry(monkeypatch):
 
 
 @pytest.mark.parametrize("mode", ["t2v", "i2v"])
-def test_only_distinct_checkpoint_and_identity_change(mode):
+def test_only_checkpoint_identity_and_reviewed_duration_limits_differ(mode):
     path = ROOT / "recipes/qualification"
     bf16 = json.loads((path / f"ltx-2.5-distilled-bf16-{mode}-v1.json").read_text())
     nvfp4 = json.loads((path / f"ltx-2.5-distilled-nvfp4-{mode}-v1.json").read_text())
     expected = copy.deepcopy(bf16)
     expected["_grid"].update(name=f"{MODEL} {mode} v1", modelName=MODEL, requiredModels=[MODEL])
+    assert expected["_grid"]["videoContract"]["max_frames"] == 721
+    expected["_grid"]["videoContract"]["max_frames"] = 337
+    expected["_grid"]["clamps"]["frames"] = [9, 337]
     expected["model"]["inputs"]["unet_name"] = CHECKPOINT
     assert nvfp4 == expected
     assert validate_recipe(nvfp4) == []
@@ -82,11 +85,24 @@ def test_public_async_does_not_silently_open_typed_waiting(monkeypatch, model, e
 
 
 @pytest.mark.parametrize("model", [MODEL, "LTX-2.5 Dev BF16", "unknown-video"])
-def test_public_async_accepts_only_reviewed_bf16(model):
+def test_public_async_defaults_to_only_reviewed_bf16(model):
     settings = GridSettings(_env_file=None, media_async_enabled=True, media_async_admission_mode="open")
     with pytest.raises(HTTPException) as denied:
         generation_admission.require_async_video(settings, "00000000-0000-4000-8000-000000000001", model=model)
     assert denied.value.status_code == 503
+
+
+def test_public_nvfp4_requires_explicit_switch_and_never_opens_sources():
+    settings = GridSettings(_env_file=None, media_async_enabled=True, media_async_admission_mode="open",
+                            media_async_nvfp4_enabled=True, media_async_source_admission_mode="open")
+    account = "00000000-0000-4000-8000-000000000001"
+    assert generation_admission.require_async_video(settings, account, model=MODEL) is None
+    for model, has_source in [(MODEL, True), ("LTX-2.5 Dev BF16", False), ("LTX-2.3", False)]:
+        with pytest.raises(HTTPException):
+            generation_admission.require_async_video(settings, account, model=model, has_source=has_source)
+    settings.media_async_enabled = False
+    with pytest.raises(HTTPException):
+        generation_admission.require_async_video(settings, account, model=MODEL)
 
 
 @pytest.mark.parametrize("image", [False, True])
