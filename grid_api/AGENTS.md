@@ -56,6 +56,9 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   local file. Never infer this authority from `GRID_DIAMOND_ADDRESS`.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
+  The x402-minimum candidate additionally requires migration `0046` before
+  startup. Only new x402 payments freeze the disclosed USD 0.001 successful-call
+  minimum; ordinary prepaid charging and old zero-minimum receipts are unchanged.
 - **Async video:** `MEDIA_ASYNC_ENABLED=0` closes new async admission only.
   Admission defaults to `pilot`: enabling requires one to ten distinct private
   account UUIDs and an aware expiry no more than 24 hours ahead at startup.

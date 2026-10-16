@@ -861,6 +861,9 @@ x402_payments = sa.Table(
     sa.Column("asset", sa.String(64), nullable=False),
     sa.Column("pay_to", sa.String(64), nullable=False),
     sa.Column("authorized_micro", sa.BigInteger, nullable=False),
+    # Zero preserves pre-minimum history; new x402 jobs freeze disclosed terms.
+    sa.Column("minimum_charge_micro", sa.BigInteger, nullable=False,
+              server_default=sa.text("0"), default=0),
     sa.Column("settled_micro", sa.BigInteger, nullable=True),
     sa.Column("tx_hash", sa.String(80), nullable=True),
     sa.Column("status", sa.String(16), nullable=False, default="verified", index=True),
@@ -870,6 +873,10 @@ x402_payments = sa.Table(
     sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow, index=True),
     sa.Column("settled", sa.DateTime(timezone=True), nullable=True),
     sa.CheckConstraint("authorized_micro > 0", name="ck_grid_x402_positive_authorization"),
+    sa.CheckConstraint("minimum_charge_micro >= 0 AND minimum_charge_micro <= authorized_micro",
+                       name="ck_grid_x402_minimum_within_authorization"),
+    sa.CheckConstraint("settled_micro IS NULL OR settled_micro >= minimum_charge_micro",
+                       name="ck_grid_x402_settlement_covers_minimum"),
     sa.CheckConstraint(
         "settled_micro IS NULL OR settled_micro > 0",
         name="ck_grid_x402_positive_settlement",
