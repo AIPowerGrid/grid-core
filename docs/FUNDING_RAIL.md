@@ -164,7 +164,7 @@ balance is created. An authorized-but-unsettled x402 job is excluded from worker
 payout aggregation. This prevents a valid signature followed by failed
 on-chain settlement from creating a payable worker reward.
 
-The candidate facilitator guard converts settlement HTTP/transport/SDK
+The deployed facilitator guard converts settlement HTTP/transport/SDK
 exceptions into bounded failure categories, preserving the official SDK's
 job-bound failure hook. A failed attempt enters `manual_review` immediately;
 crash/cancellation still uses stale reconciliation. No error body, credential
@@ -181,7 +181,7 @@ a provider constraint, not a successful signed settlement. The original
 canary response was not retained, so no claim is made about its exact body.
 
 The owner approved a **USD 0.001 minimum per successful x402 request**. The
-candidate challenge discloses it before signing, both in its description and
+challenge discloses it before signing, both in its description and
 as `extra.minimumCharge="1000"` / `extra.pricingPolicy="x402-minimum-2026-10-15-v1"`.
 The payer must echo those terms; old or modified terms reject before any hold
 or dispatch. Reservation and payment snapshots commit atomically. The final
@@ -189,7 +189,7 @@ charge is `max(grid-counted usage, frozen minimum)`, never more than the
 original hold or signed authorization. Larger jobs retain usage pricing;
 failed jobs charge zero. No account credit is created, drawn or changed.
 
-Apply migration `0046` before deploying this candidate, even dark. Historical
+Apply migration `0046` before deploying this release, even dark. Historical
 payments receive minimum zero and keep their recorded amounts; successful
 completion and stale-hold recovery use the stored minimum even after a flag,
 price-book or policy change. Database constraints reject negative/over-ceiling
@@ -198,9 +198,14 @@ pricing history, including unpaid/failed jobs. Rollback keeps both the column
 and minimum-aware terminal/recovery writers until jobs drain.
 
 This is an x402-only tariff: ordinary prepaid-credit prices and all existing
-frontends are unchanged. Public x402 remains off pending exact-source CI,
-production restore/migration and a freshly approved bounded real-worker
-payment/replay proof. Pricing approval alone enables no endpoint or spending.
+frontends are unchanged. The minimum and facilitator guard were deployed dark
+at `f72ea937` / `0046` on October16 after exact-tree CI, restored-production
+migration/parity proof and a drained cutover. All eight workers recovered;
+the existing video rollout and protected configuration were preserved. See the
+[deployment record](../deploy/X402_MINIMUM_DARK_2026_10_16.md).
+Public x402 remains off pending a freshly approved bounded real-worker
+payment/replay proof. Neither deployment nor pricing approval authorizes a
+payment, retry of the old manual-review receipt or public admission.
 
 The first route is deliberately non-streaming and text-only. x402's current
 FastAPI middleware buffers the full response before settlement; advertising
