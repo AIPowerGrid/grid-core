@@ -76,6 +76,32 @@ def _topic(address: str) -> str:
     return "0x" + "0" * 24 + address[2:]
 
 
+@pytest.mark.parametrize("nonce", ["012345", "00012345", "0" * 200 + "12345", 12345])
+def test_numeric_nonce_aliases_have_one_authorization_identity(nonce):
+    original, requirements = _payment(50_000)
+    alias, _ = _payment(50_000)
+    alias.payload["permit2Authorization"]["nonce"] = nonce
+    assert (
+        x402_payments.payment_payload_details(original, requirements)["authorization_id"]
+        == (x402_payments.payment_payload_details(alias, requirements)["authorization_id"])
+    )
+
+
+@pytest.mark.parametrize("nonce", ["", "-1", "+1", "0x1", "1.0", "1e3", "１２３", "0" * 257, str(2**256)])
+def test_invalid_permit_nonce_is_rejected_before_reservation(nonce):
+    payload, requirements = _payment(50_000)
+    payload.payload["permit2Authorization"]["nonce"] = nonce
+    with pytest.raises(RuntimeError, match="nonce"):
+        x402_payments.payment_payload_details(payload, requirements)
+
+
+@pytest.mark.parametrize("nonce", ["0", str(2**256 - 1)])
+def test_permit_nonce_uint256_boundaries(nonce):
+    payload, requirements = _payment(50_000)
+    payload.payload["permit2Authorization"]["nonce"] = nonce
+    assert x402_payments.payment_payload_details(payload, requirements)["authorization_id"]
+
+
 async def _rows(table):
     async with await database.new_session() as session:
         return (await session.execute(sa.select(table))).all()
@@ -240,6 +266,30 @@ async def test_one_authorization_cannot_open_two_jobs(db, enabled):
     assert second["status"] == "conflict"
     assert len(await _rows(reservations)) == 1
     assert len(await _rows(payments)) == 1
+
+
+@pytest.mark.asyncio
+async def test_nonce_alias_cannot_open_a_second_reservation(db, enabled):
+    payload, requirements = _payment(50_000)
+    original = await credits.authorize_x402_request(
+        MODEL,
+        100,
+        500,
+        str(uuid.uuid4()),
+        payment_payload=payload,
+        payment_requirements=requirements,
+    )
+    payload.payload["permit2Authorization"]["nonce"] = "00012345"
+    alias = await credits.authorize_x402_request(
+        MODEL,
+        100,
+        500,
+        str(uuid.uuid4()),
+        payment_payload=payload,
+        payment_requirements=requirements,
+    )
+    assert original["ok"] and not alias["ok"] and alias["status"] == "conflict"
+    assert len(await _rows(payments)) == len(await _rows(reservations)) == 1
 
 
 @pytest.mark.asyncio
