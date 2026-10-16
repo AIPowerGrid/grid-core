@@ -15,9 +15,13 @@ def require_async_video(settings: GridSettings, account_id: UUID | str, *, model
     """New jobs only; return the captured pilot deadline for the hold transaction."""
     if settings.media_async_enabled:
         if settings.media_async_admission_mode == "open":
-            if model != "LTX-2.5 Distilled BF16":
+            if model != "LTX-2.5 Distilled BF16" and not (
+                model == "LTX-2.5 Distilled NVFP4" and getattr(settings, "media_async_nvfp4_enabled", False)
+            ):
                 raise HTTPException(503, detail="This video model is not enabled for public async admission")
             if has_source:
+                if model != "LTX-2.5 Distilled BF16":
+                    raise HTTPException(503, detail="Source video is not enabled for this model")
                 if settings.media_async_source_admission_mode == "open":
                     return None
                 try:
