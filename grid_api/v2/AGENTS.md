@@ -20,6 +20,13 @@ validator shadow-observation records.
 
 ## Local Contracts
 
+- `0046` adds `grid_x402_payments.minimum_charge_micro`, default zero for
+  historical receipts, constrained nonnegative and within authorization.
+  New x402 jobs freeze the disclosed USD 0.001 minimum before dispatch; ordinary
+  account-credit reservations do not use it. Completion and recovery use that
+  immutable snapshot, never current settings. Retain it on rollback; downgrade
+  refuses nonzero history. No historical amount is rounded up by migration.
+
 - Migration `0043` creates empty private `grid_media_jobs` request/execution
   records; no historical request is reconstructed or admitted. Each row has a
   matching reservation FK and a unique account/idempotency-hash pair. The

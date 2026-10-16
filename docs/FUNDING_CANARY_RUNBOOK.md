@@ -183,7 +183,9 @@ Evidence required:
 
 1. Initial request returns a valid x402 payment requirement.
 2. Paid retry produces one non-streaming text completion.
-3. Reservation records grid-counted actual usage below the authorization.
+3. Reservation records max(grid-counted usage, the disclosed frozen minimum),
+   within the authorization. Keep raw token/rate evidence distinct from the
+   minimum-adjusted charge; do not label the floor as additional token usage.
 4. Payment transitions `verified -> settling -> reported -> settled`.
 5. Base receipt proves canonical USDC from payer to recipient for exactly
    `settled_micro`.
@@ -349,6 +351,38 @@ balance is USD 0.05 USDC with Permit2 allowance zero. No automatic retry or
 pricing change follows. Decide explicitly between disclosed x402 minimum
 pricing and preserving exact usage through another payment design; then test
 the reviewed implementation with a separately approved fresh capped payment.
+
+### Approved minimum candidate
+
+The owner subsequently approved a disclosed USD 0.001 minimum per successful
+x402 call, without changing ordinary prepaid pricing. The candidate challenge
+publishes `minimumCharge="1000"` and policy `x402-minimum-2026-10-15-v1` plus
+a plain-language description before signing. Missing/changed accepted terms
+reject before reservation or dispatch. Authorization must cover both the
+maximum usage quote and minimum. Migration `0046` stores the minimum with the
+verified payment in the reservation transaction; history defaults to zero.
+
+Successful completion and stale-hold recovery charge max(trusted usage,
+frozen minimum), within the original hold. Failed jobs release at zero;
+ordinary credits do not use the new snapshot. A later process setting cannot
+raise an existing job's minimum. SQL bounds both the minimum and attempted
+settlement; rollback retains pricing-aware writers and nonzero snapshot history.
+Independent canonical-USDC receipt proof remains mandatory for payout eligibility.
+
+The focused SQLite/HTTP tests and real PostgreSQL 16 races cover disclosure,
+missing/changed terms, 999/1000 ceiling boundaries, larger usage, unchanged
+credit balances, failed work, frozen completion/recovery, duplicate terminals
+and payout exclusion. A fresh PG16 0045-to-0046 upgrade/schema check and SQLite
+roundtrip prove the old 7-micro fixture retains minimum zero. The SQLite
+downgrade guard refuses nonzero pricing history, including an unpaid job.
+
+Authenticated provider controls accept the candidate's two new extra fields
+through schema validation and reject the intentionally expired zero signature
+instead, for verify and 1,000-micro settlement. They use no wallet key or valid
+authorization and do not prove payment. No new paid request, production schema
+change or public enablement follows from the pricing approval. Exact candidate
+CI, production restore/migration, supervised deployment and a freshly approved
+capped real-worker settlement/replay test remain required.
 
 ## 6. Holds
 

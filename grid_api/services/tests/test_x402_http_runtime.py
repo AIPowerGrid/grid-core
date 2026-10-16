@@ -21,6 +21,7 @@ from sqlalchemy.pool import StaticPool
 from x402.http import (
     decode_payment_required_header,
     decode_payment_response_header,
+    decode_payment_signature_header,
     encode_payment_signature_header,
 )
 from x402.http.middleware.fastapi import set_settlement_overrides
@@ -70,7 +71,7 @@ async def runtime(monkeypatch):
     }.items():
         monkeypatch.setattr(x402_payments, name, value)
     monkeypatch.setattr(openai.limiter, "enabled", False)
-    observed = SimpleNamespace(verify_calls=0, settlements=[], dispatches=0, valid=True, settle_mode="success")
+    observed = SimpleNamespace(verify_calls=0, settlements=[], dispatches=0, valid=True, settle_mode="success", worker_error=False)
 
     class Facilitator:
         def get_supported(self):
@@ -138,7 +139,10 @@ async def runtime(monkeypatch):
         if not authorized["ok"]:
             raise HTTPException(status_code=402, detail=authorized["reason"])
         observed.dispatches += 1
-        actual = pricing.quote_text(MODEL, 100, 50)
+        if observed.worker_error:
+            await credits.release_job(job)
+            raise HTTPException(status_code=503, detail="synthetic worker failed without output")
+        actual = max(x402_payments.MIN_CHARGE_MICRO, pricing.quote_text(MODEL, 100, 50))
         async with await database.new_session() as session:
             await session.execute(
                 sa.update(reservations)
@@ -174,6 +178,9 @@ async def challenge(client):
     assert requirement.amount == "50000"
     assert requirement.pay_to == TREASURY
     assert requirement.extra["facilitatorAddress"] == FACILITATOR
+    assert requirement.extra["minimumCharge"] == "1000"
+    assert requirement.extra["pricingPolicy"] == x402_payments.PRICING_POLICY
+    assert "$0.001 minimum" in required.resource.description
     payload = PaymentPayload(x402_version=2, accepted=requirement, payload={"permit2Authorization": {"from": PAYER, "nonce": "12345"}})
     return {"payment-signature": encode_payment_signature_header(payload)}
 
@@ -196,11 +203,12 @@ async def test_real_middleware_settles_only_actual_and_blocks_replay(runtime):
     assert response.json()["choices"][0]["message"]["content"] == "synthetic reply"
     settled = decode_payment_response_header(response.headers["payment-response"])
     assert settled.success and settled.transaction == TX
-    actual = pricing.quote_text(MODEL, 100, 50)
+    actual = max(x402_payments.MIN_CHARGE_MICRO, pricing.quote_text(MODEL, 100, 50))
     assert observed.settlements == [actual]
     assert actual < 50_000
     (row,) = await payment_rows()
     assert row["status"] == "reported"
+    assert row["minimum_charge_micro"] == actual == 1000
     assert await x402_payments.settled_amount(row["job_id"]) is None
     repeated = await client.post(x402_payments.ROUTE, json=body, headers=headers)
     assert repeated.status_code == 402
@@ -209,6 +217,39 @@ async def test_real_middleware_settles_only_actual_and_blocks_replay(runtime):
     async with await database.new_session() as session:
         assert (await session.execute(sa.select(sa.func.count()).select_from(accounts))).scalar() == 0
         assert (await session.execute(sa.select(sa.func.count()).select_from(credit_ledger))).scalar() == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terms", [{}, {"minimumCharge": "1"}, {"minimumCharge": "1000", "pricingPolicy": "old"}])
+async def test_real_middleware_rejects_undisclosed_or_changed_minimum_before_dispatch(runtime, terms):
+    client, observed = runtime
+    headers = await challenge(client)
+    payload = decode_payment_signature_header(headers["payment-signature"])
+    payload.accepted.extra = {**payload.accepted.extra, **terms}
+    if not terms:
+        payload.accepted.extra.pop("minimumCharge")
+    headers["payment-signature"] = encode_payment_signature_header(payload)
+    response = await client.post(x402_payments.ROUTE, json={"model": MODEL, "messages": []}, headers=headers)
+    assert response.status_code == 402
+    assert "fresh payment challenge" in response.text
+    assert observed.dispatches == 0 and observed.settlements == []
+    assert await payment_rows() == []
+
+
+@pytest.mark.asyncio
+async def test_failed_worker_never_charges_the_minimum(runtime):
+    client, observed = runtime
+    headers = await challenge(client)
+    observed.worker_error = True
+    response = await client.post(x402_payments.ROUTE, json={"model": MODEL, "messages": []}, headers=headers)
+    assert response.status_code == 503
+    assert observed.dispatches == 1 and observed.settlements == []
+    (payment,) = await payment_rows()
+    assert payment["status"] == "verified" and payment["attempts"] == 0
+    assert payment["settled_micro"] is None
+    async with await database.new_session() as session:
+        assert await session.scalar(sa.select(reservations.c.actual_micro)) == 0
+        assert await session.scalar(sa.select(sa.func.count()).select_from(credit_ledger)) == 0
 
 
 @pytest.mark.asyncio
@@ -389,7 +430,7 @@ async def test_real_middleware_lost_receipt_stays_ineligible_without_secret_logg
     assert response.status_code == 402
     (row,) = await payment_rows()
     assert row["status"] == "settling" and row["attempts"] == 1
-    assert row["settled_micro"] == pricing.quote_text(MODEL, 100, 50)
+    assert row["settled_micro"] == max(x402_payments.MIN_CHARGE_MICRO, pricing.quote_text(MODEL, 100, 50))
     assert row["tx_hash"] is None
     repeated = await client.post(x402_payments.ROUTE, headers=headers, json={"model": MODEL, "messages": []})
     assert repeated.status_code == 402
@@ -443,6 +484,8 @@ async def test_preflight_is_read_only_and_rejects_network_mismatches(runtime, mo
             "scheme": "upto",
             "asset": "USDC",
             "max_authorized_micro": 50_000,
+            "minimum_charge_micro": 1000,
+            "pricing_policy": "x402-minimum-2026-10-15-v1",
             "receipt_rpc_chain": 84532,
             "facilitator_support": True,
             "payments_sent": 0,

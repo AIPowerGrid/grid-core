@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0045`
+- `versions/` - ordered migration revisions. Current source head: `0046`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -62,8 +62,16 @@ production database match the Grid-owned schema contracts without relying on
   recovery index without reconstructing any historical execution authority.
   `0045` adds nullable exact private-source retention authority and cleanup
   timestamps, without adopting historical URLs or changing economic records.
+  `0046` adds zero-default x402 minimum-charge snapshots with authorization
+  bounds. Historical amounts/statuses/attempts are unchanged; no admission or
+  payment occurs. New disclosed minimums are snapshotted only at authorization.
 
 ## Local Contracts
+
+- Apply `0046` before this x402-minimum candidate starts, even with x402 off.
+  Downgrade refuses any nonzero minimum snapshot, including failed/unpaid jobs.
+  Retain the column and minimum-aware terminal/recovery code on application
+  rollback once such jobs exist; never reprice them under a newer process setting.
 
 - Apply through `0045` before starting this candidate, even with admission off.
   Ordinary journal reads and the independent source-cleanup loop select the new

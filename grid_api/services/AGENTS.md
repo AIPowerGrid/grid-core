@@ -780,6 +780,14 @@ content sanitization, and reward settlement.
   allowlisted from HTTP 400 responses. Provider checks reproduced a 1,000
   micro-USDC Coinbase minimum without usable signatures or payments. That
   constraint is not authority to round usage up or change tariffs silently.
+  The owner subsequently approved USD 0.001 minimum pricing for new successful
+  x402 calls only. The challenge description and `extra.minimumCharge` /
+  `extra.pricingPolicy` disclose it; both accepted and Core-owned terms must
+  match before reserve/dispatch. `0046` stores `minimum_charge_micro` with the
+  verified payment. Authorization covers max(usage quote, minimum), and terminal
+  plus stale-hold recovery use max(actual usage, frozen minimum), within the
+  original hold. Failure release is zero; old zero-minimum receipts and ordinary
+  credits are not repriced. Provider success still needs exact transfer proof.
 - Media billing reserves exact deterministic cost before dispatch and refunds on
   non-running paths; text billing reserves max cost and reconciles against trusted
   usage.
@@ -1035,6 +1043,11 @@ content sanitization, and reward settlement.
   Facilitator timeout/exception/non-200 failures must enter `manual_review`
   immediately with one dispatch/attempt. Actual SDK HTTP-client fixtures also
   pin 401/403/429/500 and malformed-200 redaction; cancellation must propagate.
+  Minimum tests additionally cover disclosed/echoed terms, pre-dispatch
+  rejection, exact ceiling, no minimum on worker failure, larger usage and
+  frozen completion/recovery across settings changes. `test_x402_minimum_migration.py`
+  proves SQLite upgrade/rollback/history guards; PG concurrency tests include
+  a real terminal, duplicate completion, snapshot and payout-exclusion proof.
   It also checks dark read-only preflight, chain/token mismatches and CLI
   action/error contracts. These tests do not establish a signed chain payment
   or real GPU completion; keep that distinction in the funding canary runbook.
