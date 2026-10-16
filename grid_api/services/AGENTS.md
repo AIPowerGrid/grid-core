@@ -17,7 +17,12 @@ content sanitization, and reward settlement.
   worker's model claim or changes rewards. Exact frames/FPS determine the hold;
   positive fractions round up to one micro-USD. No legacy model is relabeled.
 
-- Public async video admission is BF16-only for fresh requests. Callers must
+- Public async video admission defaults to BF16-only for fresh requests.
+  `MEDIA_ASYNC_NVFP4_ENABLED` is a separate default-off candidate opt-in for
+  NVFP4 text/opening-image work, never uploaded audio/video or other models.
+  Closing it preserves the original intent/hold and owner-only replay/GET.
+  Native exporter/worker/credit qualification remains an activation gate.
+  Callers must
   pass the requested model to the shared gate before private input processing
   and again before reserve; a model restriction never closes receipt recovery.
   Uploaded audio/video in public async mode has a separate default-off source

@@ -104,6 +104,12 @@ executes an immutable release selected through `/home/aipg/current`.
   separately capped real-worker payment/replay test precedes public admission.
   The prior `607d1c03` / `0045` deployment record remains historical evidence.
 
+- Public NVFP4 additionally requires `MEDIA_ASYNC_NVFP4_ENABLED=1` after
+  reviewed native/exporter/worker-credential and purchased path qualification.
+  Default0 retains BF16-only public admission. This switch neither widens337
+  frames nor opens source modes, bypasses a hold or changes tariffs. Close the
+  switch for rollback while retaining accepted NVFP4 receipts/replay/GET.
+
 - The owner approved the credit-first LTX-2.5 rollout on 2026-10-12.
   PR217 stops at 0045; do not pull the later x402/refund migration stack into
   this release. Distilled alone is priced at USD 0.020/output-second, with a
