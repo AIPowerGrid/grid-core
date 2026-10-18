@@ -22,6 +22,10 @@ knobs → validate → drop here).
   The distinct NVFP4 copies prepare the owner-only purchased-credit canary
   after local generated/image/audio/video qualification, not public admission.
   Both models remain blocked from legacy waiting/chat in pilot mode.
+  The BF16 duration-extension candidate raises only its frame clamp/contract
+  to625; its qualification copies match. NVFP4 stays337. Defaults, precision,
+  pixel limits and admission are unchanged. Native long-clip and release checks
+  must pass before deploying the larger bound.
 
 ## Local Contracts
 

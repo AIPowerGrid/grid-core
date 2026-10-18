@@ -36,7 +36,7 @@ class VideoKeyframe(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
     image: str = Field(min_length=1, max_length=17_000_000)
-    frame: int = Field(ge=0, le=336)
+    frame: int = Field(ge=0, le=video_contract.MAX_LTX_FRAMES - 1)
     strength: float = Field(default=1.0, ge=0, le=1)
 
 
@@ -47,8 +47,8 @@ class VideoRequest(BaseModel):
     model: Optional[str] = None
     n: int = Field(default=1, ge=1, le=2)
     size: str = "768x512"
-    seconds: float | None = Field(default=None, gt=0, le=337 / 24, allow_inf_nan=False)
-    frames: int | None = Field(default=None, ge=9, le=337, strict=True)
+    seconds: float | None = Field(default=None, gt=0, le=video_contract.MAX_LTX_FRAMES / 24, allow_inf_nan=False)
+    frames: int | None = Field(default=None, ge=9, le=video_contract.MAX_LTX_FRAMES, strict=True)
     fps: int = Field(default=24, ge=8, le=30, strict=True)
     image: Optional[str] = None  # img2video start frame: inline base64 / data: URI
     reference_audio: str | None = Field(default=None, min_length=1, max_length=16_777_280)
