@@ -193,7 +193,7 @@ async def test_reserve_replay_keeps_first_seed_and_one_funded_hold(db):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("frames,cost", [(481, 400_834), (721, 600_834)])
+@pytest.mark.parametrize("frames,cost", [(481, 400_834), (625, 520_834)])
 async def test_long_clip_uses_one_exact_hold_and_replay_never_debits_again(db, frames, cost):
     aid = await owner()
     job = prepared(aid, frames=frames, cap=cost)
@@ -207,7 +207,7 @@ async def test_long_clip_uses_one_exact_hold_and_replay_never_debits_again(db, f
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("frames,cost", [(481, 400_834), (721, 600_834)])
+@pytest.mark.parametrize("frames,cost", [(481, 400_834), (625, 520_834)])
 async def test_long_clip_rejects_ceiling_below_exact_charge_without_a_hold(db, frames, cost):
     aid = await owner()
     with pytest.raises(jobs.MediaJobPaymentRequired):

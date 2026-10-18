@@ -159,7 +159,7 @@ async def test_pilot_chat_and_shared_waiter_reject_before_upload_or_credit(setup
 @pytest.mark.asyncio
 @pytest.mark.parametrize("overrides,expected", [({}, 81), ({"seconds": 4}, 97), ({"frames": 297}, 297),
                                                 ({"frames": 481}, 481), ({"seconds": 20}, 481),
-                                                ({"frames": 721}, 721), ({"seconds": 30}, 721)])
+                                                ({"frames": 625}, 625), ({"seconds": 26}, 625)])
 async def test_http_contract_preserves_execution_defaults(setup, overrides, expected):
     app, submit, _quota = setup
     response = await post(app, {"seed": 0, **overrides})

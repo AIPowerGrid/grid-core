@@ -6,7 +6,7 @@ The first production surface is deliberately narrow:
 
 * Base USDC only;
 * the x402 ``upto`` scheme, so the payer authorizes a fixed ceiling while the
-  Grid settles only trusted, grid-counted usage;
+  Grid settles trusted usage subject to its disclosed per-request minimum;
 * non-streaming OpenAI chat only, because the upstream FastAPI middleware
   buffers response bodies before settlement;
 * disabled unless every required operator setting is present.
@@ -21,11 +21,13 @@ every other state.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import time
 from dataclasses import dataclass
@@ -36,6 +38,7 @@ import sqlalchemy as sa
 from fastapi import HTTPException
 
 from ..database import new_session
+from ..safe_logging import error_type, opaque_id
 from ..v2.schema import x402_payments as payments_t
 from . import alerts
 
@@ -72,6 +75,8 @@ STALE_SECONDS = max(
     int(os.getenv("GRID_X402_STALE_SECONDS", "900") or 900),
 )
 ROUTE = "/v1/x402/chat/completions"
+MIN_CHARGE_MICRO = 1_000
+PRICING_POLICY = "x402-minimum-2026-10-15-v1"
 
 
 def _now() -> datetime:
@@ -89,14 +94,16 @@ def _address(value: str, name: str) -> str:
     return value
 
 
-def validate_config() -> None:
+def validate_config(*, force: bool = False) -> None:
     """Fail startup when an enabled money rail is only half configured."""
-    if not ENABLED:
+    if not ENABLED and not force:
         return
     if NETWORK not in {"eip155:8453", "eip155:84532"}:
         raise RuntimeError("GRID_X402_NETWORK must be Base mainnet or Base Sepolia")
     _address(PAY_TO, "GRID_X402_PAY_TO/GRID_USDC_TREASURY")
     _address(USDC, "GRID_USDC_CONTRACT")
+    if MAX_AUTH_MICRO < MIN_CHARGE_MICRO:
+        raise RuntimeError("GRID_X402_MAX_AUTH_MICRO must cover the disclosed x402 minimum")
     parsed = urlparse(FACILITATOR_URL)
     if parsed.scheme != "https" or not parsed.netloc:
         raise RuntimeError("GRID_X402_FACILITATOR_URL must be an https URL")
@@ -178,8 +185,12 @@ def payment_payload_details(payload, requirements) -> dict:
     payer = (auth or {}).get("from", "")
     payer = _address(payer, "x402 payer")
     nonce = str((auth or {}).get("nonce", "")).strip()
-    if not nonce:
-        raise RuntimeError("x402 Permit2 authorization nonce is required")
+    if not nonce or len(nonce) > 256 or not nonce.isascii() or not nonce.isdecimal():
+        raise RuntimeError("x402 Permit2 authorization nonce must be a decimal uint256")
+    # EIP-712 signs the integer, not its JSON spelling. Hash one canonical form.
+    nonce = nonce.lstrip("0") or "0"
+    if len(nonce) > 78 or int(nonce) >= 2**256:
+        raise RuntimeError("x402 Permit2 authorization nonce must fit uint256")
     authorization_id = hashlib.sha256(
         json.dumps(
             {
@@ -202,6 +213,21 @@ def payment_payload_details(payload, requirements) -> dict:
     }
 
 
+def pricing_terms() -> dict[str, str]:
+    return {"minimumCharge": str(MIN_CHARGE_MICRO), "pricingPolicy": PRICING_POLICY}
+
+
+def verified_minimum(payload, requirements) -> int:
+    """Require the payer to echo the disclosed Core-owned pricing terms."""
+    expected = pricing_terms()
+    accepted = getattr(payload, "accepted", None)
+    for source in (accepted, requirements):
+        extra = getattr(source, "extra", None)
+        if not isinstance(extra, dict) or any(extra.get(key) != value for key, value in expected.items()):
+            raise ValueError("x402 pricing terms changed; obtain and accept a fresh payment challenge")
+    return MIN_CHARGE_MICRO
+
+
 async def insert_verified_in_session(session, *, job_id: str, details: dict) -> None:
     """Persist verified authorization in the caller's reservation transaction."""
     await session.execute(
@@ -213,6 +239,7 @@ async def insert_verified_in_session(session, *, job_id: str, details: dict) -> 
             asset=details["asset"],
             pay_to=details["pay_to"],
             authorized_micro=int(details["authorized_micro"]),
+            minimum_charge_micro=int(details["minimum_charge_micro"]),
             status="verified",
             created=_now(),
         ),
@@ -243,6 +270,62 @@ def _job_id_from_context(context) -> str | None:
     )
 
 
+class _SettlementGuard:
+    """Keep facilitator exceptions inside the SDK's settlement-failure path."""
+
+    def __init__(self, client):
+        self.client = client
+
+    def get_supported(self):
+        return self.client.get_supported()
+
+    async def verify(self, payload, requirements):
+        return await self.client.verify(payload, requirements)
+
+    async def settle(self, payload, requirements):
+        import httpx
+        from x402.http.facilitator_client_base import FacilitatorResponseError
+        from x402.schemas import SettleResponse
+
+        try:
+            return await self.client.settle(payload, requirements)
+        except Exception as exc:
+            # The pinned SDK awaits facilitator calls outside its generator's
+            # try/except. Returning failure lets its normal hook retain job context.
+            reason = "facilitator_exception"
+            if isinstance(exc, httpx.TimeoutException):
+                reason = "facilitator_timeout"
+            elif isinstance(exc, FacilitatorResponseError):
+                reason = "facilitator_invalid_response"
+            elif isinstance(exc, httpx.HTTPStatusError):
+                reason = f"facilitator_http_{exc.response.status_code}"
+            elif isinstance(exc, ValueError):
+                # HTTPFacilitatorClient exposes non-200 status only in this
+                # fixed prefix. Never retain its response body or authenticated URL.
+                match = re.match(r"\AFacilitator settle failed \(([1-5][0-9]{2})\): ", str(exc))
+                if match:
+                    reason = f"facilitator_http_{match[1]}"
+                    body = str(exc)[match.end():match.end() + 16_385]
+                    if match[1] == "400" and len(body) <= 16_384:
+                        try:
+                            failure = json.loads(body)
+                        except (ValueError, RecursionError):
+                            failure = None
+                        if (
+                            isinstance(failure, dict)
+                            and failure.get("success") is False
+                            and failure.get("errorReason") == "amount_too_low"
+                        ):
+                            reason = "facilitator_amount_too_low"
+            logger.error("x402 facilitator settlement failed category=%s error_type=%s", reason, error_type(exc))
+            return SettleResponse(
+                success=False,
+                error_reason=reason,
+                transaction="",
+                network=requirements.network,
+            )
+
+
 async def _before_settle(context) -> None:
     """Persist the exact attempted amount before any facilitator side effect."""
     job_id = _job_id_from_context(context)
@@ -260,6 +343,7 @@ async def _before_settle(context) -> None:
                     payments_t.c.job_id == str(job_id),
                     payments_t.c.status == "verified",
                     amount <= payments_t.c.authorized_micro,
+                    amount >= payments_t.c.minimum_charge_micro,
                 ),
             )
             .values(
@@ -284,11 +368,7 @@ async def _after_settle(context) -> None:
         raise RuntimeError("x402 after-settle hook missing X-Grid-Job-ID")
     result = context.result
     tx_hash = str(result.transaction or "").lower()
-    if not (
-        tx_hash.startswith("0x")
-        and len(tx_hash) == 66
-        and all(char in "0123456789abcdef" for char in tx_hash[2:])
-    ):
+    if not (tx_hash.startswith("0x") and len(tx_hash) == 66 and all(char in "0123456789abcdef" for char in tx_hash[2:])):
         raise RuntimeError("x402 facilitator success omitted a valid transaction hash")
     try:
         async with await new_session() as session:
@@ -310,8 +390,12 @@ async def _after_settle(context) -> None:
             if updated.rowcount != 1:
                 raise RuntimeError(f"x402 payment {job_id} was not in settling state")
             await session.commit()
-    except Exception:
-        logger.exception("x402 settled receipt could not be persisted job=%s", job_id)
+    except Exception as exc:
+        logger.error(
+            "x402 settled receipt could not be persisted job=%s error_type=%s",
+            opaque_id(job_id),
+            error_type(exc),
+        )
         alerts.emit(
             "x402_receipt_persist_failed",
             "critical",
@@ -344,8 +428,12 @@ async def _on_settle_failure(context):
                 .values(status="manual_review", error=error),
             )
             await session.commit()
-    except Exception:
-        logger.exception("x402 failure state could not be persisted job=%s", job_id)
+    except Exception as exc:
+        logger.error(
+            "x402 failure state could not be persisted job=%s error_type=%s",
+            opaque_id(job_id),
+            error_type(exc),
+        )
         alerts.emit(
             "x402_failure_persist_failed",
             "critical",
@@ -447,25 +535,29 @@ async def reconcile_transaction(job_id: str, tx_hash: str) -> dict:
     tx_hash = deposits._normalize_tx_hash(tx_hash)
     async with await new_session() as session:
         row = (
-            await session.execute(
-                sa.select(
-                    payments_t.c.payer,
-                    payments_t.c.asset,
-                    payments_t.c.pay_to,
-                    payments_t.c.authorized_micro,
-                    payments_t.c.settled_micro,
-                    payments_t.c.tx_hash,
-                    payments_t.c.status,
-                    payments_t.c.last_attempt,
-                    reservations_t.c.actual_micro,
+            (
+                await session.execute(
+                    sa.select(
+                        payments_t.c.payer,
+                        payments_t.c.asset,
+                        payments_t.c.pay_to,
+                        payments_t.c.authorized_micro,
+                        payments_t.c.settled_micro,
+                        payments_t.c.tx_hash,
+                        payments_t.c.status,
+                        payments_t.c.last_attempt,
+                        reservations_t.c.actual_micro,
+                    )
+                    .join(
+                        reservations_t,
+                        reservations_t.c.job_id == payments_t.c.job_id,
+                    )
+                    .where(payments_t.c.job_id == job_id),
                 )
-                .join(
-                    reservations_t,
-                    reservations_t.c.job_id == payments_t.c.job_id,
-                )
-                .where(payments_t.c.job_id == job_id),
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
     if not row:
         raise RuntimeError("x402 payment job was not found")
     if row["status"] == "settled":
@@ -554,6 +646,44 @@ class X402Runtime:
     routes: dict
 
 
+async def preflight() -> dict:
+    """Read configuration, facilitator support and RPC chain without payment."""
+    from . import deposits
+
+    validate_config(force=True)
+    chain_id = int(NETWORK.split(":", 1)[1])
+    canonical_usdc = {
+        8453: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+        84532: "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+    }[chain_id]
+    if deposits.CHAIN_ID != chain_id:
+        raise RuntimeError("x402 and the settlement receipt verifier must use the same chain")
+    if USDC != canonical_usdc or deposits.USDC != canonical_usdc:
+        raise RuntimeError("x402 and the receipt verifier must use canonical USDC for that chain")
+    if int(await deposits._rpc("eth_chainId", []), 16) != chain_id:
+        raise RuntimeError("x402 receipt RPC returned the wrong chain")
+    runtime = build_runtime()
+    await asyncio.to_thread(runtime.server.initialize)
+    supported = runtime.server.get_supported_kind(2, NETWORK, "upto")
+    if supported is None or not (supported.extra or {}).get("facilitatorAddress"):
+        raise RuntimeError("facilitator does not advertise upto for the configured chain")
+    _address(supported.extra["facilitatorAddress"], "facilitator address")
+    return {
+        "status": "preflight_passed",
+        "enabled": ENABLED,
+        "network": NETWORK,
+        "scheme": "upto",
+        "asset": "USDC",
+        "max_authorized_micro": MAX_AUTH_MICRO,
+        "minimum_charge_micro": MIN_CHARGE_MICRO,
+        "pricing_policy": PRICING_POLICY,
+        "receipt_rpc_chain": chain_id,
+        "facilitator_support": True,
+        "payments_sent": 0,
+        "inference_dispatched": 0,
+    }
+
+
 def build_runtime() -> X402Runtime:
     """Build the official x402 resource server after strict config validation."""
     validate_config()
@@ -565,7 +695,7 @@ def build_runtime() -> X402Runtime:
     facilitator = HTTPFacilitatorClient(
         {"url": FACILITATOR_URL, "create_headers": _facilitator_headers},
     )
-    server = x402ResourceServer(facilitator)
+    server = x402ResourceServer(_SettlementGuard(facilitator))
     server.register(NETWORK, UptoEvmServerScheme())
     server.on_before_settle(_before_settle)
     server.on_after_settle(_after_settle)
@@ -575,12 +705,12 @@ def build_runtime() -> X402Runtime:
             accepts=PaymentOption(
                 scheme="upto",
                 pay_to=PAY_TO,
-                price={"amount": str(MAX_AUTH_MICRO), "asset": USDC},
+                price={"amount": str(MAX_AUTH_MICRO), "asset": USDC, "extra": pricing_terms()},
                 network=NETWORK,
                 max_timeout_seconds=300,
             ),
             resource=ROUTE,
-            description="Non-streaming OpenAI-compatible Grid inference paid in Base USDC.",
+            description="Non-streaming Grid inference in Base USDC. Each successful request costs actual usage or a $0.001 minimum, whichever is higher.",
             mime_type="application/json",
             service_name="AI Power Grid",
             tags=["ai", "inference", "base", "usdc"],
@@ -614,14 +744,33 @@ async def _run_reconcile_cli(job_id: str, tx_hash: str) -> None:
         await close_database()
 
 
-if __name__ == "__main__":
+def _main(argv: list[str] | None = None) -> int:
     import argparse
-    import asyncio
 
     parser = argparse.ArgumentParser(
-        description="Reconcile one ambiguous x402 job from a confirmed Base transaction.",
+        description="Preflight x402 without payment, or reconcile one confirmed transfer.",
     )
-    parser.add_argument("--reconcile-job", required=True, help="Grid job UUID")
-    parser.add_argument("--tx", required=True, help="Base transaction hash")
-    args = parser.parse_args()
-    asyncio.run(_run_reconcile_cli(args.reconcile_job, args.tx))
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--preflight", action="store_true", help="Read-only configuration/facilitator/RPC check")
+    action.add_argument("--reconcile-job", help="Grid job UUID")
+    parser.add_argument("--tx", help="Base transaction hash; required only for reconciliation")
+    args = parser.parse_args(argv)
+    if args.preflight:
+        if args.tx:
+            parser.error("--tx is only valid with --reconcile-job")
+        try:
+            report = asyncio.run(preflight())
+        except Exception as exc:
+            # SDK/RPC exceptions may contain authenticated URLs or response bodies.
+            print(json.dumps({"status": "preflight_failed", "error_type": error_type(exc)}))
+            return 1
+        print(json.dumps(report, sort_keys=True))
+    else:
+        if not args.tx:
+            parser.error("--reconcile-job requires --tx")
+        asyncio.run(_run_reconcile_cli(args.reconcile_job, args.tx))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

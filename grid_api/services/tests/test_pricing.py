@@ -59,12 +59,15 @@ def test_turbo_image_prices_scale_per_output():
     assert pricing.quote_image("krea 2 turbo", 4) == 20_000
 
 
-@pytest.mark.parametrize("model", ["LTX-2.5 Distilled BF16", "LTX-2.5 Distilled NVFP4"])
-def test_distilled_video_tariff_uses_effective_output_duration(model):
+@pytest.mark.parametrize("model,costs", [
+    ("LTX-2.5 Distilled BF16", (67_500, 280_834, 1_200_000)),
+    ("LTX-2.5 Distilled NVFP4", (33_750, 140_417, 600_000)),
+])
+def test_distilled_video_tariff_uses_effective_output_duration(model, costs):
     assert pricing.is_priced_for(model, "video")
-    assert pricing.quote_video(model, 81 / 24) == 67_500
-    assert pricing.quote_video(model, 337 / 24) == 280_834
-    assert pricing.quote_video(model, 60) == 1_200_000
+    assert pricing.quote_video(model, 81 / 24) == costs[0]
+    assert pricing.quote_video(model, 337 / 24) == costs[1]
+    assert pricing.quote_video(model, 60) == costs[2]
     for modality in ("text", "image", "audio", "3d"):
         assert not pricing.is_priced_for(model, modality)
     for unapproved in ("LTX-2.5 Dev BF16", "LTX-2.5 Dev BF16 Ingredients", "LTX-2.5"):
@@ -72,12 +75,15 @@ def test_distilled_video_tariff_uses_effective_output_duration(model):
         assert not pricing.is_priced_for(unapproved, "video")
 
 
-@pytest.mark.parametrize("model", ["ltx-2.5 distilled bf16", "ltx-2.5 distilled nvfp4"])
-def test_distilled_video_catalog_does_not_claim_availability_or_comparison(model):
+@pytest.mark.parametrize("model,rate", [
+    ("ltx-2.5 distilled bf16", 0.02),
+    ("ltx-2.5 distilled nvfp4", 0.01),
+])
+def test_distilled_video_catalog_does_not_claim_availability_or_comparison(model, rate):
     catalog = pricing.public_catalog()
     row = next(item for item in catalog["price_book"]["models"]
                if item["model"] == model)
-    assert row["rates"]["per_video_second_usd"] == 0.02
+    assert row["rates"]["per_video_second_usd"] == rate
     assert all(row["rates"][key] is None for key in row["rates"]
                if key != "per_video_second_usd")
     assert all(item["model"] != row["model"]
