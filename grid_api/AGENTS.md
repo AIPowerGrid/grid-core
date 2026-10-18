@@ -56,6 +56,9 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   local file. Never infer this authority from `GRID_DIAMOND_ADDRESS`.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
+  The x402-minimum candidate additionally requires migration `0046` before
+  startup. Only new x402 payments freeze the disclosed USD 0.001 successful-call
+  minimum; ordinary prepaid charging and old zero-minimum receipts are unchanged.
 - **Async video:** `MEDIA_ASYNC_ENABLED=0` closes new async admission only.
   Admission defaults to `pilot`: enabling requires one to ten distinct private
   account UUIDs and an aware expiry no more than 24 hours ahead at startup.
@@ -70,10 +73,11 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   public async admission; it is not part of the first public durable rollout.
   Explicit `open` mode requires clearing both cohort and expiry; it does not
   bypass recipe, feature, pricing, credit, worker or model-permission gates.
-  `MEDIA_ASYNC_NVFP4_ENABLED=0` separately keeps public NVFP4 closed by default.
-  Its opt-in candidate permits only generated/opening-image NVFP4, with its
-  unchanged337-frame recipe limit; source uploads remain BF16-only in public
-  mode. Do not enable it based on inventory or local-only tests.
+  Public NVFP4 has an independent default-off `MEDIA_ASYNC_NVFP4_ENABLED`
+  rollout switch. Opt-in covers text/opening-image only, with the existing337
+  frame limit and all paid/worker gates. It never opens NVFP4 source uploads.
+  Receipt replay/GET must survive flag closure; qualify the actual runtime,
+  credential lifetime and native/purchased path before production activation.
   Audio/video conditioning adds separately default-dark `audio-to-video` and
   `video-to-video` admission; Ingredients appearance adds `appearance-to-video`.
   Do not infer these gates from the base video path,

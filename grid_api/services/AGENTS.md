@@ -7,21 +7,23 @@ content sanitization, and reward settlement.
 
 ## Ownership
 
-- The owner-approved credit-first tariff is USD 0.020 per effective output
-  second for distinct `LTX-2.5 Distilled BF16` and `LTX-2.5 Distilled NVFP4`
-  identities in candidate book `2026-10-13-a`. Production still has the prior
-  `2026-10-12-a` book; NVFP4 startup copies prepare only the owner-approved
-  bounded canary. Inventory never opens async or legacy waiting admission.
+- Candidate book `2026-10-15-a` lowers `LTX-2.5 Distilled NVFP4` to USD 0.010
+  per effective output second; `LTX-2.5 Distilled BF16` stays USD 0.020.
+  This owner-requested budget tariff is not a measured runtime-cost comparison.
+  Quotes, new holds and the public catalog share the same book; accepted holds
+  retain their original amount. This source change is not deployment evidence.
+  Inventory never opens async or legacy waiting admission.
   Dev and
   Ingredients remain unpriced. Pricing never grants admission, validates a
   worker's model claim or changes rewards. Exact frames/FPS determine the hold;
   positive fractions round up to one micro-USD. No legacy model is relabeled.
 
 - Public async video admission defaults to BF16-only for fresh requests.
-  The separate default-off `MEDIA_ASYNC_NVFP4_ENABLED` candidate can additionally
-  admit NVFP4 text/opening-image work after independent native/release review.
-  It never admits Dev or NVFP4 source audio/video; private pilot behavior and
-  original receipt recovery remain unchanged. Callers must
+  `MEDIA_ASYNC_NVFP4_ENABLED` is a separate default-off candidate opt-in for
+  NVFP4 text/opening-image work, never uploaded audio/video or other models.
+  Closing it preserves the original intent/hold and owner-only replay/GET.
+  Native exporter/worker/credit qualification remains an activation gate.
+  Callers must
   pass the requested model to the shared gate before private input processing
   and again before reserve; a model restriction never closes receipt recovery.
   Uploaded audio/video in public async mode has a separate default-off source
@@ -36,8 +38,8 @@ content sanitization, and reward settlement.
   must match dispatch. `recipes/qualification/` is not loaded at startup.
   Typed pins are metadata, not executable nodes: the resolver expands the
   governed first-image scaffold into a fixed LTX guide chain. The Distilled
-  BF16 candidate permits up to721 frames (30.041667seconds at24fps); NVFP4
-  retains337, standard dev81. The shared parser ceiling is721, but each recipe
+  BF16 candidate permits up to625 frames (26.041667seconds at24fps); NVFP4
+  retains337, standard dev81. The shared parser ceiling is625, but each recipe
   independently enforces its smaller bound. Up to sixteen ordered pins start at
   zero. Longer BF16 capacity still needs native execution and release proof;
   extending the contract does not qualify every size/duration combination.
@@ -276,7 +278,8 @@ content sanitization, and reward settlement.
   `deposits.py` (atomic Base funding receipts from verified account wallets
   plus USDC, bounded AIPG, and conversion-gated ETH claims),
   `x402_payments.py` (default-off accountless
-  Base USDC authorization and settlement receipts), `model_registry.py`
+  Base USDC authorization and settlement receipts, plus the read-only
+  `--preflight` operator check), `model_registry.py`
   (ModelVault sync).
 - `funding_lineage.py` is the offline migration-0042 opening reconciler.
   Preview replays deposit-bound history, debits, refunds and paired merges;
@@ -768,6 +771,33 @@ content sanitization, and reward settlement.
   Ambiguous attempts go to `manual_review`. The initial route is Base USDC,
   `upto`, text-only, and non-streaming because the upstream middleware buffers
   the response before settlement.
+  Authorization identity must canonicalize the bounded decimal Permit2 nonce
+  as uint256 before hashing: JSON leading-zero spellings sign the same integer
+  and must never create independent reservations. Reject nondecimal, oversized
+  and out-of-range values. Ordinary canonical nonce IDs stay unchanged.
+  The explicit `--preflight` action checks configuration even while disabled,
+  canonical token/receipt-chain agreement, RPC chain ID and facilitator support
+  without SQL, signing, settlement or flag changes. Use `GRID_BASE_RPC` for the
+  receipt verifier; isolated Sepolia configuration must never replace the
+  production deposit verifier's chain/token. Preflight errors and settlement
+  persistence logs expose only bounded error types and opaque job IDs.
+  The facilitator settlement guard converts transport/SDK exceptions into
+  bounded failure categories so the pinned SDK invokes the job-bound failure
+  hook immediately. No retry, success or revenue may be inferred from that
+  conversion. Never expose facilitator response bodies or authenticated URLs;
+  cancellation propagates and stale reconciliation remains the crash fallback.
+  Only the exact `amount_too_low` code in a <=16-KiB JSON failure body is
+  allowlisted from HTTP 400 responses. Provider checks reproduced a 1,000
+  micro-USDC Coinbase minimum without usable signatures or payments. That
+  constraint is not authority to round usage up or change tariffs silently.
+  The owner subsequently approved USD 0.001 minimum pricing for new successful
+  x402 calls only. The challenge description and `extra.minimumCharge` /
+  `extra.pricingPolicy` disclose it; both accepted and Core-owned terms must
+  match before reserve/dispatch. `0046` stores `minimum_charge_micro` with the
+  verified payment. Authorization covers max(usage quote, minimum), and terminal
+  plus stale-hold recovery use max(actual usage, frozen minimum), within the
+  original hold. Failure release is zero; old zero-minimum receipts and ordinary
+  credits are not repriced. Provider success still needs exact transfer proof.
 - Media billing reserves exact deterministic cost before dispatch and refunds on
   non-running paths; text billing reserves max cost and reconciles against trusted
   usage.
@@ -1015,6 +1045,26 @@ content sanitization, and reward settlement.
   over a newer cached block.
 
 ## Verification
+
+- `tests/test_x402_http_runtime.py` exercises the pinned official SDK and
+  production FastAPI route/middleware with synthetic facilitator and worker
+  dependencies: challenge, exact-usage override, replay/stream/malformed input,
+  before-attempt DB failure, lost receipt, payout exclusion and safe logging.
+  Facilitator timeout/exception/non-200 failures must enter `manual_review`
+  immediately with one dispatch/attempt. Actual SDK HTTP-client fixtures also
+  pin 401/403/429/500 and malformed-200 redaction; cancellation must propagate.
+  Minimum tests additionally cover disclosed/echoed terms, pre-dispatch
+  rejection, exact ceiling, no minimum on worker failure, larger usage and
+  frozen completion/recovery across settings changes. `test_x402_minimum_migration.py`
+  proves SQLite upgrade/rollback/history guards; PG concurrency tests include
+  a real terminal, duplicate completion, snapshot and payout-exclusion proof.
+  It also checks dark read-only preflight, chain/token mismatches and CLI
+  action/error contracts. These tests do not establish a signed chain payment
+  or real GPU completion; keep that distinction in the funding canary runbook.
+  `tests/test_credits_concurrency.py -k x402` separately requires a disposable
+  PostgreSQL database for duplicate-authorization and single-attempt races.
+  The duplicate race uses twenty textual aliases of one numeric nonce. Unit
+  cases pin leading-zero identity, uint256 bounds and invalid input rejection.
 
 - `tests/test_ltx25_appearance.py` checks the separate fixed Ingredients profile,
   nonanimated/unrotated PNG decoding, default-dark admission, committed roles/

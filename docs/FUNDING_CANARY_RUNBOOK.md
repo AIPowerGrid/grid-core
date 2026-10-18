@@ -138,6 +138,43 @@ the on-chain sender is not that account's linked wallet.
 
 ## 5. x402 canary
 
+### Read-only checks while disabled
+
+Keep `GRID_X402_ENABLED=0` until the configuration and supervised payment
+canaries are approved. With the intended environment loaded, run:
+
+```bash
+.venv/bin/python -m grid_api.services.x402_payments --preflight
+```
+
+This command checks the recipient/token configuration, receipt verifier's
+chain and canonical USDC, the actual RPC chain ID, and the facilitator's
+advertised v2 `upto` support. It works while the rail is disabled. It does not
+connect to the database, dispatch inference, sign a payment, send funds, or
+enable the rail. A nonzero exit reports only a bounded error type, not raw
+SDK/RPC exceptions or authenticated URLs. The successful report's `enabled`
+field reflects the existing flag, not a change to it.
+
+For an isolated Sepolia deployment, configure **all** of:
+
+- `GRID_X402_NETWORK=eip155:84532`
+- `GRID_BASE_CHAIN_ID=84532`
+- `GRID_BASE_RPC=https://sepolia.base.org` (or a reviewed Sepolia RPC)
+- `GRID_USDC_CONTRACT=0x036cbd53842c5426634e7929541ec2318f3dcf7e`
+- `GRID_X402_FACILITATOR_URL=https://x402.org/facilitator`
+- `GRID_X402_PAY_TO=<reviewed Sepolia recipient>`
+- `GRID_X402_MAX_AUTH_MICRO=50000`
+
+Use a dedicated staging environment/database. Do not change the shared
+production deposit verifier's chain or token to testnet. `GRID_BASE_RPC` is the
+receipt verifier setting; another component's `BASE_RPC_URL` does not configure
+it. The public test facilitator advertises Sepolia support; Base mainnet uses
+the authenticated CDP facilitator and dedicated credentials. Do not reuse
+another project's CDP key. Restrict a new facilitator key to Core's verified
+outbound IP and leave unrelated wallet/portfolio permissions disabled.
+
+### Paid proof
+
 Do this only after the USDC deposit canary passes. Start on Base Sepolia with
 matching test USDC, facilitator, network, and treasury values. Use a fresh
 low-value payer and `GRID_X402_MAX_AUTH_MICRO=50000` ($0.05 maximum).
@@ -146,7 +183,9 @@ Evidence required:
 
 1. Initial request returns a valid x402 payment requirement.
 2. Paid retry produces one non-streaming text completion.
-3. Reservation records grid-counted actual usage below the authorization.
+3. Reservation records max(grid-counted usage, the disclosed frozen minimum),
+   within the authorization. Keep raw token/rate evidence distinct from the
+   minimum-adjusted charge; do not label the floor as additional token usage.
 4. Payment transitions `verified -> settling -> reported -> settled`.
 5. Base receipt proves canonical USDC from payer to recipient for exactly
    `settled_micro`.
@@ -154,6 +193,12 @@ Evidence required:
 7. Worker payout excludes `verified`, `settling`, `reported`, and
    `manual_review`, then includes only independently proven `settled`.
 8. A forced ambiguous failure enters `manual_review` and alerts.
+
+Capture the exact candidate SHA, SDK version, network, capped authorization,
+trusted actual charge, Grid job ID, transaction hash and final receipt state.
+Never include signatures, payer private keys, API keys or JWTs in the evidence.
+A paid response lost after transfer must not be described as unpaid merely
+because the client received a 402: retain the durable attempt and reconcile it.
 
 For an ambiguous real transfer, reconcile only with the exact Base transaction:
 
@@ -166,6 +211,178 @@ For an ambiguous real transfer, reconcile only with the exact Base transaction:
 Repeat on Base mainnet with the same $0.05 ceiling only after Sepolia passes.
 Do not raise the ceiling or add streaming/media until an automated chain
 indexer/reconciler is deployed.
+
+### Verification checkpoint: October 14, 2026
+
+- Production was inspected with x402 disabled. Its unpaid route returned 404;
+  CDP facilitator credentials were absent. This is an observation, not an
+  authorization to change production configuration.
+- The real pinned x402 2.16.0 SDK returned an unpaid 402 challenge using the
+  official public Sepolia facilitator; the protected handler was not called.
+  The read-only preflight also passed against the real Sepolia RPC/facilitator
+  with the feature flag still off. No signatures or funds were used.
+- `test_x402_http_runtime.py` covers the actual SDK, production router and
+  FastAPI middleware with **synthetic facilitator verification/settlement and
+  worker output**. It checks actual-vs-ceiling settlement, replay rejection,
+  invalid/malformed payments, streaming rejection, durable attempt failures,
+  lost-receipt payout exclusion and redacted failure logs. It is not paid E2E.
+- The x402 duplicate-authorization and single-settlement races passed on a
+  disposable local PostgreSQL 16.15 instance. The targeted x402/credits race/
+  safe-logging suite passed 51 cases on Python 3.12.9 with hash-locked production
+  dependencies; adjacent deposit/credit/free-allowance/quote/payout regressions
+  passed another 141 cases. These are targeted checks, not the full Grid suite.
+  No live financial tables were used.
+- **Not yet proven:** a paid Sepolia transaction, a paid mainnet completion,
+  or a real worker/chain/receipt end-to-end result. Production enablement and
+  mainnet spending require separate explicit operator approval.
+
+### Credential checkpoint: October 15, 2026
+
+- The owner approved a dedicated CDP facilitator credential with Core's
+  verified outbound-IP allowlist and no portfolio/wallet permissions. The
+  original credential's one-time secret was not retained, so an equivalent
+  replacement was created after owner-completed Coinbase verification.
+- The replacement was matched to the open Coinbase key window, transferred
+  over SSH stdin, and installed only as `CDP_API_KEY_ID` and
+  `CDP_API_KEY_SECRET` in root-owned mode-0600 `/etc/aipg/grid.env`. The install
+  preserved every other parsed environment field, retained a root-only backup,
+  and did not restart any service. Temporary local credential copies were
+  removed after verification. Codebase credentials were not reused or changed.
+- A separate read-only process using the deployed `1bca2948` release and the
+  protected environment successfully authenticated the CDP facilitator's
+  `/supported` request, confirmed v2 `upto` support on `eip155:8453`, and checked
+  the actual receipt RPC chain ID and canonical Base USDC configuration.
+- `GRID_X402_ENABLED=0` remains unchanged. No verify/settle request, wallet
+  signature, payment, inference job, deployment or service restart was performed.
+  Authentication/support discovery is not a paid end-to-end proof; the paid
+  Sepolia/mainnet gates above remain open.
+- After separate explicit owner approval, the inaccessible original credential
+  was disabled, not deleted. The replacement remained enabled and passed the
+  authenticated facilitator/RPC check again. Other projects' keys were unchanged.
+
+### Paid Sepolia checkpoint: October 15, 2026
+
+The isolated protocol canary passed using source `3fbd48a3`, pinned x402 2.16.0,
+Python 3.12.9 and a private local PostgreSQL 16.15 instance. See the
+[public structured evidence](X402_SEPOLIA_CANARY_2026_10_15.json).
+
+- Coinbase's free faucet funded a fresh disposable testnet payer. No Ledger,
+  production payer, live financial database or mainnet funds were used.
+- The actual Core router and official SDK/FastAPI middleware returned initial
+  402, accepted an SDK-created signed `upto` authorization, and returned 200
+  after the real public facilitator settled canonical Sepolia USDC.
+- The authorization ceiling was 50,000 micro-USDC. Trusted fixture terminal
+  usage settled 23 micro-USDC, independently verified as exactly one payer-to-
+  recipient Transfer in block 48152592. The
+  [settlement transaction](https://sepolia.basescan.org/tx/0x935b414e922a444c3aa7abccc9490a3644fe58a11b13462d5da647518d091e48)
+  passed Core's own receipt/confirmation verifier before becoming `settled`.
+- Observed states were `verified -> settling -> reported -> settled`. A replay
+  returned 402 with still one job, reservation, payment row and settlement
+  attempt; neither balances nor transfer count changed again. No purchased
+  credits or credit-ledger rows were created.
+- The synthetic worker's ledger entry was excluded from aggregation while
+  `reported` and included only after independent chain proof. No actual worker
+  or validator payout was sent.
+- The remaining test-USDC Permit2 allowance was
+  [revoked](https://sepolia.basescan.org/tx/0x186094b8e2ed165fc566a6355528f7d2d788e6741b595df114901d83407aa5bd)
+  and independently read back as zero. Immediate public-RPC state reads lagged
+  mined approval receipts; subsequent read-only checks confirmed both approval
+  and revocation without broadcasting duplicates.
+
+**Boundary:** HTTP used in-process ASGI, not a publicly deployed Core instance.
+The worker account, output, usage and ledger entry were explicit synthetic
+fixtures; no real model/GPU or Grid worker transport ran. Real signatures,
+facilitator calls, test tokens, chain settlement and receipt reconciliation were
+not mocked. This closes the paid Sepolia protocol gate only. The real worker,
+bounded mainnet canary and deployment/admission gates remain open. Production
+x402 stayed disabled and no production configuration changed for this canary.
+
+The post-canary replay review found that the original Core fingerprint used
+the nonce's JSON text, whereas the SDK's EIP-712 message uses its uint256 value.
+Leading-zero aliases produced different authorization IDs in two reproduced
+failing regressions. The candidate now validates a bounded ASCII decimal
+uint256 and hashes its canonical numeric spelling. SQLite reservation and
+twenty-way PostgreSQL alias races pin one job per numeric authorization. This
+is a candidate hardening change, not a claim that an attacker exploited the
+disabled production rail. The updated targeted selection passed 208 cases
+(67 x402/concurrency/safe-log cases plus 141 adjacent money-path regressions)
+on the same locked Python 3.12/PostgreSQL 16 test setup.
+
+The real Sepolia protocol run was repeated on exact hardened source
+`1acd661f`. The facilitator accepted the unchanged signature with a leading-zero
+nonce; Core assigned it the canonical authorization identity. That paid retry
+returned 200 and independently settled exactly 23 micro-USDC in
+[block 48152961](https://sepolia.basescan.org/tx/0x8534d3bc40a7076fb34ce360e002a956fd7681714f9a62ce77aa8b44e1c87a46).
+Replaying the canonical nonce spelling returned 402 with still one job and
+one settlement attempt. The remaining allowance was again revoked and verified
+as zero. Both runs retain the same synthetic-worker/ASGI qualification boundary;
+neither is a mainnet or deployed-GPU claim.
+
+### Mainnet minimum discovery: October 15, 2026
+
+The owner-approved private real-worker canary on `607d1c03` completed
+`gpt-oss-120b` inference with trusted usage of 7 micro-USDC, but the paid
+response was 402 with one settlement attempt and no transaction hash.
+No successful settlement/replay proof is claimed. The original facilitator
+error body was not retained. Production's existing timeout monitor later
+moved this row from `settling` to `manual_review`; read-only reconciliation
+still finds zero credit-ledger movements and zero payout-eligible jobs.
+
+Subsequent authenticated provider checks used a dummy payer, an already
+expired deadline of 1 and a 65-byte all-zero signature. No private key was
+loaded, usable authorization created, Grid job dispatched or money sent:
+
+| Actual amount (micro-USDC) | HTTP | Provider error |
+| --- | --- | --- |
+| 7 | 400 | `amount_too_low` |
+| 999 | 400 | `amount_too_low` |
+| 1000 | 400 | `invalid_exact_evm_permit2_payload_deadline` |
+| 1001 | 400 | `invalid_exact_evm_permit2_payload_deadline` |
+
+Thus the real usage amount hits a reproducible USD 0.001 provider floor.
+Passing the floor is not signature, transfer or receipt qualification; the
+expired controls intentionally cannot pay. The diagnostic candidate preserves
+the bounded `amount_too_low` category and immediate job-bound failure review.
+190 focused local tests pass, including actual SDK HTTP-client controls with
+synthetic responses; these are not a second paid production canary.
+
+Public x402 remains off and the dedicated payer's last independently checked
+balance is USD 0.05 USDC with Permit2 allowance zero. No automatic retry or
+pricing change follows. Decide explicitly between disclosed x402 minimum
+pricing and preserving exact usage through another payment design; then test
+the reviewed implementation with a separately approved fresh capped payment.
+
+### Approved minimum candidate
+
+The owner subsequently approved a disclosed USD 0.001 minimum per successful
+x402 call, without changing ordinary prepaid pricing. The candidate challenge
+publishes `minimumCharge="1000"` and policy `x402-minimum-2026-10-15-v1` plus
+a plain-language description before signing. Missing/changed accepted terms
+reject before reservation or dispatch. Authorization must cover both the
+maximum usage quote and minimum. Migration `0046` stores the minimum with the
+verified payment in the reservation transaction; history defaults to zero.
+
+Successful completion and stale-hold recovery charge max(trusted usage,
+frozen minimum), within the original hold. Failed jobs release at zero;
+ordinary credits do not use the new snapshot. A later process setting cannot
+raise an existing job's minimum. SQL bounds both the minimum and attempted
+settlement; rollback retains pricing-aware writers and nonzero snapshot history.
+Independent canonical-USDC receipt proof remains mandatory for payout eligibility.
+
+The focused SQLite/HTTP tests and real PostgreSQL 16 races cover disclosure,
+missing/changed terms, 999/1000 ceiling boundaries, larger usage, unchanged
+credit balances, failed work, frozen completion/recovery, duplicate terminals
+and payout exclusion. A fresh PG16 0045-to-0046 upgrade/schema check and SQLite
+roundtrip prove the old 7-micro fixture retains minimum zero. The SQLite
+downgrade guard refuses nonzero pricing history, including an unpaid job.
+
+Authenticated provider controls accept the candidate's two new extra fields
+through schema validation and reject the intentionally expired zero signature
+instead, for verify and 1,000-micro settlement. They use no wallet key or valid
+authorization and do not prove payment. No new paid request, production schema
+change or public enablement follows from the pricing approval. Exact candidate
+CI, production restore/migration, supervised deployment and a freshly approved
+capped real-worker settlement/replay test remain required.
 
 ## 6. Holds
 

@@ -5,6 +5,18 @@
 
 ## Status
 
+### NVFP4 Budget Tariff Candidate - 2026-10-15 Eastern
+
+The owner requested cheaper NVFP4 pricing after its public rollout. Candidate
+book `2026-10-15-a` prices Distilled NVFP4 at USD 0.010 per effective output
+second, half the unchanged BF16 USD 0.020 rate. A ten-second NVFP4 output is
+USD 0.10; exact frame/FPS durations round upward to an integer micro-USD.
+The public catalog, credit estimate and new reservation use the same tariff.
+Accepted holds and historical charges keep their original amounts. Worker den
+weights, admission gates and clip limits are unchanged. This is a commercial
+decision, not a claim of measured speed, cost or fidelity parity. This candidate
+is not yet deployment proof; the dated rollout records below are historical.
+
 ### Current Dark Production - 2026-10-14 UTC
 
 Core4e9864c8/0045 is deployed after exact-source PG16 CI, production restore
@@ -256,7 +268,7 @@ Gemma4-12B projection encoder and LTX-2.5 video/audio VAEs.
 | --- | --- | --- |
 | Default size | 960x544 | 960x544 |
 | Size band | 256..960 per axis, multiples of 32, at most 522240 pixels | Same |
-| Frames | BF16 candidate9..721; NVFP4 9..337, exactly 8n+1; default81 | 9..81, exactly 8n+1; default81 |
+| Frames | BF16 candidate9..625; NVFP4 9..337, exactly 8n+1; default81 | 9..81, exactly 8n+1; default81 |
 | FPS | 24 only | 24 only |
 | Steps | 8 only, fixed sigma schedule | 4..40; default 40 |
 | CFG | 1 only | 1..5; default 2 |
@@ -272,15 +284,17 @@ reservation units, worker payload, graph and `grid.execution` use that effective
 duration. Omitted seed randomizes once; explicit seed zero is preserved.
 
 The BF16-only duration extension is a candidate, not a deployed capacity claim.
-Thirty requested seconds select721 frames /30.041667seconds; at the unchanged
-USD0.020/effective-second tariff the full quote is600834micro-USD (rounded up).
+Twenty-six requested seconds select625 frames /26.041667seconds; at the unchanged
+USD0.020/effective-second tariff the full quote is520834micro-USD (rounded up).
 The Core parser, quote, journal and source validators share that outer bound;
 NVFP4 and Dev still reject beyond their own smaller recipe limits. No source
 admission, pixel ceiling, output-byte limit, timeout or concurrency is widened.
 Qualify native generation on an idle owned BF16 worker before release. Source
 mode qualification and the separate approved USD0.06 canaries remain gates;
+the serving exporter and media worker source adapter still cap337frames and
+must be upgraded/qualified before their corresponding longer paths are served.
 their small budget does not authorize a longer purchased clip. After accepting
-a721-frame intent, rollback must retain readers/parsers supporting that original
+a625-frame intent, rollback must retain readers/parsers supporting that original
 intent and GET/replay; reduce fresh recipe admission or disable new jobs instead
 of restoring a binary that cannot recover accepted long jobs.
 Chat media uses the same 81-frame recipe default when no timing control is

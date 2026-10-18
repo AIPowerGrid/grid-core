@@ -97,12 +97,18 @@ executes an immutable release selected through `/home/aipg/current`.
 
 ## Local Contracts
 
-- `MEDIA_ASYNC_NVFP4_ENABLED=0` is an independent default-off public rollout
-  candidate for qualified NVFP4 text/opening-image jobs. It does not enable
-  source modes, widen NVFP4 beyond337frames or bypass base admission, pricing,
-  worker capability and credit holds. Verify the exact serving native exporter,
-  worker-only credential lifetime, real execution and compatible client release
-  before enabling; closing it preserves original receipt replay and GET.
+- The owner-approved x402-only USD 0.001 minimum is a candidate, not production
+  activation. Apply `0046` before starting its release, retain old receipts with
+  zero minimum, and preserve minimum-aware completion/recovery on rollback.
+  CI plus a fresh production restore/migration proof precede deployment; a
+  separately capped real-worker payment/replay test precedes public admission.
+  The prior `607d1c03` / `0045` deployment record remains historical evidence.
+
+- Public NVFP4 additionally requires `MEDIA_ASYNC_NVFP4_ENABLED=1` after
+  reviewed native/exporter/worker-credential and purchased path qualification.
+  Default0 retains BF16-only public admission. This switch neither widens337
+  frames nor opens source modes, bypasses a hold or changes tariffs. Close the
+  switch for rollback while retaining accepted NVFP4 receipts/replay/GET.
 
 - The owner approved the credit-first LTX-2.5 rollout on 2026-10-12.
   PR217 stops at 0045; do not pull the later x402/refund migration stack into

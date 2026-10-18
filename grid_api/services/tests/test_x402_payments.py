@@ -62,18 +62,50 @@ def enabled(monkeypatch):
 def _payment(amount: int):
     payload = SimpleNamespace(
         payload={"permit2Authorization": {"from": PAYER, "nonce": "12345"}},
+        accepted=SimpleNamespace(extra=x402_payments.pricing_terms()),
     )
     requirements = SimpleNamespace(
         network="eip155:8453",
         asset=USDC,
         pay_to=TREASURY,
         amount=str(amount),
+        extra=x402_payments.pricing_terms(),
     )
     return payload, requirements
 
 
+def _x402_quote(completion_tokens: int) -> int:
+    return max(x402_payments.MIN_CHARGE_MICRO, pricing.quote_text(MODEL, 100, completion_tokens))
+
+
 def _topic(address: str) -> str:
     return "0x" + "0" * 24 + address[2:]
+
+
+@pytest.mark.parametrize("nonce", ["012345", "00012345", "0" * 200 + "12345", 12345])
+def test_numeric_nonce_aliases_have_one_authorization_identity(nonce):
+    original, requirements = _payment(50_000)
+    alias, _ = _payment(50_000)
+    alias.payload["permit2Authorization"]["nonce"] = nonce
+    assert (
+        x402_payments.payment_payload_details(original, requirements)["authorization_id"]
+        == (x402_payments.payment_payload_details(alias, requirements)["authorization_id"])
+    )
+
+
+@pytest.mark.parametrize("nonce", ["", "-1", "+1", "0x1", "1.0", "1e3", "１２３", "0" * 257, str(2**256)])
+def test_invalid_permit_nonce_is_rejected_before_reservation(nonce):
+    payload, requirements = _payment(50_000)
+    payload.payload["permit2Authorization"]["nonce"] = nonce
+    with pytest.raises(RuntimeError, match="nonce"):
+        x402_payments.payment_payload_details(payload, requirements)
+
+
+@pytest.mark.parametrize("nonce", ["0", str(2**256 - 1)])
+def test_permit_nonce_uint256_boundaries(nonce):
+    payload, requirements = _payment(50_000)
+    payload.payload["permit2Authorization"]["nonce"] = nonce
+    assert x402_payments.payment_payload_details(payload, requirements)["authorization_id"]
 
 
 async def _rows(table):
@@ -164,10 +196,16 @@ def test_mainnet_config_fails_closed_without_facilitator_credentials(monkeypatch
         x402_payments.validate_config()
 
 
+def test_config_rejects_ceiling_below_disclosed_minimum(enabled, monkeypatch):
+    monkeypatch.setattr(x402_payments, "MAX_AUTH_MICRO", 999)
+    with pytest.raises(RuntimeError, match="disclosed x402 minimum"):
+        x402_payments.validate_config()
+
+
 @pytest.mark.asyncio
 async def test_external_reservation_is_atomic_and_never_touches_credit_ledger(db, enabled):
     job_id = str(uuid.uuid4())
-    maximum = pricing.quote_text(MODEL, 100, 500)
+    maximum = _x402_quote(500)
     payload, requirements = _payment(maximum)
 
     result = await credits.authorize_x402_request(
@@ -215,8 +253,59 @@ async def test_under_authorized_request_writes_nothing(db, enabled):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cap,ok", [(999, False), (1000, True)])
+async def test_authorization_covers_minimum_exactly_or_rejects_before_writes(db, enabled, cap, ok):
+    payload, requirements = _payment(cap)
+    result = await credits.authorize_x402_request(
+        MODEL, 1, 1, str(uuid.uuid4()),
+        payment_payload=payload, payment_requirements=requirements,
+    )
+    assert result["ok"] is ok
+    assert len(await _rows(reservations)) == len(await _rows(payments)) == int(ok)
+    if ok:
+        assert result["reserved"] == (await _rows(payments))[0].minimum_charge_micro == 1000
+    else:
+        assert result["status"] == "authorization_too_small"
+    assert await _rows(credit_ledger) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy,success", [(False, True), (True, True), (False, False)])
+async def test_recovery_and_release_use_frozen_minimum_not_current_policy(db, enabled, monkeypatch, legacy, success):
+    job = str(uuid.uuid4())
+    payload, requirements = _payment(50_000)
+    result = await credits.authorize_x402_request(
+        MODEL, 100, 500, job, payment_payload=payload, payment_requirements=requirements,
+    )
+    assert result["ok"]
+    if legacy:
+        # Model the zero-default terms retained by the additive migration.
+        async with await database.new_session() as session:
+            await session.execute(sa.update(payments).where(payments.c.job_id == job).values(minimum_charge_micro=0))
+            await session.commit()
+    monkeypatch.setattr(x402_payments, "MIN_CHARGE_MICRO", 99_000)
+    assert await credits.settle_job(job, 19, status="ok" if success else "failed")
+    actual = pricing.quote_text(MODEL, 100, 19)
+    expected = (actual if legacy else max(1000, actual)) if success else 0
+    assert await credits.reservation_actual_micro(job) == expected
+    assert await _rows(credit_ledger) == []
+    assert not await credits.settle_job(job, 9999)
+    assert await credits.reservation_actual_micro(job) == expected
+
+
+@pytest.mark.asyncio
+async def test_settlement_below_frozen_minimum_cannot_attempt_payment(db, enabled):
+    job = str(uuid.uuid4())
+    await _terminal_payment(job, 50_000, 1000)
+    with pytest.raises(RuntimeError, match="under-authorized"):
+        await x402_payments._before_settle(_hook_context(job, 999))
+    row = (await _rows(payments))[0]
+    assert row.status == "verified" and row.attempts == 0
+
+
+@pytest.mark.asyncio
 async def test_one_authorization_cannot_open_two_jobs(db, enabled):
-    maximum = pricing.quote_text(MODEL, 100, 500)
+    maximum = _x402_quote(500)
     payload, requirements = _payment(maximum)
     first = await credits.authorize_x402_request(
         MODEL,
@@ -243,6 +332,30 @@ async def test_one_authorization_cannot_open_two_jobs(db, enabled):
 
 
 @pytest.mark.asyncio
+async def test_nonce_alias_cannot_open_a_second_reservation(db, enabled):
+    payload, requirements = _payment(50_000)
+    original = await credits.authorize_x402_request(
+        MODEL,
+        100,
+        500,
+        str(uuid.uuid4()),
+        payment_payload=payload,
+        payment_requirements=requirements,
+    )
+    payload.payload["permit2Authorization"]["nonce"] = "00012345"
+    alias = await credits.authorize_x402_request(
+        MODEL,
+        100,
+        500,
+        str(uuid.uuid4()),
+        payment_payload=payload,
+        payment_requirements=requirements,
+    )
+    assert original["ok"] and not alias["ok"] and alias["status"] == "conflict"
+    assert len(await _rows(payments)) == len(await _rows(reservations)) == 1
+
+
+@pytest.mark.asyncio
 async def test_database_rejects_settlement_above_authorization(db):
     async with await database.new_session() as session:
         with pytest.raises(IntegrityError):
@@ -265,7 +378,8 @@ async def test_database_rejects_settlement_above_authorization(db):
 
 
 @pytest.mark.asyncio
-async def test_actual_cost_is_recorded_and_payout_waits_for_onchain_settlement(db, enabled):
+@pytest.mark.parametrize("completion_tokens", [19, 50, 5000])
+async def test_actual_cost_is_recorded_and_payout_waits_for_onchain_settlement(db, enabled, monkeypatch, completion_tokens):
     account_id = uuid.uuid4()
     worker_id = uuid.uuid4()
     job_id = str(uuid.uuid4())
@@ -296,19 +410,20 @@ async def test_actual_cost_is_recorded_and_payout_waits_for_onchain_settlement(d
         )
         await session.commit()
 
-    maximum = pricing.quote_text(MODEL, 100, 500)
+    maximum = _x402_quote(6000)
     payload, requirements = _payment(maximum)
     assert (
         await credits.authorize_x402_request(
             MODEL,
             100,
-            500,
+            6000,
             job_id,
             payment_payload=payload,
             payment_requirements=requirements,
         )
     )["ok"]
 
+    monkeypatch.setattr(x402_payments, "MIN_CHARGE_MICRO", 9_000_000)
     terminal = await credits.record_and_settle(
         ledger_values={
             "job_id": job_id,
@@ -317,15 +432,17 @@ async def test_actual_cost_is_recorded_and_payout_waits_for_onchain_settlement(d
             "model": MODEL,
             "job_type": "text",
             "den": 25.0,
-            "output_units": 50,
+            "output_units": completion_tokens,
             "prompt_hash": None,
             "result_hash": None,
         },
-        completion_tokens=50,
+        completion_tokens=completion_tokens,
     )
     assert terminal == "settled"
-    actual = pricing.quote_text(MODEL, 100, 50)
+    actual = max(1000, pricing.quote_text(MODEL, 100, completion_tokens))
     assert await credits.reservation_actual_micro(job_id) == actual
+    assert (await _rows(payments))[0].minimum_charge_micro == 1000
+    assert await _rows(credit_ledger) == []
     assert len(await _rows(ledger)) == 1
 
     before = await aggregate_den_by_account(now - timedelta(minutes=1), now + timedelta(minutes=1))
@@ -357,8 +474,8 @@ async def test_actual_cost_is_recorded_and_payout_waits_for_onchain_settlement(d
 @pytest.mark.asyncio
 async def test_settlement_hooks_persist_attempt_before_receipt(db, enabled):
     job_id = str(uuid.uuid4())
-    maximum = pricing.quote_text(MODEL, 100, 500)
-    actual = pricing.quote_text(MODEL, 100, 50)
+    maximum = _x402_quote(500)
+    actual = _x402_quote(50)
     await _terminal_payment(job_id, maximum, actual)
     context = _hook_context(job_id, actual, transaction=TX_HASH)
 
@@ -383,8 +500,8 @@ async def test_reported_payment_requires_independent_base_proof(
     monkeypatch,
 ):
     job_id = str(uuid.uuid4())
-    maximum = pricing.quote_text(MODEL, 100, 500)
-    actual = pricing.quote_text(MODEL, 100, 50)
+    maximum = _x402_quote(500)
+    actual = _x402_quote(50)
     await _terminal_payment(job_id, maximum, actual)
     context = _hook_context(job_id, actual, transaction=TX_HASH)
     await x402_payments._before_settle(context)
@@ -427,8 +544,8 @@ async def test_unproven_facilitator_report_goes_to_manual_review(
     monkeypatch,
 ):
     job_id = str(uuid.uuid4())
-    maximum = pricing.quote_text(MODEL, 100, 500)
-    actual = pricing.quote_text(MODEL, 100, 50)
+    maximum = _x402_quote(500)
+    actual = _x402_quote(50)
     await _terminal_payment(job_id, maximum, actual)
     context = _hook_context(job_id, actual, transaction=TX_HASH)
     await x402_payments._before_settle(context)
@@ -467,8 +584,8 @@ async def test_unproven_facilitator_report_goes_to_manual_review(
 @pytest.mark.asyncio
 async def test_ambiguous_settlement_never_auto_retries_or_unlocks_payout(db, enabled):
     job_id = str(uuid.uuid4())
-    maximum = pricing.quote_text(MODEL, 100, 500)
-    actual = pricing.quote_text(MODEL, 100, 50)
+    maximum = _x402_quote(500)
+    actual = _x402_quote(50)
     await _terminal_payment(job_id, maximum, actual)
     context = _hook_context(job_id, actual)
 
@@ -484,8 +601,8 @@ async def test_ambiguous_settlement_never_auto_retries_or_unlocks_payout(db, ena
 @pytest.mark.asyncio
 async def test_stale_settling_is_flagged_for_manual_review(db, enabled):
     job_id = str(uuid.uuid4())
-    maximum = pricing.quote_text(MODEL, 100, 500)
-    actual = pricing.quote_text(MODEL, 100, 50)
+    maximum = _x402_quote(500)
+    actual = _x402_quote(50)
     await _terminal_payment(job_id, maximum, actual)
     context = _hook_context(job_id, actual)
     await x402_payments._before_settle(context)
@@ -509,8 +626,8 @@ async def test_operator_reconcile_requires_exact_confirmed_usdc_transfer(
     monkeypatch,
 ):
     job_id = str(uuid.uuid4())
-    maximum = pricing.quote_text(MODEL, 100, 500)
-    actual = pricing.quote_text(MODEL, 100, 50)
+    maximum = _x402_quote(500)
+    actual = _x402_quote(50)
     await _terminal_payment(job_id, maximum, actual)
     context = _hook_context(job_id, actual)
     await x402_payments._before_settle(context)
@@ -552,8 +669,8 @@ async def test_operator_reconcile_requires_exact_confirmed_usdc_transfer(
 @pytest.mark.asyncio
 async def test_operator_reconcile_rejects_wrong_amount(db, enabled, monkeypatch):
     job_id = str(uuid.uuid4())
-    maximum = pricing.quote_text(MODEL, 100, 500)
-    actual = pricing.quote_text(MODEL, 100, 50)
+    maximum = _x402_quote(500)
+    actual = _x402_quote(50)
     await _terminal_payment(job_id, maximum, actual)
     context = _hook_context(job_id, actual)
     await x402_payments._before_settle(context)

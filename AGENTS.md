@@ -55,6 +55,12 @@ owning AGENTS.md and any affected parent Child DOX Index.
   legacy `GRID_CHARGING_ENABLED` fallback. The legacy flag being `0` does not
   prove dry-run when a mode is configured; verify the selected request cohort
   and actual running configuration.
+- The x402 minimum candidate requires migration `0046` before startup, even
+  dark. New successful x402 requests alone use the owner-approved disclosed
+  USD 0.001 minimum, snapshotted before dispatch. Old receipts keep zero minimum;
+  ordinary prepaid tariffs and failed jobs are unchanged. Keep public admission
+  off until exact-source CI, production restore/migration and a fresh capped
+  real-worker payment/replay proof pass. Retain pricing-aware terminals on rollback.
 - Production Python dependencies resolve from `requirements-grid.txt` into the
   reviewed, hash-locked Python 3.12/Linux `requirements-grid.lock`. Docker and
   host deploys consume only matching binary wheels from the lock and do not
