@@ -32,7 +32,7 @@ from ..auth import extract_api_key
 from ..database import new_session
 from ..ratelimit import limiter
 from ..services import accounts as accounts_svc
-from ..services import economics, worker_canaries
+from ..services import economics, video_contract, worker_canaries
 from ..services import identities as identities_svc
 from ..v2.schema import accounts as accounts_table
 from ..v2.schema import api_keys as api_keys_table
@@ -203,7 +203,7 @@ class CreditQuoteForm(BaseModel):
     max_tokens: int = Field(default=0, ge=0, le=1_000_000)
     n: int = Field(default=1, ge=1, le=16)
     seconds: Optional[float] = Field(default=None, gt=0, le=3_600, allow_inf_nan=False)
-    frames: Optional[int] = Field(default=None, ge=9, le=337, strict=True)
+    frames: Optional[int] = Field(default=None, ge=9, le=video_contract.MAX_LTX_FRAMES, strict=True)
 
     @model_validator(mode="after")
     def require_modality_inputs(self):

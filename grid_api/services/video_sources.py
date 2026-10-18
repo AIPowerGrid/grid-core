@@ -30,6 +30,7 @@ from fastapi import HTTPException
 from PIL import Image
 
 from . import storage
+from .video_contract import MAX_LTX_FRAMES
 
 MAX_AUDIO_BYTES = 12 * 1024 * 1024
 MAX_VIDEO_BYTES = 32 * 1024 * 1024
@@ -96,7 +97,7 @@ def validate_image(raw: bytes) -> Source:
 def validate_audio(raw: bytes, frames: int) -> Source:
     """Require exact 48 kHz stereo PCM16 duration, with complete RIFF chunks."""
     try:
-        if (type(frames) is not int or not 9 <= frames <= 337 or frames % 8 != 1
+        if (type(frames) is not int or not 9 <= frames <= MAX_LTX_FRAMES or frames % 8 != 1
                 or len(raw) > MAX_AUDIO_BYTES or len(raw) < 44 or raw[:4] != b"RIFF"
                 or raw[8:12] != b"WAVE" or struct.unpack_from("<I", raw, 4)[0] != len(raw) - 8):
             raise ValueError
@@ -133,7 +134,7 @@ def validate_video(raw: bytes, frames: int, width: int, height: int) -> Source:
         raise HTTPException(503, detail="Video source verification is unavailable")
     try:
         if (len(raw) > MAX_VIDEO_BYTES or len(raw) < 16 or raw[4:8] != b"ftyp"
-                or not 9 <= frames <= 337 or frames % 8 != 1
+                or not 9 <= frames <= MAX_LTX_FRAMES or frames % 8 != 1
                 or not 256 <= width <= 960 or not 256 <= height <= 960
                 or width % 32 or height % 32 or width * height > 960 * 544):
             raise ValueError

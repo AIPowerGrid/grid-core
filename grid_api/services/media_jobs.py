@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import new_session
 from ..v2.schema import accounts, media_jobs, reservations
 from . import identities, job_queue, media_results, media_source_retention, validator_audit_budgets
+from .video_contract import MAX_LTX_FRAMES
 
 MAX_PAYLOAD_BYTES = 256 * 1024
 MAX_DISPATCH_ATTEMPTS = 6
@@ -222,7 +223,7 @@ def _validate_prepared(job: PreparedMediaJob) -> None:
     if not isinstance(root, str) or not re.fullmatch(r"0x[0-9a-f]{64}", root):
         raise MediaJobError("governed recipe commitment required")
     frames, fps = payload.get("frames"), payload.get("fps")
-    if (type(frames) is not int or not 9 <= frames <= 337 or frames % 8 != 1
+    if (type(frames) is not int or not 9 <= frames <= MAX_LTX_FRAMES or frames % 8 != 1
             or type(fps) is not int or fps != 24
             or type(job.seconds) not in (int, float) or not math.isfinite(job.seconds)
             or job.seconds != frames / fps or payload.get("seconds") != job.seconds):

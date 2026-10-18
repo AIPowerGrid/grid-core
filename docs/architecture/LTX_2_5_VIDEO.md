@@ -268,7 +268,7 @@ Gemma4-12B projection encoder and LTX-2.5 video/audio VAEs.
 | --- | --- | --- |
 | Default size | 960x544 | 960x544 |
 | Size band | 256..960 per axis, multiples of 32, at most 522240 pixels | Same |
-| Frames | 9..337, exactly 8n+1; default 81 | 9..81, exactly 8n+1; default 81 |
+| Frames | BF16 candidate9..625; NVFP4 9..337, exactly 8n+1; default81 | 9..81, exactly 8n+1; default81 |
 | FPS | 24 only | 24 only |
 | Steps | 8 only, fixed sigma schedule | 4..40; default 40 |
 | CFG | 1 only | 1..5; default 2 |
@@ -282,6 +282,21 @@ become 97 frames / 24 fps, or approximately 4.041667 seconds. If both fields
 are supplied, they must already describe the same duration. Cost estimates,
 reservation units, worker payload, graph and `grid.execution` use that effective
 duration. Omitted seed randomizes once; explicit seed zero is preserved.
+
+The BF16-only duration extension is a candidate, not a deployed capacity claim.
+Twenty-six requested seconds select625 frames /26.041667seconds; at the unchanged
+USD0.020/effective-second tariff the full quote is520834micro-USD (rounded up).
+The Core parser, quote, journal and source validators share that outer bound;
+NVFP4 and Dev still reject beyond their own smaller recipe limits. No source
+admission, pixel ceiling, output-byte limit, timeout or concurrency is widened.
+Qualify native generation on an idle owned BF16 worker before release. Source
+mode qualification and the separate approved USD0.06 canaries remain gates;
+the serving exporter and media worker source adapter still cap337frames and
+must be upgraded/qualified before their corresponding longer paths are served.
+their small budget does not authorize a longer purchased clip. After accepting
+a625-frame intent, rollback must retain readers/parsers supporting that original
+intent and GET/replay; reduce fresh recipe admission or disable new jobs instead
+of restoring a binary that cannot recover accepted long jobs.
 Chat media uses the same 81-frame recipe default when no timing control is
 available, rather than imposing the legacy four-second default on dev.
 
