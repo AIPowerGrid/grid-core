@@ -49,6 +49,10 @@ transport, accounts, stats, health/metrics.
   (fully decoded exact-frame 24 fps H.264 MP4 at the explicit requested size).
   Motion references require a separate audio input; neither role is an opening
   image. Both source modes are default-dark and require compatible workers.
+  BF16 source requests may use625frames; above337 the frozen dispatch adds
+  `recipe-media-sources-625-v1`. Registration retains that additive feature,
+  but Core still requires all features on one worker before paid admission.
+  The flag does not widen NVFP4 sources or the fixed Ingredients profile.
   All typed LTX inputs, including optional image pins, require the separate
   private-source bucket before quota/uploads; no output-bucket fallback.
   `_video_body.py` bounds both native video JSON routes to 64 MiB + 64 KiB

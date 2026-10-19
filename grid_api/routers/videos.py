@@ -189,6 +189,11 @@ async def validate_video(body: VideoRequest, user: dict, *, async_submission: bo
         seed = media.normalize_seed(extra.get("seed"))
         seeds = media.seeds_for_outputs(seed, body.n)
 
+        if source_mode != "generated" and frames > video_sources.LEGACY_SOURCE_FRAMES:
+            features += (video_sources.LONG_SOURCE_FEATURE,)
+            if model not in await get_available_models(job_type="video", media_features=features):
+                raise HTTPException(503, detail="No compatible long-source video worker is available")
+
         # Validate every inline pin before quota or any storage side effect.
         decoded_pins = media.decode_video_keyframes([pin.image for pin in body.keyframes]) if body.keyframes else None
         if decoded_pins and "size" not in set_fields:

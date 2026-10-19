@@ -381,9 +381,11 @@ def compile_dispatch(model: str, job_type: str, payload: dict) -> tuple[dict, di
         source_bindings = resolved_recipe.get("source_bindings") or []
         source_media = payload.get("source_media") or []
         if source_bindings or source_media:
-            from .video_sources import validate_commitments
+            from .video_sources import LEGACY_SOURCE_FRAMES, LONG_SOURCE_FEATURE, validate_commitments
             validate_commitments(source_media, source_bindings, resolved_recipe["execution"])
             features = set(payload.get("required_media_features") or []) | {"recipe-media-sources-v1"}
+            if resolved_recipe["execution"]["frames"] > LEGACY_SOURCE_FRAMES:
+                features.add(LONG_SOURCE_FEATURE)
             if resolved_recipe["execution"].get("appearance_profile"):
                 features.add("recipe-appearance-reference-v1")
             if len(bindings or []) > 1:
