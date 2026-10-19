@@ -137,6 +137,21 @@ else:raise AssertionError('Missing extended capability accepted')
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("timing", [{"frames": 625}, {"seconds": 26}])
+async def test_old_source_workers_reject_long_admission_before_any_decoder(admission, monkeypatch, timing):
+    from grid_api.services.video_sources import LONG_SOURCE_FEATURE
+
+    admission.side_effect = [[MODEL], []]
+    monkeypatch.setattr(videos.video_sources, "validate_sources", forbidden)
+    body = videos.VideoRequest(prompt="synthetic source", model=MODEL, size="256x256",
+                               reference_audio=base64.b64encode(wav(625)).decode("ascii"), **timing)
+    with pytest.raises(HTTPException) as error:
+        await videos.validate_video(body, {}, async_submission=True)
+    assert error.value.status_code == 503
+    assert LONG_SOURCE_FEATURE in admission.call_args.kwargs["media_features"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["generated", "audio", "video"])
 @pytest.mark.parametrize("pin", [False, True])
 async def test_validation_and_compilation_are_side_effect_free(admission, mode, pin, mp4, monkeypatch):
