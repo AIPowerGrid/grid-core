@@ -31,9 +31,9 @@ from PIL import Image
 
 from . import storage
 
-# Governed source workers still enforce 337; generated BF16's 625-frame
-# qualification does not establish audio/motion-conditioned capacity.
-MAX_SOURCE_FRAMES = 337
+MAX_SOURCE_FRAMES = 625
+LEGACY_SOURCE_FRAMES = 337
+LONG_SOURCE_FEATURE = "recipe-media-sources-625-v1"
 
 MAX_AUDIO_BYTES = 12 * 1024 * 1024
 MAX_VIDEO_BYTES = 32 * 1024 * 1024

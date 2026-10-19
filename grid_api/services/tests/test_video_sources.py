@@ -35,7 +35,7 @@ def test_audio_commits_exact_complete_stereo_pcm():
     assert video_sources.decode_inline("data:audio/wav;base64," + base64.b64encode(raw).decode(), "reference_audio") == raw
 
 
-@pytest.mark.parametrize("frames", [241, 337])
+@pytest.mark.parametrize("frames", [241, 337, 345, 481, 625])
 def test_long_soundtrack_requires_the_complete_selected_window(frames):
     raw = wav(frames)
     source = video_sources.validate_audio(raw, frames)
@@ -44,12 +44,10 @@ def test_long_soundtrack_requires_the_complete_selected_window(frames):
     for short in (wav(169), raw[:-4]):
         with pytest.raises(HTTPException):
             video_sources.validate_audio(short, frames)
-    with pytest.raises(HTTPException):
-        video_sources.validate_audio(wav(345), 345)
 
 
-@pytest.mark.parametrize("frames", [345, 481, 625])
-def test_generated_duration_extension_does_not_widen_source_workers(frames):
+@pytest.mark.parametrize("frames", [626, 633, 721])
+def test_sources_reject_invalid_or_over_limit_duration(frames):
     with pytest.raises(HTTPException) as exc:
         video_sources.validate_audio(wav(frames), frames)
     assert exc.value.status_code == 422
@@ -90,6 +88,21 @@ def test_source_video_is_independently_decoded(mp4):
     assert source.role == "reference_video"
     assert source.commitment["frames"] == 9
     assert source.commitment["width"] == source.commitment["height"] == 256
+
+
+def test_long_motion_source_is_fully_decoded_at_the_extended_boundary(tmp_path):
+    decoder = shutil.which("ffmpeg")
+    if not decoder or not shutil.which("ffprobe"):
+        pytest.skip("independent FFmpeg source-decoder gate unavailable")
+    path = tmp_path / "long-motion.mp4"
+    subprocess.run([decoder, "-v", "error", "-nostdin", "-f", "lavfi", "-i", "testsrc2=size=256x256:rate=24",
+                    "-frames:v", "625", "-an", "-c:v", "libx264", "-threads", "1", "-pix_fmt", "yuv420p", str(path)],
+                   capture_output=True, timeout=30, check=True)
+    raw = path.read_bytes()
+    assert video_sources.validate_video(raw, 625, 256, 256).metadata["frames"] == 625
+    for frames in (617, 633):
+        with pytest.raises(HTTPException):
+            video_sources.validate_video(raw, frames, 256, 256)
 
 
 @pytest.mark.parametrize("frames,width,height", [(17, 256, 256), (9, 512, 256), (9, 256, 512)])
