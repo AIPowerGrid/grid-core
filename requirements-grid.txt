@@ -27,6 +27,7 @@ google-auth>=2.29,<3
 python-dotenv>=1.0.0
 
 # Security floors for HTTP transport dependencies; keep the lock reviewed.
+aiohttp>=3.14.4,<4
 multidict>=6.9.1
 urllib3>=2.8.0,<3
 
