@@ -5,6 +5,20 @@
 
 ## Status
 
+### 26-Second Source Extension Candidate - 2026-10-19 Eastern
+
+The matching Core/worker/Gallery candidate extends BF16 audio/video sources
+to625frames /26.041667seconds. Compilation adds `recipe-media-sources-625-v1`
+above337frames and requires that capability on one worker alongside the
+existing source/resume features before quota, input upload or a hold. Updated
+BF16 opt-in workers declare it only after complete startup checks. Older
+workers still serve short sources; NVFP4 source admission, fixed Ingredients,
+tariffs, byte/geometry bounds, concurrency and existing receipt identities are
+unchanged. Upgrade Core's registration/dispatcher before the new workers,
+then Gallery after native long-source acceptance. Exact-source CI, restored
+release checks and separately capped purchased canaries still gate rollout;
+the earlier short controls below do not prove26-second source execution.
+
 ### Source Rollout Scope - 2026-10-19 Eastern
 
 Core `8e74ef37` / schema0046 and Gallery `950979d3` introduced this public
@@ -313,8 +327,9 @@ duration. Omitted seed randomizes once; explicit seed zero is preserved.
 The BF16-only generated-video duration extension is deployed as recorded above.
 Twenty-six requested seconds select625 frames /26.041667seconds; at the unchanged
 USD0.020/effective-second tariff the full quote is520834micro-USD (rounded up).
-The Core parser, quote and journal share that outer bound; uploaded audio/video
-source validators independently retain337frames, matching the worker adapter.
+The Core parser, quote, journal and new source validators share that outer
+bound. Source dispatch above337frames additionally requires the new extended
+worker capability; the original public source rollout retained337frames.
 NVFP4 and Dev reject beyond their own smaller recipe limits. No source
 admission, pixel ceiling, output-byte limit, timeout or concurrency is widened.
 Native generated/opening-image625-frame controls and the separately bounded

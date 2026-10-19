@@ -70,11 +70,13 @@ content sanitization, and reward settlement.
   frame limit and the fixed Ingredients bucket remain unchanged.
 - `video_sources.py` owns bounded inline WAV/MP4 input decoding, exact-duration
   audio validation and isolated FFmpeg probe/full-frame checks. It accepts no
-  input URLs or filenames. Sources remain bounded to337frames while the
-  governed worker source adapter retains that
-  ceiling; generated BF16's625-frame extension is separate. Reject before
-  a decoder, quota, private upload or hold, rather than dispatch unsupported
-  work. This restriction does not alter generated-video prices or receipts.
+  input URLs or filenames. Sources are bounded to625frames; recipe/model
+  bounds still restrict NVFP4, standard Dev and Ingredients independently.
+  Above337frames, compilation additionally requires
+  `recipe-media-sources-625-v1` on the same worker as every other feature.
+  Reject missing compatible capacity before quota, private upload or hold;
+  older workers keep serving short clips. Qualify native long audio/motion
+  execution before consumer rollout. Prices and old receipts are unchanged.
   Validate all inputs before quota/upload, retain
   hash/size/role/timing commitments and require them to match the compiled
   source slots before a hold. The Ingredients-only `reference_image` role is
