@@ -84,11 +84,11 @@ validation, worker incentives, and trust boundaries.
 - `RECIPE_DISPATCH.md` - how to add a media workflow: recipe = governed ComfyUI
   graph (`_grid` node map), the importer CLI, authoring steps, dispatch flow, and
   the coordinator/worker split. Start here to add an image/video model.
-- `LTX_2_5_VIDEO.md` - owner-approved Distilled credit pilot and distinct
-  NVFP4 identity/tariff/startup copies, dark-deployed at4e9864c8/0045 with
-  verified private-source storage and preserved existing models/charging/timers.
-  Async stays off; enrollment, funded canary and consumer rollout remain gates.
-  non-serving Dev/Ingredients candidates, typed frame
+- `LTX_2_5_VIDEO.md` - Distilled BF16/NVFP4 identities, tariffs, startup and
+  generated/source duration boundaries. Deployed BF16625/NVFP4337 credit-backed
+  text/opening-image video is separate from the closed337-frame audio/motion
+  activation candidate. Source release, funded canaries and private-input
+  cleanup remain gates. It also owns non-serving Dev/Ingredients, typed frame
   and bounded image-pin contract, exact execution/quote/reward units, owned-rig
   observations, reference-film recreation/audio-preservation benchmark and
   outstanding financial/async/x402/promotion gates. Native multi-shot and
