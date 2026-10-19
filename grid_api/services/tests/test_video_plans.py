@@ -8,6 +8,10 @@ import dataclasses
 import hashlib
 import io
 import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -64,6 +68,72 @@ def request(mode, *, video=None, pin=False, **overrides):
     if pin:
         values["keyframes"] = [{"image": image(), "frame": 0, "strength": 0.5}]
     return videos.VideoRequest.model_validate(values)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frames", [337, 345, 481, 625])
+async def test_long_source_requires_one_upgraded_worker_before_paid_side_effects(admission, monkeypatch, frames):
+    from grid_api.routers import worker_ws
+    from grid_api.services.video_sources import LONG_SOURCE_FEATURE
+
+    body = request("audio", frames=frames)
+    body.reference_audio = base64.b64encode(wav(frames)).decode("ascii")
+    inputs = await videos.validate_video(body, {}, async_submission=True)
+    plan = video_plans.compile_video(inputs)
+    assert (LONG_SOURCE_FEATURE in plan.payload["required_media_features"]) == (frames > 337)
+    assert plan.payload["frames"] == frames
+    assert plan.payload["source_media"][0]["samples"] == frames * 2000
+    available = AsyncMock(return_value=[])
+    monkeypatch.setattr(worker_ws, "get_available_models", available)
+    with pytest.raises(HTTPException) as error:
+        await media.prepare_dispatch(MODEL, "video", inputs.planning_payload())
+    assert error.value.status_code == 503
+    assert (LONG_SOURCE_FEATURE in available.call_args.kwargs["media_features"]) == (frames > 337)
+    available.return_value = [MODEL]
+    payload, _ = await media.prepare_dispatch(MODEL, "video", inputs.planning_payload())
+    assert payload["frames"] == frames
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["audio", "video"])
+async def test_core_625_frame_sources_reach_the_reviewed_worker(admission, monkeypatch, tmp_path, mode):
+    source = os.environ.get("MEDIA_VIDEO_WORKER_SOURCE")
+    if not source:
+        pytest.skip("reviewed MEDIA_VIDEO_WORKER_SOURCE is required for the joint adapter check")
+    worker = Path(source).resolve()
+    python = worker / ".venv/bin/python"
+    assert python.is_file() and (worker / "bridge/source_media.py").is_file()
+    values = dict(prompt="synthetic long source", model=MODEL, frames=625, size="256x256", seed=0,
+                  reference_audio=base64.b64encode(wav(625)).decode("ascii"))
+    if mode == "video":
+        decoder = shutil.which("ffmpeg")
+        assert decoder and shutil.which("ffprobe"), "joint source check requires real codecs"
+        path = tmp_path / "motion.mp4"
+        subprocess.run([decoder, "-v", "error", "-nostdin", "-f", "lavfi", "-i", "testsrc2=size=256x256:rate=24",
+                        "-frames:v", "625", "-an", "-c:v", "libx264", "-threads", "1", "-pix_fmt", "yuv420p", str(path)],
+                       capture_output=True, timeout=30, check=True)
+        values["reference_video"] = base64.b64encode(path.read_bytes()).decode("ascii")
+    inputs = await videos.validate_video(videos.VideoRequest(**values), {}, async_submission=True)
+    plan = video_plans.compile_video(inputs)
+    monkeypatch.setattr(storage, "upload_private_source", lambda _raw, ext:
+                        "https://" + "a" * 32 + ".r2.cloudflarestorage.com/synthetic/source." + ext)
+    payload = await plan.stage()
+    script = """
+import json,sys
+sys.path.insert(0, sys.argv[1])
+from bridge.source_media import validate_bindings,LONG_SOURCE_FEATURE
+body=json.load(sys.stdin)
+assert body['frames']==625 and LONG_SOURCE_FEATURE in body['required_media_features']
+assert len(validate_bindings(body['recipe_spec'],body))==int(sys.argv[2])
+body['required_media_features'].remove(LONG_SOURCE_FEATURE)
+try:validate_bindings(body['recipe_spec'],body)
+except RuntimeError:pass
+else:raise AssertionError('Missing extended capability accepted')
+"""
+    result = subprocess.run([str(python), "-c", script, str(worker), str(1 if mode == "audio" else 2)],
+                            input=json.dumps(payload), text=True, capture_output=True, timeout=30, cwd=tmp_path,
+                            env={"PATH": os.environ.get("PATH", ""), "PYTHON_DOTENV_DISABLED": "1", "PYTHONNOUSERSITE": "1"})
+    assert result.returncode == 0, "joint long-source adapter failed on synthetic inputs"
 
 
 @pytest.mark.asyncio

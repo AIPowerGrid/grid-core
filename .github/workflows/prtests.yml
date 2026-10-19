@@ -153,27 +153,28 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: AIPowerGrid/grid-media-worker
-          ref: 629a47cb4833a0089bfb07660c8857159ffe0212
+          ref: 6b80591350ade4da9f7e052aa2d6dec2810ce560
           path: .integration/media-worker
           persist-credentials: false
       - name: Install the media-worker's frozen test runtime
         run: >-
           uv sync --frozen --extra test --python "$(command -v python)"
           --project .integration/media-worker
-      - name: Require four appearance and two NVFP4 startup cases without skips
+      - name: Require eight video worker interoperability cases without skips
         env:
           MEDIA_VIDEO_WORKER_SOURCE: ${{ github.workspace }}/.integration/media-worker
         run: |
-          test "$(git -C "$MEDIA_VIDEO_WORKER_SOURCE" rev-parse HEAD)" = 629a47cb4833a0089bfb07660c8857159ffe0212
+          test "$(git -C "$MEDIA_VIDEO_WORKER_SOURCE" rev-parse HEAD)" = 6b80591350ade4da9f7e052aa2d6dec2810ce560
           python -m pytest \
             grid_api/services/tests/test_ltx25_appearance.py::test_core_payload_reaches_actual_worker_appearance_adapter \
             grid_api/services/tests/test_ltx25_nvfp4.py::test_actual_core_inventory_parses_in_reviewed_worker \
+            grid_api/services/tests/test_video_plans.py::test_core_625_frame_sources_reach_the_reviewed_worker \
             -q -rs --junitxml="$RUNNER_TEMP/video-worker-adapter.xml"
           python - "$RUNNER_TEMP/video-worker-adapter.xml" <<'PY'
           import sys
           import xml.etree.ElementTree as ET
           cases = ET.parse(sys.argv[1]).findall(".//testcase")
-          assert len(cases) == 6, "four appearance and two NVFP4 startup cases must execute"
+          assert len(cases) == 8, "four appearance, two NVFP4 and two long-source cases must execute"
           assert all(case.find(tag) is None for case in cases for tag in ("skipped", "failure", "error")), "adapter cases must pass without skips"
           PY
       - name: Offline test suite (grid_api)

@@ -109,10 +109,13 @@ owning AGENTS.md and any affected parent Child DOX Index.
   Gallery host. Read `deploy/MEDIA_CODEC_RUNTIME.md` before selecting tools.
 
 - Credit-first release CI uses reviewed media-worker
-  `629a47cb4833a0089bfb07660c8857159ffe0212`. All four actual appearance
-  adapter and two NVFP4 Core-inventory/worker-startup cases must pass without
+  `6b80591350ade4da9f7e052aa2d6dec2810ce560`. All four actual appearance
+  adapter, two NVFP4 startup and two625-frame source cases must pass without
   skips; the complete suite uses that same
   source. Synthetic HTTP does not establish a funded GPU/storage canary.
+  Long BF16 sources require `recipe-media-sources-625-v1` on one worker,
+  never the union of short-source workers. Native qualification and matched
+  consumer rollout remain separate from CI protocol compatibility.
 
 - Full Python sanity: `pytest` from `system-core`.
 - Dependency gate:
