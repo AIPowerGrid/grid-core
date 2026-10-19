@@ -5,10 +5,12 @@
 
 ## Status
 
-### Current Serving Scope - 2026-10-19 Eastern
+### Source Rollout Scope - 2026-10-19 Eastern
 
-Core `8e74ef37` / schema0046 and Gallery `950979d3` serve authenticated,
-credit-backed Distilled BF16/NVFP4 text/opening-image video. BF16 supports625
+Core `8e74ef37` / schema0046 and Gallery `950979d3` introduced this public
+source rollout. Later dependency-only Core security releases retain its
+admission contract; `/health` reports the selected exact SHA. Authenticated,
+credit-backed Distilled BF16/NVFP4 text/opening-image video continues. BF16 supports625
 frames /26.041667seconds; NVFP4 remains337 /14.041667seconds. Exact-main CI,
 production restore and the separate bounded native/browser release checks pass.
 BF16 audio-to-video and video-to-video are now public, independently gated and
