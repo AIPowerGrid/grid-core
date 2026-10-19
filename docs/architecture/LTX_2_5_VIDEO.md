@@ -5,19 +5,32 @@
 
 ## Status
 
-### NVFP4 Budget Tariff Candidate - 2026-10-15 Eastern
+### Current Serving Scope - 2026-10-17 Eastern
 
-The owner requested cheaper NVFP4 pricing after its public rollout. Candidate
+Core `777c81f9` / schema0046 and Gallery `4ee2d473` serve authenticated,
+credit-backed Distilled BF16/NVFP4 text/opening-image video. BF16 supports625
+frames /26.041667seconds; NVFP4 remains337 /14.041667seconds. Exact-main CI,
+production restore and the separate bounded native/browser release checks pass.
+Uploaded audio/video sources, timeline generation, Ingredients and video x402
+remain closed. The source-activation candidate retains337-frame A2V/V2V output
+to match the governed worker adapter, independently of the original upload's
+file size or duration. Opening it still requires its own release and purchased
+source-mode acceptance; a capability listing is not admission.
+
+### NVFP4 Budget Tariff - 2026-10-15 Eastern
+
+The owner requested cheaper NVFP4 pricing after its public rollout. Deployed
 book `2026-10-15-a` prices Distilled NVFP4 at USD 0.010 per effective output
 second, half the unchanged BF16 USD 0.020 rate. A ten-second NVFP4 output is
 USD 0.10; exact frame/FPS durations round upward to an integer micro-USD.
 The public catalog, credit estimate and new reservation use the same tariff.
 Accepted holds and historical charges keep their original amounts. Worker den
 weights, admission gates and clip limits are unchanged. This is a commercial
-decision, not a claim of measured speed, cost or fidelity parity. This candidate
-is not yet deployment proof; the dated rollout records below are historical.
+decision, not a claim of measured speed, cost or fidelity parity. Core PR233
+deployed this tariff as `c5384c23`; the subsequent current release retains it.
+The dated dark-rollout records below are historical.
 
-### Current Dark Production - 2026-10-14 UTC
+### Historical Dark Production - 2026-10-14 UTC
 
 Core4e9864c8/0045 is deployed after exact-source PG16 CI, production restore
 and drained cutover. Its tree equals main53ebf374 (PR222). The private-source
@@ -283,17 +296,17 @@ are supplied, they must already describe the same duration. Cost estimates,
 reservation units, worker payload, graph and `grid.execution` use that effective
 duration. Omitted seed randomizes once; explicit seed zero is preserved.
 
-The BF16-only duration extension is a candidate, not a deployed capacity claim.
+The BF16-only generated-video duration extension is deployed as recorded above.
 Twenty-six requested seconds select625 frames /26.041667seconds; at the unchanged
 USD0.020/effective-second tariff the full quote is520834micro-USD (rounded up).
-The Core parser, quote, journal and source validators share that outer bound;
-NVFP4 and Dev still reject beyond their own smaller recipe limits. No source
+The Core parser, quote and journal share that outer bound; uploaded audio/video
+source validators independently retain337frames, matching the worker adapter.
+NVFP4 and Dev reject beyond their own smaller recipe limits. No source
 admission, pixel ceiling, output-byte limit, timeout or concurrency is widened.
-Qualify native generation on an idle owned BF16 worker before release. Source
-mode qualification and the separate approved USD0.06 canaries remain gates;
-the serving exporter and media worker source adapter still cap337frames and
-must be upgraded/qualified before their corresponding longer paths are served.
-their small budget does not authorize a longer purchased clip. After accepting
+Native generated/opening-image625-frame controls and the separately bounded
+paid browser acceptance pass. Longer source-conditioned execution still needs
+its own worker upgrade and native qualification; generated-video evidence does
+not establish that capacity. After accepting
 a625-frame intent, rollback must retain readers/parsers supporting that original
 intent and GET/replay; reduce fresh recipe admission or disable new jobs instead
 of restoring a binary that cannot recover accepted long jobs.
