@@ -1,7 +1,14 @@
 # Versioned Source-Media Codecs
 
-Candidate tooling, not production activation. Uploaded media needs patched
-codecs as well as namespace/resource isolation. An ordinary Ubuntu package can
+Uploaded media needs patched codecs as well as namespace/resource isolation.
+As of October19, Core8e74ef37 and Gallery950979d3 select the verified static
+codec artifact through service-private PATH after actual service-restriction
+decode/isolation checks. This preserves system codecs, global namespace
+restrictions and the distribution policy's capability-denying child stack.
+Public BF16 source admission opened only after the separately approved funded
+A2V/V2V, original-audio, cleanup and completed-receipt recovery checks passed.
+Build output alone never authorizes a new installation or wider admission.
+An ordinary Ubuntu package can
 lack ESM fixes even after refreshing its signed index. Do not interpret a
 successful sandbox self-test or a high upstream version number as a complete
 current vulnerability clearance.

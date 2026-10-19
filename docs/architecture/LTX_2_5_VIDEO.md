@@ -5,17 +5,31 @@
 
 ## Status
 
-### Current Serving Scope - 2026-10-17 Eastern
+### Source Rollout Scope - 2026-10-19 Eastern
 
-Core `777c81f9` / schema0046 and Gallery `4ee2d473` serve authenticated,
-credit-backed Distilled BF16/NVFP4 text/opening-image video. BF16 supports625
+Core `8e74ef37` / schema0046 and Gallery `950979d3` introduced this public
+source rollout. Later dependency-only Core security releases retain its
+admission contract; `/health` reports the selected exact SHA. Authenticated,
+credit-backed Distilled BF16/NVFP4 text/opening-image video continues. BF16 supports625
 frames /26.041667seconds; NVFP4 remains337 /14.041667seconds. Exact-main CI,
 production restore and the separate bounded native/browser release checks pass.
-Uploaded audio/video sources, timeline generation, Ingredients and video x402
-remain closed. The source-activation candidate retains337-frame A2V/V2V output
-to match the governed worker adapter, independently of the original upload's
-file size or duration. Opening it still requires its own release and purchased
-source-mode acceptance; a capability listing is not admission.
+BF16 audio-to-video and video-to-video are now public, independently gated and
+limited to337frames to match the governed worker adapter. Gallery accepts
+original source files through512MiB using bounded8MiB chunks for files above
+64MiB; input size/duration never increases the source output ceiling. Both
+services select qualified sandboxed codecs and explicitly open source
+admission with pilot restrictions cleared. Paid quotes, atomic holds and one
+active video/account remain mandatory; source preparation creates no paid job.
+
+Two separately approved short diagnostic purchased source canaries pass native
+graph/output binding, full independent decode, exact audio/video clocks,
+original soundtrack correlation, private-input deletion and exact-once
+settlement. Completed receipts recover after browser reload and actual API
+restarts without replacement jobs. Both used one GPU and originals above64MiB;
+they do not prove full512MiB uploads, arbitrary identity replacement, lip sync,
+every accepted format or a new in-flight crash case. NVFP4 sources, timeline
+generation, Ingredients and video x402 remain closed. Public capability
+metadata alone never grants admission.
 
 ### NVFP4 Budget Tariff - 2026-10-15 Eastern
 
