@@ -86,9 +86,12 @@ validation, worker incentives, and trust boundaries.
   the coordinator/worker split. Start here to add an image/video model.
 - `LTX_2_5_VIDEO.md` - Distilled BF16/NVFP4 identities, tariffs, startup and
   generated/source duration boundaries. Deployed BF16625/NVFP4337 credit-backed
-  text/opening-image video is separate from the closed337-frame audio/motion
-  activation candidate. Source release, funded canaries and private-input
-  cleanup remain gates. It also owns non-serving Dev/Ingredients, typed frame
+  text/opening-image video is separate from public BF16337-frame audio/motion
+  admission. Core8e74ef37/Gallery950979d3 pass source release, purchased
+  canaries, private-input deletion and completed-receipt reload/API-restart
+  checks. NVFP4 sources, Ingredients, timelines and video x402 remain closed;
+  short diagnostic acceptance is not identity/lip-sync or full512MiB upload
+  qualification. It also owns non-serving Dev/Ingredients, typed frame
   and bounded image-pin contract, exact execution/quote/reward units, owned-rig
   observations, reference-film recreation/audio-preservation benchmark and
   outstanding financial/async/x402/promotion gates. Native multi-shot and
