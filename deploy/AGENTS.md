@@ -13,6 +13,10 @@ executes an immutable release selected through `/home/aipg/current`.
   candidate. Its workflow emits main-only provenance, not host installation
   or admission. Verify the exact artifact and current security state before
   selecting a versioned binary; preserve system libraries and rollback.
+  Core8e74ef37/Gallery950979d3 now select qualified service-private codecs
+  with actual restricted-process proof and purchased source acceptance.
+  BF16 audio/video sources are public through337frames; larger Gallery
+  original uploads do not raise that bound. NVFP4 sources stay closed.
 
 - `VIDEO_PAID_RETEST_2026_10_14.md` - subsequent funded-account exporter
   deployment/retest and closed cohort, exact paid completion/clock evidence,
