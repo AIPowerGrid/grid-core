@@ -14,7 +14,7 @@ def test_public_catalog_exposes_exact_rates_and_narrow_current_comparisons():
     catalog = pricing.public_catalog(datetime(2026, 8, 29, 12, tzinfo=UTC))
 
     assert catalog["schema"] == "aipg.pricing.v1"
-    assert catalog["price_book"]["version"] == "2026-10-15-a"
+    assert catalog["price_book"]["version"] == "2026-10-20-a"
     assert catalog["comparison_evidence"]["status"] == "current"
     comparisons = {
         item["id"]: item for item in catalog["comparison_evidence"]["items"]
