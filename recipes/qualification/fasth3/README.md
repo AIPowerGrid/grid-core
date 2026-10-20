@@ -45,12 +45,36 @@ supplied positive server rate. Its test rates are synthetic. It neither selects
 a tariff nor moves money. Future quotes/reservations must bind one approved,
 versioned rate and the exact same execution duration.
 
+## Offline Source Preparation
+
+`fasth3_sources.prepare_candidate` additionally checks all expected inline roles
+and byte limits before returning validated sources. Each image/audio input has
+a separate SHA-256, byte count and role commitment; nothing is uploaded.
+
+Images must fully decode as unrotated, nonanimated, opaque PNGs,32..2048pixels
+per dimension. Opening images must already match the candidate output canvas;
+appearance images keep their own geometry. Nonopaque images require an explicit
+flattening/preview step upstream, never silent alpha removal. Sources are not
+reencoded, auto-cropped, fitted or otherwise changed after commitment.
+
+Audio inputs are canonical metadata-free48kHz stereo PCM16 WAV. Voice/music
+references are2..15seconds independently of target duration. Preserved sound
+must contain exactly frames*2000samples; short/long audio rejects rather than
+padding or trimming. Output expectations distinguish generated32kHz audio from
+the explicitly muxed48kHz soundtrack. Valid waveform transport is not lip-sync
+or identity proof.
+
+This remains a disabled preparation helper, not a public upload route. Account
+ownership, private-bucket access, source retention/cleanup, worker revalidation,
+process-isolated decoder qualification and purchased end-to-end proofs are still
+required before activation. Keep the legacy LTX validator unchanged.
+
 ## Remaining Release Gates
 
 Resolve model-use rights and required safeguards. Qualify native text, opening,
 appearance and audio combinations, including clocks, scene/identity quality,
-lip sync, capacity, cold/warm timing and matched LTX controls. Add a reviewed
-H3 source validator/commitment and worker-feature contract; never reinterpret
+lip sync, capacity, cold/warm timing and matched LTX controls. Qualify the H3
+source validator/commitments and add a worker-feature contract; never reinterpret
 LTX's8n+1frame,48kHz output or Ingredients-only image assumptions globally.
 
 Then integrate disabled-by-default recipe/API admission, authoritative pricing,
