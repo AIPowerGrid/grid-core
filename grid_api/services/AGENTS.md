@@ -7,13 +7,13 @@ content sanitization, and reward settlement.
 
 ## Ownership
 
-- Candidate book `2026-10-20-a` adds the explicit `MOSS Image SFT BF16`
-  image-only launch peg of USD0.010/output, pending owner tariff approval.
+- Live book `2026-10-20-a` adds the owner-approved `MOSS Image SFT BF16`
+  image-only launch peg of USD0.010/output on Core0d2ee0b7.
   Its exact model-specific defaults are50steps/CFG3/Euler; other model defaults
   and tariffs are unchanged. The backbone isBF16 and its separate official
-  text encoder isINT8. Exact startup recipe copies prepare reviewed worker
-  activation and its billing canary; inventory/pricing alone is neither online
-  capacity nor paid dispatch proof. No current production state follows.
+  text encoder isINT8. Exact startup recipe copies serve after all four
+  owned-worker preflights and one purchased Gallery img2img/reload canary pass;
+  inventory/pricing alone still grants no capacity or generation admission.
   `test_moss_worker_handoff.py` additionally executes the actual CI-pinned
   worker adapter for text/source graphs: only the output prefix and declared
   source filename may change. Its source download is synthetic; native output
