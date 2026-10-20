@@ -53,10 +53,18 @@ def test_capture_records_only_own_unique_inputs_without_signed_queries():
     retention.validate(RECORD)
 
 
+def test_url_capture_reuses_origin_and_key_bounds_without_changing_live_roles():
+    assert retention.capture_urls([URL]) == RECORD
+    assert retention.capture_urls([]) is None
+    for values in ([URL] * 20, None, {"url": URL}):
+        with pytest.raises(ValueError):
+            retention.capture_urls(values)
+
+
 def test_all_sixteen_pins_and_two_media_sources_have_bounded_authority():
     urls = [f"{ENDPOINT}/{BUCKET}/source/{index:032x}.png?synthetic=1" for index in range(16)]
     record = retention.capture(
-        {"source_image_url": urls[0], "source_image_urls": urls, "source_media": [{"url": URL}, {"url": URL.replace(".wav", ".mp4")}]}
+        {"source_image_url": urls[0], "source_image_urls": urls, "source_media": [{"url": URL}, {"url": URL.replace(".wav", ".mp4")}]},
     )
     assert len(record["keys"]) == 18
     retention.validate(record)

@@ -351,3 +351,22 @@ async def test_source_metadata_is_copied_before_staging_yields(admission, monkey
     payload = await plan.stage()
     assert payload["source_media"][0]["samples"] == 18_000
     assert plan.snapshot["inputs"]["sources"][0]["samples"] == 18_000
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["public_upload", "seed_bool", "seed_tuple"])
+async def test_frozen_private_plan_cannot_switch_upload_policy_or_primitive_identity(admission, change):
+    inputs = await videos.validate_video(request("generated", pin=True), {}, async_submission=True)
+    plan = video_plans.compile_video(inputs)
+    if change == "public_upload":
+        inputs = dataclasses.replace(inputs, private_images=False)
+    elif change == "seed_tuple":
+        inputs = dataclasses.replace(inputs, seeds=(False,))
+    else:
+        payload = inputs.payload
+        payload["seed"] = False
+        inputs = dataclasses.replace(inputs, payload_json=json.dumps(payload))
+    plan = dataclasses.replace(plan, inputs=inputs)
+    with pytest.raises(HTTPException) as error:
+        await plan.stage()
+    assert error.value.status_code == 422

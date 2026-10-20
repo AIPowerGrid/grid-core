@@ -14,7 +14,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from grid_api.services.fasth3_sources import prepare_candidate
+from grid_api.services import storage
+from grid_api.services.fasth3_plans import compile_candidate
 
 
 @pytest.mark.parametrize(
@@ -32,7 +33,8 @@ from grid_api.services.fasth3_sources import prepare_candidate
         (True, True, "preserve"),
     ],
 )
-def test_actual_core_source_plan_reaches_candidate_worker_without_dispatch(tmp_path, appearance, opening, mode):
+@pytest.mark.asyncio
+async def test_actual_core_source_plan_reaches_candidate_worker_without_dispatch(tmp_path, monkeypatch, appearance, opening, mode):
     source = os.environ.get("FASTH3_WORKER_SOURCE")
     if not source:
         pytest.skip("reviewed FASTH3_WORKER_SOURCE is required for FastH3 handoff")
@@ -58,7 +60,7 @@ def test_actual_core_source_plan_reaches_candidate_worker_without_dispatch(tmp_p
             writer.setparams((2, 2, 48_000, 0, "NONE", "not compressed"))
             writer.writeframes(b"\0" * (282_000 if mode == "preserve" else 96_000) * 4)
         bundle["soundtrack" if mode == "preserve" else "conditioning_audio"] = base64.b64encode(sound.getvalue()).decode()
-    plan, sources = prepare_candidate(
+    plan = compile_candidate(
         {
             "prompt": "A sunny synthetic park.",
             "seed": 0,
@@ -71,21 +73,20 @@ def test_actual_core_source_plan_reaches_candidate_worker_without_dispatch(tmp_p
         },
         bundle,
     )
-    content, committed = {}, []
-    for source_media in sources:
-        url = "https://" + "a" * 32 + f".r2.cloudflarestorage.com/synthetic/{source_media.role}.{source_media.ext}"
-        content[url] = base64.b64encode(source_media.data).decode()
-        committed.append({**source_media.commitment, "url": url})
-    payload = {
-        "recipe_engine": "comfyui",
-        "recipe_source_schema": "aipg.fasth3-sources.v1",
-        "required_media_features": ["recipe-fasth3-sources-v1"],
-        "n": 1,
-        "execution": plan["execution"],
-        "recipe_spec": plan["spec"],
-        "recipe_source_bindings": plan["source_bindings"],
-        "source_media": committed,
-    }
+    content = {}
+    endpoint = "https://" + "a" * 32 + ".r2.cloudflarestorage.com"
+    bucket = "synthetic-private-sources"
+    monkeypatch.setenv("R2_TRANSIENT_ACCOUNT", endpoint)
+    monkeypatch.setenv("R2_TRANSIENT_BUCKET", "synthetic-public-outputs")
+    monkeypatch.setattr(storage, "private_source_bucket", lambda: bucket)
+
+    def upload(raw, extension):
+        url = f"{endpoint}/{bucket}/source/{len(content):032x}.{extension}?signature=synthetic"
+        content[url] = base64.b64encode(raw).decode()
+        return url
+
+    monkeypatch.setattr(storage, "upload_private_source", upload)
+    payload = await plan.stage()
     script = """
 import asyncio, base64, copy, json, sys
 import httpx, respx

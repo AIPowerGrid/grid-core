@@ -36,6 +36,13 @@ content sanitization, and reward settlement.
   Codec/capacity/runtime failures remain uncertain, not failed-render/refund
   authority. No live freeze/settlement caller exists; a reviewed immutable-byte
   handoff, native identity/sound/lip-sync tests and paid lifecycle remain gates.
+- `fasth3_plans.py` composes the existing frozen-video planner and private-source
+  uploader with H3's validated role/graph snapshot. Only Core-issued private
+  storage locations can replace placeholders; never re-resolve or re-decode
+  after compilation. Keep raw bytes and prompts out of reprs. The candidate
+  deliberately has no governed recipe root and cannot enter the live journal,
+  reserve, dispatch or authorize deletion. It is not authenticated/account-bound,
+  qualified or priced. Native/ownership/financial integration remains a gate.
 
 - Live book `2026-10-20-a` adds the owner-approved `MOSS Image SFT BF16`
   image-only launch peg of USD0.010/output on Core0d2ee0b7.
@@ -162,6 +169,11 @@ content sanitization, and reward settlement.
   partial failure. Cancellation retains its single-flight guard until storage
   work finishes. Failures rotate behind other pending jobs, not starving them.
   Cleanup markers are operational metadata; no credits, results or ledgers move.
+  `capture_urls` shares exact Core-origin/private-bucket/key validation between
+  compiled protocols without granting ownership or deletion authority. The
+  live collector retains its LTX/Ingredients role restrictions. Preserve the
+  first-pin duplicate: nineteen URL references may represent eighteen unique
+  objects. H3 candidate inspection cannot create a cleanup journal row.
   It continues after admission rollback. Retain old bucket permissions until
   their recorded jobs drain; changing the S3 account or making a recorded bucket
   the output bucket refuses deletion. ComfyUI files, output/attempt orphans and
@@ -238,8 +250,12 @@ content sanitization, and reward settlement.
   before quota or storage. Planning uses non-routable source slots; only their
   locations change during staging. Keep source bytes out of serialized snapshots
   and reprs. Recheck commitments before uploads and copy mutable metadata before
-  yielding. Returned dictionaries cannot mutate the snapshot. This is not a
-  durable quote, frozen tariff, payment authorization, recovery selector or
+  yielding. Returned dictionaries cannot mutate the snapshot.
+  Before staging, recheck the private-upload policy and exact canonical JSON
+  types/seeds as well as byte commitments. A replaced private flag must never
+  turn a frozen private image into a legacy public-bucket upload. Model-specific
+  staging validation is a compiler-selected method, never a client field.
+  This is not a durable quote, frozen tariff, payment authorization, recovery selector or
   public graph interface. Core still prices and reserves through the existing
   live-credit authority; x402 quote/payment/refund implementation remains absent.
 - `media.compile_dispatch` is the non-I/O governed compiler; the existing
