@@ -25,6 +25,17 @@ content sanitization, and reward settlement.
   commitments. Generated/reference sound declares32kHz output; preserved
   sound declares48kHz. No upload, ownership, retention, worker advertisement,
   native quality or permission proof follows from this offline preparation.
+- `fasth3_output.py` inspects offline candidate bytes through the existing
+  bounded/isolation-required codec runner. Require one H.264/AAC pair, exact
+  H3 frame/resolution/track clocks and full contiguous frame/audio decoding.
+  AAC must be LC; at most1023decoded terminal padding samples are separately
+  reported after an independently valid presentation clock. Numeric probe
+  fields are bounded decimal/rational strings, never exponential allocations.
+  Generated/reference audio presents32kHz; preserved audio presents48kHz.
+  Report AAC terminal padding separately, never trim to manufacture agreement.
+  Codec/capacity/runtime failures remain uncertain, not failed-render/refund
+  authority. No live freeze/settlement caller exists; a reviewed immutable-byte
+  handoff, native identity/sound/lip-sync tests and paid lifecycle remain gates.
 
 - Live book `2026-10-20-a` adds the owner-approved `MOSS Image SFT BF16`
   image-only launch peg of USD0.010/output on Core0d2ee0b7.
@@ -1085,8 +1096,10 @@ content sanitization, and reward settlement.
 ## Verification
 
 - `tests/test_fasth3_worker_handoff.py` optionally runs actual offline Core
-  source preparation against `MEDIA_VIDEO_WORKER_SOURCE`'s separate FastH3
-  adapter. `MEDIA_VIDEO_WORKER_PYTHON` may select its reviewed test interpreter.
+  source preparation against `FASTH3_WORKER_SOURCE`'s separate FastH3
+  adapter. `FASTH3_WORKER_PYTHON` may select its reviewed test interpreter.
+  Keep this opt-in independent of the existing LTX worker fixture pin; an old
+  LTX adapter is not an H3 handoff source, and an explicit bad H3 pin must fail.
   Ten role combinations use synthetic PNG/PCM WAV and mocked credential-free
   HTTP, checking exact bytes, collision names and graph preservation. No GPU,
   storage, ownership, native quality or paid lifecycle qualification is implied;
