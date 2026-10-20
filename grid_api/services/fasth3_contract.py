@@ -115,6 +115,8 @@ def normalize(contract: FastH3Contract, values: dict) -> dict:
         "seconds": float(duration),
         "duration_numerator": duration.numerator,
         "duration_denominator": duration.denominator,
+        "output_audio_sample_rate": 48_000 if inputs.audio_mode == "preserve" else 32_000,
+        "output_audio_channels": 2,
     }
 
 

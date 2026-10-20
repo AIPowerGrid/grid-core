@@ -15,6 +15,16 @@ content sanitization, and reward settlement.
   not native capacity/quality. Model-use rights, source protocol, purchased
   billing and public rollout remain unresolved release gates. Tests prove
   startup/public-async/unpriced-money denial, not license or native execution.
+- `fasth3_sources.py` prepares offline inline source bundles only after strict
+  candidate/role checks. It fully verifies/decodes bounded opaque, unrotated,
+  single-frame PNGs, with exact output dimensions for opening images. Verify
+  PNG structure before metadata reads can close its verification stream.
+  Canonical48kHz stereo PCM16 WAV references may last2..15seconds; preserved
+  soundtracks require exactly frames*2000samples. No trimming, stretching or
+  silent role conversion. Retain exact byte/hash/role/geometry/sample
+  commitments. Generated/reference sound declares32kHz output; preserved
+  sound declares48kHz. No upload, ownership, retention, worker advertisement,
+  native quality or permission proof follows from this offline preparation.
 
 - Live book `2026-10-20-a` adds the owner-approved `MOSS Image SFT BF16`
   image-only launch peg of USD0.010/output on Core0d2ee0b7.
