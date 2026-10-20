@@ -7,6 +7,13 @@ content sanitization, and reward settlement.
 
 ## Ownership
 
+- `tests/test_media_security_floors.py` enforces installed Pillow13.0.0 and
+  certifi2026.10.19 floors. Its tiny GIF control checks that a rejected huge
+  frame cannot poison the surviving image dimensions, without allocating or
+  decoding that frame. The TLS control parses the updated CA store and keeps
+  verification/hostname checks on; it is not an external handshake or native
+  media quality test. Preserve the dependency audit and exact lock gate.
+
 - Live book `2026-10-20-a` adds the owner-approved `MOSS Image SFT BF16`
   image-only launch peg of USD0.010/output on Core0d2ee0b7.
   Its exact model-specific defaults are50steps/CFG3/Euler; other model defaults
