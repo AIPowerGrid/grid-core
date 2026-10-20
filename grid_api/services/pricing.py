@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 MICRO = 1_000_000  # micro-USD per USD (the ledger's integer unit)
-PRICE_BOOK_VERSION = "2026-10-15-a"
+PRICE_BOOK_VERSION = "2026-10-20-a"
 COMPARISON_AS_OF = "2026-08-29T00:00:00Z"
 COMPARISON_VALID_UNTIL = "2026-09-29T00:00:00Z"
 
@@ -90,6 +90,8 @@ PRICING: dict[str, ModelPrice] = {
     "z-image-turbo":        half_of(0, 0, usd_image=0.006),      # → $0.003/image (1 MP turbo)
     "flux.2 klein 4b fp8":  half_of(0, 0, usd_image=0.02),       # → $0.010/image (Flux distilled 4B)
     "krea 2 turbo":         half_of(0, 0, usd_image=0.01),       # → $0.005/image (txt2img or img2img)
+    # Proposed launch peg, not a hosted-provider comparison or admission grant.
+    "moss image sft bf16":  ModelPrice(0, 0, image_per_image=0.01),
     "ltx-2.3":              half_of(0, 0, usd_video_sec=0.04),   # → $0.020/second video (Justin)
     # Owner-approved credit-first tariff. Dev/Ingredients remain unpriced.
     "ltx-2.5 distilled bf16": ModelPrice(0, 0, video_per_second=0.02),

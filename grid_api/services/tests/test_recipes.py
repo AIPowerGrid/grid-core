@@ -218,6 +218,57 @@ def test_krea_img2img_recipe_selects_source_graph():
     assert "image_paths" in text_only and text_only["image_paths"] is None
 
 
+def test_moss_startup_recipes_match_qualification_and_bind_source_pixels():
+    from pathlib import Path
+
+    import pytest
+
+    from grid_api.services import recipe_import
+
+    _clear()
+    recipe_dir = Path(__file__).resolve().parents[3] / "recipes"
+    recipes.load_local_recipes(str(recipe_dir))
+    model = "MOSS Image SFT BF16"
+    loaded_roots = set(recipes._BY_ROOT)
+
+    for mode in ("t2i", "i2i"):
+        path = recipe_dir / "qualification" / f"moss-image-sft-bf16-{mode}-v1.json"
+        candidate = json.loads(path.read_text())
+        assert candidate == json.loads((recipe_dir / path.name).read_text())
+        assert recipe_import.validate_recipe(candidate) == []
+        assert candidate["_grid"]["requiredModels"] == [model]
+        assert "loraInject" not in candidate["_grid"]
+        assert candidate["1"]["inputs"]["unet_name"] == "moss_image_sft_bf16.safetensors"
+        assert candidate["2"]["inputs"]["type"] == "moss_image"
+        assert candidate["2"]["inputs"]["clip_name"] == "qwen3.5_9b_int8_convrot.safetensors"
+        assert recipe_import.recipe_root(candidate).lower() in loaded_roots
+
+    assert recipes.generation_modes(model) == ["txt2img", "img2img"]
+    inputs = {"prompt": "final scene caption", "seed": 0, "width": 1344, "height": 768}
+    text = recipes.resolve_for_model(model, inputs)
+    assert text["image_paths"] is None
+    assert text["spec"]["7"]["inputs"]["latent_image"] == ["6", 0]
+    assert text["spec"]["7"]["inputs"]["steps"] == 50
+    assert text["spec"]["7"]["inputs"]["cfg"] == 3
+
+    source = recipes.resolve_for_model(model, {**inputs, "denoise": 0.65}, has_source=True)
+    graph = source["spec"]
+    assert source["image_paths"] == "10.inputs.image"
+    assert graph["7"]["inputs"]["latent_image"] == ["12", 0]
+    assert graph["12"]["class_type"] == "VAEEncode"
+    assert graph["12"]["inputs"]["pixels"] == ["11", 0]
+    assert graph["11"]["inputs"]["image"] == ["10", 0]
+    assert graph["11"]["inputs"]["width"] == 1344
+    assert graph["11"]["inputs"]["height"] == 768
+    assert graph["7"]["inputs"]["seed"] == 0
+    assert graph["7"]["inputs"]["denoise"] == 0.65
+    assert all(node["class_type"] != "TextGenerate" for node in graph.values())
+    for bad in ({"denoise": 0.9}, {"steps": 100}, {"cfg": 7.5},
+                {"sampler": "er_sde"}, {"scheduler": "normal"}, {"width": 1536}):
+        with pytest.raises(recipes.RecipeError):
+            recipes.resolve_for_model(model, {**inputs, **bad}, has_source=True)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

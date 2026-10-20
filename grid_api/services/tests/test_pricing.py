@@ -59,6 +59,22 @@ def test_turbo_image_prices_scale_per_output():
     assert pricing.quote_image("krea 2 turbo", 4) == 20_000
 
 
+def test_moss_has_explicit_image_only_price_without_implicit_aliases():
+    model = "MOSS Image SFT BF16"
+    assert pricing.is_priced_for(model, "image")
+    assert pricing.quote_image(model) == 10_000
+    assert pricing.quote_image(model.upper(), 4) == 40_000
+    for modality in ("text", "video", "audio", "3d"):
+        assert not pricing.is_priced_for(model, modality)
+    for unknown in ("MOSS Image", "MOSS Image Base BF16", "MOSS Image SFT INT8"):
+        assert pricing.get_price(unknown) is None
+        assert not pricing.is_priced_for(unknown, "image")
+    catalog = pricing.public_catalog()
+    row = next(item for item in catalog["price_book"]["models"] if item["model"] == model.lower())
+    assert row["rates"]["per_image_usd"] == 0.01
+    assert all(item["model"] != model.lower() for item in catalog["comparison_evidence"]["items"])
+
+
 @pytest.mark.parametrize("model,costs", [
     ("LTX-2.5 Distilled BF16", (67_500, 280_834, 1_200_000)),
     ("LTX-2.5 Distilled NVFP4", (33_750, 140_417, 600_000)),

@@ -331,6 +331,35 @@ async def test_authorize_media_image_reserves_n(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_moss_reserves_exact_tariff_and_refunds_once(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 1_000_000, "topup", ref="moss-seed")
+    auth = await credits.authorize_media(
+        aid, "MOSS Image SFT BF16", "image", 1, None, "moss-job",
+        max_cost_micro_usd=10_000,
+    )
+    assert auth["ok"] and auth["reserved"] == 10_000
+    assert await credits.get_balance(aid) == 990_000
+    await credits.refund_reservation(aid, auth["reserved"], "moss-job")
+    await credits.refund_reservation(aid, auth["reserved"], "moss-job")
+    assert await credits.get_balance(aid) == 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_moss_cost_cap_rejects_without_a_debit(db, monkeypatch):
+    monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
+    aid = uuid.uuid4()
+    await credits.credit(aid, 1_000_000, "topup", ref="moss-cap-seed")
+    auth = await credits.authorize_media(
+        aid, "MOSS Image SFT BF16", "image", 1, None, "moss-over-cap",
+        max_cost_micro_usd=9_999,
+    )
+    assert not auth["ok"]
+    assert await credits.get_balance(aid) == 1_000_000
+
+
+@pytest.mark.asyncio
 async def test_authorize_media_video_reserves_seconds(db, monkeypatch):
     monkeypatch.setattr(credits, "CHARGING_ENABLED", True)
     aid = uuid.uuid4()

@@ -252,9 +252,12 @@ def diffusion_params(model: str, overrides: dict) -> tuple[int, float, str]:
     name = model.lower()
     is_flux = "flux" in name
     is_fast = "klein" in name or "schnell" in name
-    default_steps = 4 if is_fast else (20 if is_flux else 30)
-    default_cfg = 1.0 if is_fast else (3.5 if is_flux else 7.5)
-    default_sampler = "euler" if is_flux else "k_euler"
+    if name.strip() == "moss image sft bf16":
+        default_steps, default_cfg, default_sampler = 50, 3.0, "euler"
+    else:
+        default_steps = 4 if is_fast else (20 if is_flux else 30)
+        default_cfg = 1.0 if is_fast else (3.5 if is_flux else 7.5)
+        default_sampler = "euler" if is_flux else "k_euler"
     steps = overrides.get("steps") if overrides.get("steps") is not None else default_steps
     cfg = overrides.get("cfg_scale") if overrides.get("cfg_scale") is not None else default_cfg
     sampler = overrides.get("sampler") if overrides.get("sampler") is not None else default_sampler
