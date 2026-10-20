@@ -218,7 +218,7 @@ def test_krea_img2img_recipe_selects_source_graph():
     assert "image_paths" in text_only and text_only["image_paths"] is None
 
 
-def test_moss_candidates_are_nonserving_and_bind_source_pixels():
+def test_moss_startup_recipes_match_qualification_and_bind_source_pixels():
     from pathlib import Path
 
     import pytest
@@ -229,18 +229,19 @@ def test_moss_candidates_are_nonserving_and_bind_source_pixels():
     recipe_dir = Path(__file__).resolve().parents[3] / "recipes"
     recipes.load_local_recipes(str(recipe_dir))
     model = "MOSS Image SFT BF16"
-    assert recipes.resolve_for_model(model, {"prompt": "not admitted"}) is None
+    loaded_roots = set(recipes._BY_ROOT)
 
     for mode in ("t2i", "i2i"):
         path = recipe_dir / "qualification" / f"moss-image-sft-bf16-{mode}-v1.json"
         candidate = json.loads(path.read_text())
+        assert candidate == json.loads((recipe_dir / path.name).read_text())
         assert recipe_import.validate_recipe(candidate) == []
         assert candidate["_grid"]["requiredModels"] == [model]
         assert "loraInject" not in candidate["_grid"]
         assert candidate["1"]["inputs"]["unet_name"] == "moss_image_sft_bf16.safetensors"
         assert candidate["2"]["inputs"]["type"] == "moss_image"
         assert candidate["2"]["inputs"]["clip_name"] == "qwen3.5_9b_int8_convrot.safetensors"
-        recipes.register_recipe(recipe_import.recipe_root(candidate), candidate["_grid"]["name"], candidate)
+        assert recipe_import.recipe_root(candidate).lower() in loaded_roots
 
     assert recipes.generation_modes(model) == ["txt2img", "img2img"]
     inputs = {"prompt": "final scene caption", "seed": 0, "width": 1344, "height": 768}

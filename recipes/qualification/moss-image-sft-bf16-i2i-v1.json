@@ -6,7 +6,7 @@
     "jobType": "image",
     "deterministic": false,
     "requiredModels": ["MOSS Image SFT BF16"],
-    "license": "Apache-2.0; OpenMOSS-Team/MOSS-Image-SFT and Comfy-Org/MOSS-Image. Latent img2img, not a trained identity editor. Qualification only.",
+    "license": "Apache-2.0; OpenMOSS-Team/MOSS-Image-SFT and Comfy-Org/MOSS-Image. Latent img2img, not a trained identity editor.",
     "vars": {
       "prompt": "4.inputs.text",
       "negative_prompt": "5.inputs.text",
