@@ -33,12 +33,12 @@ from grid_api.services.fasth3_sources import prepare_candidate
     ],
 )
 def test_actual_core_source_plan_reaches_candidate_worker_without_dispatch(tmp_path, appearance, opening, mode):
-    source = os.environ.get("MEDIA_VIDEO_WORKER_SOURCE")
+    source = os.environ.get("FASTH3_WORKER_SOURCE")
     if not source:
-        pytest.skip("reviewed MEDIA_VIDEO_WORKER_SOURCE is required for FastH3 handoff")
+        pytest.skip("reviewed FASTH3_WORKER_SOURCE is required for FastH3 handoff")
     worker = Path(source).resolve()
     # Keep the venv entry path: resolving its symlink selects bare Python.
-    python = Path(os.environ.get("MEDIA_VIDEO_WORKER_PYTHON", str(worker / ".venv/bin/python"))).absolute()
+    python = Path(os.environ.get("FASTH3_WORKER_PYTHON", str(worker / ".venv/bin/python"))).absolute()
     if not python.is_file() or not (worker / "bridge/fasth3_sources.py").is_file():
         pytest.fail("FastH3 handoff requires its reviewed worker checkout and test Python")
 
