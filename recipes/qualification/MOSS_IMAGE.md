@@ -1,12 +1,46 @@
 # MOSS Image Qualification
 
-Status: native-qualified candidate with exact startup copies preparing the
-owned-worker rollout and billing canary. Native GPU results and existing-model
-regressions pass. Pricing approval and ordinary exact-source release gates
-precede controlled activation; a separately bounded Grid billing canary and
-explicit public acceptance still precede declaring the release complete.
-Inventory alone does not create online worker capacity. Do not recursively
-load this directory.
+Status: public text-to-image and source-guided img2img on October20,2026,
+at the owner-approved USD0.01/image tariff. Core0d2ee0b7 and Galleryc972bfa4
+are deployed after exact-main release gates and one capped purchased-credit
+img2img canary. Inventory alone does not create worker capacity; do not
+recursively load this qualification directory.
+
+## Public Grid Acceptance
+
+- Core `0d2ee0b72ee04e779949d68b00dfd6143f6b1be1` passed PR/main CI,
+  fresh production-backup restore/migration parity and drained cutover.
+  Alembic0046, environment, existing admission and timers are unchanged.
+- Gallery `c972bfa4ada7b020c465b88e05d0ebe986baef74` passed protected-main
+  artifact provenance, host pruned-runtime checks and all seven standalone
+  race-test packages on a restored production backup. Existing rows/schema,
+  environment and ingress are preserved; the disposable database is removed.
+- The owned32GiB5090 selects the independent pinned runtime below. Code,
+  Python runtime and model files are root-owned and service-group-readable,
+  without group write; input/output/temp/user paths are separate. ComfyUI
+  listens on loopback with custom nodes disabled and offline mode enabled.
+  The original runtime/configuration remain available for rollback.
+- Explicit advertisement retains Z-image, Klein and Krea alongside MOSS.
+  All four local preflight renders pass before the worker reconnects, with
+  one worker identity and one concurrent GPU job. Ten total Grid workers
+  are observed after activation; this is a point-in-time fleet observation.
+- One authenticated Gallery source-image job emits a fully decoded1344x768
+  WebP through normal Grid/R2 delivery. Native history proves one prompt,
+  the actual LoadImage-to-VAEEncode binding,50steps/CFG3/Euler/simple,
+  denoise0.65 and seed739. Browser-reported generation time is29seconds;
+  this is not a throughput benchmark.
+- One reservation settles at10000micro-USD with one purchased debit and one
+  completion. No replacement job, refund or extra debit is created. The same
+  completed result/receipt survives a real page reload with no redispatch.
+  This successful canary is not a fresh live failure/refund canary.
+
+The rollout does not register reward weights, change video/validator policy,
+add identity references or enable MOSS batches/LoRAs. Prompts, source media,
+account identities, job handles and operational proofs stay private. For
+rollback, withdraw/drain the owned image worker, restore its original runtime
+and explicit three-model list, and retain accepted receipt/settlement readers.
+
+## Earlier Native Qualification
 
 On October20, native qualification on an owned32GiB RTX5090 completes one
 1344x768 text image and two1344x768 source-image controls at denoise0.45/0.70,
