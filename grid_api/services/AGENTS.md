@@ -14,6 +14,10 @@ content sanitization, and reward settlement.
   text encoder isINT8. Exact startup recipe copies prepare reviewed worker
   activation and its billing canary; inventory/pricing alone is neither online
   capacity nor paid dispatch proof. No current production state follows.
+  `test_moss_worker_handoff.py` additionally executes the actual CI-pinned
+  worker adapter for text/source graphs: only the output prefix and declared
+  source filename may change. Its source download is synthetic; native output
+  and funded Grid acceptance remain separate proofs.
 
 - Candidate book `2026-10-15-a` lowers `LTX-2.5 Distilled NVFP4` to USD 0.010
   per effective output second; `LTX-2.5 Distilled BF16` stays USD 0.020.
