@@ -18,8 +18,9 @@ recursively, and inventory alone does not enable job admission.
   official INT8 Qwen3.5-9B encoder and Flux2 VAE. Img2img uses source pixels
   through VAEEncode and bounded denoise, not an instruction-trained identity
   editor or the upstream prompt enhancer's image input. Exact startup copies
-  prepare the worker/billing canary after native proof; inventory is not live
-  capacity or approval to activate the owned worker. See `MOSS_IMAGE.md`.
+  now serve through the separately approved October20 rollout and one paid
+  img2img canary. Inventory alone still grants no worker capacity or activation
+  authority; retain the exact runtime/weight pins and see `MOSS_IMAGE.md`.
 - `ltx-2.5-*-v1.json` owns the single-stage BF16 distilled/dev, text/image-pin
   qualification graphs. They mirror the locally rendered native workflows.
 - `docs/architecture/LTX_2_5_VIDEO.md` owns evidence and promotion gates.
