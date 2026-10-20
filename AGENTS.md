@@ -79,6 +79,9 @@ owning AGENTS.md and any affected parent Child DOX Index.
   both declarations. The October20 audit rejects the prior12.3.0/2026.7.22
   lock. Regenerate hashes and qualify image ingest, auth/funding and worker
   paths before release; do not waive the findings or hot-install production.
+  PR/main lock generation and audit use uv0.13.4 to remove the compromised
+  certificate root from that tool's separate trust bundle. A patched certifi
+  wheel does not repair an older uv executable; keep TLS verification enabled.
 - Treat `grid_ledger` and `grid_credit_ledger` as append-only economic records.
   Do not mutate historical ledger rows except via an explicit audited migration.
 - Worker/model claims are untrusted until verified by registry sync, signed
