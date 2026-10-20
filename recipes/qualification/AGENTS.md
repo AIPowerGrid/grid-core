@@ -13,6 +13,13 @@ recursively, and inventory alone does not enable job admission.
 
 ## Ownership
 
+- `moss-image-sft-bf16-{t2i,i2i}-v1.json` retain the image qualification copies.
+  The distinct MOSS Image SFT BF16 identity pins a BF16 diffusion backbone,
+  official INT8 Qwen3.5-9B encoder and Flux2 VAE. Img2img uses source pixels
+  through VAEEncode and bounded denoise, not an instruction-trained identity
+  editor or the upstream prompt enhancer's image input. Exact startup copies
+  prepare the worker/billing canary after native proof; inventory is not live
+  capacity or approval to activate the owned worker. See `MOSS_IMAGE.md`.
 - `ltx-2.5-*-v1.json` owns the single-stage BF16 distilled/dev, text/image-pin
   qualification graphs. They mirror the locally rendered native workflows.
 - `docs/architecture/LTX_2_5_VIDEO.md` owns evidence and promotion gates.
@@ -59,6 +66,8 @@ recursively, and inventory alone does not enable job admission.
 
 ## Verification
 
+- `pytest grid_api/services/tests/test_recipes.py` covers the MOSS copies'
+  exact startup parity, weights, source binding and parameter gates.
 - `pytest grid_api/services/tests/test_ltx25_contract.py`
 - `pytest grid_api/services/tests/test_ltx25_appearance.py`
   Set `MEDIA_VIDEO_WORKER_SOURCE` to a reviewed checkout with a test `.venv`

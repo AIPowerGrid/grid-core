@@ -11,6 +11,11 @@ knobs → validate → drop here).
 
 ## Ownership
 
+- MOSS Image SFT BF16 has exact startup and qualification copies after native
+  text/source execution and all three existing image-model regressions pass.
+  These prepare the reviewed worker/billing canary, not public worker capacity
+  or deployment approval. Keep its actual latent-img2img contract distinct from
+  identity/reference editing; see `qualification/MOSS_IMAGE.md` for remaining gates.
 - `*.json` - ComfyUI workflow JSON with a `_grid` metadata block describing
   recipe name, job type, engine, required models, constraints, determinism, seed
   fields, and optional LoRA injection points.

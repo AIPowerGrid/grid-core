@@ -31,6 +31,15 @@ def test_diffusion_params_reject_unbounded_legacy_knobs():
         media.diffusion_params("sdxl", {"sampler": "../../bad"})
 
 
+def test_moss_defaults_match_qualified_graph_without_changing_other_models():
+    assert media.diffusion_params("MOSS Image SFT BF16", {}) == (50, 3.0, "euler")
+    assert media.diffusion_params(" moss image sft bf16 ", {}) == (50, 3.0, "euler")
+    assert media.diffusion_params("MOSS Image SFT BF16", {"steps": 25, "cfg_scale": 2.5}) == (25, 2.5, "euler")
+    assert media.diffusion_params("Krea 2 Turbo", {}) == (30, 7.5, "k_euler")
+    assert media.diffusion_params("FLUX.2 Klein 4B FP8", {}) == (4, 1.0, "euler")
+    assert media.diffusion_params("unapproved-moss-model", {}) == (30, 7.5, "k_euler")
+
+
 def test_seed_contract_randomizes_only_when_omitted():
     assert media.normalize_seed(0) == 0
     assert media.normalize_seed("42") == 42

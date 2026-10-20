@@ -1,0 +1,37 @@
+{
+  "_grid": {
+    "name": "MOSS Image SFT BF16 (latent img2img v1)",
+    "modelName": "MOSS Image SFT BF16",
+    "engine": "comfyui",
+    "jobType": "image",
+    "deterministic": false,
+    "requiredModels": ["MOSS Image SFT BF16"],
+    "license": "Apache-2.0; OpenMOSS-Team/MOSS-Image-SFT and Comfy-Org/MOSS-Image. Latent img2img, not a trained identity editor.",
+    "vars": {
+      "prompt": "4.inputs.text",
+      "negative_prompt": "5.inputs.text",
+      "seed": "7.inputs.seed",
+      "steps": "7.inputs.steps",
+      "cfg": "7.inputs.cfg",
+      "sampler": "7.inputs.sampler_name",
+      "scheduler": "7.inputs.scheduler",
+      "image": "10.inputs.image",
+      "denoise": "7.inputs.denoise",
+      "width": "11.inputs.width",
+      "height": "11.inputs.height"
+    },
+    "clamps": {"steps": [25, 50], "cfg": [2.5, 3], "width": [512, 1344], "height": [512, 1344], "denoise": [0.2, 0.8]},
+    "enums": {"sampler": ["euler"], "scheduler": ["simple"]}
+  },
+  "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "moss_image_sft_bf16.safetensors", "weight_dtype": "default"}},
+  "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen3.5_9b_int8_convrot.safetensors", "type": "moss_image", "device": "default"}},
+  "3": {"class_type": "VAELoader", "inputs": {"vae_name": "flux2-vae.safetensors"}},
+  "4": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["2", 0]}},
+  "5": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["2", 0]}},
+  "7": {"class_type": "KSampler", "inputs": {"seed": 0, "steps": 50, "cfg": 3, "sampler_name": "euler", "scheduler": "simple", "denoise": 0.65, "model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0], "latent_image": ["12", 0]}},
+  "8": {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": ["3", 0]}},
+  "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": "moss_image_sft_bf16_i2i", "images": ["8", 0]}},
+  "10": {"class_type": "LoadImage", "inputs": {"image": "grid_source.png"}},
+  "11": {"class_type": "ImageScale", "inputs": {"image": ["10", 0], "upscale_method": "lanczos", "width": 1024, "height": 1024, "crop": "center"}},
+  "12": {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["3", 0]}}
+}
