@@ -1084,6 +1084,14 @@ content sanitization, and reward settlement.
 
 ## Verification
 
+- `tests/test_fasth3_worker_handoff.py` optionally runs actual offline Core
+  source preparation against `MEDIA_VIDEO_WORKER_SOURCE`'s separate FastH3
+  adapter. `MEDIA_VIDEO_WORKER_PYTHON` may select its reviewed test interpreter.
+  Ten role combinations use synthetic PNG/PCM WAV and mocked credential-free
+  HTTP, checking exact bytes, collision names and graph preservation. No GPU,
+  storage, ownership, native quality or paid lifecycle qualification is implied;
+  the public runtime remains closed and licensing remains a separate gate.
+
 - `tests/test_x402_http_runtime.py` exercises the pinned official SDK and
   production FastAPI route/middleware with synthetic facilitator and worker
   dependencies: challenge, exact-usage override, replay/stream/malformed input,
