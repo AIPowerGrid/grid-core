@@ -75,6 +75,10 @@ owning AGENTS.md and any affected parent Child DOX Index.
   alone does not establish exposure to the server-specific denial-of-service
   prerequisites. Upgrade the transitive client dependency rather than waive
   the audit or silently alter production locks in place.
+- Pillow's security floor is13.0.0 (below14) and certifi's is2026.10.19 in
+  both declarations. The October20 audit rejects the prior12.3.0/2026.7.22
+  lock. Regenerate hashes and qualify image ingest, auth/funding and worker
+  paths before release; do not waive the findings or hot-install production.
 - Treat `grid_ledger` and `grid_credit_ledger` as append-only economic records.
   Do not mutate historical ledger rows except via an explicit audited migration.
 - Worker/model claims are untrusted until verified by registry sync, signed
