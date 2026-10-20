@@ -6,7 +6,7 @@
     "jobType": "image",
     "deterministic": false,
     "requiredModels": ["MOSS Image SFT BF16"],
-    "license": "Apache-2.0; OpenMOSS-Team/MOSS-Image-SFT and Comfy-Org/MOSS-Image. Qualification only; not startup admission.",
+    "license": "Apache-2.0; OpenMOSS-Team/MOSS-Image-SFT and Comfy-Org/MOSS-Image.",
     "vars": {
       "prompt": "4.inputs.text",
       "negative_prompt": "5.inputs.text",

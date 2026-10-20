@@ -11,8 +11,9 @@ content sanitization, and reward settlement.
   image-only launch peg of USD0.010/output, pending owner tariff approval.
   Its exact model-specific defaults are50steps/CFG3/Euler; other model defaults
   and tariffs are unchanged. The backbone isBF16 and its separate official
-  text encoder isINT8. Recipes remain non-serving qualification candidates;
-  pricing/default code alone is neither availability nor paid dispatch proof.
+  text encoder isINT8. Exact startup recipe copies prepare reviewed worker
+  activation and its billing canary; inventory/pricing alone is neither online
+  capacity nor paid dispatch proof. No current production state follows.
 
 - Candidate book `2026-10-15-a` lowers `LTX-2.5 Distilled NVFP4` to USD 0.010
   per effective output second; `LTX-2.5 Distilled BF16` stays USD 0.020.

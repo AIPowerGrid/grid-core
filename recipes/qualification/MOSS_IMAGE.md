@@ -1,9 +1,12 @@
 # MOSS Image Qualification
 
-Status: non-serving candidates. No public price or admission is granted by
-these files. Native GPU results and existing-model regressions pass. Explicit
-pricing approval, reviewed release checks and a separately bounded Grid billing
-canary are still required before promotion. Do not recursively load this directory.
+Status: native-qualified candidate with exact startup copies preparing the
+owned-worker rollout and billing canary. Native GPU results and existing-model
+regressions pass. Pricing approval and ordinary exact-source release gates
+precede controlled activation; a separately bounded Grid billing canary and
+explicit public acceptance still precede declaring the release complete.
+Inventory alone does not create online worker capacity. Do not recursively
+load this directory.
 
 On October20, native qualification on an owned32GiB RTX5090 completes one
 1344x768 text image and two1344x768 source-image controls at denoise0.45/0.70,
@@ -93,6 +96,7 @@ Native examples do not establish paid Grid dispatch or universal GPU fit.
    restore the original worker if any required capability regresses.
 5. Select an explicit tariff and model-specific API defaults. Test quotes,
    reserve/settle/refund behavior, recipe selection and worker preflight.
-6. Complete ordinary Core release gates and a freshly approved, capped real
-   Grid canary before promotion and worker advertisement. A local render is
-   not a production deployment or permission to spend a user's credits.
+6. Complete ordinary Core release gates before controlled activation. Verify a
+   freshly approved, capped real Grid canary before declaring public acceptance.
+   A local render is not a production deployment or permission to spend a user's
+   credits. Retain the old worker configuration for immediate withdrawal/rollback.
