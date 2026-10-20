@@ -25,7 +25,7 @@ transport, accounts, stats, health/metrics.
 - `pricing.py` - public, unauthenticated `GET /v1/pricing`; exposes the exact
   versioned USD price book plus only fresh, source-linked same-model comparison
   workloads. Expired comparison evidence is omitted rather than repeated.
-  Candidate book2026-10-20-a adds MOSS Image SFT BF16 atUSD0.010/image,
+  Live book2026-10-20-a adds MOSS Image SFT BF16 atUSD0.010/image,
   without a competitor claim, worker availability or generation admission.
 - Text model discovery and status include additive `pricing` with USD input/
   output rates per million tokens, source (`model` or `default`) and book
