@@ -11,6 +11,10 @@ knobs → validate → drop here).
 
 ## Ownership
 
+- MOSS Image SFT BF16 lives only under `qualification/`, not startup inventory.
+  Native source-image examples and Krea/Klein regression pass, but a local
+  render is not public dispatch, pricing approval or a complete runtime release.
+  Keep its actual latent-img2img contract distinct from identity/reference editing.
 - `*.json` - ComfyUI workflow JSON with a `_grid` metadata block describing
   recipe name, job type, engine, required models, constraints, determinism, seed
   fields, and optional LoRA injection points.
