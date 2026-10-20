@@ -7,6 +7,15 @@ content sanitization, and reward settlement.
 
 ## Ownership
 
+- `fasth3_contract.py` owns an offline-only FastH3 qualification compiler,
+  exact17k+5frame units, integer quote math and separate appearance/opening/
+  conditioning-audio/preserved-soundtrack slots. Its fixed template lives in
+  `recipes/qualification/fasth3/`; the live registry rejects its schema and no
+  HTTP, price-book or worker-advertisement path calls it. Candidate bounds are
+  not native capacity/quality. Model-use rights, source protocol, purchased
+  billing and public rollout remain unresolved release gates. Tests prove
+  startup/public-async/unpriced-money denial, not license or native execution.
+
 - Live book `2026-10-20-a` adds the owner-approved `MOSS Image SFT BF16`
   image-only launch peg of USD0.010/output on Core0d2ee0b7.
   Its exact model-specific defaults are50steps/CFG3/Euler; other model defaults

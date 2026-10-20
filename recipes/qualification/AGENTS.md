@@ -13,6 +13,10 @@ recursively, and inventory alone does not enable job admission.
 
 ## Ownership
 
+- `fasth3/` owns an offline-only FastH3 Omni NVFP4 candidate scaffold and
+  separate17k+5frame/input-role contract. Live recipe parsing rejects its H3
+  schema; startup remains nonrecursive. No model execution, public capability,
+  tariff or activation is authorized by these files. See its leaf contract.
 - `moss-image-sft-bf16-{t2i,i2i}-v1.json` retain the image qualification copies.
   The distinct MOSS Image SFT BF16 identity pins a BF16 diffusion backbone,
   official INT8 Qwen3.5-9B encoder and Flux2 VAE. Img2img uses source pixels
@@ -82,4 +86,4 @@ recursively, and inventory alone does not enable job admission.
 
 ## Child DOX Index
 
-- None - leaf.
+- [fasth3/AGENTS.md](fasth3/AGENTS.md) - offline-only H3 candidate and release gates.
