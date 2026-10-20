@@ -97,10 +97,16 @@ class FrozenVideoPlan:
             hashlib.sha256(self.snapshot_json.encode("ascii")).hexdigest() != self.sha256
             or snapshot["model"] != self.model
             or self.inputs.model != self.model
-            or snapshot["inputs"] != json.loads(_json(self.inputs.commitments))
-            or snapshot["uncompiled"] != self.inputs.planning_payload()
+            or self.inputs.private_images is not True
+            or _json(list(self.inputs.seeds)) != _json([snapshot["payload"]["seed"]])
+            or _json(snapshot["inputs"]) != _json(self.inputs.commitments)
+            or _json(snapshot["uncompiled"]) != _json(self.inputs.planning_payload())
         ):
             raise HTTPException(422, detail="Video inputs changed after planning")
+
+    def _validate_staged_sources(self, payload: dict[str, Any]) -> None:
+        if payload.get("source_media"):
+            video_sources.validate_commitments(payload["source_media"], payload["recipe_source_bindings"], self.snapshot["execution"])
 
     async def stage(self) -> dict[str, Any]:
         """Bind private uploads to the frozen graph, without re-resolving it."""
@@ -133,10 +139,9 @@ class FrozenVideoPlan:
                     raise ValueError
             except (ValueError, TypeError, AttributeError):
                 raise HTTPException(503, detail="Private video source staging failed") from None
-        if payload.get("source_media"):
-            video_sources.validate_commitments(payload["source_media"], payload["recipe_source_bindings"], self.snapshot["execution"])
+        self._validate_staged_sources(payload)
         observed = [{key: value for key, value in source.items() if key != "url"} for source in payload.get("source_media", [])]
-        if observed != self.snapshot["inputs"]["sources"]:
+        if _json(observed) != _json(self.snapshot["inputs"]["sources"]):
             raise HTTPException(422, detail="Video sources changed during staging")
         return payload
 
@@ -171,7 +176,7 @@ def compile_video(inputs: VideoInputs) -> FrozenVideoPlan:
             "execution": recipe["execution"],
             "inputs": inputs.commitments,
             "uncompiled": uncompiled,
-        }
+        },
     )
     return FrozenVideoPlan(inputs.model, snapshot, hashlib.sha256(snapshot.encode("ascii")).hexdigest(), inputs)
 

@@ -66,6 +66,19 @@ def capture(payload: dict[str, Any]) -> dict[str, Any] | None:
         raise ValueError("three private sources require the separate Ingredients profile")
     urls.extend(images)
     urls.extend(item.get("url") for item in media)
+    return capture_urls(urls)
+
+
+def capture_urls(urls: list[Any]) -> dict[str, Any] | None:
+    """Inspect exact Core storage locations, not owner or deletion authority.
+
+    Each compiler must independently validate its input roles first. Only the
+    existing financial hold/journal transaction may persist deletion authority.
+    """
+    # Legacy timed images repeat their first URL in source_image_url. Preserve
+    # the eighteen-unique-object bound, including that one duplicate reference.
+    if not isinstance(urls, list) or len(urls) > MAX_OBJECTS + 1:
+        raise ValueError("private source URL collection is invalid")
     if not urls:
         return None
     endpoint, bucket = _endpoint(), storage.private_source_bucket()
@@ -162,7 +175,7 @@ async def sweep(*, limit: int = 2) -> dict[str, int]:
                             media_jobs.c.job_id.in_(_closed()),
                         )
                         .order_by(sa.func.coalesce(media_jobs.c.source_cleanup_attempted_at, media_jobs.c.created), media_jobs.c.job_id)
-                        .limit(limit)
+                        .limit(limit),
                     )
                 )
                 .mappings()
@@ -178,7 +191,7 @@ async def sweep(*, limit: int = 2) -> dict[str, int]:
                         media_jobs.c.source_cleanup_at.is_(None),
                         media_jobs.c.job_id.in_(_closed()),
                     )
-                    .values(source_cleanup_attempted_at=datetime.now(UTC))
+                    .values(source_cleanup_attempted_at=datetime.now(UTC)),
                 )
                 await session.commit()
             task = asyncio.create_task(asyncio.to_thread(delete, row["source_objects"]))
@@ -199,7 +212,7 @@ async def sweep(*, limit: int = 2) -> dict[str, int]:
                         media_jobs.c.source_cleanup_at.is_(None),
                         media_jobs.c.job_id.in_(_closed()),
                     )
-                    .values(source_cleanup_at=datetime.now(UTC))
+                    .values(source_cleanup_at=datetime.now(UTC)),
                 )
                 await session.commit()
                 counts["deleted"] += result.rowcount

@@ -7,6 +7,43 @@ content sanitization, and reward settlement.
 
 ## Ownership
 
+- `fasth3_contract.py` owns an offline-only FastH3 qualification compiler,
+  exact17k+5frame units, integer quote math and separate appearance/opening/
+  conditioning-audio/preserved-soundtrack slots. Its fixed template lives in
+  `recipes/qualification/fasth3/`; the live registry rejects its schema and no
+  HTTP, price-book or worker-advertisement path calls it. Candidate bounds are
+  not native capacity/quality. Model-use rights, source protocol, purchased
+  billing and public rollout remain unresolved release gates. Tests prove
+  startup/public-async/unpriced-money denial, not license or native execution.
+- `fasth3_sources.py` prepares offline inline source bundles only after strict
+  candidate/role checks. It fully verifies/decodes bounded opaque, unrotated,
+  single-frame PNGs, with exact output dimensions for opening images. Verify
+  PNG structure before metadata reads can close its verification stream.
+  Canonical48kHz stereo PCM16 WAV references may last2..15seconds; preserved
+  soundtracks require exactly frames*2000samples. No trimming, stretching or
+  silent role conversion. Retain exact byte/hash/role/geometry/sample
+  commitments. Generated/reference sound declares32kHz output; preserved
+  sound declares48kHz. No upload, ownership, retention, worker advertisement,
+  native quality or permission proof follows from this offline preparation.
+- `fasth3_output.py` inspects offline candidate bytes through the existing
+  bounded/isolation-required codec runner. Require one H.264/AAC pair, exact
+  H3 frame/resolution/track clocks and full contiguous frame/audio decoding.
+  AAC must be LC; at most1023decoded terminal padding samples are separately
+  reported after an independently valid presentation clock. Numeric probe
+  fields are bounded decimal/rational strings, never exponential allocations.
+  Generated/reference audio presents32kHz; preserved audio presents48kHz.
+  Report AAC terminal padding separately, never trim to manufacture agreement.
+  Codec/capacity/runtime failures remain uncertain, not failed-render/refund
+  authority. No live freeze/settlement caller exists; a reviewed immutable-byte
+  handoff, native identity/sound/lip-sync tests and paid lifecycle remain gates.
+- `fasth3_plans.py` composes the existing frozen-video planner and private-source
+  uploader with H3's validated role/graph snapshot. Only Core-issued private
+  storage locations can replace placeholders; never re-resolve or re-decode
+  after compilation. Keep raw bytes and prompts out of reprs. The candidate
+  deliberately has no governed recipe root and cannot enter the live journal,
+  reserve, dispatch or authorize deletion. It is not authenticated/account-bound,
+  qualified or priced. Native/ownership/financial integration remains a gate.
+
 - Live book `2026-10-20-a` adds the owner-approved `MOSS Image SFT BF16`
   image-only launch peg of USD0.010/output on Core0d2ee0b7.
   Its exact model-specific defaults are50steps/CFG3/Euler; other model defaults
@@ -132,6 +169,11 @@ content sanitization, and reward settlement.
   partial failure. Cancellation retains its single-flight guard until storage
   work finishes. Failures rotate behind other pending jobs, not starving them.
   Cleanup markers are operational metadata; no credits, results or ledgers move.
+  `capture_urls` shares exact Core-origin/private-bucket/key validation between
+  compiled protocols without granting ownership or deletion authority. The
+  live collector retains its LTX/Ingredients role restrictions. Preserve the
+  first-pin duplicate: nineteen URL references may represent eighteen unique
+  objects. H3 candidate inspection cannot create a cleanup journal row.
   It continues after admission rollback. Retain old bucket permissions until
   their recorded jobs drain; changing the S3 account or making a recorded bucket
   the output bucket refuses deletion. ComfyUI files, output/attempt orphans and
@@ -208,8 +250,12 @@ content sanitization, and reward settlement.
   before quota or storage. Planning uses non-routable source slots; only their
   locations change during staging. Keep source bytes out of serialized snapshots
   and reprs. Recheck commitments before uploads and copy mutable metadata before
-  yielding. Returned dictionaries cannot mutate the snapshot. This is not a
-  durable quote, frozen tariff, payment authorization, recovery selector or
+  yielding. Returned dictionaries cannot mutate the snapshot.
+  Before staging, recheck the private-upload policy and exact canonical JSON
+  types/seeds as well as byte commitments. A replaced private flag must never
+  turn a frozen private image into a legacy public-bucket upload. Model-specific
+  staging validation is a compiler-selected method, never a client field.
+  This is not a durable quote, frozen tariff, payment authorization, recovery selector or
   public graph interface. Core still prices and reserves through the existing
   live-credit authority; x402 quote/payment/refund implementation remains absent.
 - `media.compile_dispatch` is the non-I/O governed compiler; the existing
@@ -1064,6 +1110,16 @@ content sanitization, and reward settlement.
   over a newer cached block.
 
 ## Verification
+
+- `tests/test_fasth3_worker_handoff.py` optionally runs actual offline Core
+  source preparation against `FASTH3_WORKER_SOURCE`'s separate FastH3
+  adapter. `FASTH3_WORKER_PYTHON` may select its reviewed test interpreter.
+  Keep this opt-in independent of the existing LTX worker fixture pin; an old
+  LTX adapter is not an H3 handoff source, and an explicit bad H3 pin must fail.
+  Ten role combinations use synthetic PNG/PCM WAV and mocked credential-free
+  HTTP, checking exact bytes, collision names and graph preservation. No GPU,
+  storage, ownership, native quality or paid lifecycle qualification is implied;
+  the public runtime remains closed and licensing remains a separate gate.
 
 - `tests/test_x402_http_runtime.py` exercises the pinned official SDK and
   production FastAPI route/middleware with synthetic facilitator and worker
