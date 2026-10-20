@@ -1,9 +1,9 @@
 # MOSS Image Qualification
 
 Status: non-serving candidates. No public price or admission is granted by
-these files. Native GPU results, existing-model regression, explicit pricing,
-reviewed release checks and a separately bounded Grid billing canary are still
-required before promotion. Do not recursively load this directory.
+these files. Native GPU results and existing-model regressions pass. Explicit
+pricing approval, reviewed release checks and a separately bounded Grid billing
+canary are still required before promotion. Do not recursively load this directory.
 
 On October20, native qualification on an owned32GiB RTX5090 completes one
 1344x768 text image and two1344x768 source-image controls at denoise0.45/0.70,
@@ -25,8 +25,23 @@ CUDA packages; they do not qualify an independently packaged production
 environment. The original TorchCUDA12.8 build runs these controls but the new
 runtime warns that optimized operations requireCUDA13.0+. Preserve that
 performance limitation rather than claiming optimized kernel coverage.
-The third advertised model, Z-image, still needs candidate execution proof;
-the existing worker's restored preflight does not test the candidate runtime.
+That initial overlay proof is superseded for runtime independence by a second
+native window on a separate103-package, fully wheel-hash-locked environment:
+Torch2.14.1+cu130/Torchvision0.29.1+cu130, the same pinned ComfyUI source and
+the same model files. Its dependency-lockSHA256 is
+`2b67cf2140d256aa09f84a1bc9ca7098c8ad5b65e687b42b7b1f0711f73bd87f`.
+All103 upstream package versions have no reported advisories in the audit;
+the two official CUDA variant wheels are separately bound by upstream hashes.
+This is not a guarantee against unpublished vulnerabilities.
+
+The independent environment passes CPU startup, dependency consistency and six
+native cases without replacement submissions: MOSS text36.14seconds,
+source-image0.45/0.70 at28.09/28.08seconds, Krea10.06, Klein8.08 and
+Z-image10.07. MOSS/Krea/Z-image emit1344x768; Klein retains1328x768.
+The original services/configuration are restored after this second window as
+well. These single-run cache-dependent timings are not a speedup claim, a
+production rollout, or paid Grid evidence. Native input/graph/output bindings,
+full decode checks and exact prompt identities stay in private operator evidence.
 
 ## Identity And Provenance
 
