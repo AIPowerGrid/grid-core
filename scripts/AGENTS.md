@@ -10,6 +10,10 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 
 - `payout_hourly.sh` - production systemd timer entrypoint for custodial AIPG
   payouts and failed-payout reconciliation.
+- `alert_ops.py` - standard-library operator alerts for the payout sender:
+  the `OnFailure=` hook and the reward-policy expiry reminder. Installed to
+  `/usr/local/libexec/aipg/` so it runs independently of the selected release.
+  It must never fail its caller or print configuration.
 - `deploy_model_registry.py` - incomplete Base Sepolia ModelRegistry scaffold;
   not the production Grid Diamond deployment path.
 - `run_tests.sh` - Grid-native retirement, lint, and offline test wrapper.

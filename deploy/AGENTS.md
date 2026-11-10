@@ -18,6 +18,11 @@ executes an immutable release selected through `/home/aipg/current`.
   BF16 audio/video sources are public through337frames; larger Gallery
   original uploads do not raise that bound. NVFP4 sources stay closed.
 
+- `systemd/aipg-ops-alert@.service` with `scripts/alert_ops.py` alerts on a
+  failed `aipg-payout.service` and before the reward-policy windows end.
+  Installing or changing it must preserve the payout timer's enabled/active
+  state and must not start the payout service.
+
 - `VIDEO_PAID_RETEST_2026_10_14.md` - subsequent funded-account exporter
   deployment/retest and closed cohort, exact paid completion/clock evidence,
   preserved unsuccessful interruption control, scoped key401 cleanup and
