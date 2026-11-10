@@ -26,6 +26,9 @@ executes an immutable release selected through `/home/aipg/current`.
   update, payout alerting, first enablement of AIPG deposits with the
   operator price file and caps, reasoning-effort compatibility, live checks,
   and the still-missing real-token deposit canary.
+- `PROMPT_SCREEN_SHADOW_2026_11_10.md` - release `c96b1d17`: log-only prompt
+  screening enabled against a moderation-only key, live score evidence, what
+  is not screened or calibrated, and how to turn it off.
 
 - `PAYOUT_POLICY_RENEWAL_2026_11_10.md` - the eight-week payout sender
   failure after the single reward-policy window expired, the appended
