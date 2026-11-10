@@ -354,6 +354,13 @@ transport, accounts, stats, health/metrics.
   neither submits jobs nor changes credit, reward, or free-allowance state.
 
 - Faithful passthrough: forward request/response shape unchanged except metering + sanitize.
+  One compatibility exception: reasoning effort is rewritten on all three text
+  formats (`reasoning_effort`, `reasoning.effort`, `output_config.effort`) by
+  `_passthrough.normalize_reasoning_effort`. `low`/`medium` pass, `none`/`minimal`
+  become `low`, and anything else is removed so the backend default applies.
+  Backends reject levels they do not know (vLLM returns 400 for `high`), and
+  Claude Code sends `high` on every request. Do not forward a wider set unless
+  every routed engine accepts it.
 - Paid inference/media routes go through the shared rate limiter (`ratelimit.py`) keyed by
   API key. Not every endpoint is limited — `models`, `stats`, `health`/`metrics`, and progress
   polling are unlimited by design; wire the limiter on new work-submitting routes explicitly.

@@ -74,6 +74,55 @@ def normalize_output_budget(api_format: str, raw_request: dict) -> int:
     return max_len
 
 
+# Reasoning-effort values every text backend the Grid routes to accepts. Clients
+# send a wider vocabulary (`high` is the default in Claude Code and common in
+# OpenAI clients) and backends reject values they do not know: vLLM answers
+# 400 to `high`, `max` and `minimal`. Workers differ and Core does not know
+# which engine will serve the job, so normalize at the network boundary.
+_PORTABLE_REASONING_EFFORT = frozenset({"low", "medium"})
+_MINIMAL_REASONING_EFFORT = frozenset({"none", "minimal"})
+
+
+def _portable_effort(value) -> str | None:
+    """Portable equivalent of a client effort value, or None to use the backend default."""
+    effort = value.strip().lower() if isinstance(value, str) else ""
+    if effort in _PORTABLE_REASONING_EFFORT:
+        return effort
+    if effort in _MINIMAL_REASONING_EFFORT:
+        return "low"  # closest supported level to "as little as possible"
+    return None  # high / xhigh / max / unknown: the backend default is its fullest
+
+
+def normalize_reasoning_effort(api_format: str, raw_request: dict) -> dict:
+    """Rewrite the client's reasoning effort to one any backend accepts.
+
+    `low` and `medium` pass through, `none`/`minimal` become `low`, and every
+    other value is removed so the serving backend applies its own default.
+    Only the effort field changes; sibling settings are preserved.
+    """
+    if api_format == "openai-chat":
+        if "reasoning_effort" in raw_request:
+            effort = _portable_effort(raw_request["reasoning_effort"])
+            if effort is None:
+                raw_request.pop("reasoning_effort")
+            else:
+                raw_request["reasoning_effort"] = effort
+        return raw_request
+    field = "output_config" if api_format == "anthropic" else "reasoning"
+    container = raw_request.get(field)
+    if not isinstance(container, dict) or "effort" not in container:
+        return raw_request
+    container = dict(container)
+    effort = _portable_effort(container.pop("effort"))
+    if effort is not None:
+        container["effort"] = effort
+    if container:
+        raw_request[field] = container
+    else:
+        raw_request.pop(field)
+    return raw_request
+
+
 # Passthrough bodies (Anthropic /v1/messages, /v1/responses) are accepted raw
 # and recursively walked. Bound them so a huge or pathologically-nested body
 # can't burn CPU/stack in deep_sanitize. (Reuses the OpenAI char budget.)

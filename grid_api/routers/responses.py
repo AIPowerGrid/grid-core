@@ -26,6 +26,7 @@ from ._passthrough import (
     guard_passthrough_body,
     new_passthrough_job_id,
     normalize_output_budget,
+    normalize_reasoning_effort,
     stream_passthrough,
     submit_passthrough_job,
 )
@@ -75,7 +76,7 @@ async def create_response(
 
         await quota.check_and_consume(dict(user))
 
-        raw = deep_sanitize(dict(body))
+        raw = normalize_reasoning_effort(API_FORMAT, deep_sanitize(dict(body)))
         max_len = normalize_output_budget(API_FORMAT, raw)
 
         # Billing: reserve BEFORE dispatch on a grid-side prompt count (never the
