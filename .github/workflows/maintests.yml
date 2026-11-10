@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # matches the production host; ubuntu-latest moved to 26.04
     services:
       postgres:
         image: postgres:16
