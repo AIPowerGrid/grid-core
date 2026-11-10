@@ -18,6 +18,10 @@ executes an immutable release selected through `/home/aipg/current`.
   BF16 audio/video sources are public through337frames; larger Gallery
   original uploads do not raise that bound. NVFP4 sources stay closed.
 
+- `systemd/aipg-ops-alert@.service` with `scripts/alert_ops.py` alerts on a
+  failed `aipg-payout.service` and before the reward-policy windows end.
+  Installing or changing it must preserve the payout timer's enabled/active
+  state and must not start the payout service.
 - `PAYOUT_POLICY_RENEWAL_2026_11_10.md` - the eight-week payout sender
   failure after the single reward-policy window expired, the appended
   windows and valuations through 2026-12-15, verification, and the catch-up

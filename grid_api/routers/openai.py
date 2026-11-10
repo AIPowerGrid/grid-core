@@ -45,6 +45,7 @@ from ..services import concurrency
 from ..services import generation_admission
 from ..services import chat_output, credits, den, job_queue, media, pricing, quota, recipes, token_stream
 from ..services.sanitizer import sanitize_messages
+from ._passthrough import normalize_reasoning_effort
 from .worker_ws import get_available_models
 from ..services import router as router_svc
 from .worker_ws import get_model_modalities
@@ -129,7 +130,7 @@ def _normalize_worker_request(request_body: dict) -> dict:
         request_body.pop("tools", None)
         request_body.pop("tool_choice", None)
         request_body.pop("parallel_tool_calls", None)
-    return request_body
+    return normalize_reasoning_effort("openai-chat", request_body)
 
 
 @router.post("/v1/chat/completions")

@@ -1,0 +1,14 @@
+[Unit]
+Description=AIPG operator alert for failed unit %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=aipg
+Group=aipg
+EnvironmentFile=/etc/aipg/grid.env
+StateDirectory=aipg-ops-alert
+ExecStart=/usr/bin/python3 /usr/local/libexec/aipg/alert_ops.py unit-failed %i
+NoNewPrivileges=true
+PrivateTmp=true

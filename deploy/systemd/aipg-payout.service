@@ -2,6 +2,7 @@
 Description=AIPG hourly custodial worker payout
 After=network-online.target
 Wants=network-online.target
+OnFailure=aipg-ops-alert@%n.service
 
 [Service]
 Type=oneshot
@@ -10,5 +11,9 @@ Group=aipg
 WorkingDirectory=/home/aipg/current
 EnvironmentFile=/etc/aipg/grid.env
 ExecStart=/home/aipg/current/scripts/payout_hourly.sh
+# Best-effort reminder before the reviewed reward-policy windows run out.
+ExecStartPost=-/usr/bin/python3 /usr/local/libexec/aipg/alert_ops.py policy-expiry
+ExecStartPost=-/usr/bin/python3 /usr/local/libexec/aipg/alert_ops.py aipg-price-expiry
+StateDirectory=aipg-ops-alert
 NoNewPrivileges=true
 PrivateTmp=true

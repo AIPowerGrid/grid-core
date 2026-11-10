@@ -104,6 +104,8 @@ Install the versioned unit assets, select the release atomically, and restart:
 sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-gridapi.service" /etc/systemd/system/
 sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-payout.service" /etc/systemd/system/
 sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-payout.timer" /etc/systemd/system/
+sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-ops-alert@.service" /etc/systemd/system/
+sudo install -D -m 0755 "$RELEASE/scripts/alert_ops.py" /usr/local/libexec/aipg/alert_ops.py
 sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-postgres-backup.service" /etc/systemd/system/
 sudo install -m 0644 "$RELEASE/deploy/systemd/aipg-postgres-backup.timer" /etc/systemd/system/
 sudo install -d -o root -g root -m 0755 /etc/nginx/aipg-api.d
@@ -112,7 +114,7 @@ sudo ln -sfn /etc/nginx/sites-available/aipg-api.conf /etc/nginx/sites-enabled/a
 sudo ln -s "$RELEASE" /home/aipg/.current.next
 sudo mv -Tf /home/aipg/.current.next /home/aipg/current
 sudo systemctl daemon-reload
-sudo systemd-analyze verify aipg-gridapi.service aipg-payout.service aipg-payout.timer
+sudo systemd-analyze verify aipg-gridapi.service aipg-payout.service aipg-payout.timer aipg-ops-alert@aipg-payout.service.service
 sudo nginx -t
 sudo systemctl restart aipg-gridapi
 sudo systemctl reload nginx
@@ -163,6 +165,15 @@ from both health endpoints equals the reviewed release SHA.
 - `aipg-payout.timer` drives the live custodial worker payout CLI. Stop/restart
   it only under the settlement runbook in
   `grid_api/services/settlement/GO_LIVE.md`.
+- `aipg-ops-alert@.service` and `/usr/local/libexec/aipg/alert_ops.py` post a
+  minimal Discord alert when `aipg-payout.service` fails (`OnFailure=`), and a
+  daily reminder in the last seven days before the configured
+  `WORKER_REWARD_DEMAND_POLICIES` windows end. When `GRID_AIPG_PRICE_FILE` is
+  set it also warns in the last two days before that price expires, and when
+  the file is missing. The script is copied outside
+  the release tree and uses the system Python and standard library only, so
+  alerting does not depend on the selected release. It never fails the payout
+  unit and sends no logs, amounts or addresses.
 - Private payout/reporter keys stay in the service environment or secret store;
   never print them during verification.
 
