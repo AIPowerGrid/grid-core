@@ -637,13 +637,16 @@ async def test_funding_config_reports_the_file_price(funding, monkeypatch, tmp_p
         {"version": 2},
         {"epoch": "bad epoch!"},
         {"block": -1},
-        {"as_of": (datetime.now(UTC) + timedelta(minutes=5)).isoformat()},
-        {"valid_until": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()},
-        {"as_of": (datetime.now(UTC) - timedelta(days=2)).isoformat()},
+        # Times are offsets resolved when the test runs, not when it is collected.
+        {"as_of": timedelta(minutes=5)},
+        {"valid_until": timedelta(seconds=-1)},
+        {"as_of": timedelta(days=-2)},
         {"extra": 1},
     ],
 )
 def test_aipg_price_file_fails_closed_on_bad_content(funding, monkeypatch, tmp_path, overrides):
+    now = datetime.now(UTC)
+    overrides = {k: (now + v).isoformat() if isinstance(v, timedelta) else v for k, v in overrides.items()}
     _price_file(tmp_path, monkeypatch, **overrides)
     assert deposits._aipg_price() is None
     assert deposits.aipg_is_configured() is False
