@@ -444,6 +444,8 @@ async def lifespan(app: FastAPI):
         await alerts.flush()
         await alerts.stop()
         raise
+    from .services import prompt_screen
+    await prompt_screen.start()
     reclaimer = asyncio.create_task(_stale_job_reclaimer())
     # Media recipes: load curated local recipes now. Chain sync is an explicit,
     # default-off, dual-RPC verified background authority.
@@ -500,6 +502,7 @@ async def lifespan(app: FastAPI):
     await close_p2p()  # Shutdown P2P
     await close_redis()
     await close_database()
+    await prompt_screen.stop()
     await alerts.stop()
 
 

@@ -43,6 +43,7 @@ from ..models.openai import ChatCompletionRequest, ModelInfo, ModelListResponse
 from ..services import accounts as accounts_svc
 from ..services import concurrency
 from ..services import generation_admission
+from ..services import prompt_screen
 from ..services import chat_output, credits, den, job_queue, media, pricing, quota, recipes, token_stream
 from ..services.sanitizer import sanitize_messages
 from ._passthrough import normalize_reasoning_effort
@@ -457,6 +458,7 @@ async def _handle_chat_completions_for_user(
     # Flattened prompt — legacy bookkeeping, ledger prompt-hash, and the
     # fallback payload for pre-passthrough workers.
     prompt = _messages_to_prompt(clean_messages)
+    prompt_screen.observe("openai-chat", request.model, prompt, user.get("account_id"))
 
     # Seed: grid-side randomization. If the caller didn't pin a seed, mint a
     # fresh one here so output varies per request regardless of the backend

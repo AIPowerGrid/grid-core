@@ -657,6 +657,18 @@ content sanitization, and reward settlement.
   unrelated reviewed local recipes remain, while governed recipes fail closed.
 - **Safety:** `sanitizer.py` - **secrets redactor only** (strips API keys/PGP from prompts).
   NOT a content filter.
+  `prompt_screen.py` - default-off, **log-only** prompt scoring. `observe()` is
+  called after admission on OpenAI chat, Anthropic/Responses passthrough,
+  waiting media and async video; it enqueues and returns, never raises, and
+  must stay off the request's latency and failure path. One bounded worker
+  posts credential-redacted, tail-truncated text to `PROMPT_SCREEN_URL` and
+  reads only `PROMPT_SCREEN_CATEGORY` (the provider's overall "flagged" also
+  covers legal adult content and is ignored). Prompt text is never logged,
+  stored or alerted; records carry a keyed opaque account ID, path, model and
+  score. Failures count as failures, never as a score. Refusal ("enforce") is
+  not implemented: it needs its own design for classifier outage, account
+  consequences and the no-account x402 rail. Negative prompts and generated
+  outputs are not screened.
 - **Settlement:** `settlement/` - owned in its own AGENTS.md.
 - **Deferred decentralized dispatch:** `p2p/` - owned in its own AGENTS.md and
   default-off.
