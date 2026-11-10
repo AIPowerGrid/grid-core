@@ -9,6 +9,8 @@ Two modes, both run by systemd next to `aipg-payout.service`:
   alert_ops.py unit-failed <unit>   OnFailure hook: the unit just failed.
   alert_ops.py policy-expiry        After a good run: warn when the reviewed
                                     reward-policy windows end soon.
+  alert_ops.py aipg-price-expiry    After a good run: warn when the published
+                                    AIPG funding price is about to lapse.
 
 Standard library only, no database and no chain access. Alerts carry the unit
 name or a date, never logs, amounts, addresses or configuration. A missing
@@ -34,6 +36,8 @@ UNIT_RE = re.compile(r"^aipg-[a-z0-9-]{1,48}\.service$")
 FAILURE_REPEAT_SECONDS = 6 * 3600
 EXPIRY_REPEAT_SECONDS = 24 * 3600
 EXPIRY_WARNING_SECONDS = 7 * 86400
+AIPG_PRICE_WARNING_SECONDS = 48 * 3600
+AIPG_PRICE_REPEAT_SECONDS = 12 * 3600
 
 
 def policy_end(raw: str | None) -> datetime | None:
@@ -64,6 +68,29 @@ def expiry_message(raw: str | None, now: datetime) -> str | None:
     return (
         f"Worker reward policy windows end {when} (about {hours} hours). "
         "Hourly payouts will fail closed after that unless a reviewed window is appended."
+    )
+
+
+def aipg_price_message(path: str | None, now: datetime) -> str | None:
+    """Warning text when the AIPG funding price file is missing, unreadable or
+    within two days of expiry. None when no price file is configured."""
+    if not path or not path.strip():
+        return None
+    try:
+        end = datetime.fromisoformat(str(json.loads(Path(path.strip()).read_text())["valid_until"]))
+        if end.tzinfo is None:
+            raise ValueError("price has no timezone")
+    except (OSError, ValueError, KeyError, TypeError):
+        return "The AIPG funding price file is missing or unreadable. AIPG deposits are unavailable until a price is published."
+    remaining = (end.astimezone(UTC) - now).total_seconds()
+    if remaining > AIPG_PRICE_WARNING_SECONDS:
+        return None
+    when = end.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    if remaining <= 0:
+        return f"The AIPG funding price expired {when}. AIPG deposits are unavailable until a new price is published."
+    return (
+        f"The AIPG funding price expires {when} (about {int(remaining // 3600)} hours). "
+        "Publish a new one with scripts/set_aipg_price.py or AIPG deposits will stop."
     )
 
 
@@ -101,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     failed = modes.add_parser("unit-failed")
     failed.add_argument("unit")
     modes.add_parser("policy-expiry")
+    modes.add_parser("aipg-price-expiry")
     args = parser.parse_args(argv)
 
     state = Path(os.environ.get("STATE_DIRECTORY", "/var/lib/aipg-ops-alert").split(":")[0])
@@ -108,6 +136,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.mode == "unit-failed":
             title, message = "Payout sender failed", failure_message(args.unit)
             stamp, repeat = state / f"failed-{args.unit}", FAILURE_REPEAT_SECONDS
+        elif args.mode == "aipg-price-expiry":
+            title = "AIPG funding price expiring"
+            message = aipg_price_message(os.environ.get("GRID_AIPG_PRICE_FILE"), datetime.now(UTC))
+            stamp, repeat = state / "aipg-price-expiry", AIPG_PRICE_REPEAT_SECONDS
         else:
             title = "Reward policy windows ending"
             message = expiry_message(os.environ.get("WORKER_REWARD_DEMAND_POLICIES"), datetime.now(UTC))

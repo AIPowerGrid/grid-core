@@ -85,3 +85,23 @@ def test_never_fails_the_calling_unit(monkeypatch, tmp_path, capsys):
     err = capsys.readouterr().err
     assert "alert not sent" in err and WEBHOOK not in err
     assert not (tmp_path / "failed-aipg-payout.service").exists()
+
+
+def test_aipg_price_reminder(tmp_path):
+    assert alert_ops.aipg_price_message(None, NOW) is None
+    assert alert_ops.aipg_price_message("  ", NOW) is None
+    path = tmp_path / "aipg-price.json"
+    assert "missing or unreadable" in alert_ops.aipg_price_message(str(path), NOW)
+
+    def publish(until):
+        path.write_text(json.dumps({"version": 1, "epoch": "e", "price_micro": 1000,
+                                    "as_of": NOW.isoformat(), "valid_until": until.isoformat(), "block": 0}))
+
+    publish(NOW + timedelta(days=3))
+    assert alert_ops.aipg_price_message(str(path), NOW) is None
+    publish(NOW + timedelta(hours=20))
+    assert "about 20 hours" in alert_ops.aipg_price_message(str(path), NOW)
+    publish(NOW - timedelta(hours=1))
+    assert "expired 2026-12-10 04:00 UTC" in alert_ops.aipg_price_message(str(path), NOW)
+    path.write_text("{broken")
+    assert "missing or unreadable" in alert_ops.aipg_price_message(str(path), NOW)

@@ -168,7 +168,9 @@ from both health endpoints equals the reviewed release SHA.
 - `aipg-ops-alert@.service` and `/usr/local/libexec/aipg/alert_ops.py` post a
   minimal Discord alert when `aipg-payout.service` fails (`OnFailure=`), and a
   daily reminder in the last seven days before the configured
-  `WORKER_REWARD_DEMAND_POLICIES` windows end. The script is copied outside
+  `WORKER_REWARD_DEMAND_POLICIES` windows end. When `GRID_AIPG_PRICE_FILE` is
+  set it also warns in the last two days before that price expires, and when
+  the file is missing. The script is copied outside
   the release tree and uses the system Python and standard library only, so
   alerting does not depend on the selected release. It never fails the payout
   unit and sends no logs, amounts or addresses.
