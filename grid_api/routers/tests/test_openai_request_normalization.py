@@ -69,3 +69,51 @@ def test_nonempty_tools_are_forwarded_unchanged():
     }
 
     assert _normalize_worker_request(body) == body
+
+
+# ── Reasoning effort is rewritten to a level every backend accepts ──────────
+# vLLM rejects `high`, `max` and `minimal` with HTTP 400; Claude Code sends
+# `high` on every request.
+
+
+@pytest.mark.parametrize(
+    ("sent", "forwarded"),
+    [("low", "low"), ("medium", "medium"), ("MEDIUM", "medium"), ("minimal", "low"), ("none", "low"),
+     ("high", None), ("xhigh", None), ("max", None), ("turbo", None), (3, None)],
+)
+def test_reasoning_effort_is_portable_on_every_api_format(sent, forwarded):
+    from grid_api.routers._passthrough import normalize_reasoning_effort
+
+    chat = _normalize_worker_request(_request(reasoning_effort=sent).model_dump(exclude_none=True))
+    assert chat.get("reasoning_effort") == forwarded
+
+    anthropic = normalize_reasoning_effort("anthropic", {"model": "m", "output_config": {"effort": sent}})
+    assert (anthropic.get("output_config") or {}).get("effort") == forwarded
+    assert ("output_config" in anthropic) is (forwarded is not None)
+
+    responses = normalize_reasoning_effort(
+        "openai-responses", {"model": "m", "reasoning": {"effort": sent, "summary": "auto"}},
+    )
+    assert responses["reasoning"].get("effort") == forwarded
+    assert responses["reasoning"]["summary"] == "auto"  # sibling settings survive
+
+
+def test_reasoning_effort_normalization_leaves_other_requests_alone():
+    from grid_api.routers._passthrough import normalize_reasoning_effort
+
+    claude_code = {
+        "model": "m", "max_tokens": 32000, "stream": True,
+        "thinking": {"type": "adaptive", "display": "omitted"},
+        "context_management": {"edits": [{"type": "clear_thinking_20251015", "keep": "all"}]},
+        "output_config": {"effort": "high", "format": {"type": "json_schema"}},
+    }
+    original = {"type": "json_schema"}
+    out = normalize_reasoning_effort("anthropic", claude_code)
+    assert out["output_config"] == {"format": original}
+    assert out["thinking"] == {"type": "adaptive", "display": "omitted"}
+    assert "context_management" in out
+
+    for api_format in ("anthropic", "openai-responses", "openai-chat"):
+        plain = {"model": "m", "reasoning": "not-a-dict", "output_config": None}
+        assert normalize_reasoning_effort(api_format, dict(plain)) == plain
+    assert "reasoning_effort" not in _normalize_worker_request(_request().model_dump(exclude_none=True))

@@ -775,6 +775,9 @@ content sanitization, and reward settlement.
   narrow exception to the no-request-path-chain-read rule: they must verify the
   configured RPC is on the expected chain before trusting transaction/receipt
   data, and they must never sit in the inference hot path.
+  With `GRID_AIPG_PRICE_FILE` set, that file is the sole AIPG price source,
+  re-read per request with one snapshot per claim; any unusable file disables
+  the rail and the env price is never a fallback.
 - Production ETH funding uses `swap_receipt`: the linked wallet spends native
   ETH and the confirmed transaction must deliver canonical Base USDC directly
   to the configured USDC treasury. Credit only the actual USDC Transfer amount.

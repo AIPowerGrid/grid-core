@@ -106,6 +106,39 @@ GRID_AIPG_NETWORK_DAILY_MICRO=500000000
 $0.0012/AIPG before the 3% haircut; it is an example, not a live price. A missing,
 future, stale, or expired epoch disables the rail with no fallback.
 
+### Publishing a price without a restart
+
+The variables above are read once at process start, so changing them means
+restarting the API. Set `GRID_AIPG_PRICE_FILE` to publish the price from a file
+instead:
+
+```dotenv
+GRID_AIPG_PRICE_FILE=/etc/aipg/aipg-price.json
+GRID_AIPG_PRICE_MAX_AGE_SECONDS=691200
+```
+
+```bash
+sudo /usr/bin/python3 scripts/set_aipg_price.py --price-micro 1000            # dry run
+sudo /usr/bin/python3 scripts/set_aipg_price.py --price-micro 1000 --apply
+```
+
+- When the variable is set, the file is the only price source. The
+  `GRID_AIPG_CREDIT_PRICE_MICRO`, `_EPOCH`, `_AS_OF`, `_VALID_UNTIL` and `_BLOCK`
+  variables are ignored. There is no fallback to them.
+- Core re-reads the file on every funding request and uses one snapshot per
+  claim. A missing, symlinked, group- or world-writable, oversized, malformed,
+  future, stale or expired file disables the AIPG rail.
+- The tool is dry-run by default, writes atomically, defaults to seven days of
+  validity, and refuses a change of more than 50% without
+  `--allow-large-change`. It reads no market data; the operator sets the price.
+- It backdates `as_of` by a grace period (60 minutes by default) so a transfer
+  mined shortly before a new price is published is still claimable. That
+  transfer is credited at the new price, not the one shown when it was sent.
+- `GRID_AIPG_PRICE_MAX_AGE_SECONDS` must cover the validity plus the grace
+  period, or the price expires early. Eight days covers the defaults.
+- The price still needs an owner. When it expires, AIPG funding stops until a
+  new one is published.
+
 Received AIPG stays in the AIPG treasury for reviewed network uses such as
 worker/validator rewards. The funding path does not market-sell it.
 
