@@ -3,6 +3,7 @@
 
 """DB-backed Base funding receipt and credit invariants."""
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -80,6 +81,7 @@ def funding(monkeypatch):
     monkeypatch.setattr(deposits, "AIPG_PRICE_VALID_UNTIL_RAW", (now + timedelta(hours=1)).isoformat())
     monkeypatch.setattr(deposits, "AIPG_PRICE_MAX_AGE_SECONDS", 86_400)
     monkeypatch.setattr(deposits, "AIPG_PRICE_BLOCK", 123)
+    monkeypatch.setattr(deposits, "AIPG_PRICE_FILE", "")
     monkeypatch.setattr(deposits, "AIPG_HAIRCUT_BPS", 300)
     monkeypatch.setattr(deposits, "AIPG_MAX_DEPOSIT_MICRO", 100_000_000)
     monkeypatch.setattr(deposits, "AIPG_ACCOUNT_DAILY_MICRO", 100_000_000)
@@ -574,3 +576,111 @@ async def test_funding_config_exposes_swap_receipt_without_direct_send(funding, 
     assert eth["backend_claim_enabled"] is True
     assert eth["status"] == "conversion_ready"
     assert eth["treasury"] == TREASURY
+
+
+# ── Operator-published AIPG price file ──────────────────────────────────────
+
+
+def _price_file(tmp_path, monkeypatch, **overrides):
+    now = datetime.now(UTC)
+    record = {
+        "version": 1,
+        "epoch": "file-epoch",
+        "price_micro": 1_000,
+        "as_of": (now - timedelta(minutes=5)).isoformat(),
+        "valid_until": (now + timedelta(hours=1)).isoformat(),
+        "block": 456,
+    }
+    record.update(overrides)
+    path = tmp_path / "aipg-price.json"
+    path.write_text(json.dumps(record))
+    path.chmod(0o644)
+    monkeypatch.setattr(deposits, "AIPG_PRICE_FILE", str(path))
+    return path
+
+
+@pytest.mark.asyncio
+async def test_aipg_price_file_replaces_env_price_without_restart(db, funding, monkeypatch, tmp_path):
+    # The env price in the fixture is $0.002; the file says $0.001 and must win.
+    path = _price_file(tmp_path, monkeypatch)
+    monkeypatch.setattr(deposits, "_rpc", _rpc_for(AIPG, 10_000 * 10**18))
+
+    result = await deposits.verify_and_credit_aipg(TX, {"account_id": db, "wallet": WALLET})
+
+    assert result["amount_usd"] == 9.7  # 10,000 AIPG at $0.001, less 3%
+    assert result["price_source"] == "operator:file-epoch:haircut-300bps"
+    assert await credits.get_balance(db) == 9_700_000
+
+    # A newly published price is picked up on the next read, same process.
+    record = json.loads(path.read_text())
+    record.update(price_micro=1_500, epoch="file-epoch-2")
+    path.write_text(json.dumps(record))
+    price = deposits._aipg_price()
+    assert (price.price_micro, price.epoch, price.block) == (1_500, "file-epoch-2", 456)
+
+
+@pytest.mark.asyncio
+async def test_funding_config_reports_the_file_price(funding, monkeypatch, tmp_path):
+    _price_file(tmp_path, monkeypatch)
+    config = await deposits.funding_config({"account_id": None, "wallet": WALLET})
+    aipg = next(a for a in config["assets"] if a["asset"] == "AIPG")
+    assert aipg["enabled"] is True and aipg["status"] == "available"
+    assert aipg["price_micro"] == 1_000 and aipg["price_epoch"] == "file-epoch"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"price_micro": 0},
+        {"price_micro": "1000"},
+        {"price_micro": True},
+        {"version": 2},
+        {"epoch": "bad epoch!"},
+        {"block": -1},
+        {"as_of": (datetime.now(UTC) + timedelta(minutes=5)).isoformat()},
+        {"valid_until": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()},
+        {"as_of": (datetime.now(UTC) - timedelta(days=2)).isoformat()},
+        {"extra": 1},
+    ],
+)
+def test_aipg_price_file_fails_closed_on_bad_content(funding, monkeypatch, tmp_path, overrides):
+    _price_file(tmp_path, monkeypatch, **overrides)
+    assert deposits._aipg_price() is None
+    assert deposits.aipg_is_configured() is False
+
+
+def test_aipg_price_file_fails_closed_when_missing_unsafe_or_not_json(funding, monkeypatch, tmp_path):
+    # A configured file is the only source: the valid env price must not be a fallback.
+    monkeypatch.setattr(deposits, "AIPG_PRICE_FILE", str(tmp_path / "absent.json"))
+    assert deposits._aipg_price() is None
+
+    path = _price_file(tmp_path, monkeypatch)
+    assert deposits._aipg_price() is not None
+    path.chmod(0o666)
+    assert deposits._aipg_price() is None
+    path.chmod(0o644)
+
+    link = tmp_path / "link.json"
+    link.symlink_to(path)
+    monkeypatch.setattr(deposits, "AIPG_PRICE_FILE", str(link))
+    assert deposits._aipg_price() is None
+
+    monkeypatch.setattr(deposits, "AIPG_PRICE_FILE", str(path))
+    path.write_text("{not json")
+    assert deposits._aipg_price() is None
+    path.write_text("x" * 5000)
+    assert deposits._aipg_price() is None
+
+
+@pytest.mark.asyncio
+async def test_aipg_claim_without_usable_file_fails_before_rpc(db, funding, monkeypatch, tmp_path):
+    monkeypatch.setattr(deposits, "AIPG_PRICE_FILE", str(tmp_path / "absent.json"))
+
+    async def should_not_call(*_args):
+        raise AssertionError("RPC must not run without a usable price")
+
+    monkeypatch.setattr(deposits, "_rpc", should_not_call)
+    with pytest.raises(HTTPException) as exc:
+        await deposits.verify_and_credit_aipg(TX, {"account_id": db, "wallet": WALLET})
+    assert exc.value.status_code == 503
+    assert await _deposit_count() == 0

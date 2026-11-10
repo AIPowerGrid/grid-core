@@ -10,6 +10,10 @@ account provisioning tools, and an incomplete testnet model-registry helper.
 
 - `payout_hourly.sh` - production systemd timer entrypoint for custodial AIPG
   payouts and failed-payout reconciliation.
+- `set_aipg_price.py` - dry-run-by-default publisher for the operator AIPG
+  funding price file read by `services/deposits.py`. Standard library only;
+  no database, chain or market access. It must keep writing a file Core's
+  reader accepts, and it never selects a price itself.
 - `deploy_model_registry.py` - incomplete Base Sepolia ModelRegistry scaffold;
   not the production Grid Diamond deployment path.
 - `run_tests.sh` - Grid-native retirement, lint, and offline test wrapper.
