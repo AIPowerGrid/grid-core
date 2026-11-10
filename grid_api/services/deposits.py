@@ -21,10 +21,14 @@ dollar liability backed by volatile treasury inventory.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
+import stat
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import NamedTuple
 
 import httpx
 import sqlalchemy as sa
@@ -73,6 +77,11 @@ AIPG_PRICE_EPOCH = os.getenv("GRID_AIPG_PRICE_EPOCH", "").strip()
 AIPG_PRICE_AS_OF_RAW = os.getenv("GRID_AIPG_PRICE_AS_OF", "").strip()
 AIPG_PRICE_VALID_UNTIL_RAW = os.getenv("GRID_AIPG_PRICE_VALID_UNTIL", "").strip()
 AIPG_PRICE_BLOCK = int(os.getenv("GRID_AIPG_PRICE_BLOCK", "0") or 0)
+# Optional operator-published price file. When set it is the ONLY price source:
+# the GRID_AIPG_*PRICE* variables above are ignored, and a missing, unsafe,
+# malformed, future, stale or expired file disables the rail. It is re-read on
+# every use, so a reviewed price can be published without restarting the API.
+AIPG_PRICE_FILE = os.getenv("GRID_AIPG_PRICE_FILE", "").strip()
 AIPG_PRICE_MAX_AGE_SECONDS = max(
     300,
     int(os.getenv("GRID_AIPG_PRICE_MAX_AGE_SECONDS", "86400") or 86400),
@@ -145,13 +154,82 @@ def is_configured() -> bool:
     return DEPOSITS_ENABLED and _valid_address(TREASURY) and _valid_address(USDC)
 
 
-def _aipg_price_epoch(now: datetime | None = None) -> tuple[datetime, datetime] | None:
-    now = now or _now()
-    as_of = _parse_time(AIPG_PRICE_AS_OF_RAW)
-    valid_until = _parse_time(AIPG_PRICE_VALID_UNTIL_RAW)
+class AipgPrice(NamedTuple):
+    """One operator-published valuation. Use a single snapshot per decision."""
+
+    price_micro: int
+    epoch: str
+    as_of: datetime
+    valid_until: datetime
+    block: int
+
+
+_AIPG_PRICE_FILE_KEYS = frozenset({"version", "epoch", "price_micro", "as_of", "valid_until", "block"})
+_AIPG_EPOCH_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+_AIPG_PRICE_FILE_MAX_BYTES = 4096
+
+
+def _read_aipg_price_file(path: str) -> tuple[int, str, str, str, int] | None:
+    """Raw fields from the operator price file, or None when it is unusable.
+
+    Fail closed: the file must be a small regular file that only root or the
+    service's own user can write, with exactly the expected fields.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        return None
+    try:
+        info = os.fstat(fd)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+            or info.st_uid not in (0, os.geteuid())
+            or info.st_size > _AIPG_PRICE_FILE_MAX_BYTES
+        ):
+            return None
+        raw = os.read(fd, _AIPG_PRICE_FILE_MAX_BYTES + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or set(data) != _AIPG_PRICE_FILE_KEYS or data["version"] != 1:
+        return None
+    price, epoch, block = data["price_micro"], data["epoch"], data["block"]
     if (
-        AIPG_PRICE_MICRO <= 0
-        or not AIPG_PRICE_EPOCH
+        type(price) is not int
+        or type(block) is not int
+        or block < 0
+        or not isinstance(epoch, str)
+        or not _AIPG_EPOCH_RE.fullmatch(epoch)
+        or not isinstance(data["as_of"], str)
+        or not isinstance(data["valid_until"], str)
+    ):
+        return None
+    return price, epoch, data["as_of"], data["valid_until"], block
+
+
+def _aipg_price(now: datetime | None = None) -> AipgPrice | None:
+    """The active AIPG valuation, or None when the rail has no usable price."""
+    now = now or _now()
+    if AIPG_PRICE_FILE:
+        fields = _read_aipg_price_file(AIPG_PRICE_FILE)
+        if fields is None:
+            return None
+        price_micro, epoch, as_of_raw, valid_until_raw, block = fields
+    else:
+        price_micro, epoch, block = AIPG_PRICE_MICRO, AIPG_PRICE_EPOCH, AIPG_PRICE_BLOCK
+        as_of_raw, valid_until_raw = AIPG_PRICE_AS_OF_RAW, AIPG_PRICE_VALID_UNTIL_RAW
+    as_of = _parse_time(as_of_raw)
+    valid_until = _parse_time(valid_until_raw)
+    if (
+        price_micro <= 0
+        or price_micro > _MAX_SIGNED_BIGINT
+        or not epoch
         or as_of is None
         or valid_until is None
         or as_of > now
@@ -160,7 +238,12 @@ def _aipg_price_epoch(now: datetime | None = None) -> tuple[datetime, datetime] 
         or now - as_of > timedelta(seconds=AIPG_PRICE_MAX_AGE_SECONDS)
     ):
         return None
-    return as_of, valid_until
+    return AipgPrice(price_micro, epoch, as_of, valid_until, block)
+
+
+def _aipg_price_epoch(now: datetime | None = None) -> tuple[datetime, datetime] | None:
+    price = _aipg_price(now)
+    return (price.as_of, price.valid_until) if price else None
 
 
 def aipg_is_configured() -> bool:
@@ -247,7 +330,8 @@ async def _daily_cap_usage(account_id) -> dict[str, tuple[int, int]]:
 
 async def funding_config(account: dict) -> dict:
     """Safe client configuration for the signed-in Console funding flow."""
-    epoch = _aipg_price_epoch()
+    aipg_price = _aipg_price()
+    aipg_available = aipg_is_configured() and aipg_price is not None
     wallets = await _verified_funding_wallets(account)
     usage = await _daily_cap_usage(account.get("account_id"))
 
@@ -290,17 +374,17 @@ async def funding_config(account: dict) -> dict:
             },
             {
                 "asset": "AIPG",
-                "enabled": aipg_is_configured(),
+                "enabled": aipg_available,
                 "treasury": AIPG_TREASURY or None,
                 "token_address": AIPG_TOKEN,
                 "decimals": AIPG_DECIMALS,
-                "price_micro": AIPG_PRICE_MICRO if epoch else None,
-                "price_epoch": AIPG_PRICE_EPOCH if epoch else None,
-                "price_valid_until": epoch[1].isoformat() if epoch else None,
+                "price_micro": aipg_price.price_micro if aipg_price else None,
+                "price_epoch": aipg_price.epoch if aipg_price else None,
+                "price_valid_until": aipg_price.valid_until.isoformat() if aipg_price else None,
                 "haircut_bps": AIPG_HAIRCUT_BPS,
                 "minimum_credit_micro": MIN_CREDIT_MICRO,
                 "maximum_credit_micro": AIPG_MAX_DEPOSIT_MICRO,
-                "status": "available" if aipg_is_configured() else "price_unavailable",
+                "status": "available" if aipg_available else "price_unavailable",
                 **cap_status(
                     "AIPG",
                     AIPG_ACCOUNT_DAILY_MICRO,
@@ -724,8 +808,9 @@ async def verify_and_credit(tx_hash: str, account: dict) -> dict:
 
 async def verify_and_credit_aipg(tx_hash: str, account: dict) -> dict:
     """Credit a direct AIPG transfer under a bounded, expiring price epoch."""
-    epoch = _aipg_price_epoch()
-    if not aipg_is_configured() or epoch is None:
+    # One snapshot for the whole claim: the price file can change between reads.
+    price = _aipg_price()
+    if not aipg_is_configured() or price is None:
         raise HTTPException(503, detail="AIPG deposits do not have a valid funding price right now.")
     tx_hash = _normalize_tx_hash(tx_hash)
     tx, receipt, block_number = await _confirmed_transaction(tx_hash, "AIPG")
@@ -734,16 +819,16 @@ async def verify_and_credit_aipg(tx_hash: str, account: dict) -> dict:
     if amount_raw <= 0:
         raise HTTPException(400, detail="No direct AIPG transfer to the grid treasury was found.")
     block_timestamp = await _block_timestamp(block_number)
-    if not epoch[0] <= block_timestamp <= epoch[1]:
+    if not price.as_of <= block_timestamp <= price.valid_until:
         raise HTTPException(
             422,
             detail="The AIPG transfer was not mined inside the active funding price epoch.",
         )
-    market_micro = amount_raw * AIPG_PRICE_MICRO // (10 ** AIPG_DECIMALS)
+    market_micro = amount_raw * price.price_micro // (10 ** AIPG_DECIMALS)
     credited_micro = market_micro * (10_000 - AIPG_HAIRCUT_BPS) // 10_000
     if credited_micro < MIN_CREDIT_MICRO:
         raise HTTPException(422, detail="AIPG deposit is below the minimum funding amount.")
-    source = f"operator:{AIPG_PRICE_EPOCH}:haircut-{AIPG_HAIRCUT_BPS}bps"
+    source = f"operator:{price.epoch}:haircut-{AIPG_HAIRCUT_BPS}bps"
     applied, deposit, balance = await _record_and_credit(
         account=account,
         asset="AIPG",
@@ -754,10 +839,10 @@ async def verify_and_credit_aipg(tx_hash: str, account: dict) -> dict:
         treasury=AIPG_TREASURY,
         amount_raw=amount_raw,
         decimals=AIPG_DECIMALS,
-        price_micro=AIPG_PRICE_MICRO,
+        price_micro=price.price_micro,
         price_source=source,
-        price_timestamp=epoch[0],
-        price_block=AIPG_PRICE_BLOCK or None,
+        price_timestamp=price.as_of,
+        price_block=price.block or None,
         credited_micro=credited_micro,
         caps=(AIPG_MAX_DEPOSIT_MICRO, AIPG_ACCOUNT_DAILY_MICRO, AIPG_NETWORK_DAILY_MICRO),
     )
@@ -771,7 +856,7 @@ async def verify_and_credit_aipg(tx_hash: str, account: dict) -> dict:
                 "account": alerts.opaque_id(account["account_id"]),
                 "tx": alerts.opaque_id(tx_hash),
                 "amount_micro": credited_micro,
-                "price_epoch": AIPG_PRICE_EPOCH,
+                "price_epoch": price.epoch,
             },
             dedupe_key=f"deposit-credited:aipg:{alerts.opaque_id(tx_hash)}",
         )
