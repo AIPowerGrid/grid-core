@@ -139,6 +139,10 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
   while OAuth is disabled after rollback.
 - **Safety:** `services/sanitizer.py` is secret redaction, not a content safety
   system. Do not treat it as CSAM/PII/NSFW moderation.
+  `services/prompt_screen.py` is a default-off, log-only (`PROMPT_SCREEN_MODE=shadow`)
+  score of admitted prompts for one category from an external classifier. It
+  refuses nothing and checks no generated output. Enabling it sends prompt text
+  to that endpoint, so the published content policy must say so first.
 - **Media capabilities:** `/v1/status/models` publishes generation modes derived
   from approved recipe variants. A connected checkpoint alone does not authorize
   `img2img` or `img2video`; the corresponding recipe must declare an image input.

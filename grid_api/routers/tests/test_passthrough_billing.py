@@ -212,3 +212,25 @@ async def test_authorize_passthrough_dry_run_is_noop(monkeypatch):
     )
     assert auth["ok"] and auth["reserved"] == 0 and auth["status"] == "dry_run"
     assert auth["prompt_toks"] > 0  # grid still counts the prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ok,expected", [(True, 1), (False, 0)])
+async def test_authorize_passthrough_screens_only_authorized_prompts(monkeypatch, ok, expected):
+    from grid_api.services import prompt_screen
+
+    seen = []
+    account = uuid.uuid4()
+
+    async def authorize(*args, **kwargs):
+        return {"ok": ok, "reserved": 0, "status": "dry_run" if ok else "insufficient"}
+
+    monkeypatch.setattr(credits, "authorize_request", authorize)
+    monkeypatch.setattr(prompt_screen, "observe", lambda *a: seen.append(a) or True)
+    await pt.authorize_passthrough(
+        {"account_id": account}, "m", "anthropic",
+        {"messages": [{"role": "user", "content": "hi there"}]}, 100, "j6",
+    )
+    assert len(seen) == expected
+    if seen:
+        assert seen[0][0] == "anthropic" and seen[0][1] == "m" and "hi there" in seen[0][2] and seen[0][3] == account

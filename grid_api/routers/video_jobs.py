@@ -16,6 +16,7 @@ from ..auth import extract_api_key
 from ..config import get_settings
 from ..ratelimit import limiter
 from ..services import accounts, generation_admission, media, media_jobs, quota, video_plans, video_sources
+from ..services import prompt_screen
 from . import _video_body
 from .videos import VideoRequest, validate_video
 
@@ -153,6 +154,7 @@ async def submit_video_job(
                 preferred_worker=body.worker or "", max_cost_micro=body.max_cost_micro_usd,
                 admission_deadline=admission_deadline)
             row = await media_jobs.reserve(prepared, user=user, concurrency_limit=settings.media_async_concurrency)
+            prompt_screen.observe("video", plan.model, prompt_screen.media_text(payload), user["account_id"])
         status = await media_jobs.recover(user["account_id"], row["job_id"])
         if status is None:
             raise media_jobs.MediaJobError("committed video is not recoverable")

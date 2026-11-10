@@ -27,6 +27,7 @@ from PIL import Image
 
 from . import job_queue, token_stream, recipes, storage, credits
 from . import generation_admission, video_contract
+from . import prompt_screen
 
 logger = logging.getLogger("grid_api.media")
 
@@ -461,6 +462,7 @@ async def submit_and_wait(model: str, job_type: str, payload: dict, timeout: int
     if job_type == "video":
         generation_admission.require_waiting_video(model)
     payload, resolved_recipe = await prepare_dispatch(model, job_type, payload)
+    prompt_screen.observe(job_type, model, prompt_screen.media_text(payload), account_id)
     n = int(payload.get("n", 1) or 1)
     job_id = str(uuid4())
 

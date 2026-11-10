@@ -225,6 +225,20 @@ class GridSettings(BaseSettings):
     grid_alert_queue_size: int = 256
     grid_alert_dedupe_seconds: int = 300
 
+    # Log-only safety screening of admitted prompts. "shadow" scores prompts in
+    # a background worker and never delays or refuses a request. Prompt text is
+    # sent to this endpoint, so enabling it is a privacy decision. The key is a
+    # production secret.
+    prompt_screen_mode: Literal["off", "shadow"] = "off"
+    prompt_screen_api_key: SecretStr | None = Field(default=None, repr=False)
+    prompt_screen_url: str = Field(default="https://api.openai.com/v1/moderations", max_length=512)
+    prompt_screen_model: str = Field(default="omni-moderation-latest", min_length=1, max_length=120)
+    prompt_screen_category: str = Field(default="sexual/minors", min_length=1, max_length=80)
+    prompt_screen_threshold: float = Field(default=0.5, gt=0, lt=1)
+    prompt_screen_timeout_seconds: float = Field(default=5.0, ge=0.5, le=30)
+    prompt_screen_queue_size: int = Field(default=256, ge=10, le=10000)
+    prompt_screen_max_chars: int = Field(default=12000, ge=500, le=100000)
+
     grid_reward_monitor_enabled: bool = False
     grid_treasury_monitor_enabled: bool = False
     grid_treasury_monitor_wallet: str = Field(default="", pattern=r"^(?:0x[0-9a-fA-F]{40})?$")
