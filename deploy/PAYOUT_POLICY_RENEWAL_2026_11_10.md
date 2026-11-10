@@ -50,18 +50,29 @@ line 166 differs.
   `sent 0, pending 0, accrued 0, skipped 0, failed 0`, unit finished
   successfully. No unit is in a failed state.
 
+## Catch-up for the held period
+
+With the owner's approval, the sender was run for the held hours that had
+purchased work, between `2026-11-10T04:14Z` and `04:19Z`.
+
+- Hourly dry runs over the 21 days that showed purchased work found 40 payable
+  hours between `hour-2026-09-16T00` and `hour-2026-11-09T21`. The other held
+  hours had no eligible work and were not run, so they have no plan rows.
+- Each of the 40 hours was sent with the unchanged 208.33 AIPG budget through
+  the same module the timer uses. All 40 reported `failed 0, pending 0`; the
+  closing reconcile reported nothing pending or failed.
+- 57 transfers, 1,335.63 AIPG in total, to four destinations: 1,324.22 to
+  `0xa218db26…`, 9.58 to `0x4e6f1a9e…`, 1.53 to `0x252ee496…` and 0.21 to
+  `0x844fedf9…`. The public totals moved from 1,729 payouts / 100,846.20 AIPG
+  to 1,786 / 102,181.83.
+- An earlier estimate of about 178 AIPG, taken from week-long previews, was
+  wrong: one preview is capped at a single hour's budget.
+
 ## Not done
 
-- **No catch-up.** Read-only weekly previews found purchased work in the held
-  period: about 178 AIPG in total across at most four accounts between
-  `2026-09-14T02:00Z` and `2026-11-10T03:00Z`. Weekly previews are not hourly
-  plans, so the exact owed amounts differ. Paying them means running the
-  sender for each held hour, which creates one plan row per hour. That needs a
-  separate decision.
 - The interval `2026-09-10T18:00Z` to `2026-09-13T02:00Z` precedes the first
   policy. A preview showed one account with funded work there; the hourly
-  runs at the time sent nothing. Not investigated.
-- No transfer was sent by this change.
+  runs at the time sent nothing. Not investigated and not paid.
 
 ## Follow-up
 
