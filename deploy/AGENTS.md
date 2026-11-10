@@ -22,6 +22,11 @@ executes an immutable release selected through `/home/aipg/current`.
   failed `aipg-payout.service` and before the reward-policy windows end.
   Installing or changing it must preserve the payout timer's enabled/active
   state and must not start the payout service.
+- `AIPG_DEPOSITS_ROLLOUT_2026_11_10.md` - release `a6cd1166`: dependency
+  update, payout alerting, first enablement of AIPG deposits with the
+  operator price file and caps, reasoning-effort compatibility, live checks,
+  and the still-missing real-token deposit canary.
+
 - `PAYOUT_POLICY_RENEWAL_2026_11_10.md` - the eight-week payout sender
   failure after the single reward-policy window expired, the appended
   windows and valuations through 2026-12-15, verification, and the catch-up
