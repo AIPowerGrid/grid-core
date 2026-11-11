@@ -247,7 +247,12 @@ content sanitization, and reward settlement.
   gated on `GRID_PROMO_SPENDABLE_LIVE` plus exact campaign IDs in
   `GRID_PROMO_SPENDABLE_CAMPAIGNS`), `free_credits.py`
   (daily free CREDIT allowance, Redis, FAIL-CLOSED, atomic consume/release
-  idempotent on ref), `quota.py` (free-tier request COUNT, fail-open — distinct
+  idempotent on ref; the default-off AIPG holder allowance qualifies on the
+  wallet's balance at the last Base block before UTC midnight and now, claims
+  once per wallet and per account per day under
+  `GRID_FREE_HOLDER_DAILY_BUDGET_MICRO`, and after the claim reads no chain;
+  keep the single snapshot block, both claim keys, and the budget together or
+  the same tokens can be paid twice), `quota.py` (free-tier request COUNT, fail-open — distinct
   from credit value), `pricing.py` (versioned USD rates plus expiring,
   source-linked public same-model comparisons), `ledger.py` (incl. `content_hash` — real
   sha256 of witnessed output or NULL, never sha256("")), `den.py` (den
