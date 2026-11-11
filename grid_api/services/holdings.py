@@ -9,6 +9,12 @@ Two read-only helpers, both cached in-process:
   Feeds the ">=100k AIPG holder" charge discount. Stale-on-error (a perk must never
   block a charge), cached ~10 min so it adds no per-request RPC under load.
 
+- ``block_before(ts)`` / ``aipg_balance_raw_at(wallet, block)`` — the balance at one
+  fixed past block, for the holder daily allowance. Every wallet is read at the same
+  block, so the same tokens cannot qualify two wallets on one day. Both RAISE on
+  failure (free value must never be granted on a guessed balance) and need an RPC
+  that serves state at least one day old.
+
 - ``eth_usd_micro()`` — Chainlink ETH/USD on Base, as **micro-USD per 1 ETH**. Prices
   a native-ETH deposit at claim time. This is a DEPOSIT-time oracle only; the request
   path stays deliberately oracle-free (USDC/USD-native). Raises on failure — a deposit
@@ -44,18 +50,81 @@ _bal_cache: dict[str, tuple[float, int]] = {}    # wallet -> (expiry_monotonic, 
 _price_cache: dict[str, tuple[float, int]] = {}  # "eth" -> (expiry_monotonic, micro_usd)
 
 
-async def _eth_call(to: str, data: str) -> str:
+async def _rpc(method: str, params: list):
     async with httpx.AsyncClient(timeout=15) as c:
         r = await c.post(
             BASE_RPC,
-            json={"jsonrpc": "2.0", "id": 1, "method": "eth_call",
-                  "params": [{"to": to, "data": data}, "latest"]},
+            json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
         )
         r.raise_for_status()
         body = r.json()
         if body.get("error"):
-            raise RuntimeError(f"eth_call {to}: {body['error']}")
-        return body.get("result") or "0x"
+            raise RuntimeError(f"{method}: {body['error']}")
+        return body.get("result")
+
+
+async def _eth_call(to: str, data: str, block: str = "latest") -> str:
+    return await _rpc("eth_call", [{"to": to, "data": data}, block]) or "0x"
+
+
+_SNAPSHOT_CACHE_MAX = 20_000
+_snapshot_cache: dict[tuple[str, int], int] = {}  # (wallet, block) -> raw balance (immutable)
+_block_cache: dict[int, int] = {}                 # unix ts -> last block before it
+
+
+async def _block_time(number: int | str) -> tuple[int, int]:
+    tag = number if isinstance(number, str) else hex(number)
+    block = await _rpc("eth_getBlockByNumber", [tag, False])
+    if not block:
+        raise RuntimeError("block not found")
+    return int(block["number"], 16), int(block["timestamp"], 16)
+
+
+async def block_before(ts: int) -> int:
+    """Number of the last Base block with a timestamp before `ts`. RAISES on any
+    RPC failure or when `ts` is not in the chain's past."""
+    hit = _block_cache.get(ts)
+    if hit is not None:
+        return hit
+    high, high_ts = await _block_time("latest")
+    if high_ts < ts:
+        raise RuntimeError("snapshot time is not in the chain's past")
+    low = 0  # invariant: block `low` is before ts, block `high` is not
+    while high - low > 1:
+        mid = (low + high) // 2
+        _, mid_ts = await _block_time(mid)
+        if mid_ts < ts:
+            low = mid
+        else:
+            high = mid
+    if low <= 0:
+        raise RuntimeError("snapshot time is before the chain")
+    if len(_block_cache) > 64:
+        _block_cache.clear()
+    _block_cache[ts] = low
+    return low
+
+
+async def aipg_balance_raw_at(wallet: str, block: int) -> int:
+    """AIPG balance (raw base units) of `wallet` at the end of `block`. A past
+    block never changes, so results are cached for the life of the process.
+    RAISES on failure — callers must grant nothing on an unknown balance."""
+    w = (wallet or "").strip().lower()
+    if not (w.startswith("0x") and len(w) == 42) or block <= 0:
+        raise ValueError("invalid wallet or block")
+    key = (w, int(block))
+    hit = _snapshot_cache.get(key)
+    if hit is not None:
+        return hit
+    data = "0x70a08231" + w[2:].rjust(64, "0")  # balanceOf(address)
+    res = await _eth_call(AIPG_TOKEN, data, hex(int(block)))
+    if not res or res == "0x":
+        raise RuntimeError("empty balance response")
+    bal = int(res, 16)
+    if len(_snapshot_cache) >= _SNAPSHOT_CACHE_MAX:
+        _snapshot_cache.clear()
+    _snapshot_cache[key] = bal
+    return bal
 
 
 async def aipg_balance_raw(wallet: str) -> int:

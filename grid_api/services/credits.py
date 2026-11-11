@@ -261,6 +261,7 @@ async def account_credit_summary(user: dict) -> dict:
     promo_preview = await promotions.available_micro(account_id)
     promo_left = await promotions.available_micro(account_id, spendable_only=True)
     daily_cap = await free_credits.daily_cap_micro(account_id, wallet)
+    holder_bonus = await free_credits.holder_bonus_micro(account_id, wallet)
     free_left = await free_credits.available_micro(account_id, wallet)
     free_active = free_credits.FREE_ENABLED and free_credits.FREE_SPENDABLE_LIVE
     promo_active = promotions.spending_live()
@@ -282,7 +283,13 @@ async def account_credit_summary(user: dict) -> dict:
             "daily_cap_usd": _usd(daily_cap),
             "remaining_usd": _usd(free_left),
             "resets": "utc-midnight",
-            "holder_bonus_active": daily_cap > free_credits.FREE_DAILY_MICRO,
+            "holder_bonus_active": holder_bonus > 0,
+            "holder_bonus_micro": holder_bonus,
+            "holder_bonus_usd": _usd(holder_bonus),
+            "holder_tiers": [
+                {"min_aipg": min_aipg, "daily_micro": micro, "daily_usd": _usd(micro)}
+                for min_aipg, micro in reversed(free_credits.holder_tiers())
+            ],
             "active": free_active,
         },
         "paid": {
