@@ -466,6 +466,8 @@ async def link_wallet_from_assertion(
     )
     if user.get("key_kind") not in {"delegated_user", "user_token"}:
         raise HTTPException(403, detail="Wallet linking requires a native Grid user token")
+    if (user.get("token_claims") or {}).get("client_id"):
+        raise HTTPException(403, detail="Wallet linking requires a native Grid user token")
     from ..services import user_tokens
 
     user_tokens.require_recent_step_up(user.get("token_claims") or {})
