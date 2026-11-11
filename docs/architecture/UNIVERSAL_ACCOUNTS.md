@@ -210,9 +210,12 @@ quote.
 
 The launch default gives wallet-only accounts no automatic value. A holder
 could move the same tokens through multiple wallets and collect a naive bonus
-repeatedly, so the holder allowance qualifies on a prior-epoch snapshot: the
-login wallet's AIPG balance at the last Base block before today's UTC midnight,
-and its balance now; the lower of the two picks the tier. Every wallet is read
+repeatedly, so the holder allowance qualifies on a prior-epoch snapshot: a
+wallet's AIPG balance at the last Base block before today's UTC midnight, and
+its balance now; the lower of the two picks the tier. An account is offered
+the best tier among the wallets it has proven (the sign-in wallet first, at
+most `GRID_FREE_HOLDER_MAX_WALLETS`, default 5); balances in different wallets
+are never added, so linking a second, smaller wallet cannot lower the tier. Every wallet is read
 at that same block, so one set of tokens qualifies one wallet per day. The
 first qualifying read claims the day's allowance atomically: one claim per
 wallet, one per account, and the total of all claims never passes
