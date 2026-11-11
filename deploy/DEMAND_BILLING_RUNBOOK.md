@@ -104,6 +104,10 @@ The disposable database must not be production or share production tables.
 
    These values mean `$0.10` once for verified Google, a `$500` global welcome
    ceiling, `$0.01/day` for verified Google, and no wallet-only holder faucet.
+   The holder allowance is a separate owner decision: it needs
+   `GRID_FREE_HOLDER_TIERS` (`min_aipg:micro_usd_per_day,...`), a positive
+   `GRID_FREE_HOLDER_DAILY_BUDGET_MICRO`, and a `GRID_BASE_RPC` that answers
+   `eth_call` at a block one day old. Leave both unset to keep it off.
    Since 2026-11-10 production runs `GRID_FREE_DAILY_MICRO=100000` (`$0.10/day`
    for verified Google), raised with owner approval after a report that one
    cent a day was not a usable trial. The previous environment file is

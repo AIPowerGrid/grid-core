@@ -9,6 +9,15 @@ holder allowance without Google. A charge draws from this FREE bucket before the
 purchased balance (see credits.charge_request). Tracked in Redis (per-account
 -per-day key, auto-expiring) — no cleanup job, no unbounded growth.
 
+HOLDER ALLOWANCE (default off). A login wallet qualifies for a tier by the AIPG
+it held at the last Base block before today's UTC midnight AND still holds now
+(the lower of the two decides the tier). Every wallet is measured at that one
+block, so moving tokens between wallets cannot qualify two of them on the same
+day. The first qualifying read of the day claims the allowance atomically in
+Redis: one claim per wallet, one per account, and the sum of all claims stays
+under GRID_FREE_HOLDER_DAILY_BUDGET_MICRO. Later reads that day use the claim
+and touch no chain. Any failure (RPC, Redis, budget spent) grants nothing.
+
 This complements the request-count `quota.py` (N free requests/day): that caps
 how OFTEN you call; this caps how much VALUE you consume for free, so a cheap
 chat and an expensive video draw the right amount from the same allowance.
@@ -30,6 +39,7 @@ matching behavior. Enable it only alongside a reviewed
 `GRID_CHARGING_MODE=allowlist` canary or the later global rollout.
 """
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timezone
@@ -51,12 +61,66 @@ FREE_ENABLED = os.getenv("GRID_FREE_CREDITS_ENABLED", "1").lower() in ("1", "tru
 FREE_SPENDABLE_LIVE = os.getenv("GRID_FREE_SPENDABLE_LIVE", "0").lower() in ("1", "true", "yes", "on")
 # Base free micro-USD per UTC day (10000 = $0.01).
 FREE_DAILY_MICRO = int(os.getenv("GRID_FREE_DAILY_MICRO", "10000"))
-# Holder rewards stay disabled until qualification cannot be recycled between wallets.
+# Holder allowance. Off unless at least one tier AND a positive network-wide
+# daily budget are configured. A single tier may be given with the two legacy
+# variables; GRID_FREE_HOLDER_TIERS ("min_aipg:micro_usd_per_day,...") wins.
 FREE_HOLDER_MIN_AIPG = int(os.getenv("GRID_FREE_HOLDER_MIN_AIPG", "100000"))
 FREE_HOLDER_BONUS_MICRO = int(os.getenv("GRID_FREE_HOLDER_BONUS_MICRO", "0"))
+FREE_HOLDER_TIERS_RAW = os.getenv("GRID_FREE_HOLDER_TIERS", "").strip()
+# Most holder allowance the whole network may claim in one UTC day.
+FREE_HOLDER_DAILY_BUDGET_MICRO = int(os.getenv("GRID_FREE_HOLDER_DAILY_BUDGET_MICRO", "0"))
+# Upper bound on the chain reads a first-of-day qualification may spend.
+FREE_HOLDER_LOOKUP_SECONDS = float(os.getenv("GRID_FREE_HOLDER_LOOKUP_SECONDS", "8"))
 
 _PREFIX = "grid:freecredit:"       # {_PREFIX}{account_id}:{day} -> micro spent today
 _REF_PREFIX = "grid:freeconsumed:" # {_REF_PREFIX}{ref} -> micro consumed for that job (idempotency)
+_HOLDER_ACCOUNT_PREFIX = "grid:holderbonus:"  # {..}{day}:{account_id} -> micro claimed today
+_HOLDER_WALLET_PREFIX = "grid:holderwallet:"  # {..}{day}:{wallet} -> account_id that claimed
+_HOLDER_BUDGET_PREFIX = "grid:holderbudget:"  # {..}{day} -> micro claimed network-wide
+_HOLDER_BLOCK_PREFIX = "grid:holderblock:"    # {..}{day} -> snapshot block number
+
+
+def parse_holder_tiers(raw: str) -> list[tuple[int, int]]:
+    """Parse "min_aipg:micro,..." into tiers, largest holding first. Any invalid
+    entry disables the whole list: a typo must never widen a giveaway."""
+    tiers: dict[int, int] = {}
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            min_text, micro_text = part.split(":")
+            min_aipg, micro = int(min_text), int(micro_text)
+        except ValueError:
+            logger.error("invalid GRID_FREE_HOLDER_TIERS; holder allowance disabled")
+            return []
+        if min_aipg <= 0 or micro <= 0 or min_aipg in tiers:
+            logger.error("invalid GRID_FREE_HOLDER_TIERS; holder allowance disabled")
+            return []
+        tiers[min_aipg] = micro
+    ordered = sorted(tiers.items(), reverse=True)
+    if any(a[1] < b[1] for a, b in zip(ordered, ordered[1:])):
+        logger.error("GRID_FREE_HOLDER_TIERS must not pay less for holding more; disabled")
+        return []
+    return ordered
+
+
+def holder_tiers() -> list[tuple[int, int]]:
+    """Active tiers as (whole AIPG held, micro-USD per day), largest first."""
+    if FREE_HOLDER_DAILY_BUDGET_MICRO <= 0:
+        return []
+    if FREE_HOLDER_TIERS_RAW:
+        return parse_holder_tiers(FREE_HOLDER_TIERS_RAW)
+    if FREE_HOLDER_BONUS_MICRO > 0 and FREE_HOLDER_MIN_AIPG > 0:
+        return [(FREE_HOLDER_MIN_AIPG, FREE_HOLDER_BONUS_MICRO)]
+    return []
+
+
+def _tier_micro(balance_raw: int, tiers: list[tuple[int, int]], decimals: int) -> int:
+    for min_aipg, micro in tiers:
+        if balance_raw >= min_aipg * (10 ** decimals):
+            return micro
+    return 0
 
 
 def _day() -> str:
@@ -100,25 +164,123 @@ async def _wallet_for_account(account_id) -> str | None:
         return None
 
 
+def _day_start_ts() -> int:
+    now = datetime.now(timezone.utc)
+    return int(now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+
+
+_block_searches: dict[str, asyncio.Task] = {}  # day -> the one in-flight search
+
+
+async def _find_snapshot_block(r, day: str, key: str) -> int:
+    from . import holdings
+
+    try:
+        block = await holdings.block_before(_day_start_ts())
+        # NX: if two processes race, both read the same chain and agree anyway.
+        await r.set(key, block, ex=_secs_to_midnight() + 3600, nx=True)
+        return int(await r.get(key) or block)
+    finally:
+        _block_searches.pop(day, None)
+
+
+async def _snapshot_block(r) -> int:
+    """Today's snapshot block: the last Base block before UTC midnight. Shared
+    through Redis so every process measures every wallet at the same block. The
+    search runs once per day and is shielded, so a caller that gives up waiting
+    does not throw the search away for the next caller."""
+    day = _day()
+    key = f"{_HOLDER_BLOCK_PREFIX}{day}"
+    known = await r.get(key)
+    if known:
+        return int(known)
+    search = _block_searches.get(day)
+    if search is None:
+        search = asyncio.ensure_future(_find_snapshot_block(r, day, key))
+        _block_searches[day] = search
+    return await asyncio.shield(search)
+
+
+# Atomic claim of today's holder allowance. One claim per account and per wallet;
+# the network-wide total never passes the budget. Returns the micro-USD this
+# account holds for today (0 when the wallet or the budget is taken).
+_HOLDER_CLAIM_LUA = """
+local mine = redis.call('GET', KEYS[1])
+if mine then return tonumber(mine) end
+if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
+local micro = tonumber(ARGV[2])
+local used = tonumber(redis.call('GET', KEYS[3]) or '0')
+if used + micro > tonumber(ARGV[3]) then return 0 end
+redis.call('INCRBY', KEYS[3], micro)
+redis.call('EXPIRE', KEYS[3], tonumber(ARGV[4]))
+redis.call('SET', KEYS[2], ARGV[1], 'EX', tonumber(ARGV[4]))
+redis.call('SET', KEYS[1], micro, 'EX', tonumber(ARGV[4]))
+return micro
+"""
+
+
+async def _claim_holder_bonus(r, account_id, wallet: str, micro: int) -> int:
+    day = _day()
+    taken = await r.eval(
+        _HOLDER_CLAIM_LUA, 3,
+        f"{_HOLDER_ACCOUNT_PREFIX}{day}:{account_id}",
+        f"{_HOLDER_WALLET_PREFIX}{day}:{wallet}",
+        f"{_HOLDER_BUDGET_PREFIX}{day}",
+        str(account_id), int(micro), FREE_HOLDER_DAILY_BUDGET_MICRO, _secs_to_midnight(),
+    )
+    return int(taken or 0)
+
+
+async def _qualify_holder(r, account_id, wallet: str, tiers: list[tuple[int, int]]) -> int:
+    from . import holdings
+
+    now_micro = _tier_micro(await holdings.aipg_balance_raw(wallet), tiers, holdings.AIPG_DECIMALS)
+    if now_micro <= 0:
+        return 0
+    block = await _snapshot_block(r)
+    held = await holdings.aipg_balance_raw_at(wallet, block)
+    micro = min(now_micro, _tier_micro(held, tiers, holdings.AIPG_DECIMALS))
+    if micro <= 0:
+        return 0
+    return await _claim_holder_bonus(r, account_id, wallet, micro)
+
+
+async def holder_bonus_micro(account_id, wallet: str | None) -> int:
+    """Today's holder allowance for this account in micro-USD. 0 on any failure
+    (fail-closed): an RPC or Redis outage must never grant free value."""
+    if not FREE_ENABLED or not account_id:
+        return 0
+    tiers = holder_tiers()
+    if not tiers:
+        return 0
+    try:
+        r = get_redis()
+        claimed = await r.get(f"{_HOLDER_ACCOUNT_PREFIX}{_day()}:{account_id}")
+        if claimed is not None:
+            return max(int(claimed), 0)
+        if wallet is None:
+            wallet = await _wallet_for_account(account_id)
+        wallet = (wallet or "").strip().lower()
+        if not (wallet.startswith("0x") and len(wallet) == 42):
+            return 0
+        return await asyncio.wait_for(
+            _qualify_holder(r, account_id, wallet, tiers), FREE_HOLDER_LOOKUP_SECONDS
+        )
+    except Exception as exc:
+        logger.warning(
+            "holder allowance lookup failed; granting none account=%s error_type=%s",
+            opaque_id(account_id),
+            error_type(exc),
+        )
+        return 0
+
+
 async def daily_cap_micro(account_id, wallet: str | None) -> int:
-    """Daily cap: verified-Google base plus an optional qualified-holder bonus."""
+    """Daily cap: verified-Google base plus the claimed holder allowance."""
     if not FREE_ENABLED:
         return 0
     cap = FREE_DAILY_MICRO if await _has_verified_google(account_id) else 0
-    if wallet is None:
-        wallet = await _wallet_for_account(account_id)
-    if wallet and FREE_HOLDER_BONUS_MICRO > 0:
-        try:
-            from . import holdings
-            bal = await holdings.aipg_balance_raw(wallet)
-            if bal >= FREE_HOLDER_MIN_AIPG * (10 ** holdings.AIPG_DECIMALS):
-                cap += FREE_HOLDER_BONUS_MICRO
-        except Exception as exc:
-            logger.debug(
-                "holder-bonus read failed; verified base only error_type=%s",
-                error_type(exc),
-            )
-    return cap
+    return cap + await holder_bonus_micro(account_id, wallet)
 
 
 async def _spent_today_micro(account_id) -> int:

@@ -3,9 +3,9 @@
 
 """Free daily credit allowance — cap tiering + free-first draw in charge_request.
 
-No Redis: the daily-cap tiering is pure (mock the on-chain balance), and the
-charge-path split is exercised by stubbing the allowance. The atomic Redis
-consume (Lua) is covered by a separate real-Redis integration run."""
+No Redis: the daily-cap sum is pure, and the charge-path split is exercised by
+stubbing the allowance. The holder allowance's snapshot, claim and budget rules
+run against a real disposable Redis in test_holder_allowance_redis.py."""
 
 import pytest
 
@@ -29,68 +29,54 @@ async def test_daily_cap_base_no_wallet(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_daily_cap_holder_gets_bonus(monkeypatch):
+async def test_daily_cap_adds_claimed_holder_allowance(monkeypatch):
     monkeypatch.setattr(free_credits, "FREE_ENABLED", True)
     monkeypatch.setattr(free_credits, "FREE_DAILY_MICRO", 250_000)
-    monkeypatch.setattr(free_credits, "FREE_HOLDER_MIN_AIPG", 100_000)
-    monkeypatch.setattr(free_credits, "FREE_HOLDER_BONUS_MICRO", 1_000_000)
     monkeypatch.setattr(free_credits, "_has_verified_google", _async(True))
-    monkeypatch.setattr(holdings, "aipg_balance_raw", _async(150_000 * 10 ** holdings.AIPG_DECIMALS))
+    monkeypatch.setattr(free_credits, "holder_bonus_micro", _async(1_000_000))
     assert await free_credits.daily_cap_micro("account", "0xabc") == 1_250_000  # base + bonus
 
 
 @pytest.mark.asyncio
-async def test_daily_cap_below_threshold_base_only(monkeypatch):
-    monkeypatch.setattr(free_credits, "FREE_ENABLED", True)
-    monkeypatch.setattr(free_credits, "FREE_DAILY_MICRO", 250_000)
-    monkeypatch.setattr(free_credits, "_has_verified_google", _async(True))
-    monkeypatch.setattr(holdings, "aipg_balance_raw", _async(99_999 * 10 ** holdings.AIPG_DECIMALS))
-    assert await free_credits.daily_cap_micro("account", "0xabc") == 250_000
-
-
-@pytest.mark.asyncio
-async def test_wallet_only_non_holder_gets_no_free_faucet(monkeypatch):
+async def test_wallet_only_holder_gets_holder_allowance_alone(monkeypatch):
     monkeypatch.setattr(free_credits, "FREE_ENABLED", True)
     monkeypatch.setattr(free_credits, "_has_verified_google", _async(False))
-    monkeypatch.setattr(holdings, "aipg_balance_raw", _async(0))
-    assert await free_credits.daily_cap_micro("wallet-account", "0xabc") == 0
-
-
-@pytest.mark.asyncio
-async def test_wallet_only_launch_policy_disables_holder_faucet(monkeypatch):
-    monkeypatch.setattr(free_credits, "FREE_ENABLED", True)
-    monkeypatch.setattr(free_credits, "FREE_HOLDER_BONUS_MICRO", 0)
-    monkeypatch.setattr(free_credits, "_has_verified_google", _async(False))
-
-    async def unexpected_chain_read(*_args, **_kwargs):
-        raise AssertionError("disabled holder policy must not read the chain")
-
-    monkeypatch.setattr(holdings, "aipg_balance_raw", unexpected_chain_read)
-    assert await free_credits.daily_cap_micro("wallet-account", "0xabc") == 0
-
-
-@pytest.mark.asyncio
-async def test_wallet_only_holder_gets_holder_bonus(monkeypatch):
-    monkeypatch.setattr(free_credits, "FREE_ENABLED", True)
-    monkeypatch.setattr(free_credits, "FREE_HOLDER_MIN_AIPG", 100_000)
-    monkeypatch.setattr(free_credits, "FREE_HOLDER_BONUS_MICRO", 200_000)
-    monkeypatch.setattr(free_credits, "_has_verified_google", _async(False))
-    monkeypatch.setattr(holdings, "aipg_balance_raw", _async(100_000 * 10 ** holdings.AIPG_DECIMALS))
+    monkeypatch.setattr(free_credits, "holder_bonus_micro", _async(200_000))
     assert await free_credits.daily_cap_micro("wallet-account", "0xabc") == 200_000
 
 
 @pytest.mark.asyncio
-async def test_media_account_id_resolves_wallet_for_holder_bonus(monkeypatch):
+@pytest.mark.parametrize("tiers,bonus,budget", [
+    ("", 0, 10_000_000),             # no tier configured
+    ("", 200_000, 0),                # legacy single tier but no network budget
+    ("1000:50000", 0, 0),            # tiers but no network budget
+    ("1000:5x", 0, 10_000_000),      # typo disables the whole list
+    ("1000:90000,5000:50000", 0, 10_000_000),  # paying less for more is rejected
+])
+async def test_holder_allowance_off_never_reads_chain_or_redis(monkeypatch, tiers, bonus, budget):
     monkeypatch.setattr(free_credits, "FREE_ENABLED", True)
+    monkeypatch.setattr(free_credits, "FREE_HOLDER_TIERS_RAW", tiers)
+    monkeypatch.setattr(free_credits, "FREE_HOLDER_BONUS_MICRO", bonus)
+    monkeypatch.setattr(free_credits, "FREE_HOLDER_DAILY_BUDGET_MICRO", budget)
+    monkeypatch.setattr(free_credits, "_has_verified_google", _async(False))
+
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("disabled holder policy must not read the chain or Redis")
+
+    monkeypatch.setattr(holdings, "aipg_balance_raw", unexpected)
+    monkeypatch.setattr(holdings, "aipg_balance_raw_at", unexpected)
+    monkeypatch.setattr(free_credits, "get_redis", unexpected)
+    assert await free_credits.daily_cap_micro("wallet-account", "0xabc") == 0
+
+
+def test_holder_tiers_parse_largest_first(monkeypatch):
+    monkeypatch.setattr(free_credits, "FREE_HOLDER_DAILY_BUDGET_MICRO", 1)
+    monkeypatch.setattr(free_credits, "FREE_HOLDER_TIERS_RAW", "1000:50000, 100000:500000,10000:200000")
+    assert free_credits.holder_tiers() == [(100_000, 500_000), (10_000, 200_000), (1_000, 50_000)]
+    monkeypatch.setattr(free_credits, "FREE_HOLDER_TIERS_RAW", "")
     monkeypatch.setattr(free_credits, "FREE_HOLDER_MIN_AIPG", 100_000)
     monkeypatch.setattr(free_credits, "FREE_HOLDER_BONUS_MICRO", 200_000)
-    monkeypatch.setattr(free_credits, "_has_verified_google", _async(False))
-    monkeypatch.setattr(free_credits, "_wallet_for_account", _async("0xabc"))
-    monkeypatch.setattr(
-        holdings, "aipg_balance_raw",
-        _async(100_000 * 10 ** holdings.AIPG_DECIMALS),
-    )
-    assert await free_credits.daily_cap_micro("wallet-account", None) == 200_000
+    assert free_credits.holder_tiers() == [(100_000, 200_000)]
 
 
 @pytest.mark.asyncio
