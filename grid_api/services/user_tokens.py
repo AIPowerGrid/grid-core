@@ -114,6 +114,11 @@ def verify(token: str, *, audience: str | None = None, now: int | None = None) -
 
 def require_recent_step_up(claims: dict, *, now: int | None = None) -> None:
     current = int(time.time() if now is None else now)
+    # A token issued to an OAuth application records how the user proved
+    # themselves at consent, and is fresh by construction. It still speaks for
+    # the application, never for the user's own interactive session.
+    if claims.get("client_id"):
+        raise HTTPException(403, detail="Application tokens cannot manage the account; sign in directly")
     if claims.get("amr") not in {"google", "siwe"}:
         raise HTTPException(403, detail="Account management requires Google or wallet proof")
     try:

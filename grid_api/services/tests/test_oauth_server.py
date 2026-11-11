@@ -701,3 +701,64 @@ def test_user_token_auth_time_cannot_be_in_the_future(monkeypatch):
         user_tokens.issue("a", audience="x", scopes=["account.read"], auth_method="google", now=1000, auth_time=1001)
     token = user_tokens.issue("a", audience="x", scopes=["account.read"], auth_method="google", now=5000, auth_time=1000)
     assert user_tokens.verify(token, now=5001)["auth_time"] == 1000
+
+
+@pytest.mark.asyncio
+async def test_oauth_application_token_can_never_satisfy_account_step_up(oauth_db):
+    """A third-party OAuth token is fresh and carries the user's proof method,
+    but it speaks for an application. It must not pass account-management gates."""
+    from starlette.requests import Request
+
+    from grid_api.routers import accounts as accounts_router
+
+    client = await oauth_server.register_client(
+        {"client_name": "Third-party app", "application_type": "native", "redirect_uris": ["http://127.0.0.1/callback"]},
+    )
+    verifier = "s" * 43
+    consent = await oauth_server.create_authorization_request(
+        client_id=client["client_id"],
+        redirect_uri="http://127.0.0.1:50001/callback",
+        response_type="code",
+        scope="account.read",
+        state="s",
+        code_challenge=_challenge(verifier),
+        code_challenge_method="S256",
+        requested_resource="https://api.example.test",
+    )
+    callback = await oauth_server.decide_authorization_request(
+        _query_value(consent, "request"), approve=True, account_id=oauth_db["id"], auth_method="google",
+    )
+    token = (
+        await oauth_server.exchange_authorization_code(
+            grant_type="authorization_code",
+            code=_query_value(callback, "code"),
+            client_id=client["client_id"],
+            redirect_uri="http://127.0.0.1:50001/callback",
+            code_verifier=verifier,
+            requested_resource="https://api.example.test",
+        )
+    )["access_token"]
+    claims = user_tokens.verify(token)
+    assert claims["amr"] == "google" and claims["client_id"] == client["client_id"]
+
+    with pytest.raises(HTTPException) as gate:
+        user_tokens.require_recent_step_up(claims)
+    assert gate.value.status_code == 403
+
+    # The same account's own first-party token still passes.
+    own = user_tokens.verify(
+        user_tokens.issue(oauth_db["id"], audience="grid-console", scopes=["account.read"], auth_method="google"),
+    )
+    user_tokens.require_recent_step_up(own)
+
+    request = Request({"type": "http", "method": "POST", "path": "/", "headers": [], "client": ("127.0.0.1", 1)})
+    form = accounts_router.WalletLinkForm(
+        address="0x" + "1" * 40,
+        message="Link wallet to AIPG Grid identity\n\nNonce: abcdef",
+        signature="0x" + "0" * 130,
+    )
+    with pytest.raises(HTTPException) as route:
+        await accounts_router.link_wallet_from_assertion.__wrapped__(
+            request, form, None, f"Bearer {token}", None, "any-header-value",
+        )
+    assert route.value.status_code == 403
