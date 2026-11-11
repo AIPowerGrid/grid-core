@@ -104,6 +104,11 @@ The disposable database must not be production or share production tables.
 
    These values mean `$0.10` once for verified Google, a `$500` global welcome
    ceiling, `$0.01/day` for verified Google, and no wallet-only holder faucet.
+   Since 2026-11-10 production runs `GRID_FREE_DAILY_MICRO=100000` (`$0.10/day`
+   for verified Google), raised with owner approval after a report that one
+   cent a day was not a usable trial. The previous environment file is
+   `grid.env.before-free-daily-20261110T234038Z`. Accounts without a verified
+   Google identity still receive no daily allowance.
    Promotional spending additionally requires one or more reviewed exact
    campaign IDs; the global live flag alone must leave every campaign dark.
 3. Add `GRID_ALERT_DISCORD_WEBHOOK` only to `/etc/aipg/grid.env`; preserve its

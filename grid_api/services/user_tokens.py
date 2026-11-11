@@ -52,10 +52,16 @@ def issue(
     client_id: str | None = None,
     lifetime_seconds: int = DEFAULT_TTL_SECONDS,
     now: int | None = None,
+    auth_time: int | None = None,
 ) -> str:
     if client_id is not None and (not isinstance(client_id, str) or not client_id or len(client_id) > 96):
         raise ValueError("client_id must be 1..96 characters")
     issued = int(time.time() if now is None else now)
+    # A refreshed token must not look like a fresh proof of identity: step-up
+    # checks read auth_time, so it stays at the original authorization.
+    proved = issued if auth_time is None else int(auth_time)
+    if proved > issued:
+        raise ValueError("auth_time cannot be in the future")
     ttl = max(60, min(int(lifetime_seconds), MAX_TTL_SECONDS))
     payload = {
         "iss": ISSUER,
@@ -65,7 +71,7 @@ def issue(
         "amr": auth_method,
         "service_id": service_id,
         "client_id": client_id,
-        "auth_time": issued,
+        "auth_time": proved,
         "iat": issued,
         "exp": issued + ttl,
         "jti": secrets.token_urlsafe(18),

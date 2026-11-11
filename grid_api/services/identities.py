@@ -495,6 +495,11 @@ async def merge_accounts(destination_account_id, source_account_id, *, reason: s
         await session.execute(
             sa.update(api_keys).where(api_keys.c.account_id == source).values(revoked=True)
         )
+        # Applications authorized on the retired account lose their sessions
+        # with its keys; they would otherwise act for the merged account.
+        from . import oauth_server
+
+        await oauth_server.revoke_account_sessions(session, source, now=now)
         await session.execute(
             sa.update(workers).where(workers.c.account_id == source).values(account_id=destination)
         )

@@ -115,3 +115,77 @@ async def test_console_consent_requires_fresh_google_or_wallet_proof(monkeypatch
     monkeypatch.setattr(oauth.accounts_svc, "authenticate", wallet_authenticate)
     result = await oauth._require_console_user("service-key", None, "user-token")
     assert result["service_id"] == "grid-console"
+
+
+@pytest.mark.asyncio
+async def test_metadata_advertises_refresh_only_when_enabled(monkeypatch):
+    monkeypatch.setenv("GRID_MCP_OAUTH_ENABLED", "1")
+    monkeypatch.delenv("GRID_OAUTH_REFRESH_TOKENS_ENABLED", raising=False)
+    dark = await oauth.authorization_server_metadata()
+    assert dark["grant_types_supported"] == ["authorization_code"]
+    assert dark["scopes_supported"] == ["account.read", "inference.submit"]
+    assert "revocation_endpoint" not in dark
+
+    monkeypatch.setenv("GRID_OAUTH_REFRESH_TOKENS_ENABLED", "1")
+    live = await oauth.authorization_server_metadata()
+    assert live["grant_types_supported"] == ["authorization_code", "refresh_token"]
+    assert live["scopes_supported"] == ["account.read", "inference.submit", "offline_access"]
+    assert live["revocation_endpoint"].endswith("/v1/oauth/revoke")
+    assert (await oauth.protected_resource_metadata())["scopes_supported"] == live["scopes_supported"]
+
+
+@pytest.mark.asyncio
+async def test_token_endpoint_dispatches_grants_and_never_caches(monkeypatch):
+    monkeypatch.setenv("GRID_MCP_OAUTH_ENABLED", "1")
+    calls = []
+
+    async def refresh(**kwargs):
+        calls.append(("refresh", kwargs))
+        return {"access_token": "a", "refresh_token": "r"}
+
+    async def exchange(**kwargs):
+        calls.append(("code", kwargs))
+        raise oauth_server.OAuthProtocolError("unsupported_grant_type", "nope")
+
+    monkeypatch.setattr(oauth_server, "refresh_access_token", refresh)
+    monkeypatch.setattr(oauth_server, "exchange_authorization_code", exchange)
+    form = "application/x-www-form-urlencoded"
+    response = await oauth.token.__wrapped__(
+        _request(b"grant_type=refresh_token&refresh_token=tok&client_id=c&scope=account.read", form),
+    )
+    assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
+    assert calls == [("refresh", {"refresh_token": "tok", "client_id": "c", "requested_resource": "", "scope": "account.read"})]
+
+    response = await oauth.token.__wrapped__(_request(b"grant_type=password&client_id=c", form))
+    assert response.status_code == 400 and json.loads(response.body)["error"] == "unsupported_grant_type"
+    assert calls[-1][0] == "code"
+
+
+@pytest.mark.asyncio
+async def test_revocation_answers_200_and_sessions_require_the_console(monkeypatch):
+    monkeypatch.setenv("GRID_MCP_OAUTH_ENABLED", "1")
+    seen = []
+
+    async def revoke(**kwargs):
+        seen.append(kwargs)
+
+    monkeypatch.setattr(oauth_server, "revoke_refresh_token", revoke)
+    response = await oauth.revoke.__wrapped__(
+        _request(b"token=whatever&client_id=c", "application/x-www-form-urlencoded"),
+    )
+    assert response.status_code == 200 and json.loads(response.body) == {}
+    assert seen == [{"token": "whatever", "client_id": "c"}]
+
+    with pytest.raises(HTTPException) as exc:
+        await oauth.list_sessions.__wrapped__(_request(b"", "text/plain"), None, None, None)
+    assert exc.value.status_code == 401
+    with pytest.raises(HTTPException) as exc:
+        await oauth.revoke_session.__wrapped__(
+            _request(b"", "text/plain"), oauth.SessionRevocation(session_id="s" * 32), None, None, None,
+        )
+    assert exc.value.status_code == 401
+
+    monkeypatch.delenv("GRID_MCP_OAUTH_ENABLED")
+    with pytest.raises(HTTPException) as exc:
+        await oauth.revoke.__wrapped__(_request(b"token=x", "application/x-www-form-urlencoded"))
+    assert exc.value.status_code == 404

@@ -58,8 +58,24 @@ MCP client                 Core OAuth                 Grid Console             C
   stored only as SHA-256 hashes.
 - A code is bound to the client, redirect, resource, account, scopes, and PKCE
   challenge. PostgreSQL row locking makes redemption single-use.
-- Access tokens expire after 15 minutes, carry the exact resource audience and
-  OAuth client id, and have no refresh token.
+- Access tokens expire after 15 minutes and carry the exact resource audience
+  and OAuth client id. By default there is no refresh token.
+- With `GRID_OAUTH_REFRESH_TOKENS_ENABLED=1`, a client that requests
+  `offline_access` and is approved also receives a rotating refresh token.
+  Core stores only its SHA-256 hash. Each `grant_type=refresh_token` call
+  consumes it and returns a successor; presenting a consumed token revokes the
+  whole session, because a replay means a copy escaped. A session ends after
+  30 idle days or 180 days from the original consent. The client can end it
+  at `/v1/oauth/revoke`, and the account owner can list and end sessions
+  through the Console-only `/v1/oauth/sessions` routes. `offline_access` is
+  shown at consent and is never an access-token scope. A refreshed access
+  token keeps the original consent time as `auth_time`, so refreshing never
+  counts as a fresh proof of identity. Access tokens are stateless, so one
+  issued before a revocation stays valid for up to 15 minutes. Rotation and
+  revocation of one session are serialized, so a revocation always reaches a
+  token issued by a rotation that was in flight. Merging an account ends the
+  retired account's sessions. Presenting one refresh token twice at the same
+  time counts as a replay and ends the session.
 - Consent inspection and decisions require both the `grid-console` service key
   and a delegated Console user token backed by a Google or SIWE proof no more
   than ten minutes old. Neither credential is exposed to browser JavaScript by
@@ -79,8 +95,9 @@ MCP client                 Core OAuth                 Grid Console             C
 
 ## Non-Goals
 
-- No refresh tokens, offline access, confidential clients, client credentials,
-  wallet signatures inside the OAuth protocol, or economic authority.
+- No confidential clients, client credentials, wallet signatures inside the
+  OAuth protocol, or economic authority. Refresh tokens and offline access
+  exist only behind their own default-off flag.
 - OAuth does not change account ownership, link identities, create credits, or
   bypass normal request metering.
 - The MCP backend is not trusted to invent user identity. It may only

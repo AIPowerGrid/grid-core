@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0046`
+- `versions/` - ordered migration revisions. Current source head: `0047`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -65,9 +65,14 @@ production database match the Grid-owned schema contracts without relying on
   `0046` adds zero-default x402 minimum-charge snapshots with authorization
   bounds. Historical amounts/statuses/attempts are unchanged; no admission or
   payment occurs. New disclosed minimums are snapshotted only at authorization.
+  `0047` creates hash-only `grid_oauth_refresh_tokens` for rotating OAuth
+  refresh sessions. It is operational state, not an economic record.
 
 ## Local Contracts
 
+- Apply `0047` before a release containing it starts, even with refresh
+  tokens off: the OAuth sweeper prunes the table. Downgrade drops it, which
+  only signs OAuth clients out.
 - Apply `0046` before this x402-minimum candidate starts, even with x402 off.
   Downgrade refuses any nonzero minimum snapshot, including failed/unpaid jobs.
   Retain the column and minimum-aware terminal/recovery code on application
