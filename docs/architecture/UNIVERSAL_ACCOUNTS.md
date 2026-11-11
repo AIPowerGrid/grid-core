@@ -178,7 +178,7 @@ alone are not proof of a deployed cross-frontend merge lifecycle.
 | Pocket | Default | Reset or expiry | Sybil control | Live gate |
 | --- | ---: | --- | --- | --- |
 | Daily free | $0.01/day | UTC midnight | Verified Google | `GRID_FREE_SPENDABLE_LIVE` |
-| AIPG holder bonus | Disabled | N/A | Deferred until non-recyclable | `GRID_FREE_SPENDABLE_LIVE` |
+| AIPG holder allowance | Disabled | UTC midnight | Prior-midnight Base snapshot, one claim per wallet and account, network daily budget | `GRID_FREE_HOLDER_TIERS` plus `GRID_FREE_HOLDER_DAILY_BUDGET_MICRO`, under `GRID_FREE_SPENDABLE_LIVE` |
 | Welcome promotion | $0.10 once; $500 campaign cap | 30 days | Verified Google plus global budget | Global gate plus exact campaign in `GRID_PROMO_SPENDABLE_CAMPAIGNS` |
 | Purchased | Deposited value | None | Payment confirmation | `GRID_CHARGING_MODE` |
 
@@ -210,10 +210,22 @@ quote.
 
 The launch default gives wallet-only accounts no automatic value. A holder
 could move the same tokens through multiple wallets and collect a naive bonus
-repeatedly, so the holder bonus remains zero until qualification uses bonded
-stake or a prior-epoch snapshot. Before `GRID_FREE_SPENDABLE_LIVE=1`, also
-enforce a network-wide daily subsidy ceiling. Verified Google identity reduces
-casual abuse but is not, by itself, a Sybil proof.
+repeatedly, so the holder allowance qualifies on a prior-epoch snapshot: the
+login wallet's AIPG balance at the last Base block before today's UTC midnight,
+and its balance now; the lower of the two picks the tier. Every wallet is read
+at that same block, so one set of tokens qualifies one wallet per day. The
+first qualifying read claims the day's allowance atomically: one claim per
+wallet, one per account, and the total of all claims never passes
+`GRID_FREE_HOLDER_DAILY_BUDGET_MICRO`. The claim stands until UTC midnight even
+if the tokens leave. A wallet funded today starts the next UTC day. The
+allowance stays off until both `GRID_FREE_HOLDER_TIERS`
+(`min_aipg:micro_usd_per_day,...`) and a positive budget are set; a malformed
+tier list disables it. An RPC or Redis failure grants nothing. The snapshot
+needs a Base RPC that serves state one day old. The allowance adds to the
+verified-Google base, shares its bucket and reset, and is reported as
+`free.holder_bonus_micro` and `free.holder_tiers` by `GET /v1/account/credits`.
+The verified-Google base still has no network-wide ceiling. Verified Google
+identity reduces casual abuse but is not, by itself, a Sybil proof.
 
 Account merges preserve append-only payout and job ledgers on their original
 account and wallet identifiers. Canonical account views resolve the complete
@@ -232,8 +244,9 @@ alias family so linked users still see that history without rewriting evidence.
 5. Remove frontend-owned free counters only after parity.
 6. Enable promotional spending with rollback metrics and campaign-budget
    alerts.
-7. Add holder anti-recycling and a network-wide daily-free budget, then enable
-   daily free spending independently.
+7. Holder anti-recycling and the holder daily budget are implemented; set
+   tiers and a budget with owner approval to enable the holder allowance. A
+   network-wide ceiling for the verified-Google base is still open.
 8. Keep `GRID_LEGACY_INTERNAL_SESSION_ENABLED=0` and remove
    `GRID_INTERNAL_TOKEN` after rollback windows close.
 
