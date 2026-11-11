@@ -112,7 +112,9 @@ The disposable database must not be production or share production tables.
    for verified Google), raised with owner approval after a report that one
    cent a day was not a usable trial. The previous environment file is
    `grid.env.before-free-daily-20261110T234038Z`. Accounts without a verified
-   Google identity still receive no daily allowance.
+   Google identity receive no base allowance. Since 2026-11-11 the holder
+   allowance is on (see `HOLDER_ALLOWANCE_ROLLOUT_2026_11_11.md`), so a
+   wallet-only account that holds enough AIPG receives the holder amount.
    Promotional spending additionally requires one or more reviewed exact
    campaign IDs; the global live flag alone must leave every campaign dark.
 3. Add `GRID_ALERT_DISCORD_WEBHOOK` only to `/etc/aipg/grid.env`; preserve its

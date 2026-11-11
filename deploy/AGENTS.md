@@ -32,6 +32,9 @@ executes an immutable release selected through `/home/aipg/current`.
 - `OAUTH_REFRESH_ROLLOUT_2026_11_11.md` - releases `27080900` (application
   tokens never satisfy step-up) and `0f0bad60` (migration `0047`, refresh
   tokens enabled), live checks, what is unproven, and rollback limits.
+- `HOLDER_ALLOWANCE_ROLLOUT_2026_11_11.md` - release `6564c295`, the holder
+  tiers and daily budget enabled in production, live checks, what is unproven,
+  and rollback.
 
 - `PAYOUT_POLICY_RENEWAL_2026_11_10.md` - the eight-week payout sender
   failure after the single reward-policy window expired, the appended
