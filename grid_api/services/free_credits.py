@@ -9,9 +9,10 @@ holder allowance without Google. A charge draws from this FREE bucket before the
 purchased balance (see credits.charge_request). Tracked in Redis (per-account
 -per-day key, auto-expiring) — no cleanup job, no unbounded growth.
 
-HOLDER ALLOWANCE (default off). A login wallet qualifies for a tier by the AIPG
-it held at the last Base block before today's UTC midnight AND still holds now
-(the lower of the two decides the tier). Every wallet is measured at that one
+HOLDER ALLOWANCE (default off). A wallet qualifies for a tier by the AIPG it
+held at the last Base block before today's UTC midnight AND still holds now
+(the lower of the two decides the tier). An account is offered the best tier
+among the wallets it has proven; balances in different wallets are not added. Every wallet is measured at that one
 block, so moving tokens between wallets cannot qualify two of them on the same
 day. The first qualifying read of the day claims the allowance atomically in
 Redis: one claim per wallet, one per account, and the sum of all claims stays
@@ -69,6 +70,8 @@ FREE_HOLDER_BONUS_MICRO = int(os.getenv("GRID_FREE_HOLDER_BONUS_MICRO", "0"))
 FREE_HOLDER_TIERS_RAW = os.getenv("GRID_FREE_HOLDER_TIERS", "").strip()
 # Most holder allowance the whole network may claim in one UTC day.
 FREE_HOLDER_DAILY_BUDGET_MICRO = int(os.getenv("GRID_FREE_HOLDER_DAILY_BUDGET_MICRO", "0"))
+# Most linked wallets one account may have checked for the allowance.
+FREE_HOLDER_MAX_WALLETS = int(os.getenv("GRID_FREE_HOLDER_MAX_WALLETS", "5"))
 # Upper bound on the chain reads a first-of-day qualification may spend.
 FREE_HOLDER_LOOKUP_SECONDS = float(os.getenv("GRID_FREE_HOLDER_LOOKUP_SECONDS", "8"))
 
@@ -231,18 +234,55 @@ async def _claim_holder_bonus(r, account_id, wallet: str, micro: int) -> int:
     return int(taken or 0)
 
 
-async def _qualify_holder(r, account_id, wallet: str, tiers: list[tuple[int, int]]) -> int:
+def _valid_wallet(wallet) -> str | None:
+    w = (wallet or "").strip().lower()
+    if len(w) == 42 and w.startswith("0x") and all(c in "0123456789abcdef" for c in w[2:]):
+        return w
+    return None
+
+
+async def _holder_wallets(account_id, wallet: str | None) -> list[str]:
+    """Wallets that may qualify this account: the caller's sign-in wallet, then
+    every wallet the account has proven, primary first. Bounded, so one account
+    cannot turn a balance read into many chain calls."""
+    from . import identities
+
+    candidates = [wallet] if wallet else [await _wallet_for_account(account_id)]
+    try:
+        candidates += await identities.verified_wallet_addresses(account_id)
+    except Exception as exc:
+        logger.debug("linked-wallet read failed; primary only error_type=%s", error_type(exc))
+    wallets: list[str] = []
+    for candidate in candidates:
+        valid = _valid_wallet(candidate)
+        if valid and valid not in wallets:
+            wallets.append(valid)
+    return wallets[:FREE_HOLDER_MAX_WALLETS]
+
+
+async def _qualify_holder(r, account_id, wallets: list[str], tiers: list[tuple[int, int]]) -> int:
+    """Claim the best tier any one of the account's wallets earns. Balances are
+    never added together: each wallet stands alone, at the shared snapshot."""
     from . import holdings
 
-    now_micro = _tier_micro(await holdings.aipg_balance_raw(wallet), tiers, holdings.AIPG_DECIMALS)
-    if now_micro <= 0:
-        return 0
-    block = await _snapshot_block(r)
-    held = await holdings.aipg_balance_raw_at(wallet, block)
-    micro = min(now_micro, _tier_micro(held, tiers, holdings.AIPG_DECIMALS))
-    if micro <= 0:
-        return 0
-    return await _claim_holder_bonus(r, account_id, wallet, micro)
+    block = None
+    offers: list[tuple[int, str]] = []
+    for wallet in wallets:
+        now_micro = _tier_micro(await holdings.aipg_balance_raw(wallet), tiers, holdings.AIPG_DECIMALS)
+        if now_micro <= 0:
+            continue
+        if block is None:
+            block = await _snapshot_block(r)
+        held = await holdings.aipg_balance_raw_at(wallet, block)
+        micro = min(now_micro, _tier_micro(held, tiers, holdings.AIPG_DECIMALS))
+        if micro > 0:
+            offers.append((micro, wallet))
+    # Largest first; sorted() is stable, so equal tiers keep the primary-first order.
+    for micro, wallet in sorted(offers, key=lambda offer: -offer[0]):
+        taken = await _claim_holder_bonus(r, account_id, wallet, micro)
+        if taken > 0:
+            return taken
+    return 0
 
 
 async def holder_bonus_micro(account_id, wallet: str | None) -> int:
@@ -258,13 +298,11 @@ async def holder_bonus_micro(account_id, wallet: str | None) -> int:
         claimed = await r.get(f"{_HOLDER_ACCOUNT_PREFIX}{_day()}:{account_id}")
         if claimed is not None:
             return max(int(claimed), 0)
-        if wallet is None:
-            wallet = await _wallet_for_account(account_id)
-        wallet = (wallet or "").strip().lower()
-        if not (wallet.startswith("0x") and len(wallet) == 42):
+        wallets = await _holder_wallets(account_id, wallet)
+        if not wallets:
             return 0
         return await asyncio.wait_for(
-            _qualify_holder(r, account_id, wallet, tiers), FREE_HOLDER_LOOKUP_SECONDS
+            _qualify_holder(r, account_id, wallets, tiers), FREE_HOLDER_LOOKUP_SECONDS
         )
     except Exception as exc:
         logger.warning(
