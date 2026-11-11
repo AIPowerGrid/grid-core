@@ -247,8 +247,9 @@ content sanitization, and reward settlement.
   gated on `GRID_PROMO_SPENDABLE_LIVE` plus exact campaign IDs in
   `GRID_PROMO_SPENDABLE_CAMPAIGNS`), `free_credits.py`
   (daily free CREDIT allowance, Redis, FAIL-CLOSED, atomic consume/release
-  idempotent on ref; the default-off AIPG holder allowance qualifies on the
-  wallet's balance at the last Base block before UTC midnight and now, claims
+  idempotent on ref; the AIPG holder allowance takes the best single wallet
+  among those the account has proven, qualifies it on its balance at the last
+  Base block before UTC midnight and now, claims
   once per wallet and per account per day under
   `GRID_FREE_HOLDER_DAILY_BUDGET_MICRO`, and after the claim reads no chain;
   keep the single snapshot block, both claim keys, and the budget together or
