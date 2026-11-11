@@ -57,3 +57,24 @@ Remove the two variables (or restore the saved environment file) and restart
 stay in Redis until UTC midnight but are not honored once the tiers are
 unset. Repointing `/home/aipg/current` to `grid-core-0f0bad60` is also safe:
 the schema is unchanged.
+
+## Follow-up release b1370d34 (same day)
+
+- Approved scope: the owner's "deploy" on 2026-11-11 for PR #255.
+- Release: `b1370d34b452f8d3bb072d868d4f5500b371e001`, at
+  `/home/aipg/releases/grid-core-b1370d34`. Previous: `grid-core-6564c295`.
+  Cutover about 20:00 UTC. Code only; no migration, dependency, unit or
+  environment change.
+- Why: linking a wallet makes it the account's primary, and the allowance
+  looked only at the primary. An outside builder who linked a second, smaller
+  wallet was measured on it instead of his larger first wallet. The allowance
+  now takes the best single wallet among those the account has proven (at
+  most five); balances are not added.
+- Checks: PR checks passed; `/health` reported the release SHA; the same 7
+  workers that were connected before the restart reconnected; public
+  `/health` 200, `/v1/models` 200, unauthenticated validator assignments 401.
+  A read-only check of the affected account showed both linked wallets
+  evaluated, the larger one in the top tier, and its claim for the day
+  already at the top tier. Network-wide claims stood at $4.00 of $25.00.
+- Rollback: repoint `/home/aipg/current` to `grid-core-6564c295` and restart;
+  the allowance then looks at the primary wallet only.
