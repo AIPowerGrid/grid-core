@@ -18,7 +18,9 @@ def test_refresh_token_table_matches_schema_and_roundtrips(tmp_path, monkeypatch
     root = Path(__file__).resolve().parents[3]
     path = tmp_path / "refresh.db"
     monkeypatch.setenv("GRID_DB_URL", f"sqlite+aiosqlite:///{path}")
-    config = Config(str(root / "alembic.ini"))
+    # No ini file: alembic's env would otherwise run logging.fileConfig, which
+    # disables every existing logger for the tests that follow.
+    config = Config()
     config.set_main_option("script_location", str(root / "alembic"))
     command.upgrade(config, "0046")
     engine = sa.create_engine(f"sqlite:///{path}")
