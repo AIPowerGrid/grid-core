@@ -11,7 +11,9 @@ Refresh tokens are default-off (`GRID_OAUTH_REFRESH_TOKENS_ENABLED`). When on,
 a client that requests the `offline_access` scope and is approved receives a
 rotating refresh token: each use consumes it and returns a successor, and
 presenting a consumed token revokes the whole session, because a replay means
-a copy escaped. A session ends after 30 idle days or 180 days in total. Access
+a copy escaped. Rotation and every revocation of one session serialize on a
+per-session advisory lock, so a revocation cannot miss a successor inserted by
+a rotation that was in flight. A session ends after 30 idle days or 180 days in total. Access
 tokens stay stateless, so one issued before a revocation remains valid for up
 to its 15-minute lifetime.
 """
@@ -32,6 +34,7 @@ from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
 from ..database import new_session
+from ..v2.schema import accounts as accounts_table
 from ..v2.schema import oauth_authorizations, oauth_clients, oauth_refresh_tokens
 from . import identities, user_tokens
 
@@ -527,7 +530,24 @@ async def _insert_refresh_token(
     return token
 
 
+async def _lock_family(session, family_id: str) -> None:
+    """Serialize rotation and revocation of one refresh session.
+
+    A row lock is not enough: under READ COMMITTED a revocation that waited on
+    the predecessor row would never see the successor inserted by the rotation
+    it waited for. SQLite serializes writers, so it needs no lock.
+    """
+    if session.get_bind().dialect.name != "postgresql":
+        return
+    digest = hashlib.sha256(f"grid-oauth-refresh:{family_id}".encode()).digest()
+    await session.execute(
+        sa.text("SELECT pg_advisory_xact_lock(:key)"),
+        {"key": int.from_bytes(digest[:8], "big", signed=True)},
+    )
+
+
 async def _revoke_family(session, family_id: str, *, reason: str, now: datetime) -> int:
+    await _lock_family(session, family_id)
     result = await session.execute(
         sa.update(oauth_refresh_tokens)
         .where(
@@ -557,12 +577,36 @@ async def refresh_access_token(
         raise OAuthProtocolError("invalid_target", "The requested resource does not match the authorization")
     now = datetime.now(UTC)
 
+    token_hash = _hash_capability(presented)
     async with await new_session() as session:
+        located = (
+            (
+                await session.execute(
+                    sa.select(oauth_refresh_tokens.c.family_id, oauth_refresh_tokens.c.account_id).where(
+                        oauth_refresh_tokens.c.token_hash == token_hash,
+                    ),
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if not located:
+            raise invalid
+        # Lock order is account, session, token. An account merge holds the
+        # account row and then revokes that account's sessions, so taking the
+        # account's key-share lock first makes a rotation wait for the merge
+        # instead of deadlocking with it on the successor's foreign key.
+        await session.execute(
+            sa.select(accounts_table.c.id)
+            .where(accounts_table.c.id == located["account_id"])
+            .with_for_update(key_share=True, read=True),
+        )
+        await _lock_family(session, located["family_id"])
         row = (
             (
                 await session.execute(
                     sa.select(oauth_refresh_tokens)
-                    .where(oauth_refresh_tokens.c.token_hash == _hash_capability(presented))
+                    .where(oauth_refresh_tokens.c.token_hash == token_hash)
                     .with_for_update(),
                 )
             )
@@ -572,6 +616,19 @@ async def refresh_access_token(
         if not row or row["client_id"] != client_id or row["resource"] != resource():
             raise invalid
         if row["revoked_at"] is not None:
+            raise invalid
+        ended_for = await session.scalar(
+            sa.select(oauth_refresh_tokens.c.revoke_reason)
+            .where(
+                oauth_refresh_tokens.c.family_id == row["family_id"],
+                oauth_refresh_tokens.c.revoked_at.is_not(None),
+            )
+            .limit(1),
+        )
+        if ended_for:
+            # Defence in depth: a session is dead once any of its rows is.
+            await _revoke_family(session, row["family_id"], reason=ended_for, now=now)
+            await session.commit()
             raise invalid
         if row["used_at"] is not None:
             # A consumed token came back: the holder of its successor and this
@@ -658,8 +715,12 @@ async def revoke_refresh_token(*, token: str, client_id: str) -> None:
 
 
 async def list_sessions(account_id) -> list[dict]:
-    """Live refresh sessions of one account, newest first. Never returns tokens."""
-    canonical_id = await identities.canonical_account_id(account_id)
+    """Live refresh sessions of one account, newest first. Never returns tokens.
+
+    Covers accounts merged into this one: a session created on a retired
+    account authenticates as its canonical account, so its owner must see it.
+    """
+    owned_ids = await identities.account_family_ids(account_id)
     now = datetime.now(UTC)
     async with await new_session() as session:
         rows = (
@@ -676,7 +737,7 @@ async def list_sessions(account_id) -> list[dict]:
                     )
                     .join(oauth_clients, oauth_clients.c.id == oauth_refresh_tokens.c.client_id)
                     .where(
-                        oauth_refresh_tokens.c.account_id == canonical_id,
+                        oauth_refresh_tokens.c.account_id.in_(owned_ids),
                         oauth_refresh_tokens.c.used_at.is_(None),
                         oauth_refresh_tokens.c.revoked_at.is_(None),
                         oauth_refresh_tokens.c.expires_at > now,
@@ -704,7 +765,7 @@ async def list_sessions(account_id) -> list[dict]:
 
 async def revoke_session(account_id, session_id: str) -> bool:
     """End one of the account's own sessions. False when it is not theirs or not live."""
-    canonical_id = await identities.canonical_account_id(account_id)
+    owned_ids = await identities.account_family_ids(account_id)
     now = datetime.now(UTC)
     async with await new_session() as session:
         owned = await session.scalar(
@@ -712,7 +773,7 @@ async def revoke_session(account_id, session_id: str) -> bool:
             .select_from(oauth_refresh_tokens)
             .where(
                 oauth_refresh_tokens.c.family_id == str(session_id or ""),
-                oauth_refresh_tokens.c.account_id == canonical_id,
+                oauth_refresh_tokens.c.account_id.in_(owned_ids),
             ),
         )
         if not owned:
@@ -720,6 +781,23 @@ async def revoke_session(account_id, session_id: str) -> bool:
         changed = await _revoke_family(session, str(session_id), reason="user", now=now)
         await session.commit()
     return changed > 0
+
+
+async def revoke_account_sessions(session, account_id, *, now: datetime) -> int:
+    """End every refresh session of an account being retired by a merge.
+
+    Runs inside the merge transaction, which already holds the account row, so
+    no rotation for this account is in flight (see refresh_access_token).
+    """
+    result = await session.execute(
+        sa.update(oauth_refresh_tokens)
+        .where(
+            oauth_refresh_tokens.c.account_id == account_id,
+            oauth_refresh_tokens.c.revoked_at.is_(None),
+        )
+        .values(revoked_at=now, revoke_reason="merge"),
+    )
+    return max(0, int(result.rowcount or 0))
 
 
 def introspect_access_token(token: str) -> dict:
@@ -782,13 +860,22 @@ async def prune_operational_state(
                 oauth_authorizations.c.created < authorization_cutoff,
             ),
         )
+        # Consumed rows are the replay evidence for a session, so they stay
+        # for as long as that session has a usable token. A session's rows go
+        # together, a retention period after it expired or was revoked.
+        live = oauth_refresh_tokens.alias("live")
+        live_families = sa.select(live.c.family_id).where(
+            live.c.used_at.is_(None),
+            live.c.revoked_at.is_(None),
+            live.c.expires_at > current,
+        )
         refresh_result = await session.execute(
             sa.delete(oauth_refresh_tokens).where(
                 sa.or_(
                     oauth_refresh_tokens.c.expires_at < authorization_cutoff,
                     oauth_refresh_tokens.c.revoked_at < authorization_cutoff,
-                    oauth_refresh_tokens.c.used_at < authorization_cutoff,
                 ),
+                oauth_refresh_tokens.c.family_id.not_in(live_families),
             ),
         )
         client_result = await session.execute(

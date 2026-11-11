@@ -71,7 +71,11 @@ MCP client                 Core OAuth                 Grid Console             C
   shown at consent and is never an access-token scope. A refreshed access
   token keeps the original consent time as `auth_time`, so refreshing never
   counts as a fresh proof of identity. Access tokens are stateless, so one
-  issued before a revocation stays valid for up to 15 minutes.
+  issued before a revocation stays valid for up to 15 minutes. Rotation and
+  revocation of one session are serialized, so a revocation always reaches a
+  token issued by a rotation that was in flight. Merging an account ends the
+  retired account's sessions. Presenting one refresh token twice at the same
+  time counts as a replay and ends the session.
 - Consent inspection and decisions require both the `grid-console` service key
   and a delegated Console user token backed by a Google or SIWE proof no more
   than ten minutes old. Neither credential is exposed to browser JavaScript by

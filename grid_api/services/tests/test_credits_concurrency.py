@@ -240,8 +240,22 @@ async def test_opposing_account_merges_cannot_create_alias_cycle(pg):
 async def test_credit_racing_merge_is_not_stranded_on_retired_account(pg):
     destination = await _seed_account()
     source = await _seed_account()
+
+    async def deposit():
+        # Which side takes the account lock first is a matter of milliseconds.
+        # When the merge wins, the credit refuses with its documented retry
+        # error instead of crediting a retired account; the caller retries the
+        # same idempotent ref and must land on the surviving account.
+        for _ in range(3):
+            try:
+                return await credits.credit(source, 50_000, "deposit", ref=f"deposit:{source}")
+            except RuntimeError as exc:
+                if "account changed during value movement" not in str(exc):
+                    raise
+        raise AssertionError("credit never settled after the merge")
+
     await asyncio.gather(
-        credits.credit(source, 50_000, "deposit", ref=f"deposit:{source}"),
+        deposit(),
         identities.merge_accounts(destination, source, merge_ref=f"credit-race:{source}"),
     )
     canonical = await identities.canonical_account_id(source)

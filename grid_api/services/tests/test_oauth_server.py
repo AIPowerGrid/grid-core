@@ -453,9 +453,10 @@ async def test_refresh_rotates_and_preserves_the_original_proof_time(oauth_db, m
     assert refreshed["scope"] == "account.read inference.submit offline_access"
     claims = user_tokens.verify(refreshed["access_token"], audience=RESOURCE)
     assert claims["client_id"] == client["client_id"] and claims["amr"] == "google"
+    # A refresh is not a new proof of identity: the original consent time stays.
     assert abs(claims["auth_time"] - int(hour_ago.timestamp())) <= 1
     with pytest.raises(HTTPException) as stale:
-        user_tokens.require_recent_step_up(claims)
+        user_tokens.require_recent_step_up({**claims, "client_id": None})
     assert stale.value.status_code == 403
     authenticated = await accounts.authenticate(refreshed["access_token"], required_scope="inference.submit")
     assert str(authenticated["account_id"]) == oauth_db["id"]
@@ -599,21 +600,99 @@ async def test_account_can_list_and_revoke_only_its_own_sessions(oauth_db, monke
 
 
 @pytest.mark.asyncio
-async def test_prune_removes_dead_refresh_rows_and_keeps_live_sessions(oauth_db, monkeypatch):
+async def test_prune_keeps_replay_evidence_while_a_session_is_live(oauth_db, monkeypatch):
+    monkeypatch.setenv("GRID_OAUTH_REFRESH_TOKENS_ENABLED", "1")
+    client, stolen = await _authorize(oauth_db["id"])
+    # A thief uses a copy first; the real client is idle for longer than the sweeper's retention.
+    thief = await oauth_server.refresh_access_token(refresh_token=stolen["refresh_token"], client_id=client["client_id"])
+    later = datetime.now(UTC) + timedelta(days=3)
+    deleted = await oauth_server.prune_operational_state(now=later)
+    assert deleted["refresh_tokens"] == 0 and len(await _rows()) == 2
+
+    with pytest.raises(oauth_server.OAuthProtocolError):
+        await oauth_server.refresh_access_token(refresh_token=stolen["refresh_token"], client_id=client["client_id"])
+    with pytest.raises(oauth_server.OAuthProtocolError):
+        await oauth_server.refresh_access_token(refresh_token=thief["refresh_token"], client_id=client["client_id"])
+    assert {row["revoke_reason"] for row in await _rows()} == {"reuse"}
+
+
+@pytest.mark.asyncio
+async def test_prune_removes_a_whole_session_only_after_it_ended(oauth_db, monkeypatch):
+    monkeypatch.setenv("GRID_OAUTH_REFRESH_TOKENS_ENABLED", "1")
+    client, tokens = await _authorize(oauth_db["id"])
+    await oauth_server.refresh_access_token(refresh_token=tokens["refresh_token"], client_id=client["client_id"])
+    keep_client, keep = await _authorize(oauth_db["id"])
+    sessions = await oauth_server.list_sessions(oauth_db["id"])
+    ended = next(item["session_id"] for item in sessions if item["client_id"] == client["client_id"])
+    assert await oauth_server.revoke_session(oauth_db["id"], ended) is True
+
+    soon = await oauth_server.prune_operational_state(now=datetime.now(UTC) + timedelta(hours=1))
+    assert soon["refresh_tokens"] == 0  # still inside the retention period
+    deleted = await oauth_server.prune_operational_state(now=datetime.now(UTC) + timedelta(days=2))
+    assert deleted["refresh_tokens"] == 2 and deleted["clients"] == 0
+    rows = await _rows()
+    assert [row["client_id"] for row in rows] == [keep_client["client_id"]]
+    assert (await oauth_server.refresh_access_token(refresh_token=keep["refresh_token"], client_id=keep_client["client_id"]))["access_token"]
+
+    # An expired, never-revoked session is removed as a whole too.
+    past = datetime.now(UTC) - timedelta(days=40)
+    async with await database.new_session() as session:
+        await session.execute(sa.update(oauth_refresh_tokens).values(created=past, expires_at=past + timedelta(days=30)))
+        await session.commit()
+    assert (await oauth_server.prune_operational_state())["refresh_tokens"] == 2
+    assert await _rows() == []
+
+
+@pytest.mark.asyncio
+async def test_merging_an_account_ends_its_sessions_and_stragglers_stay_visible(oauth_db, monkeypatch):
+    from grid_api.services import identities
+
+    monkeypatch.setenv("GRID_OAUTH_REFRESH_TOKENS_ENABLED", "1")
+    retired, _ = await accounts.create_account(username="Old login", issue_initial_key=False, grant_verified_welcome=False)
+    client, tokens = await _authorize(retired["id"])
+    kept_client, kept = await _authorize(oauth_db["id"])
+
+    await identities.merge_accounts(oauth_db["id"], retired["id"], merge_ref="merge-test")
+    with pytest.raises(oauth_server.OAuthProtocolError):
+        await oauth_server.refresh_access_token(refresh_token=tokens["refresh_token"], client_id=client["client_id"])
+    reasons = {row["client_id"]: row["revoke_reason"] for row in await _rows()}
+    assert reasons == {client["client_id"]: "merge", kept_client["client_id"]: None}
+    assert (await oauth_server.refresh_access_token(refresh_token=kept["refresh_token"], client_id=kept_client["client_id"]))["access_token"]
+
+    # A session that lands on the retired account after the merge authenticates
+    # as the surviving account, so that account can see it and end it.
+    async with await database.new_session() as session:
+        straggler = await oauth_server._insert_refresh_token(
+            session, family_id="straggler-family-0001", client_id=client["client_id"],
+            account_id=__import__("uuid").UUID(str(retired["id"])), scopes=["account.read"], auth_method="google",
+            authorized_at=datetime.now(UTC), now=datetime.now(UTC),
+        )
+        await session.commit()
+    listed = {item["session_id"] for item in await oauth_server.list_sessions(oauth_db["id"])}
+    assert "straggler-family-0001" in listed
+    assert await oauth_server.revoke_session(oauth_db["id"], "straggler-family-0001") is True
+    with pytest.raises(oauth_server.OAuthProtocolError):
+        await oauth_server.refresh_access_token(refresh_token=straggler, client_id=client["client_id"])
+
+
+@pytest.mark.asyncio
+async def test_a_token_in_a_partly_revoked_session_is_dead(oauth_db, monkeypatch):
     monkeypatch.setenv("GRID_OAUTH_REFRESH_TOKENS_ENABLED", "1")
     client, tokens = await _authorize(oauth_db["id"])
     refreshed = await oauth_server.refresh_access_token(refresh_token=tokens["refresh_token"], client_id=client["client_id"])
-    old = datetime.now(UTC) - timedelta(days=3)
+    # Simulate a revocation that reached only the predecessor.
     async with await database.new_session() as session:
         await session.execute(
-            sa.update(oauth_refresh_tokens).where(oauth_refresh_tokens.c.used_at.is_not(None)).values(used_at=old),
+            sa.update(oauth_refresh_tokens)
+            .where(oauth_refresh_tokens.c.used_at.is_not(None))
+            .values(revoked_at=datetime.now(UTC), revoke_reason="user"),
         )
         await session.commit()
-    deleted = await oauth_server.prune_operational_state()
-    assert deleted["refresh_tokens"] == 1 and deleted["clients"] == 0
-    rows = await _rows()
-    assert len(rows) == 1 and rows[0]["used_at"] is None
-    assert (await oauth_server.refresh_access_token(refresh_token=refreshed["refresh_token"], client_id=client["client_id"]))["access_token"]
+    assert await oauth_server.list_sessions(oauth_db["id"]) != []  # the row itself still looks live
+    with pytest.raises(oauth_server.OAuthProtocolError):
+        await oauth_server.refresh_access_token(refresh_token=refreshed["refresh_token"], client_id=client["client_id"])
+    assert {row["revoke_reason"] for row in await _rows()} == {"user"}
+    assert await oauth_server.list_sessions(oauth_db["id"]) == []
 
 
 def test_user_token_auth_time_cannot_be_in_the_future(monkeypatch):

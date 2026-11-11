@@ -325,6 +325,17 @@ content sanitization, and reward settlement.
   refresh can never satisfy `require_recent_step_up`. Access tokens stay
   stateless: one issued before a revocation lives out its 15 minutes.
   Failed refreshes (wrong client, resource, scope) must not consume or revoke.
+  Rotation and every revocation of a session take a per-session
+  `pg_advisory_xact_lock` first: a row lock alone lets a revocation that
+  waited on a rotation miss the successor it inserted. Lock order in a
+  rotation is account (key share), session, token, so it waits for an account
+  merge instead of deadlocking with it. `identities.merge_accounts` revokes
+  the retired account's sessions with its API keys. Listing and owner
+  revocation cover every account merged into the caller's. Consumed rows are
+  the replay evidence and are pruned only with their whole session, a
+  retention period after it expired or was revoked. A token in a session with
+  any revoked row is dead. Two simultaneous uses of one token count as a
+  replay; clients must serialize refreshes.
   `prune_operational_state` bounds authorization rows and removes only
   old clients that never completed a token exchange; used clients and economic
   account records are not retention targets. See

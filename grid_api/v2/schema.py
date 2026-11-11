@@ -371,7 +371,7 @@ oauth_refresh_tokens = sa.Table(
         name="ck_grid_oauth_refresh_tokens_expiry",
     ),
     sa.CheckConstraint(
-        "revoke_reason IS NULL OR revoke_reason IN ('client', 'user', 'reuse')",
+        "revoke_reason IS NULL OR revoke_reason IN ('client', 'user', 'reuse', 'merge')",
         name="ck_grid_oauth_refresh_tokens_revoke_reason",
     ),
     sa.CheckConstraint(

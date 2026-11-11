@@ -43,7 +43,7 @@ def upgrade():
         sa.Column("revoke_reason", sa.String(16), nullable=True),
         sa.CheckConstraint("expires_at > created", name="ck_grid_oauth_refresh_tokens_expiry"),
         sa.CheckConstraint(
-            "revoke_reason IS NULL OR revoke_reason IN ('client', 'user', 'reuse')",
+            "revoke_reason IS NULL OR revoke_reason IN ('client', 'user', 'reuse', 'merge')",
             name="ck_grid_oauth_refresh_tokens_revoke_reason",
         ),
         sa.CheckConstraint(

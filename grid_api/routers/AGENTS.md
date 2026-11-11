@@ -307,7 +307,10 @@ transport, accounts, stats, health/metrics.
   also serves `grant_type=refresh_token`, `/v1/oauth/revoke` ends a session
   for its own client (RFC 7009, always 200), and Console-only
   `/v1/oauth/sessions` and `/v1/oauth/sessions/revoke` list and end an
-  account's sessions. Discovery advertises none of this while the flag is off.
+  account's sessions. Discovery advertises none of this while the flag is
+  off, but the revoke and session routes stay reachable whenever OAuth is on,
+  so sessions can still be ended after the flag is rolled back. They read
+  `grid_oauth_refresh_tokens`, so migration `0047` must be applied first.
 - `tests/` - router-level tests, including billing/settlement behavior.
 
 ## Local Contracts
