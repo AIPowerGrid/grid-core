@@ -29,6 +29,9 @@ executes an immutable release selected through `/home/aipg/current`.
 - `PROMPT_SCREEN_SHADOW_2026_11_10.md` - release `c96b1d17`: log-only prompt
   screening enabled against a moderation-only key, live score evidence, what
   is not screened or calibrated, and how to turn it off.
+- `OAUTH_REFRESH_ROLLOUT_2026_11_11.md` - releases `27080900` (application
+  tokens never satisfy step-up) and `0f0bad60` (migration `0047`, refresh
+  tokens enabled), live checks, what is unproven, and rollback limits.
 
 - `PAYOUT_POLICY_RENEWAL_2026_11_10.md` - the eight-week payout sender
   failure after the single reward-policy window expired, the appended
