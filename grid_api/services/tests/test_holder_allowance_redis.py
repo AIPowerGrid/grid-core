@@ -35,6 +35,7 @@ class Chain:
         self.block_searches = 0
         self.snapshot_reads = 0
         self.fail_snapshot = False
+        self.linked: dict[str, list[str]] = {}
 
     async def balance_now(self, wallet):
         return self.now.get(wallet, 0) * UNIT
@@ -104,7 +105,11 @@ def chain(monkeypatch):
     async def no_google(_account_id):
         return False
 
+    async def linked(account_id):
+        return list(fake.linked.get(account_id, []))
+
     monkeypatch.setattr(free_credits, "_has_verified_google", no_google)
+    monkeypatch.setattr("grid_api.services.identities.verified_wallet_addresses", linked)
     return fake
 
 
@@ -151,6 +156,52 @@ async def test_one_account_claims_once_even_with_a_bigger_wallet_later(redis, ch
     assert await free_credits.holder_bonus_micro("acct-1", A) == 50_000
     assert await free_credits.holder_bonus_micro("acct-1", B) == 50_000
     assert await redis.get(f"grid:holderbudget:{free_credits._day()}") == "50000"
+
+
+@pytest.mark.asyncio
+async def test_account_gets_the_best_tier_among_its_linked_wallets(redis, chain):
+    # A newly linked small wallet became primary; the older one holds more.
+    chain.hold(A, 25_000)
+    chain.hold(B, 3_000_000)
+    chain.linked["acct-1"] = [A, B]
+    assert await free_credits.holder_bonus_micro("acct-1", A) == 500_000
+    # Balances are not added together: two 6,000 wallets stay in the lowest tier.
+    chain.hold(C, 6_000)
+    other = "0x" + "d" * 40
+    chain.hold(other, 6_000)
+    chain.linked["acct-2"] = [C, other]
+    assert await free_credits.holder_bonus_micro("acct-2", C) == 50_000
+
+
+@pytest.mark.asyncio
+async def test_wallet_claimed_elsewhere_falls_back_to_the_next_linked_wallet(redis, chain):
+    chain.hold(A, 100_000)
+    chain.hold(B, 10_000)
+    assert await free_credits.holder_bonus_micro("acct-1", A) == 500_000
+    chain.linked["acct-2"] = [A, B]
+    assert await free_credits.holder_bonus_micro("acct-2", A) == 200_000
+
+
+@pytest.mark.asyncio
+async def test_linked_wallet_checks_are_bounded(redis, chain, monkeypatch):
+    monkeypatch.setattr(free_credits, "FREE_HOLDER_MAX_WALLETS", 2)
+    many = ["0x" + f"{i:040x}" for i in range(1, 9)]
+    for wallet in many:
+        chain.hold(wallet, 1_000)
+    chain.hold(many[-1], 100_000)   # beyond the bound: never read
+    chain.linked["acct-1"] = many
+    assert await free_credits.holder_bonus_micro("acct-1", None) == 50_000
+    assert chain.snapshot_reads == 2
+
+
+@pytest.mark.asyncio
+async def test_linked_wallet_lookup_failure_still_uses_the_sign_in_wallet(redis, chain, monkeypatch):
+    async def broken(_account_id):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr("grid_api.services.identities.verified_wallet_addresses", broken)
+    chain.hold(A, 10_000)
+    assert await free_credits.holder_bonus_micro("acct-1", A) == 200_000
 
 
 @pytest.mark.asyncio
