@@ -314,8 +314,18 @@ content sanitization, and reward settlement.
   authorization server for public MCP clients. It requires S256 PKCE, exact
   registered HTTPS or native-loopback redirects, short-lived resource-bound
   Grid user tokens, hashed one-use capabilities/codes, and a dedicated
-  `oauth.introspect` backend scope. It does not issue refresh tokens or client
-  secrets. `prune_operational_state` bounds authorization rows and removes only
+  `oauth.introspect` backend scope. It never issues client secrets.
+  Refresh tokens are default-off (`GRID_OAUTH_REFRESH_TOKENS_ENABLED`): only
+  an approved `offline_access` request gets one, stored as a SHA-256 hash.
+  Every refresh consumes the token and inserts its successor in the same
+  transaction under a row lock; presenting a consumed token revokes the whole
+  session (`revoke_reason='reuse'`). Sessions end after 30 idle days or 180
+  days from consent. `offline_access` is never an access-token scope.
+  Refreshed access tokens keep the original consent as `auth_time`, so a
+  refresh can never satisfy `require_recent_step_up`. Access tokens stay
+  stateless: one issued before a revocation lives out its 15 minutes.
+  Failed refreshes (wrong client, resource, scope) must not consume or revoke.
+  `prune_operational_state` bounds authorization rows and removes only
   old clients that never completed a token exchange; used clients and economic
   account records are not retention targets. See
   `docs/architecture/REMOTE_MCP_AUTH.md`.

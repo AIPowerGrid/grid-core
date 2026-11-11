@@ -39,6 +39,10 @@ class AuthorizationDecision(AuthorizationCapability):
     approve: bool
 
 
+class SessionRevocation(BaseModel):
+    session_id: str = Field(min_length=16, max_length=64)
+
+
 def _oauth_error(exc: oauth_server.OAuthProtocolError) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
@@ -121,7 +125,7 @@ async def protected_resource_metadata():
     return {
         "resource": oauth_server.resource(),
         "authorization_servers": [oauth_server.issuer()],
-        "scopes_supported": sorted(oauth_server.ALLOWED_SCOPES),
+        "scopes_supported": oauth_server.supported_scopes(),
         "bearer_methods_supported": ["header"],
         "resource_documentation": "https://docs.aipowergrid.io/integrations/mcp",
     }
@@ -131,18 +135,22 @@ async def protected_resource_metadata():
 async def authorization_server_metadata():
     oauth_server.require_enabled()
     base = oauth_server.issuer()
-    return {
+    metadata = {
         "issuer": base,
         "authorization_endpoint": f"{base}/v1/oauth/authorize",
         "token_endpoint": f"{base}/v1/oauth/token",
         "registration_endpoint": f"{base}/v1/oauth/register",
         "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code"],
+        "grant_types_supported": oauth_server.supported_grant_types(),
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
-        "scopes_supported": sorted(oauth_server.ALLOWED_SCOPES),
+        "scopes_supported": oauth_server.supported_scopes(),
         "service_documentation": "https://docs.aipowergrid.io/integrations/mcp",
     }
+    if oauth_server.refresh_enabled():
+        metadata["revocation_endpoint"] = f"{base}/v1/oauth/revoke"
+        metadata["revocation_endpoint_auth_methods_supported"] = ["none"]
+    return metadata
 
 
 @router.post("/v1/oauth/register", status_code=201)
@@ -227,20 +235,73 @@ async def token(request: Request):
     oauth_server.require_enabled()
     try:
         form = await _bounded_form(request)
-        result = await oauth_server.exchange_authorization_code(
-            grant_type=form.get("grant_type", ""),
-            code=form.get("code", ""),
-            client_id=form.get("client_id", ""),
-            redirect_uri=form.get("redirect_uri", ""),
-            code_verifier=form.get("code_verifier", ""),
-            requested_resource=form.get("resource", ""),
-        )
+        if form.get("grant_type", "") == "refresh_token":
+            result = await oauth_server.refresh_access_token(
+                refresh_token=form.get("refresh_token", ""),
+                client_id=form.get("client_id", ""),
+                requested_resource=form.get("resource", ""),
+                scope=form.get("scope", ""),
+            )
+        else:
+            result = await oauth_server.exchange_authorization_code(
+                grant_type=form.get("grant_type", ""),
+                code=form.get("code", ""),
+                client_id=form.get("client_id", ""),
+                redirect_uri=form.get("redirect_uri", ""),
+                code_verifier=form.get("code_verifier", ""),
+                requested_resource=form.get("resource", ""),
+            )
     except oauth_server.OAuthProtocolError as exc:
         return _oauth_error(exc)
     return JSONResponse(
         result,
         headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
     )
+
+
+@router.post("/v1/oauth/revoke")
+@limiter.limit("60/minute")
+async def revoke(request: Request):
+    """RFC 7009 revocation for public clients. Always 200 for a well-formed request."""
+    oauth_server.require_enabled()
+    try:
+        form = await _bounded_form(request)
+    except oauth_server.OAuthProtocolError as exc:
+        return _oauth_error(exc)
+    await oauth_server.revoke_refresh_token(
+        token=form.get("token", ""),
+        client_id=form.get("client_id", ""),
+    )
+    return JSONResponse({}, headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
+
+
+@router.get("/v1/oauth/sessions")
+@limiter.limit("60/minute")
+async def list_sessions(
+    request: Request,
+    x_grid_user_token: str | None = Header(None),
+    apikey: str | None = Header(None),
+    authorization: str | None = Header(None),
+):
+    oauth_server.require_enabled()
+    user = await _require_console_user(apikey, authorization, x_grid_user_token)
+    return {"sessions": await oauth_server.list_sessions(user["account_id"])}
+
+
+@router.post("/v1/oauth/sessions/revoke")
+@limiter.limit("30/minute")
+async def revoke_session(
+    request: Request,
+    form: SessionRevocation,
+    x_grid_user_token: str | None = Header(None),
+    apikey: str | None = Header(None),
+    authorization: str | None = Header(None),
+):
+    oauth_server.require_enabled()
+    user = await _require_console_user(apikey, authorization, x_grid_user_token)
+    if not await oauth_server.revoke_session(user["account_id"], form.session_id):
+        raise HTTPException(404, detail="Session not found")
+    return {"revoked": True}
 
 
 @router.post("/v1/oauth/introspect")

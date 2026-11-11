@@ -303,6 +303,11 @@ transport, accounts, stats, health/metrics.
 - `oauth.py` - default-off OAuth discovery, bounded public-client registration,
   S256 authorization/token exchange, Console-only consent inspection/decision,
   and service-only token introspection for the future remote MCP resource.
+  With `GRID_OAUTH_REFRESH_TOKENS_ENABLED` (default off) the token endpoint
+  also serves `grant_type=refresh_token`, `/v1/oauth/revoke` ends a session
+  for its own client (RFC 7009, always 200), and Console-only
+  `/v1/oauth/sessions` and `/v1/oauth/sessions/revoke` list and end an
+  account's sessions. Discovery advertises none of this while the flag is off.
 - `tests/` - router-level tests, including billing/settlement behavior.
 
 ## Local Contracts

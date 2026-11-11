@@ -5,8 +5,15 @@
 
 The browser sees opaque request and authorization-code capabilities. Core stores
 only their SHA-256 hashes. Public clients use S256 PKCE and receive short-lived,
-resource-bound Grid user tokens; refresh tokens and client secrets are
-deliberately absent from the first release.
+resource-bound Grid user tokens. Client secrets are deliberately absent.
+
+Refresh tokens are default-off (`GRID_OAUTH_REFRESH_TOKENS_ENABLED`). When on,
+a client that requests the `offline_access` scope and is approved receives a
+rotating refresh token: each use consumes it and returns a successor, and
+presenting a consumed token revokes the whole session, because a replay means
+a copy escaped. A session ends after 30 idle days or 180 days in total. Access
+tokens stay stateless, so one issued before a revocation remains valid for up
+to its 15-minute lifetime.
 """
 
 from __future__ import annotations
@@ -25,13 +32,17 @@ from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
 from ..database import new_session
-from ..v2.schema import oauth_authorizations, oauth_clients
+from ..v2.schema import oauth_authorizations, oauth_clients, oauth_refresh_tokens
 from . import identities, user_tokens
 
 ALLOWED_SCOPES = frozenset({"account.read", "inference.submit"})
 AUTHORIZATION_REQUEST_TTL_SECONDS = 600
 AUTHORIZATION_CODE_TTL_SECONDS = 300
 ACCESS_TOKEN_TTL_SECONDS = 900
+OFFLINE_SCOPE = "offline_access"
+REFRESH_TOKEN_IDLE_SECONDS = 30 * 24 * 60 * 60
+REFRESH_SESSION_MAX_SECONDS = 180 * 24 * 60 * 60
+REFRESH_TOKEN_PREFIX = "oauth_refresh_"
 MAX_REDIRECT_URIS = 10
 DEFAULT_AUTHORIZATION_RETENTION_SECONDS = 24 * 60 * 60
 DEFAULT_UNUSED_CLIENT_RETENTION_SECONDS = 24 * 60 * 60
@@ -55,6 +66,23 @@ def enabled() -> bool:
         "yes",
         "on",
     }
+
+
+def refresh_enabled() -> bool:
+    return enabled() and os.getenv("GRID_OAUTH_REFRESH_TOKENS_ENABLED", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def supported_scopes() -> list[str]:
+    return sorted(ALLOWED_SCOPES | ({OFFLINE_SCOPE} if refresh_enabled() else set()))
+
+
+def supported_grant_types() -> list[str]:
+    return ["authorization_code", "refresh_token"] if refresh_enabled() else ["authorization_code"]
 
 
 def require_enabled() -> None:
@@ -125,10 +153,12 @@ def _redirect_matches(registered: str, supplied: str, *, application_type: str) 
 
 def normalize_scopes(scope: str) -> list[str]:
     values = sorted(set(str(scope or "").split()))
-    if not values or not set(values).issubset(ALLOWED_SCOPES):
+    authority = set(values) - {OFFLINE_SCOPE}
+    if not authority or not set(values).issubset(supported_scopes()):
         raise OAuthProtocolError(
             "invalid_scope",
-            "Only account.read and inference.submit may be requested",
+            "Only account.read and inference.submit may be requested"
+            + (", optionally with offline_access" if refresh_enabled() else ""),
         )
     return values
 
@@ -157,10 +187,12 @@ async def register_client(metadata: dict) -> dict:
     )
     if metadata.get("token_endpoint_auth_method", "none") != "none":
         raise ValueError("Only public clients with token_endpoint_auth_method=none are supported")
-    if set(metadata.get("grant_types") or ["authorization_code"]) != {
-        "authorization_code",
-    }:
-        raise ValueError("Only the authorization_code grant is supported")
+    grant_types = set(metadata.get("grant_types") or ["authorization_code"])
+    if "authorization_code" not in grant_types or not grant_types.issubset(supported_grant_types()):
+        raise ValueError(
+            "Only the authorization_code grant"
+            + (" and the refresh_token grant are supported" if refresh_enabled() else " is supported"),
+        )
     if set(metadata.get("response_types") or ["code"]) != {"code"}:
         raise ValueError("Only the code response type is supported")
 
@@ -185,7 +217,7 @@ async def register_client(metadata: dict) -> dict:
                 "client_name": name,
                 "redirect_uris": redirects,
                 "application_type": application_type,
-                "grant_types": ["authorization_code"],
+                "grant_types": sorted(grant_types),
                 "response_types": ["code"],
                 "token_endpoint_auth_method": "none",
             }
@@ -420,14 +452,27 @@ async def exchange_authorization_code(
         if not secrets.compare_digest(expected, row["code_challenge"]):
             raise OAuthProtocolError("invalid_grant", "Invalid authorization code or verifier")
 
+        authority = sorted(set(row["scopes"]) - {OFFLINE_SCOPE})
         token = user_tokens.issue(
             row["account_id"],
             audience=resource(),
-            scopes=list(row["scopes"]),
+            scopes=authority,
             auth_method=row["auth_method"] or "app",
             client_id=client_id,
             lifetime_seconds=ACCESS_TOKEN_TTL_SECONDS,
         )
+        refresh_token = None
+        if OFFLINE_SCOPE in row["scopes"] and refresh_enabled():
+            refresh_token = await _insert_refresh_token(
+                session,
+                family_id=secrets.token_urlsafe(24),
+                client_id=client_id,
+                account_id=row["account_id"],
+                scopes=authority,
+                auth_method=row["auth_method"] or "app",
+                authorized_at=now,
+                now=now,
+            )
         await session.execute(
             sa.update(oauth_authorizations)
             .where(oauth_authorizations.c.request_hash == row["request_hash"])
@@ -437,12 +482,244 @@ async def exchange_authorization_code(
             sa.update(oauth_clients).where(oauth_clients.c.id == client_id).values(last_used=now),
         )
         await session.commit()
-    return {
+    result = {
         "access_token": token,
         "token_type": "Bearer",
         "expires_in": ACCESS_TOKEN_TTL_SECONDS,
-        "scope": " ".join(row["scopes"]),
+        "scope": " ".join(authority + ([OFFLINE_SCOPE] if refresh_token else [])),
     }
+    if refresh_token:
+        result["refresh_token"] = refresh_token
+    return result
+
+
+async def _insert_refresh_token(
+    session,
+    *,
+    family_id: str,
+    client_id: str,
+    account_id,
+    scopes: list[str],
+    auth_method: str,
+    authorized_at: datetime,
+    now: datetime,
+) -> str:
+    """Insert one hash-only refresh token; the caller commits."""
+    token = REFRESH_TOKEN_PREFIX + secrets.token_urlsafe(48)
+    expires_at = min(
+        now + timedelta(seconds=REFRESH_TOKEN_IDLE_SECONDS),
+        _utc(authorized_at) + timedelta(seconds=REFRESH_SESSION_MAX_SECONDS),
+    )
+    await session.execute(
+        sa.insert(oauth_refresh_tokens).values(
+            token_hash=_hash_capability(token),
+            family_id=family_id,
+            client_id=client_id,
+            account_id=account_id,
+            resource=resource(),
+            scopes=scopes,
+            auth_method=auth_method,
+            authorized_at=authorized_at,
+            created=now,
+            expires_at=expires_at,
+        ),
+    )
+    return token
+
+
+async def _revoke_family(session, family_id: str, *, reason: str, now: datetime) -> int:
+    result = await session.execute(
+        sa.update(oauth_refresh_tokens)
+        .where(
+            oauth_refresh_tokens.c.family_id == family_id,
+            oauth_refresh_tokens.c.revoked_at.is_(None),
+        )
+        .values(revoked_at=now, revoke_reason=reason),
+    )
+    return max(0, int(result.rowcount or 0))
+
+
+async def refresh_access_token(
+    *,
+    refresh_token: str,
+    client_id: str,
+    requested_resource: str = "",
+    scope: str = "",
+) -> dict:
+    """Rotate one refresh token and issue a new access token."""
+    if not refresh_enabled():
+        raise OAuthProtocolError("unsupported_grant_type", "Only authorization_code is supported")
+    invalid = OAuthProtocolError("invalid_grant", "Invalid or expired refresh token")
+    presented = str(refresh_token or "")
+    if not presented.startswith(REFRESH_TOKEN_PREFIX) or len(presented) > 256:
+        raise invalid
+    if requested_resource and str(requested_resource).rstrip("/") != resource():
+        raise OAuthProtocolError("invalid_target", "The requested resource does not match the authorization")
+    now = datetime.now(UTC)
+
+    async with await new_session() as session:
+        row = (
+            (
+                await session.execute(
+                    sa.select(oauth_refresh_tokens)
+                    .where(oauth_refresh_tokens.c.token_hash == _hash_capability(presented))
+                    .with_for_update(),
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if not row or row["client_id"] != client_id or row["resource"] != resource():
+            raise invalid
+        if row["revoked_at"] is not None:
+            raise invalid
+        if row["used_at"] is not None:
+            # A consumed token came back: the holder of its successor and this
+            # caller cannot both be the client. End the session for both.
+            await _revoke_family(session, row["family_id"], reason="reuse", now=now)
+            await session.commit()
+            raise invalid
+        if _utc(row["expires_at"]) <= now:
+            raise invalid
+        client_active = await session.scalar(
+            sa.select(oauth_clients.c.active).where(oauth_clients.c.id == client_id),
+        )
+        if not client_active:
+            raise invalid
+
+        granted = list(row["scopes"])
+        authority = granted
+        if scope:
+            requested = set(str(scope).split()) - {OFFLINE_SCOPE}
+            if not requested or not requested.issubset(granted):
+                raise OAuthProtocolError("invalid_scope", "A refresh may only narrow the granted scopes")
+            authority = sorted(requested)
+
+        authorized_at = _utc(row["authorized_at"])
+        access_token = user_tokens.issue(
+            row["account_id"],
+            audience=resource(),
+            scopes=authority,
+            auth_method=row["auth_method"] or "app",
+            client_id=client_id,
+            lifetime_seconds=ACCESS_TOKEN_TTL_SECONDS,
+            auth_time=int(authorized_at.timestamp()),
+        )
+        await session.execute(
+            sa.update(oauth_refresh_tokens)
+            .where(oauth_refresh_tokens.c.token_hash == row["token_hash"])
+            .values(used_at=now),
+        )
+        successor = await _insert_refresh_token(
+            session,
+            family_id=row["family_id"],
+            client_id=client_id,
+            account_id=row["account_id"],
+            scopes=granted,
+            auth_method=row["auth_method"] or "app",
+            authorized_at=authorized_at,
+            now=now,
+        )
+        await session.execute(
+            sa.update(oauth_clients).where(oauth_clients.c.id == client_id).values(last_used=now),
+        )
+        await session.commit()
+    return {
+        "access_token": access_token,
+        "token_type": "Bearer",
+        "expires_in": ACCESS_TOKEN_TTL_SECONDS,
+        "scope": " ".join(authority + [OFFLINE_SCOPE]),
+        "refresh_token": successor,
+    }
+
+
+async def revoke_refresh_token(*, token: str, client_id: str) -> None:
+    """RFC 7009: end the session a refresh token belongs to. Never reveals validity."""
+    presented = str(token or "")
+    if not presented.startswith(REFRESH_TOKEN_PREFIX) or len(presented) > 256:
+        return
+    now = datetime.now(UTC)
+    async with await new_session() as session:
+        row = (
+            (
+                await session.execute(
+                    sa.select(oauth_refresh_tokens.c.family_id, oauth_refresh_tokens.c.client_id).where(
+                        oauth_refresh_tokens.c.token_hash == _hash_capability(presented),
+                    ),
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if not row or row["client_id"] != client_id:
+            return
+        await _revoke_family(session, row["family_id"], reason="client", now=now)
+        await session.commit()
+
+
+async def list_sessions(account_id) -> list[dict]:
+    """Live refresh sessions of one account, newest first. Never returns tokens."""
+    canonical_id = await identities.canonical_account_id(account_id)
+    now = datetime.now(UTC)
+    async with await new_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    sa.select(
+                        oauth_refresh_tokens.c.family_id,
+                        oauth_refresh_tokens.c.client_id,
+                        oauth_refresh_tokens.c.scopes,
+                        oauth_refresh_tokens.c.authorized_at,
+                        oauth_refresh_tokens.c.created,
+                        oauth_refresh_tokens.c.expires_at,
+                        oauth_clients.c.name.label("client_name"),
+                    )
+                    .join(oauth_clients, oauth_clients.c.id == oauth_refresh_tokens.c.client_id)
+                    .where(
+                        oauth_refresh_tokens.c.account_id == canonical_id,
+                        oauth_refresh_tokens.c.used_at.is_(None),
+                        oauth_refresh_tokens.c.revoked_at.is_(None),
+                        oauth_refresh_tokens.c.expires_at > now,
+                    )
+                    .order_by(oauth_refresh_tokens.c.created.desc())
+                    .limit(100),
+                )
+            )
+            .mappings()
+            .all()
+        )
+    return [
+        {
+            "session_id": row["family_id"],
+            "client_id": row["client_id"],
+            "client_name": row["client_name"],
+            "scopes": list(row["scopes"]),
+            "authorized_at": _utc(row["authorized_at"]).isoformat(),
+            "last_refreshed_at": _utc(row["created"]).isoformat(),
+            "expires_at": _utc(row["expires_at"]).isoformat(),
+        }
+        for row in rows
+    ]
+
+
+async def revoke_session(account_id, session_id: str) -> bool:
+    """End one of the account's own sessions. False when it is not theirs or not live."""
+    canonical_id = await identities.canonical_account_id(account_id)
+    now = datetime.now(UTC)
+    async with await new_session() as session:
+        owned = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(oauth_refresh_tokens)
+            .where(
+                oauth_refresh_tokens.c.family_id == str(session_id or ""),
+                oauth_refresh_tokens.c.account_id == canonical_id,
+            ),
+        )
+        if not owned:
+            return False
+        changed = await _revoke_family(session, str(session_id), reason="user", now=now)
+        await session.commit()
+    return changed > 0
 
 
 def introspect_access_token(token: str) -> dict:
@@ -505,6 +782,15 @@ async def prune_operational_state(
                 oauth_authorizations.c.created < authorization_cutoff,
             ),
         )
+        refresh_result = await session.execute(
+            sa.delete(oauth_refresh_tokens).where(
+                sa.or_(
+                    oauth_refresh_tokens.c.expires_at < authorization_cutoff,
+                    oauth_refresh_tokens.c.revoked_at < authorization_cutoff,
+                    oauth_refresh_tokens.c.used_at < authorization_cutoff,
+                ),
+            ),
+        )
         client_result = await session.execute(
             sa.delete(oauth_clients).where(
                 oauth_clients.c.created < client_cutoff,
@@ -516,4 +802,5 @@ async def prune_operational_state(
     return {
         "authorizations": max(0, int(authorization_result.rowcount or 0)),
         "clients": max(0, int(client_result.rowcount or 0)),
+        "refresh_tokens": max(0, int(refresh_result.rowcount or 0)),
     }

@@ -168,6 +168,11 @@ validator shadow-observation records.
   Migration `0031` must precede any OAuth feature enablement. Authorization
   rows and old clients that never completed an exchange are bounded operational
   state and may be pruned; used clients and account/economic records remain.
+- `grid_oauth_refresh_tokens` (migration `0047`) holds rotating refresh
+  sessions: one row per issued token, hash only, grouped by `family_id`.
+  `used_at` marks rotation and `revoked_at`/`revoke_reason` end a family.
+  Rows are operational state and are pruned a day after they expire, are
+  consumed or are revoked.
 - `grid_validator_reference_workers` is derived only from finalized Base bond
   sync plus non-economic quality review. Active selection requires a finalized
   block hash, routed facet and exact reviewed runtime proof, fresh bond, quality,
