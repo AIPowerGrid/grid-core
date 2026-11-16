@@ -23,7 +23,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -699,6 +699,13 @@ async def worker_websocket(ws: WebSocket):
         # XREADGROUP entirely — silently stranding every later job while the
         # worker still looked online.
         local_jobs: asyncio.Queue = asyncio.Queue(maxsize=1)
+        # The poll task reads the shared stream only while this worker is free.
+        # A busy worker that kept reading held the next job in `local_jobs`
+        # until its own job finished: a slow or incompatible worker could sit
+        # on another model's request for minutes (the client saw nothing and
+        # timed out; the job surfaced again only through stale reclaim).
+        free_for_job = asyncio.Event()
+        free_for_job.set()
 
         async def _poll_jobs():
             """Background: pull jobs from Redis and hand them to the loop.
@@ -710,11 +717,15 @@ async def worker_websocket(ws: WebSocket):
             """
             while True:
                 try:
+                    await free_for_job.wait()
                     job = await job_queue.pop_job(
                         worker_id, timeout_ms=job_queue.POLL_BLOCK_MS, job_types=job_types,
                     )
                     if job:
-                        await local_jobs.put(job)  # blocks (backpressure) until taken
+                        # Stop reading before handing over; the main loop opens
+                        # the gate again once this job has been dealt with.
+                        free_for_job.clear()
+                        await local_jobs.put(job)
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
@@ -734,12 +745,22 @@ async def worker_websocket(ws: WebSocket):
             /v1/models goes empty and new requests 503. Refresh independently of
             job state so presence tracks the connection, not the job length.
             """
+            ticks = 0
             while True:
                 await asyncio.sleep(20)
                 try:
                     await refresh_worker(worker_id, worker_info)
                 except Exception:
                     logger.debug("registry keepalive refresh failed", exc_info=True)
+                # `last_seen` is what operators read in /v1/account/workers. It
+                # was written only at connect, so a worker serving for hours
+                # looked last seen hours ago. One small write a minute.
+                ticks += 1
+                if ticks % LAST_SEEN_REFRESH_TICKS == 0:
+                    try:
+                        await _touch_last_seen(worker_id)
+                    except Exception:
+                        logger.debug("last_seen refresh failed", exc_info=True)
 
         refresh_task = asyncio.create_task(_keepalive_registry())
 
@@ -758,6 +779,10 @@ async def worker_websocket(ws: WebSocket):
                     if not ok:
                         break
                     continue
+                # Free again: the previous job (if any) is finished and nothing
+                # is waiting locally, so the poll task may read the next one.
+                if local_jobs.empty():
+                    free_for_job.set()
                 # Wait for the next job, or time out every 10s to keepalive.
                 try:
                     job = await asyncio.wait_for(local_jobs.get(), timeout=10)
@@ -1197,7 +1222,7 @@ async def worker_websocket(ws: WebSocket):
                         tool_calls=gen["tool_calls"],
                         usage=gen["usage"],
                         finish_reason=gen["finish_reason"],
-                        grid=gen["grid_meta"],
+                        grid=_with_billed_completion(gen["grid_meta"], bill_completion),
                     )
                     await job_queue.ack_job(job["stream_id"])
                     await ws.send_json({"type": "ack", "id": job["job_id"], "den": den_awarded})
@@ -2282,8 +2307,34 @@ def _merge_tool_call_deltas(acc: dict, deltas: list):
 # record_and_settle outcomes that mean a PAID success (publish DONE, pay den).
 # Everything else is either a retry ('error') or a terminally-closed-but-unpaid
 # job ('stale_no_payout' / 'duplicate') that must NOT look like a paid completion.
+# Keepalive ticks (20 s each) between `last_seen` writes for a connected worker.
+LAST_SEEN_REFRESH_TICKS = 3
+
 _PAID_SETTLE = frozenset({"settled", "audit_settled", "no_reservation"})
 _UNPAID_CLIENT_ERROR_SETTLE = frozenset({"stale_no_payout", "audit_manual_review"})
+
+
+def _with_billed_completion(grid_meta: dict | None, billed_tokens: int) -> dict:
+    """State the completion quantity the reservation was settled on.
+
+    `usage` in a chat response is the backend's own object, relayed unchanged,
+    so it carries the model tokenizer's count. Settlement uses the Grid's count
+    of the text it received, capped at the requested maximum. The two differ
+    by model (15-17% on Qwen), and without this field a client that multiplies
+    `usage` by the list price overstates what it was charged.
+    """
+    return {**(grid_meta or {}), "billed_completion_tokens": int(billed_tokens)}
+
+
+async def _touch_last_seen(worker_id: str) -> None:
+    """Move `last_seen` while a worker stays connected, not only at connect."""
+    async with await new_session() as session:
+        await session.execute(
+            sa.update(v2_workers_table)
+            .where(v2_workers_table.c.id == UUID(str(worker_id)))
+            .values(last_seen=datetime.utcnow()),
+        )
+        await session.commit()
 
 
 def _is_paid_settlement(status: str) -> bool:
