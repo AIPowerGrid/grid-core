@@ -362,6 +362,9 @@ transport, accounts, stats, health/metrics.
   neither submits jobs nor changes credit, reward, or free-allowance state.
 
 - Faithful passthrough: forward request/response shape unchanged except metering + sanitize.
+- Chat completions return one choice. `n` other than 1 is refused at validation,
+  before any reserve or dispatch: the worker stream carries a single choice, so
+  a backend asked for more interleaves them into one billed answer.
   One compatibility exception: reasoning effort is rewritten on all three text
   formats (`reasoning_effort`, `reasoning.effort`, `output_config.effort`) by
   `_passthrough.normalize_reasoning_effort`. `low`/`medium` pass, `none`/`minimal`
