@@ -825,7 +825,7 @@ def _text_param_schema(model_id: str) -> dict:
             "top_p": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.9},
             "max_tokens": {"type": "integer", "minimum": 1, "maximum": DEFAULT_MAX_TOKENS,
                            "default": DEFAULT_MAX_TOKENS},
-            "n": {"type": "integer", "minimum": 1, "maximum": 4, "default": 1},
+            "n": {"type": "integer", "minimum": 1, "maximum": 1, "default": 1},
             "stop": {"type": "string|array"},
             "presence_penalty": {"type": "number", "minimum": -2, "maximum": 2},
             "frequency_penalty": {"type": "number", "minimum": -2, "maximum": 2},
