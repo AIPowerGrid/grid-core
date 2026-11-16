@@ -3,8 +3,8 @@
 
 # Video x402 Build
 
-Status: **private quotation, signature/receipt/ownership foundations and
-receipt-backed hold/outbox with unsent refund obligations implemented as
+Status: **private quotation, signature/receipt/ownership foundations,
+receipt-backed hold/outbox and reviewed Safe refund intent/proof implemented as
 candidates; HTTP payment collection remains a proposal**.
 Reviewed against the candidate async video code and locally locked x402 2.16.0
 SDK on October 11, 2026. The quote routes below are independently default-off
@@ -556,8 +556,8 @@ Scratch Alembic upgrades through `0051` and reports no schema drift. New module,
 test and migration files pass Ruff; unrelated inherited lint remains unchanged.
 It does not prove a received payment, facilitator, GPU render or sent refund.
 Fresh exact-commit PostgreSQL 16 CI is still required for this candidate.
-The missing HTTP/envelope/sender, automatic lost-transaction watcher, reviewed
-Safe refund proof, live testnet/storage/GPU chain and public model permission
+The missing HTTP/envelope/sender, automatic lost-transaction watcher, actual
+Safe/refund qualification, live testnet/storage/GPU chain and public model permission
 remain gates.
 
 ### Lost Transaction Recovery Candidate
@@ -599,6 +599,68 @@ diagnostic in the extended attempt-test module remains outside this scope.
 
 Protocol references: [EIP-3009](https://eips.ethereum.org/EIPS/eip-3009) and the
 [Ethereum JSON-RPC log API](https://ethereum.org/en/developers/docs/apis/json-rpc/#eth_getlogs).
+
+### Reviewed Safe Refund Candidate
+
+Migration `0052` creates empty `grid_video_refunds`. The private service requires
+the original owned/proved payment and a committed refund obligation: unadmitted
+funds or an already failed/zero-charge job. Held and successfully paid jobs cannot
+prepare refunds. The original payer, exact amount, source quote/proof/claim,
+reviewed Safe nonce and confirmation policy are frozen before any manual Safe
+action. Account merges or changed payout-wallet preferences do not redirect it.
+One chain/Safe/nonce cannot belong to two obligations. Preparation is an unsigned
+intent, not proof of unused nonce or permission to broadcast; no automatic nonce
+allocator or signer exists. The operator must review other queued Safe actions.
+
+The current lane is a direct Safe 1.4.1 `execTransaction` containing one canonical
+USDC `transfer` with Call operation, zero native value and zero gas reimbursement.
+Its EIP-712 Safe hash is frozen. Modules, batches, delegatecall, unknown versions,
+gas-token reimbursement and altered recipients/amounts/hash reject. Safe owners
+sign outside Core; signatures are not retained. Real proxy/singleton/guard/module,
+pending-nonce and Safe UI compatibility must be reviewed before any live approval.
+
+The read-only verifier requires both configured sources to agree on the original
+direct calldata, status, one exact USDC Transfer before one matching
+ExecutionSuccess (not ExecutionFailure), code/version/decimals/hash and consumed-
+nonce views at the required-canonical block, and re-read safe/finalized anchors.
+It uses the existing response/deadline/capacity bounds. State/version checks are
+not general Safe runtime attestation; two RPC sources are not cryptographic
+chain proof. The payment received by the treasury cannot stand in for its refund.
+
+Proof happens outside SQL locks. Outbound ownership in the existing
+`video_x402`/`refund:<quote UUID>` namespace commits with confirmed refund state.
+Its purpose differs from the original incoming `video_x402`/`<quote UUID>` claim;
+another deposit/payment/refund cannot reuse the same token transaction. Invalid,
+missing, unconfirmed or unavailable receipts and claim conflicts leave the
+original intent unresolved. An unproved supplied hash is never pinned into it.
+Pre/post-commit reply loss recovers the same intent or atomic refunded result.
+No retry acquires another nonce or sends anything.
+
+Original `refund_due_at` and zero-charge terminal history remain intact even
+after repayment. Clearing that timestamp could incorrectly restore worker
+backing; credit and reward ledgers never move. Apply `0052` before private refund
+tools and retain every preparation/proof on rollback. Downgrade refuses all rows
+or retained refund-namespaced claims, including completed state. There is no HTTP
+route, CLI payment adapter, signer, automatic sender or startup loop. Actual
+Base payment/refund, GPU/storage chain and consumer/release gates remain open.
+
+The focused refund/receipt/quote/attempt/prepaid matrix passes 374 cases with
+11 explicit skips using real SQLite/PostgreSQL 14 and synthetic Safe/token
+responses. It includes 25 competing preparations/reconciliations, cross-quote
+nonce conflict, original-payer alias recovery, self-consistent intent mutation,
+network-outside-lock and pre/post-commit failures. The separate pure refund
+matrix passes 60 cases, with independent Safe Solidity hash arithmetic, actual
+Web3 ABI encoding and generated test signatures. These are not executed Safe
+transactions, spent/refunded USDC or live wallet qualification. The full local
+Python 3.13/PostgreSQL 14 suite passes 3,585 with 41 skips and 139 inherited
+warnings in 495.67 seconds. Scratch migration through `0052` and schema drift
+checks pass. New runtime/test/migration files pass Ruff; the four extended
+historical test modules retain their pre-existing import-order diagnostics.
+Fresh exact-commit Linux/Python 3.12/PostgreSQL 16 CI remains a promotion gate.
+
+Primary interface references: [Safe 1.4.1 source](https://github.com/safe-global/safe-smart-account/blob/v1.4.1/contracts/Safe.sol),
+[Safe execution API](https://docs.safe.global/reference-smart-account/transactions/execTransaction)
+and [Safe transaction hash API](https://docs.safe.global/reference-smart-account/transactions/getTransactionHash).
 
 ### Intended Flow
 

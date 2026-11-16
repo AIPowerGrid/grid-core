@@ -20,6 +20,16 @@ validator shadow-observation records.
 
 ## Local Contracts
 
+- `0052` adds empty `grid_video_refunds`, one retained intent per prepaid quote,
+  unique chain/Safe/nonce, Safe hash, chain/transaction and receipt claim.
+  Coherent prepared/refunded states explicitly reject SQL NULL receipt fields
+  in refunded state. No signatures, historical adoption or credit movement
+  exists. Outbound proofs use `video_x402`/`refund:<quote UUID>` with distinct
+  purpose; shared receipt constraints are unchanged. Keep original prepaid
+  refund-due history even after repayment. Migrate before optional refund tools,
+  retain every row on rollback and refuse nonempty downgrade. No sender or API
+  is enabled by this table.
+
 - Migration `0051` creates empty `grid_video_prepaid_payments`, unique by quote,
   job and shared receipt claim. Exact amount, proof/quote/input commitments and
   initial admission are retained; refund-due timestamps are unsent liabilities,

@@ -96,6 +96,19 @@ owning AGENTS.md and any affected parent Child DOX Index.
 
 ## Verification
 
+- Private `0052` adds reviewed, unsigned Safe refund intents and atomic
+  confirmed-refund receipt closure. Nonces are unique by chain/Safe, never
+  automatically replaced; outgoing receipts use the existing `video_x402`
+  `refund:<quote UUID>` ownership namespace. Preparation is not sending and
+  `refund_due_at` remains historical after repayment; do not erase it to restore
+  worker backing. No signer, route, loop, price or public flag is enabled.
+  Apply before private refund tooling; retain every intent/proof on rollback.
+  Actual Safe/token/payment/refund and client qualification remain release gates.
+  The focused money matrix passes 374 with 11 explicit skips; the full local
+  Python 3.13/PostgreSQL 14 Grid suite passes 3,585 with 41 skips and 139 inherited
+  warnings. Scratch genesis-through-0052/schema parity passes. Chain/Safe
+  responses remain synthetic; exact-revision Linux/PostgreSQL 16 CI is required.
+
 - Candidate `0051` privately commits a proved/owned exact-USDC video payment,
   its external reservation, frozen job and original input authority together.
   Closed/expired/capacity-rejected admission records only an unsent refund
