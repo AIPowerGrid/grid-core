@@ -53,6 +53,14 @@ DISPATCH_WAIT_MS_TEXT = STALE_JOB_MS
 DISPATCH_WAIT_MS_MEDIA = STALE_JOB_MS_MEDIA
 ROUTING_PROTOCOL = "stream-inbox-v1"
 
+# How long a connected worker blocks on the shared stream before it looks at
+# its routing inbox again. A job handed to a compatible peer lands in that
+# peer's inbox, and nothing wakes a blocked read, so this is the longest a
+# routed job waits for an idle worker. At five seconds every routed chat job
+# sat for 0-5 s before its first token. Kept short; each cycle is one small
+# script call per stream plus the blocking read.
+POLL_BLOCK_MS = min(5000, max(50, int(os.getenv("GRID_JOB_POLL_BLOCK_MS", "250") or 250)))
+
 
 def _dispatch_wait_ms_for(stream: str) -> int:
     return DISPATCH_WAIT_MS_MEDIA if stream == MEDIA_STREAM_KEY else DISPATCH_WAIT_MS_TEXT

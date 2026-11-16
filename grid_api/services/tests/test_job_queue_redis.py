@@ -324,3 +324,33 @@ async def test_route_process_kill_preserves_one_pending_delivery(redis, phase, j
         if child.returncode is None:
             child.kill()
         await child.communicate()
+
+
+@pytest.mark.asyncio
+async def test_idle_peer_receives_a_routed_job_within_one_poll_interval(redis):
+    # The peer is already blocked on the shared stream when the job is routed
+    # to its inbox. Nothing wakes that read, so the poll interval is the wait.
+    assert queue.POLL_BLOCK_MS <= 500
+    job = await pending_job()
+    target, snapshot = "idle-recipient", json.dumps({"models": ["test-model"]})
+    await redis.sadd("grid:workers:active", target)
+    await redis.set(f"grid:worker:{target}:status", snapshot, ex=60)
+
+    async def poll():
+        while True:
+            received = await queue.pop_job(target, timeout_ms=queue.POLL_BLOCK_MS)
+            if received:
+                return received
+
+    waiter = asyncio.create_task(poll())
+    try:
+        await asyncio.sleep(0.05)
+        started = asyncio.get_running_loop().time()
+        assert await queue.route_to_worker(job, target, snapshot) == "routed"
+        received = await asyncio.wait_for(waiter, 3)
+        waited = asyncio.get_running_loop().time() - started
+    finally:
+        waiter.cancel()
+    assert received["stream_id"] == job["stream_id"] and received["routed_dispatch"]
+    assert waited < queue.POLL_BLOCK_MS / 1000 + 0.5
+    await queue.ack_job(received["stream_id"], received["stream"])

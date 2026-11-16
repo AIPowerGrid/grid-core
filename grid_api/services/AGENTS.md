@@ -716,6 +716,10 @@ content sanitization, and reward settlement.
   never interpret a typo as `off` and silently admit unbilled work. Only an
   absent mode uses the documented legacy boolean fallback.
 
+- A routed job waits in the target's inbox until that worker's next poll cycle:
+  nothing wakes a blocked stream read. `POLL_BLOCK_MS` (`GRID_JOB_POLL_BLOCK_MS`,
+  default 250, bounded 50-5000) is therefore the worst-case added wait before an
+  idle peer starts a routed job. Do not raise it to save Redis calls.
 - One queue: `job_queue.py`. Retry handoffs check the original pending delivery
   and append its replacement before acknowledging it in one Redis Lua script.
   A failed append leaves the original pending; repeat handoffs are nonterminal
