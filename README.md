@@ -1,4 +1,6 @@
 <!--
+SPDX-FileCopyrightText: 2022 Konstantinos Thoukydidis <mail@dbzer0.com>
+SPDX-FileCopyrightText: 2024 Tazlin <tazlin.on.github@gmail.com>
 SPDX-FileCopyrightText: 2026 AI Power Grid
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
@@ -9,6 +11,12 @@ Coordinator and economic ledger for the AI Power Grid decentralized generation
 network. The production application is the FastAPI `grid_api` service: it serves
 the canonical `/v1` text, image, video, account, worker, validator-preview, and
 statistics APIs and dispatches jobs to workers over WebSockets.
+
+This repository is a modified fork of
+[AI Horde](https://github.com/Haidra-Org/AI-Horde) by Konstantinos Thoukydidis
+(db0) and the Haidra contributors, used and redistributed under the
+AGPL-3.0-or-later. Their copyright notices are kept on the files that came from
+it.
 
 The inherited Flask/Horde source remains under `horde/` as frozen migration
 history. It is not imported, installed, or served by the Grid runtime. Legacy
