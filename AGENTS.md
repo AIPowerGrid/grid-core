@@ -102,7 +102,16 @@ owning AGENTS.md and any affected parent Child DOX Index.
   obligation. Existing terminal, stale release, outbox and reward selectors
   recognize `video_prepaid`; no credits are drawn/restored. Migrate before all
   financial/backing readers and retain these handlers/history on rollback.
-  HTTP sender/watcher, actual refunds and live testnet/GPU/storage remain gates.
+  HTTP sender, automatic watcher scheduling, actual refunds and live
+  testnet/GPU/storage remain gates. A separate non-routable recovery helper can
+  correlate a lost transaction through a bounded confirmed nonce-log search;
+  it proves the entire original transfer before recording its transaction.
+  Empty searches never prove absence or permit another send.
+  The recovery candidate's full local Python 3.13/PostgreSQL 14 Grid suite
+  passes 3,479 with 39 skips and 139 inherited warnings. Its combined focused
+  recovery/receipt/journal/shared-claim/prepaid matrix passes 437 with five
+  explicit SQLite skips. These use synthetic chain evidence, not real funds;
+  fresh exact-commit Linux/Python 3.12/PostgreSQL 16 CI remains required.
   The focused matrix passes 674 cases; the full local suite passes 3,396 with
   38 skips. Ten final test-only terminal-commit/affinity cases additionally pass
   within the 81-case prepaid matrix. Fresh exact-commit CI remains required.
