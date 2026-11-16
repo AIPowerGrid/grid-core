@@ -30,3 +30,32 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 - Rollback: repoint `/home/aipg/current` to `grid-core-b1370d34` and restart.
   The schema is unchanged. To keep the release and only restore the old poll
   interval, set `GRID_JOB_POLL_BLOCK_MS=5000` and restart.
+
+## Follow-up release 30d91617 (same day)
+
+- Approved scope: the owner's "deploy" on 2026-11-16 for PR #261.
+- Release: `30d916178a648284a9be1ac7cdff709edd1b4009`, at
+  `/home/aipg/releases/grid-core-30d91617`. Previous: `grid-core-ac2167eb`.
+  Cutover 18:43 UTC. Code only; no migration, dependency, unit or environment
+  change. PR #260 (copyright headers and a README paragraph) rode along.
+- What changed:
+  - A worker connection reads the shared job stream only while it has no job
+    in hand. A busy worker used to park the next job until its own finished;
+    the logs showed a stale reclaim about five and a half minutes after each
+    of two reported client timeouts, with no worker disconnect.
+  - A settled chat reply carries `grid.billed_completion_tokens`.
+  - `grid_workers.last_seen` is refreshed about once a minute while a worker
+    is connected.
+- Checks: PR checks passed; the staged release imported with the production
+  environment; `/health` reported the release SHA; 8 workers were connected
+  before the restart and 8 one minute after; public `/health` 200,
+  `/v1/models` 200, unauthenticated validator assignments 401, retired
+  heartbeat 410. In the first two minutes one text worker completed five jobs
+  in a row, so the read gate reopens after a finished job. Every connected
+  worker's `last_seen` had moved about a minute after it connected. No
+  reclaim, traceback or critical log line in that window.
+- Not checked: the billed-token field on a live reply (no paid request was
+  sent), a long job on one worker with a second request waiting, and the
+  other seven workers taking a second job (they had no traffic yet).
+- Rollback: repoint `/home/aipg/current` to `grid-core-ac2167eb` and restart.
+  The schema is unchanged.
