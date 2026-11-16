@@ -362,6 +362,14 @@ transport, accounts, stats, health/metrics.
   neither submits jobs nor changes credit, reward, or free-allowance state.
 
 - Faithful passthrough: forward request/response shape unchanged except metering + sanitize.
+- A worker connection reads the shared job stream only while it has no job in
+  hand (`free_for_job` in `worker_ws.py`). Do not reintroduce a prefetch: a busy
+  or incompatible worker then holds another request until its own job ends.
+- A settled chat reply carries `grid.billed_completion_tokens`, the quantity the
+  reservation was settled on. `usage` stays the backend's own object and can
+  differ from it.
+- `grid_workers.last_seen` is refreshed about once a minute for a connected
+  worker, not only at connect.
 - Chat completions return one choice. `n` other than 1 is refused at validation,
   before any reserve or dispatch: the worker stream carries a single choice, so
   a backend asked for more interleaves them into one billed answer.
