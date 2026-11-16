@@ -7,6 +7,23 @@ content sanitization, and reward settlement.
 
 ## Ownership
 
+- `video_payment_envelope.py` owns the private strict x402 v2 outer boundary.
+  Derive exact amount/asset/network/payTo/domain/timeout/EIP-3009 method from
+  the immutable live quote, never client requirements. Freeze quote/envelope
+  inputs before validation/serialization so caller mutation cannot rebind them.
+  Binding-v3 commits upfront/EIP-3009 terms; wire `extra.paymentFlow=upfront`
+  requires settle then independent receipt proof before job admission, without
+  facilitator `/verify`. Locked 2.16.0 request-shape compatibility does not
+  qualify actual client/facilitator flow handling.
+  Validate primitive types and exact fields before SDK construction; reject v1, extensions,
+  coercion and client-selected resource metadata. Optional HTTPS descriptor
+  must match an operator-controlled URL, never Host/request authority. Bounded
+  canonical PAYMENT-SIGNATURE decoding rejects duplicate JSON, floats/nonfinite
+  numbers, invalid UTF-8 and deep/oversized input. Original inner cryptographic
+  binding still applies. The SDK-shaped facilitator body contains a spending
+  capability: do not log/persist it, or send without the winning committed
+  attempt and ready inputs. No route, client, signer, SQL or admission calls
+  this helper; validation never proves revenue or grants generation.
 - `video_refunds.py` owns private `0052` reviewed Safe refund intent/recovery.
   Only an owned proved receipt with a committed refund obligation can prepare
   one nonce/amount/payer. Active and completed paid jobs cannot refund. Existing
@@ -23,6 +40,7 @@ content sanitization, and reward settlement.
   read-only dual-source proof. Freeze Call-only canonical USDC transfer, zero
   native value/gas reimbursement, original payer/amount, Safe nonce and EIP-712
   hash. Require exact direct execution calldata, one matching ExecutionSuccess
+  with the transaction hash in its indexed topic and zero payment in data
   after one exact Transfer, status, code/version/decimals/hash/consumed-nonce
   views at the required-canonical block and re-read confirmation anchors.
   Unknown versions, modules, batches, delegatecall and gas-token reimbursement
@@ -31,6 +49,23 @@ content sanitization, and reward settlement.
   actual treasury proxy/singleton/guard/modules, pending nonce coordination,
   Safe UI and real token/refund qualification remain gates. Sources must be
   operator-selected TLS-verifying clients; two hosts are not chain proof.
+- `tests/video_fork_support.py` and `tests/test_video_payment_fork.py` own
+  opt-in local Anvil/Base contract-execution qualification. Writes require
+  a literal loopback URL and repeatedly checked Anvil/pinned-fork identity.
+  Fresh payer keys and local owner impersonation never access production keys
+  or submit to the upstream fork source. Real Safe/USDC code, SQL admission,
+  failure obligation/refund closure, consumed authorization and both replay
+  reverts are exercised; provider failures cannot count as replay rejection.
+  Snapshot rollback runs in finally. Two logical proof adapters share one
+  fork, not independent providers; this is neither actual Base payment nor
+  GPU/storage/customer-funded qualification. Inputs/prices remain synthetic.
+  The v3 follow-up decodes the strict PAYMENT-SIGNATURE header and executes
+  that exact forwarded capability, never a newly constructed signature.
+  Missing/authorization/escrow flow rejects before an attempt or transfer.
+  Payment, lost-hash recovery, failed-job refund and both replay reverts pass
+  against copied contracts; 225 combined cases and an 11-case unchanged-code
+  repeat pass, each with one explicit SQLite financial skip. No collector or
+  live-facilitator semantics are qualified by this test.
 
 - `video_prepaid.py` owns private `0051` proved-receipt admission. Actual shared
   ownership, proof, ready original inputs and account/quote/job locks precede
@@ -120,6 +155,14 @@ content sanitization, and reward settlement.
   immutable compiled graph. PostgreSQL serializes pocket draws; the existing
   credit hold and journal insert commit together. Live positive credit holds and
   explicit cost caps are required; dry-run never writes an async job.
+  `generation_admission.py` owns the default-empty, expiring async-video cohort.
+  It never changes global charging or approves a model. Captured pilot deadlines
+  are transient server-only preparation metadata, not client intent or schema.
+  Recheck after canonical-account locking, before hold insertion and after the
+  awaited journal insert in the debit transaction. Expiry restores independent
+  promo/free/service draws and returns admission-closed, not paid success.
+  Existing committed replay must precede deadline checks; recovery/outbox and
+  terminal settlement do not depend on continued pilot membership.
   The canonical-account lock also serializes the held async-job cap (default
   four, at most sixteen), including proved aliases. This is separate from the
   synchronous media/text concurrency limits; replay does not consume a slot.
@@ -177,9 +220,14 @@ content sanitization, and reward settlement.
   Five-minute quotes freeze canonical owner/request key, normalized intent,
   source-byte commitments, selected seed/graph/units, undiscounted price-book
   snapshot, canonical Base USDC recipient/network and one derived nonce.
-  New binding-v2 snapshots also freeze the USDC EIP-712 name/version/chain/token
-  domain; old domainless v1 quotes remain readable/replayable without upgrade,
-  repricing or a replacement nonce, but cannot acquire signing authority.
+  New binding-v3 snapshots freeze the USDC EIP-712 name/version/chain/token
+  domain plus upfront flow/EIP-3009 method. Old v1/v2 remain readable/replayable
+  without upgrade, repricing or replacement nonces; only v3 permits fresh
+  signing. Prior v2 attempts retain historical proof and observation-only replay.
+  Upgrade every quote/staging/proof/refund/financial reader before v3 writes;
+  retain those readers/history on rollback, never downconvert existing rows.
+  Normal quote-pilot expiry must not prevent Core startup or retained recovery;
+  the router still rejects new rows before source work and under the commit lock.
   Reads verify the commitment and indexed fields; replay never recompiles or
   reprices. PostgreSQL globally serializes inserts and retained-row caps while
   account locks fence merges; no decoder/storage/network call runs under those
@@ -218,13 +266,13 @@ content sanitization, and reward settlement.
 - `video_eip3009.py` is an offline, admission-time exact EIP-3009 binding
   helper, not a payment endpoint. It builds unsigned SDK-compatible typed data
   including the mandatory JSON-RPC `EIP712Domain` type definitions,
-  and checks canonical 65-byte low-S signatures against one owner-loaded v2
+  and checks canonical 65-byte low-S signatures against one owner-loaded v3
   quote's amount/payer/recipient/nonce/domain/window. It rejects self-payments,
   compact/wrapped signatures, unbound SDK nonces and expired quotes. Core never
   signs or takes private keys; the bound result contains no signature or
   funded state. No database, RPC, replay claim, balance/code check, facilitator,
   upload or dispatch occurs. Live signer classification/token-domain checks,
-  outer-envelope validation and durable financial admission remain required.
+  routed outer-envelope validation and durable financial admission remain required.
   Do not use its current-window check to abandon recovery of an earlier payment
   attempt after expiry. No real-wallet prompting or published client exists.
   Separate MIT SDK candidates now supply dependency-free policy/preparation and

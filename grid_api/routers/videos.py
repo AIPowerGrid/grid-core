@@ -88,6 +88,8 @@ async def validate_video(body: VideoRequest, user: dict, *, async_submission: bo
             style_loras = eff.get("loras") or []
 
         model = body.model or style_model or media.DEFAULT_VIDEO_MODEL
+        if not async_submission:
+            generation_admission.require_waiting_video(model)
         if body.image and body.keyframes:
             raise HTTPException(status_code=422, detail="Use image or keyframes, not both")
         if body.reference_image and (body.image or body.keyframes):

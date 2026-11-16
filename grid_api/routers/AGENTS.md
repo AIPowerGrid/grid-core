@@ -70,8 +70,14 @@ transport, accounts, stats, health/metrics.
   dispatches or moves money; unknown/foreign keys return indistinguishable 404s
   and merged duplicate keys fail 409. Key text is not a URL selector or bearer
   capability. The private response adds the stored normalized `request_hash`
-  so a client can bind recovery to its own intent. New admission defaults off. Scoped
-  `inference.submit` authentication, a UUIDv4 `Idempotency-Key`, a positive
+  so a client can bind recovery to its own intent. New admission defaults off.
+  A separate default `pilot` mode admits only a configured private account
+  cohort before its <=24-hour expiry. Fresh blocked keys reject before source
+  decoding/staging; replay checks the original intent and does not charge or
+  upload again. Recheck admission after staging and capture the earlier deadline
+  for the credit transaction. Contract-backed legacy waiting/chat video cannot
+  bypass pilot mode; public `open` is an explicit, separately reviewed choice.
+  Scoped `inference.submit` authentication, a UUIDv4 `Idempotency-Key`, a positive
   `max_cost_micro_usd` and a live credit hold are required. The typed body is
   bounded before JSON parsing and input-bearing validation errors are redacted.
   Replay/recovery remain available after admission rollback; changed intent
@@ -99,8 +105,10 @@ transport, accounts, stats, health/metrics.
   quota, credit or dispatch. One retained quote returns 201; exact replay 200,
   changed intent 409 and exhausted retained capacity 429. GET/accepted replay
   survive rollback and expiry; expired identity never becomes a new quote.
-  `binding_schema` distinguishes readable legacy v1 from new v2 snapshots
-  with a frozen `payment.eip712_domain`; no old commitment is rewritten.
+  `binding_schema` distinguishes readable legacy v1/v2 from new v3 snapshots
+  with a frozen domain and upfront/EIP-3009 terms; no old commitment is rewritten.
+  An expired quote pilot closes new creation without blocking Core startup;
+  retained owner GET/replay remains available with its enable flag still set.
   Replies are private/no-store and explicitly `payment_enabled:false`; no
   `/pay` route or PAYMENT-REQUIRED challenge exists. This is not a live x402
   rail, held generation, stock-client compatibility or public model permission.

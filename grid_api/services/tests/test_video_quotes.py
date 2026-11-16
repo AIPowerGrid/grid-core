@@ -98,18 +98,24 @@ async def test_replay_after_tariff_change_and_expiry_keeps_one_nonce_seed_and_pl
 
 
 @pytest.mark.asyncio
-async def test_legacy_domainless_quote_recovers_without_upgrade_or_new_nonce(db, admission):
+@pytest.mark.parametrize("version", [1, 2])
+async def test_legacy_quote_recovers_without_upgrade_or_new_nonce(db, admission, version):
     aid = await owner(0)
     current, key = await prepared(aid)
     legacy = current.snapshot
-    legacy["schema"] = "aipg.video-quote-binding.v1"
-    legacy["payment"].pop("eip712_domain")
+    legacy["schema"] = f"aipg.video-quote-binding.v{version}"
+    if version == 1:
+        legacy["payment"].pop("eip712_domain")
+    legacy["payment"].pop("payment_flow")
+    legacy["payment"].pop("asset_transfer_method")
     old = quotes.PreparedVideoQuote(quotes._canonical(legacy))
     saved, _ = await quotes.persist(old, idempotency_key=key, **LIMITS)
     replay, created = await quotes.persist(current, idempotency_key=key, **LIMITS)
     assert not created and replay["snapshot"] == saved["snapshot"] == legacy
     assert replay["authorization_nonce"] == saved["authorization_nonce"]
-    assert "eip712_domain" not in quotes.view(await quotes.lookup(aid, idempotency_key=key))["payment"]
+    payment = quotes.view(await quotes.lookup(aid, idempotency_key=key))["payment"]
+    assert ("eip712_domain" in payment) is (version == 2)
+    assert "payment_flow" not in payment and "asset_transfer_method" not in payment
 
 
 @pytest.mark.asyncio
@@ -289,10 +295,17 @@ def test_quote_settings_are_dark_bounded_and_require_private_pilot():
     for change in ({"video_x402_quote_accounts": []}, {"video_x402_quote_pay_to": ""},
                    {"video_x402_quote_pay_to": "0x" + "0" * 40}, {"video_x402_quotes_until": None},
                    {"video_x402_quotes_until": datetime.now(UTC) + timedelta(days=2)},
-                   {"video_x402_quotes_until": datetime.now(UTC) - timedelta(seconds=1)},
                    {"video_x402_quote_capacity": 1}, {"video_x402_quote_network": "eip155:1"}):
         with pytest.raises(ValueError):
             GridSettings(_env_file=None, **{**enabled, **change})
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_expired_quote_pilot_metadata_keeps_core_startup_available(enabled):
+    settings = GridSettings(_env_file=None, video_x402_quotes_enabled=enabled,
+                            video_x402_quote_accounts=[uuid4()], video_x402_quote_pay_to=PAY_TO,
+                            video_x402_quotes_until=datetime.now(UTC) - timedelta(days=1))
+    assert settings.video_x402_quotes_enabled == enabled
 
 
 def migration():

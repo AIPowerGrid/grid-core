@@ -15,7 +15,7 @@ from pydantic import ConfigDict, Field
 from ..auth import extract_api_key
 from ..config import get_settings
 from ..ratelimit import limiter
-from ..services import accounts, media, media_jobs, quota, video_plans, video_sources
+from ..services import accounts, generation_admission, media, media_jobs, quota, video_plans, video_sources
 from . import _video_body
 from .videos import VideoRequest, validate_video
 
@@ -100,6 +100,8 @@ def _error(exc: Exception) -> JSONResponse:
         code, detail = 409, "Idempotency key conflicts with another video request"
     elif isinstance(exc, media_jobs.MediaJobPaymentRequired):
         code, detail = 402, "A positive live credit hold within the cost ceiling is required"
+    elif isinstance(exc, media_jobs.MediaJobAdmissionClosed):
+        code, detail = 503, "Async video admission is unavailable; recover any existing receipt"
     elif isinstance(exc, media_jobs.MediaJobCapacityExceeded):
         code, detail = 429, "Too many held async video jobs; retry after one finishes"
     elif isinstance(exc, media_jobs.MediaJobError):
@@ -121,11 +123,18 @@ async def submit_video_job(
         settings = get_settings()
         user = await _authenticate(apikey, authorization, x_grid_user_assertion, x_grid_user_token)
         media_jobs.validate_idempotency_key(idempotency_key)
+        try:
+            generation_admission.require_async_video(settings, user["account_id"])
+        except HTTPException:
+            # Existing requests remain recoverable after cohort removal/expiry.
+            # Fresh blocked keys must not reach private input decoding/staging.
+            existing = await media_jobs.recover(user["account_id"], idempotency_key=idempotency_key)
+            if existing is None:
+                raise
         intent = request_hash(body)
         row = await media_jobs.lookup_request(user["account_id"], idempotency_key, intent)
         if row is None:
-            if not settings.media_async_enabled:
-                raise HTTPException(503, detail="Async video admission is disabled")
+            admission_deadline = generation_admission.require_async_video(settings, user["account_id"])
             native = body.model_dump(exclude_unset=True, exclude_none=True, exclude={"max_cost_micro_usd"})
             native["model"] = body.model
             inputs = await validate_video(VideoRequest.model_validate(native), user, async_submission=True)
@@ -133,9 +142,13 @@ async def submit_video_job(
             plan.check_inputs()
             await quota.check_and_consume(dict(user))
             payload = await plan.stage()
+            latest_deadline = generation_admission.require_async_video(settings, user["account_id"])
+            if latest_deadline is not None:
+                admission_deadline = min(admission_deadline or latest_deadline, latest_deadline)
             prepared = media_jobs.prepare(account_id=user["account_id"], idempotency_key=idempotency_key,
                 request_hash=intent, model=plan.model, payload=payload, route_models=plan.route_models,
-                preferred_worker=body.worker or "", max_cost_micro=body.max_cost_micro_usd)
+                preferred_worker=body.worker or "", max_cost_micro=body.max_cost_micro_usd,
+                admission_deadline=admission_deadline)
             row = await media_jobs.reserve(prepared, user=user, concurrency_limit=settings.media_async_concurrency)
         status = await media_jobs.recover(user["account_id"], row["job_id"])
         if status is None:

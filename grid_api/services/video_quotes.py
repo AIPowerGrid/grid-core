@@ -183,13 +183,14 @@ def prepare(*, account_id, idempotency_key: str, request_hash: str, plan: video_
     created = _now().replace(microsecond=0)
     expires = created + timedelta(seconds=TTL_SECONDS)
     quote = PreparedVideoQuote(_canonical({
-        "schema": "aipg.video-quote-binding.v2", "quote_id": str(uuid4()), "job_id": str(uuid4()),
+        "schema": "aipg.video-quote-binding.v3", "quote_id": str(uuid4()), "job_id": str(uuid4()),
         "owner": str(owner), "idempotency_hash": key_hash, "request_hash": intent,
         "preferred_worker": preferred_worker,
         "plan": frozen, "plan_hash": plan.sha256,
         "price": {"version": pricing.PRICE_BOOK_VERSION, "currency": "USD", "video_per_second_usd": rate,
                   "discount_bps": 0},
-        "payment": {"scheme": "exact", "network": network, "asset": USDC[network], "pay_to": pay_to,
+        "payment": {"scheme": "exact", "asset_transfer_method": "eip3009", "payment_flow": "upfront",
+                    "network": network, "asset": USDC[network], "pay_to": pay_to,
                     "amount_micro": amount, "valid_after": 0, "valid_before": int(expires.timestamp()),
                     "eip712_domain": payment_domain(network)},
         "max_cost_micro": max_cost_micro, "created": int(created.timestamp()), "expires": int(expires.timestamp()),
@@ -211,7 +212,7 @@ def _validate_row(row: dict) -> dict:
                 raise VideoQuoteError("video quote deadline changed")
         payment, plan, price = snapshot["payment"], snapshot["plan"], snapshot["price"]
         rate, seconds = price["video_per_second_usd"], plan["payload"]["seconds"]
-        if (snapshot["schema"] not in {"aipg.video-quote-binding.v1", "aipg.video-quote-binding.v2"}
+        if (snapshot["schema"] not in {"aipg.video-quote-binding.v1", "aipg.video-quote-binding.v2", "aipg.video-quote-binding.v3"}
                 or plan["schema"] != "aipg.video-plan.v1"
                 or _hash(plan) != _digest(row["plan_hash"]) or payment["network"] not in USDC
                 or payment["asset"] != USDC[payment["network"]] or payment["scheme"] != "exact"
@@ -227,11 +228,16 @@ def _validate_row(row: dict) -> dict:
                 or type(row["amount_micro"]) is not int or not 0 < row["amount_micro"] <= row["max_cost_micro"]
                 or not _HASH.fullmatch(snapshot["salt"])):
             raise VideoQuoteError("invalid video quote binding")
-        if snapshot["schema"] == "aipg.video-quote-binding.v2":
+        if snapshot["schema"] in {"aipg.video-quote-binding.v2", "aipg.video-quote-binding.v3"}:
             if payment.get("eip712_domain") != payment_domain(payment["network"]):
                 raise VideoQuoteError("video quote signing domain changed")
         elif "eip712_domain" in payment:
             raise VideoQuoteError("legacy quote cannot acquire a signing domain")
+        if snapshot["schema"] == "aipg.video-quote-binding.v3":
+            if payment.get("payment_flow") != "upfront" or payment.get("asset_transfer_method") != "eip3009":
+                raise VideoQuoteError("video quote payment flow changed")
+        elif "payment_flow" in payment or "asset_transfer_method" in payment:
+            raise VideoQuoteError("legacy quote cannot acquire upfront terms")
         for key in ("idempotency_hash", "request_hash", "commitment"):
             _digest(row[key])
         return snapshot

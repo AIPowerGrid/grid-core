@@ -28,12 +28,27 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 
 ## Local Contracts
 
+- Private video envelope validation is offline and unrouted. Binding-v3 freezes
+  upfront/EIP-3009 terms; the future flow settles then proves a receipt before
+  job admission, without facilitator `/verify`. Old v1/v2 retain read-only
+  recovery, not fresh signing. Upgrade all candidate readers before v3 writes
+  and retain them on rollback. The helper derives x402-v2
+  requirements from one immutable live quote and checks the original inner
+  signature after strict outer/header decoding. Returned facilitator JSON is
+  an ephemeral capability, not send permission or receipt-backed admission.
+  Authentication/owner loading, staged inputs, a winning durable attempt,
+  independent chain proof and atomic funding remain separate obligations.
+  Both normally expired quote and credit pilots retain Core startup and
+  authorized recovery with enable flags unchanged; new work closes at runtime.
 - The optional `0052` Safe refund journal is non-routable. It requires an owned
   proved payment and closed refund obligation, freezes the original payer/exact
   amount and one reviewed Safe nonce, and commits outbound receipt ownership
   with confirmed refund state. It moves no credit or worker reward and never
   clears historical refund-due timestamps. No signer or automatic nonce/send
   permission exists; actual Safe/refund and rollout qualification remain gates.
+  Safe 1.4.1 execution hashes must be decoded from indexed event topics, not
+  data. Opt-in local-fork execution covers copied real contracts and SQL;
+  it grants no public broadcaster, live-chain proof or funded launch approval.
 
 - Private `0051` receipt-backed video admission is non-routable. It commits
   actual owned proof, exact external hold, frozen outbox and original private
@@ -76,6 +91,17 @@ chain sync, and settlement scaffolding. Entry point: `main.py`.
 - **Billing:** live charging must reserve before dispatch and reconcile/refund
   after terminal job state. Add tests for every endpoint that moves paid work.
 - **Async video:** `MEDIA_ASYNC_ENABLED=0` closes new async admission only.
+  Admission defaults to `pilot`: enabling requires one to ten distinct private
+  account UUIDs and an aware expiry no more than 24 hours ahead at startup.
+  A normally expired pilot can restart with its flag still set; runtime admission
+  stays closed, while all Core routes and accepted-job recovery remain available.
+  New holds recheck the captured deadline after account/balance locks and
+  journal insertion; expiry
+  rolls back paid writes and restores separately drawn pockets. Existing
+  replay/status/outbox work survives expiry or cohort removal. Contract-backed
+  waiting/chat video routes reject in pilot mode, even when async is disabled.
+  Explicit `open` mode requires clearing both cohort and expiry; it does not
+  bypass recipe, feature, pricing, credit, worker or model-permission gates.
   Audio/video conditioning adds separately default-dark `audio-to-video` and
   `video-to-video` admission; Ingredients appearance adds `appearance-to-video`.
   Do not infer these gates from the base video path,
