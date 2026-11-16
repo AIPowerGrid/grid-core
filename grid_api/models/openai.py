@@ -5,7 +5,7 @@
 
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ChatMessage(BaseModel):
@@ -41,7 +41,9 @@ class ChatCompletionRequest(BaseModel):
     top_p: float = Field(default=0.9, ge=0, le=1)
     max_tokens: Optional[int] = Field(default=None, ge=1, le=32768)
     stream: bool = False
-    n: int = Field(default=1, ge=1, le=4)
+    # One choice per request: the worker stream carries a single choice, so a
+    # backend asked for more would interleave them into one billed answer.
+    n: int = 1
     # Modeled so they're documented + validated; still forwarded verbatim.
     tools: Optional[list[Any]] = None
     tool_choice: Optional[Union[str, dict]] = None
@@ -51,6 +53,16 @@ class ChatCompletionRequest(BaseModel):
     seed: Optional[int] = None
     response_format: Optional[dict] = None
     stream_options: Optional[dict] = None
+
+    @field_validator("n")
+    @classmethod
+    def single_choice_only(cls, value: int) -> int:
+        if value != 1:
+            raise ValueError(
+                "n must be 1: chat completions return one choice per request; "
+                "send separate requests for more"
+            )
+        return value
 
     @model_validator(mode="before")
     @classmethod

@@ -117,3 +117,16 @@ def test_reasoning_effort_normalization_leaves_other_requests_alone():
         plain = {"model": "m", "reasoning": "not-a-dict", "output_config": None}
         assert normalize_reasoning_effort(api_format, dict(plain)) == plain
     assert "reasoning_effort" not in _normalize_worker_request(_request().model_dump(exclude_none=True))
+
+
+def test_one_choice_is_the_default_and_is_accepted():
+    assert _request().n == 1
+    assert _request(n=1).n == 1
+
+
+@pytest.mark.parametrize("count", [0, 2, 4])
+def test_more_than_one_choice_is_refused_before_dispatch(count: int):
+    # A worker stream carries one choice. A backend asked for two interleaves
+    # them into a single answer that is billed for both.
+    with pytest.raises(ValidationError, match="n must be 1"):
+        _request(n=count)
