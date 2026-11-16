@@ -710,7 +710,9 @@ async def worker_websocket(ws: WebSocket):
             """
             while True:
                 try:
-                    job = await job_queue.pop_job(worker_id, timeout_ms=5000, job_types=job_types)
+                    job = await job_queue.pop_job(
+                        worker_id, timeout_ms=job_queue.POLL_BLOCK_MS, job_types=job_types,
+                    )
                     if job:
                         await local_jobs.put(job)  # blocks (backpressure) until taken
                 except asyncio.CancelledError:
