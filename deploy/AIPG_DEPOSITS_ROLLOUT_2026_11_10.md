@@ -94,3 +94,15 @@ Select `/home/aipg/releases/grid-core-0d2ee0b7` through the symlink, restore
 `aipg-gridapi`. The older release ignores `GRID_AIPG_PRICE_FILE`, so restore
 the environment file with it or AIPG deposits would read the unset env price
 and stay unavailable. Rolling back reintroduces the Pillow advisories.
+
+## Price renewals
+
+- 2026-11-16 18:09 UTC, on the owner's word: republished at 1,000 micro-USD
+  per AIPG, unchanged. Epoch `2026-11-16T1809Z`, accepts transfers mined from
+  2026-11-16T17:09Z, valid to `2026-11-23T18:09:14Z`. Market that day was
+  about $0.00128 (CoinGecko and GeckoTerminal) with about $1,440 of pool
+  liquidity and no 24-hour volume, so credit is about 24% under spot after
+  the haircut. Core read the new file as valid without a restart. A transfer
+  mined before 17:09Z and not yet claimed can no longer be claimed; none was
+  known. Next renewal is due before 2026-11-23T18:09Z.
+
