@@ -538,12 +538,16 @@ async def _free_first(account_id, wallet: str | None, cost: int, ref: str) -> in
     return await free_credits.consume(account_id, wallet, cost, ref=ref)
 
 
-async def _promo_first(account_id, cost: int, ref: str) -> int:
-    """Draw durable expiring promotion grants before daily and paid credit."""
+async def _promo_first(account_id, cost: int, ref: str, *, media: bool = False) -> int:
+    """Draw durable expiring promotion grants before daily and paid credit.
+    Text-only campaigns never fund a media job."""
     if not promotions.spending_live():
         return 0
     try:
-        return await promotions.consume(account_id, cost, ref=ref)
+        from . import wallet_trial
+
+        exclude = wallet_trial.TEXT_ONLY_CAMPAIGNS if media else frozenset()
+        return await promotions.consume(account_id, cost, ref=ref, exclude_campaigns=exclude)
     except Exception as exc:
         logger.warning(
             "promotion consume failed; falling through to daily/paid error_type=%s",
@@ -1174,7 +1178,7 @@ async def authorize_media(account_id, model: str, job_type: str, n: int, seconds
                 "reason": service_reason}
     # PROMO → DAILY FREE → PAID (same contract as authorize_request).
     ref = str(job_id)
-    from_promo = await _promo_first(account_id, cost, ref)
+    from_promo = await _promo_first(account_id, cost, ref, media=True)
     from_free = await _free_first(account_id, None, cost - from_promo, ref)
     remainder = cost - from_promo - from_free
     if record_reservation:

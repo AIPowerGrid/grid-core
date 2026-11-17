@@ -913,6 +913,17 @@ content sanitization, and reward settlement.
   Google identity and has a finite global budget; wallet-only accounts do not
   receive it. The daily baseline also requires verified Google. Holder value
   defaults to zero until qualification cannot be recycled between wallets.
+- The wallet trial credit (`wallet_trial.py`, `GRID_WALLET_TRIAL_ENABLED`, off
+  by default) is the one deliberate exception, and it does not claim to resist
+  Sybils either. It bounds what farming can take: a small grant once per
+  account and once per network address (keyed digest in
+  `grid_wallet_trial_claims`; IPv6 by /64; a non-public address never
+  qualifies), a per-hour release, a fixed total campaign budget, a short
+  expiry, and text jobs only (`credits._promo_first(media=True)` skips
+  `TEXT_ONLY_CAMPAIGNS`). The hour check and the address claim run inside
+  `promotions.grant_once` under the campaign lock, so they commit or roll back
+  with the grant. Changing the amount, budget or expiry needs a new campaign
+  id. Every failure grants nothing.
 - Account merges require proof of both sides, refuse active holds, revoke source
   keys, preserve accrued payout reachability, and move purchased balance through
   paired append-only ledger entries.

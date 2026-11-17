@@ -371,7 +371,7 @@ async def wallet_verify(request: Request, form: WalletVerifyForm):
             label="wallet-login",
             is_session=True,
         )
-    return {
+    response = {
         "account_id": str(acct["id"]),
         "wallet": wallet,
         "username": acct.get("username"),
@@ -381,6 +381,15 @@ async def wallet_verify(request: Request, form: WalletVerifyForm):
         "api_key": legacy_key,
         "created": created,
     }
+    from ..services import wallet_trial
+
+    if wallet_trial.ENABLED:
+        from slowapi.util import get_remote_address
+
+        response["trial_credit"] = wallet_trial.public(
+            await wallet_trial.grant(acct["id"], get_remote_address(request))
+        )
+    return response
 
 
 @router.post("/v1/account/identities/wallet/link")
