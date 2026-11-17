@@ -7,16 +7,16 @@
 # entries are retired bucket/developer-path disclosures. This file records no
 # secret value and must never contain a broad rule, path, or regex exclusion.
 # This exact code fingerprint is a keyword-argument placeholder, not a secret.
-bbfaca603eda75ae20805cbfc39884c1fa2e12fa:grid_api/services/p2p/protocol.py:generic-api-key:168
+2dafdc3e2957504deb8d68449a15a4c7dfbd2c7e:grid_api/services/p2p/protocol.py:generic-api-key:168
 grid_api/services/p2p/protocol.py:generic-api-key:176
-2a8219045f1c5b00d8188df543d2a653bc6596c5:docs/SYSTEM_SWEEP_2026-07-01.md:aipg-local-dev-path:91
-2a8219045f1c5b00d8188df543d2a653bc6596c5:docs/SYSTEM_SWEEP_2026-07-01.md:aipg-r2-bucket:13
-2fafcf40227390c4b0b6ddf82b93d6fabd2819dd:clientData_template.py:generic-api-key:9
-43a602e48f35f9ae29150b28ed0ff2b3486b16ee:tests/test_alchemy.py:generic-api-key:10
-43a602e48f35f9ae29150b28ed0ff2b3486b16ee:tests/test_image.py:generic-api-key:10
-43a602e48f35f9ae29150b28ed0ff2b3486b16ee:tests/test_text.py:generic-api-key:10
-8161c74b1c5cef937aeda0f7ef1cf1edb870e263:tests/test_alchemy.py:generic-api-key:9
-8161c74b1c5cef937aeda0f7ef1cf1edb870e263:tests/test_image.py:generic-api-key:9
-8161c74b1c5cef937aeda0f7ef1cf1edb870e263:tests/test_text.py:generic-api-key:9
-81ca4227e8f73bfd14045cb702f1404cbe7ee516:grid_api/services/storage.py:aipg-r2-bucket:43
-8c00255e8f91beddcfa9acf2371e4d3767596be9:test.py:generic-api-key:6
+17c03c04daf1e62239a5134a25e7b1daadffe88c:docs/SYSTEM_SWEEP_2026-07-01.md:aipg-local-dev-path:91
+17c03c04daf1e62239a5134a25e7b1daadffe88c:docs/SYSTEM_SWEEP_2026-07-01.md:aipg-r2-bucket:13
+046988c69c7f3233582af6b0c2c31968d5515c54:clientData_template.py:generic-api-key:9
+0f248488961a37384c6eac159f5c7684b574cbc5:tests/test_alchemy.py:generic-api-key:10
+0f248488961a37384c6eac159f5c7684b574cbc5:tests/test_image.py:generic-api-key:10
+0f248488961a37384c6eac159f5c7684b574cbc5:tests/test_text.py:generic-api-key:10
+4e11e8e793e44aa418573190e590ad1f377eef4b:tests/test_alchemy.py:generic-api-key:9
+4e11e8e793e44aa418573190e590ad1f377eef4b:tests/test_image.py:generic-api-key:9
+4e11e8e793e44aa418573190e590ad1f377eef4b:tests/test_text.py:generic-api-key:9
+b5fe0c767a8f8ff5288a20ab82f29bd207628448:grid_api/services/storage.py:aipg-r2-bucket:43
+a3bf009761c970ff5448da58bdb6c5f1e0665e79:test.py:generic-api-key:6
