@@ -23,8 +23,7 @@ import os
 
 import sqlalchemy as sa
 
-from ..auth import _get_api_key_salt
-from ..safe_logging import error_type, opaque_id
+from ..safe_logging import _log_key, error_type, opaque_id
 from ..v2.schema import promo_grants, wallet_trial_claims
 from . import promotions
 
@@ -127,6 +126,13 @@ def caller_address(request) -> str | None:
 _campaign_ready = False
 
 
+def _address_key() -> bytes:
+    """Server-only 32-byte key. The salt itself may be longer than a blake2b
+    key allows, so this reuses the key Core already derives from it; the
+    `person` label on each digest keeps the two uses apart."""
+    return _log_key()
+
+
 def address_hash(remote_address: str | None) -> str | None:
     """Server-keyed digest of the caller's network address, or None when the
     address is unusable. IPv6 is reduced to its /56. Loopback and private
@@ -140,13 +146,8 @@ def address_hash(remote_address: str | None) -> str | None:
         canonical = f"{block.network_address}/{IPV6_PREFIX}"
     else:
         canonical = str(ip)
-    # blake2b keys are at most 64 bytes and the salt may be longer, so derive a
-    # domain-separated key from it first (same pattern as safe_logging).
-    key = hashlib.blake2b(
-        _get_api_key_salt().encode("utf-8"), digest_size=32, person=b"aipg-trial-key1",
-    ).digest()
     return hashlib.blake2b(
-        canonical.encode("utf-8"), key=key, digest_size=32, person=b"aipg-trial-ip-v1",
+        canonical.encode("utf-8"), key=_address_key(), digest_size=32, person=b"aipg-trial-ip-v1",
     ).hexdigest()
 
 

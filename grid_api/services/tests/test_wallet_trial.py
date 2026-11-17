@@ -36,7 +36,7 @@ async def trial_db(monkeypatch):
     monkeypatch.setattr(wallet_trial, "HOURLY_MICRO", 40_000)
     monkeypatch.setattr(wallet_trial, "EXPIRES_DAYS", 3)
     monkeypatch.setattr(wallet_trial, "_campaign_ready", False)
-    monkeypatch.setattr(wallet_trial, "_get_api_key_salt", lambda: "test-salt-" + "x" * 90)
+    monkeypatch.setattr(wallet_trial, "_address_key", lambda: b"k" * 32)
 
     async def new_account():
         aid = uuid4()
@@ -145,9 +145,9 @@ async def test_credit_pays_for_text_but_not_media(trial_db):
 
 
 def test_address_digest_is_keyed_and_not_the_address(monkeypatch):
-    monkeypatch.setattr(wallet_trial, "_get_api_key_salt", lambda: "a" * 40)
+    monkeypatch.setattr(wallet_trial, "_address_key", lambda: b"a" * 32)
     first = wallet_trial.address_hash("8.8.4.7")
-    monkeypatch.setattr(wallet_trial, "_get_api_key_salt", lambda: "b" * 40)
+    monkeypatch.setattr(wallet_trial, "_address_key", lambda: b"b" * 32)
     assert len(first) == 64 and "8.8.4" not in first
     assert wallet_trial.address_hash("8.8.4.7") != first
     assert wallet_trial.address_hash("::ffff:8.8.4.7") == wallet_trial.address_hash("8.8.4.7")
@@ -181,8 +181,14 @@ def test_a_direct_caller_cannot_name_another_address():
 
 
 def test_a_salt_longer_than_the_hash_key_limit_still_works(monkeypatch):
-    monkeypatch.setattr(wallet_trial, "_get_api_key_salt", lambda: "s" * 200)
-    assert len(wallet_trial.address_hash("8.8.4.4")) == 64
+    from grid_api import safe_logging
+
+    monkeypatch.setattr(safe_logging, "_get_api_key_salt", lambda: "s" * 200)
+    safe_logging._log_key.cache_clear()
+    try:
+        assert len(wallet_trial.address_hash("8.8.4.4")) == 64
+    finally:
+        safe_logging._log_key.cache_clear()
 
 
 def test_earlier_trial_campaigns_stay_text_only():
