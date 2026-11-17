@@ -143,7 +143,7 @@ def address_hash(remote_address: str | None) -> str | None:
     # blake2b keys are at most 64 bytes and the salt may be longer, so derive a
     # domain-separated key from it first (same pattern as safe_logging).
     key = hashlib.blake2b(
-        _get_api_key_salt().encode("utf-8"), digest_size=32, person=b"aipg-trial-key-v1",
+        _get_api_key_salt().encode("utf-8"), digest_size=32, person=b"aipg-trial-key1",
     ).digest()
     return hashlib.blake2b(
         canonical.encode("utf-8"), key=key, digest_size=32, person=b"aipg-trial-ip-v1",
