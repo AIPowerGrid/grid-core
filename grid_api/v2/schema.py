@@ -220,6 +220,23 @@ promo_spends = sa.Table(
 )
 
 
+# One wallet trial credit per network address, ever. The address is stored only
+# as a server-keyed digest; the row exists to refuse a repeat, not to list IPs.
+wallet_trial_claims = sa.Table(
+    "grid_wallet_trial_claims",
+    metadata,
+    sa.Column("address_hash", sa.String(64), primary_key=True),
+    sa.Column(
+        "account_id",
+        sa.Uuid,
+        sa.ForeignKey("grid_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("created", sa.DateTime(timezone=True), nullable=False, default=utcnow),
+)
+
+
 # Backend applications are durable principals with independently rotatable keys
 # and bounded delegation authority. They may pay for service-owned work directly
 # or exchange a locally authenticated app subject / provider proof for a short-

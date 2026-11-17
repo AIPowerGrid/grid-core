@@ -175,12 +175,18 @@ async def ensure_fixed_campaign(
             raise
 
 
-async def grant_once(account_id, campaign_id: str = WELCOME_CAMPAIGN_ID, *, ref: str | None = None) -> dict:
+async def grant_once(account_id, campaign_id: str = WELCOME_CAMPAIGN_ID, *, ref: str | None = None,
+                     guard=None) -> dict:
     """Issue one campaign grant to one canonical account.
 
     The campaign row is locked before checking/incrementing its budget, making
     concurrent first logins unable to overrun the global campaign cap. The
     account+campaign constraint is the second idempotency guard.
+
+    `guard(session, campaign, now)` runs under that same campaign lock, after
+    the budget check and before the grant is written. It may write rows of its
+    own (they commit or roll back with the grant) and returns a refusal status,
+    or None to allow the grant.
     """
     if not PROMO_ENABLED:
         return {"status": "disabled", "granted_micro": 0}
@@ -215,6 +221,11 @@ async def grant_once(account_id, campaign_id: str = WELCOME_CAMPAIGN_ID, *, ref:
         if budget is not None and granted + amount > int(budget):
             return {"status": "budget_exhausted", "granted_micro": 0}
         expires = now + timedelta(days=int(campaign["expires_days"])) if campaign["expires_days"] else None
+        if guard is not None:
+            refused = await guard(session, campaign, now)
+            if refused:
+                await session.rollback()
+                return {"status": str(refused), "granted_micro": 0}
         try:
             await session.execute(sa.insert(promo_grants).values(
                 id=uuid4(), account_id=aid, campaign_id=campaign_id,
@@ -244,7 +255,8 @@ async def grant_once(account_id, campaign_id: str = WELCOME_CAMPAIGN_ID, *, ref:
             "expires": expires.isoformat() if expires else None}
 
 
-async def available_micro(account_id, *, spendable_only: bool = False) -> int:
+async def available_micro(account_id, *, spendable_only: bool = False,
+                          exclude_campaigns: frozenset[str] = frozenset()) -> int:
     if not PROMO_ENABLED or not account_id:
         return 0
     if spendable_only and not spending_live():
@@ -259,7 +271,7 @@ async def available_micro(account_id, *, spendable_only: bool = False) -> int:
                 sa.or_(promo_grants.c.expires.is_(None), promo_grants.c.expires > now),
             )
             if spendable_only:
-                query = query.where(promo_grants.c.campaign_id.in_(PROMO_SPENDABLE_CAMPAIGNS))
+                query = query.where(promo_grants.c.campaign_id.in_(PROMO_SPENDABLE_CAMPAIGNS - exclude_campaigns))
             value = await session.scalar(query)
             return int(value or 0)
     except Exception:
@@ -278,8 +290,10 @@ async def held_micro(account_id, ref: str) -> int:
         return int(value or 0)
 
 
-async def consume(account_id, want_micro: int, ref: str) -> int:
-    """Hold up to want_micro from earliest-expiring active grants."""
+async def consume(account_id, want_micro: int, ref: str, *,
+                  exclude_campaigns: frozenset[str] = frozenset()) -> int:
+    """Hold up to want_micro from earliest-expiring active grants. Grants of
+    `exclude_campaigns` are left alone (a campaign limited to some job types)."""
     if not spending_live() or not account_id or want_micro <= 0 or not ref:
         return 0
     aid = _as_uuid(account_id)
@@ -295,7 +309,7 @@ async def consume(account_id, want_micro: int, ref: str) -> int:
             sa.select(promo_grants.c.id, promo_grants.c.remaining_micro)
             .where(
                 promo_grants.c.account_id == aid,
-                promo_grants.c.campaign_id.in_(PROMO_SPENDABLE_CAMPAIGNS),
+                promo_grants.c.campaign_id.in_(PROMO_SPENDABLE_CAMPAIGNS - exclude_campaigns),
                 promo_grants.c.status == "active",
                 promo_grants.c.remaining_micro > 0,
                 sa.or_(promo_grants.c.expires.is_(None), promo_grants.c.expires > now),

@@ -10,7 +10,7 @@ production database match the Grid-owned schema contracts without relying on
 
 - `env.py` - Alembic environment.
 - `script.py.mako` - revision template.
-- `versions/` - ordered migration revisions. Current source head: `0047`
+- `versions/` - ordered migration revisions. Current source head: `0048`
   (`0009` payout-pref cols, `0010` grid_revenue, `0011` grid_payout_legs,
   `0012` reservations.free_micro, `0013` universal identities, scoped keys,
   promotional grants, and reservations.promo_micro; `0014` codifies safe DB
@@ -67,9 +67,14 @@ production database match the Grid-owned schema contracts without relying on
   payment occurs. New disclosed minimums are snapshotted only at authorization.
   `0047` creates hash-only `grid_oauth_refresh_tokens` for rotating OAuth
   refresh sessions. It is operational state, not an economic record.
+  `0048` creates `grid_wallet_trial_claims`: one keyed address digest per
+  wallet trial credit. It skips creation when a fresh boot's `create_all`
+  already made the table.
 
 ## Local Contracts
 
+- Apply `0048` before `GRID_WALLET_TRIAL_ENABLED` is turned on. Downgrade drops
+  the claims, which would let an address claim the trial credit again.
 - Apply `0047` before a release containing it starts, even with refresh
   tokens off: the OAuth sweeper prunes the table. Downgrade drops it, which
   only signs OAuth clients out.
