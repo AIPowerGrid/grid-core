@@ -230,6 +230,10 @@ transport, accounts, stats, health/metrics.
   wallet, allowlisted frontend domain/URI, Base chain id, issue/expiry time, and
   a single-use nonce. `/wallet/nonce` remains for authenticated wallet-link
   proofs, not for minting a login session.
+  With `GRID_WALLET_TRIAL_ENABLED`, `POST /v1/accounts/wallet/verify` also
+  returns `trial_credit` (`status`, and on a grant `granted_usd`,
+  `remaining_usd`, `expires`, `models`); internal refusal reasons are
+  reported only as `unavailable`. The field is absent when the trial is off.
 - `worker_media.py` - `POST /v1/workers/self/media-jobs`, a private read-only
   cache-reconciliation authority for the exact rig bound to a dedicated worker
   credential. It does not grant account access, dispatch or financial writes.

@@ -917,10 +917,16 @@ content sanitization, and reward settlement.
   by default) is the one deliberate exception, and it does not claim to resist
   Sybils either. It bounds what farming can take: a small grant once per
   account and once per network address (keyed digest in
-  `grid_wallet_trial_claims`; IPv6 by /64; a non-public address never
+  `grid_wallet_trial_claims`; IPv6 by /56; a non-public address never
   qualifies), a per-hour release, a fixed total campaign budget, a short
-  expiry, and text jobs only (`credits._promo_first(media=True)` skips
-  `TEXT_ONLY_CAMPAIGNS`). The hour check and the address claim run inside
+  expiry, and text jobs only (media authorization and media quotes skip every
+  `wallet-trial-*` campaign, so an earlier id stays text-only while it is
+  spent down). The address is the connecting peer, except that a peer inside
+  the CDN's ranges (`GRID_WALLET_TRIAL_EDGE_CIDRS`, Cloudflare by default) is
+  replaced by `CF-Connecting-IP`; a deployment that trusts client-supplied
+  `X-Forwarded-For` (the Docker default) must not enable the trial. A
+  sign-in made by a server on the user's behalf, such as the Console, is
+  limited by that server's address, so it yields at most one grant. The hour check and the address claim run inside
   `promotions.grant_once` under the campaign lock, so they commit or roll back
   with the grant. Changing the amount, budget or expiry needs a new campaign
   id. Every failure grants nothing.

@@ -31,13 +31,12 @@ async def trial_db(monkeypatch):
     monkeypatch.setattr(promotions, "PROMO_SPENDABLE_CAMPAIGNS", frozenset({CAMPAIGN}))
     monkeypatch.setattr(wallet_trial, "ENABLED", True)
     monkeypatch.setattr(wallet_trial, "CAMPAIGN_ID", CAMPAIGN)
-    monkeypatch.setattr(wallet_trial, "TEXT_ONLY_CAMPAIGNS", frozenset({CAMPAIGN}))
     monkeypatch.setattr(wallet_trial, "GRANT_MICRO", 20_000)
     monkeypatch.setattr(wallet_trial, "BUDGET_MICRO", 100_000)
     monkeypatch.setattr(wallet_trial, "HOURLY_MICRO", 40_000)
     monkeypatch.setattr(wallet_trial, "EXPIRES_DAYS", 3)
     monkeypatch.setattr(wallet_trial, "_campaign_ready", False)
-    monkeypatch.setattr(wallet_trial, "_get_api_key_salt", lambda: "test-salt-" + "x" * 32)
+    monkeypatch.setattr(wallet_trial, "_get_api_key_salt", lambda: "test-salt-" + "x" * 90)
 
     async def new_account():
         aid = uuid4()
@@ -93,7 +92,7 @@ async def test_second_wallet_from_the_same_address_gets_nothing(trial_db):
 async def test_ipv6_addresses_in_one_block_count_as_one(trial_db):
     await wallet_trial.grant(await trial_db(), "2001:4860:4860:1::8888")
     refused = await wallet_trial.grant(await trial_db(), "2001:4860:4860:1:ffff::1")
-    other_block = await wallet_trial.grant(await trial_db(), "2001:4860:4860:2::8888")
+    other_block = await wallet_trial.grant(await trial_db(), "2001:4860:4861::8888")
     assert refused["status"] == "address_used"
     assert other_block["status"] == "granted"
 
@@ -161,3 +160,64 @@ def test_public_result_hides_internal_reasons():
     assert shown == {"status": "granted", "granted_usd": 0.02, "remaining_usd": 0.02,
                      "expires": "2026-11-20T00:00:00+00:00", "models": "text"}
     assert "retry" in wallet_trial.public({"status": "hour_exhausted", "granted_micro": 0})
+
+
+class _Request:
+    def __init__(self, peer, headers=None):
+        self.client = type("Client", (), {"host": peer})()
+        self.headers = headers or {}
+
+
+def test_behind_the_cdn_the_caller_is_the_one_the_cdn_names():
+    edge = "104.16.1.1"
+    assert wallet_trial.caller_address(_Request(edge, {"cf-connecting-ip": "8.8.4.4"})) == "8.8.4.4"
+    assert wallet_trial.caller_address(_Request(edge)) is None
+    assert wallet_trial.caller_address(_Request(edge, {"cf-connecting-ip": "junk"})) is None
+
+
+def test_a_direct_caller_cannot_name_another_address():
+    assert wallet_trial.caller_address(_Request("8.8.4.4", {"cf-connecting-ip": "1.1.1.1"})) == "8.8.4.4"
+    assert wallet_trial.address_hash(wallet_trial.caller_address(_Request(None))) is None
+
+
+def test_a_salt_longer_than_the_hash_key_limit_still_works(monkeypatch):
+    monkeypatch.setattr(wallet_trial, "_get_api_key_salt", lambda: "s" * 200)
+    assert len(wallet_trial.address_hash("8.8.4.4")) == 64
+
+
+def test_earlier_trial_campaigns_stay_text_only():
+    listed = frozenset({"wallet-trial-v0", "builder-x", CAMPAIGN})
+    assert wallet_trial.text_only_campaigns(listed) >= {"wallet-trial-v0", CAMPAIGN}
+    assert "builder-x" not in wallet_trial.text_only_campaigns(listed)
+
+
+def test_a_malformed_amount_switches_the_trial_off_instead_of_raising(monkeypatch):
+    import importlib
+
+    monkeypatch.setenv("GRID_WALLET_TRIAL_ENABLED", "1")
+    monkeypatch.setenv("GRID_WALLET_TRIAL_GRANT_MICRO", "0.02")
+    try:
+        reloaded = importlib.reload(wallet_trial)
+        assert reloaded.ENABLED is False and reloaded.GRANT_MICRO == 20_000
+    finally:
+        monkeypatch.delenv("GRID_WALLET_TRIAL_ENABLED")
+        monkeypatch.delenv("GRID_WALLET_TRIAL_GRANT_MICRO")
+        importlib.reload(wallet_trial)
+
+
+@pytest.mark.asyncio
+async def test_media_quotes_do_not_count_the_trial_credit(trial_db):
+    account = await trial_db()
+    await wallet_trial.grant(account, "8.8.4.7")
+    spendable = await promotions.available_micro(account, spendable_only=True)
+    for_media = await promotions.available_micro(
+        account, spendable_only=True, exclude_campaigns=wallet_trial.text_only_campaigns(),
+    )
+    assert (spendable, for_media) == (20_000, 0)
+
+
+@pytest.mark.asyncio
+async def test_returning_wallet_is_answered_without_touching_the_address(trial_db):
+    account = await trial_db()
+    await wallet_trial.grant(account, "8.8.4.7")
+    assert (await wallet_trial.grant(account, None))["status"] == "already"

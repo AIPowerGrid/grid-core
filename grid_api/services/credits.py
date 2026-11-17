@@ -392,6 +392,14 @@ async def quote_for_account(
         if summary["promotional"]["active"]
         else 0
     )
+    if promo_available and modality != "text":
+        # Mirror authorize_media: text-only campaigns never fund a media job.
+        from . import wallet_trial
+
+        promo_available = await promotions.available_micro(
+            _account_id(user), spendable_only=True,
+            exclude_campaigns=wallet_trial.text_only_campaigns(),
+        )
     daily_available = summary["free"]["remaining_micro"] if summary["free"]["active"] else 0
     paid_available = summary["paid"]["balance_micro"]
     from_promo = min(cost, promo_available)
@@ -546,7 +554,7 @@ async def _promo_first(account_id, cost: int, ref: str, *, media: bool = False) 
     try:
         from . import wallet_trial
 
-        exclude = wallet_trial.TEXT_ONLY_CAMPAIGNS if media else frozenset()
+        exclude = wallet_trial.text_only_campaigns() if media else frozenset()
         return await promotions.consume(account_id, cost, ref=ref, exclude_campaigns=exclude)
     except Exception as exc:
         logger.warning(

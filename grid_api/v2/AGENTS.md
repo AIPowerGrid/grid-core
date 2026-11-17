@@ -90,6 +90,9 @@ validator shadow-observation records.
 - `grid_reservations.promo_micro` and `grid_promo_spends` preserve the durable
   promotional allocation. Campaign grants are unique per canonical account and
   globally budgeted.
+- `grid_wallet_trial_claims` holds one server-keyed digest per network address
+  that has received the wallet trial credit. It is written in the same
+  transaction as the grant and never stores the address itself.
 - Reservation-time text rates and discount basis points are immutable billing
   evidence; settlement must not use a newer price book for an existing hold.
 - `grid_account_identities` is authoritative for login identities; legacy

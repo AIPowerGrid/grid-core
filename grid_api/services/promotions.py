@@ -255,7 +255,8 @@ async def grant_once(account_id, campaign_id: str = WELCOME_CAMPAIGN_ID, *, ref:
             "expires": expires.isoformat() if expires else None}
 
 
-async def available_micro(account_id, *, spendable_only: bool = False) -> int:
+async def available_micro(account_id, *, spendable_only: bool = False,
+                          exclude_campaigns: frozenset[str] = frozenset()) -> int:
     if not PROMO_ENABLED or not account_id:
         return 0
     if spendable_only and not spending_live():
@@ -270,7 +271,7 @@ async def available_micro(account_id, *, spendable_only: bool = False) -> int:
                 sa.or_(promo_grants.c.expires.is_(None), promo_grants.c.expires > now),
             )
             if spendable_only:
-                query = query.where(promo_grants.c.campaign_id.in_(PROMO_SPENDABLE_CAMPAIGNS))
+                query = query.where(promo_grants.c.campaign_id.in_(PROMO_SPENDABLE_CAMPAIGNS - exclude_campaigns))
             value = await session.scalar(query)
             return int(value or 0)
     except Exception:

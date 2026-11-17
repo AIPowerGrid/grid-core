@@ -384,10 +384,8 @@ async def wallet_verify(request: Request, form: WalletVerifyForm):
     from ..services import wallet_trial
 
     if wallet_trial.ENABLED:
-        from slowapi.util import get_remote_address
-
         response["trial_credit"] = wallet_trial.public(
-            await wallet_trial.grant(acct["id"], get_remote_address(request))
+            await wallet_trial.grant(acct["id"], wallet_trial.caller_address(request))
         )
     return response
 

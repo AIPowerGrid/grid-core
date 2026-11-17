@@ -14,6 +14,8 @@ depends_on = None
 
 
 def upgrade():
+    if sa.inspect(op.get_bind()).has_table("grid_wallet_trial_claims"):
+        return  # a fresh boot's create_all made it already
     op.create_table(
         "grid_wallet_trial_claims",
         sa.Column("address_hash", sa.String(64), primary_key=True),
