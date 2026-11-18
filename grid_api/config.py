@@ -15,7 +15,7 @@ ReviewedValidatorVersion = Annotated[
 ]
 
 GenerationPath = Literal[
-    "openai-chat", "openai-responses", "anthropic", "image", "image-to-image",
+    "openai-chat", "openai-responses", "anthropic", "openai-embeddings", "image", "image-to-image",
     "image-batch", "video", "image-to-video", "video-timeline", "audio-to-video", "video-to-video", "appearance-to-video", "audio", "3d",
 ]
 
@@ -59,7 +59,7 @@ class GridSettings(BaseSettings):
     # Explicit JSON allowlist for new public inference. [] closes every path.
     # Existing holds still finalize; omission is permitted only before global charging.
     generation_enabled_paths: frozenset[GenerationPath] = frozenset(get_args(GenerationPath)) - {
-        "audio-to-video", "video-to-video", "appearance-to-video",
+        "audio-to-video", "video-to-video", "appearance-to-video", "openai-embeddings",
     }
 
     # Exact direct-service IDs only; never delegated users. Empty is dark.

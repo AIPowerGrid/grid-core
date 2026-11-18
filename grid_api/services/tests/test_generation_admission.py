@@ -24,7 +24,7 @@ def configure(monkeypatch, paths):
 
 def test_default_preserves_known_paths():
     assert GridSettings(_env_file=None).generation_enabled_paths == frozenset(get_args(GenerationPath)) - {
-        "audio-to-video", "video-to-video", "appearance-to-video",
+        "audio-to-video", "video-to-video", "appearance-to-video", "openai-embeddings",
     }
 
 
@@ -176,7 +176,7 @@ def test_dark_rollout_preserves_omitted_admission(monkeypatch, mode):
     monkeypatch.setattr(generation_admission, "get_settings", lambda: settings)
     generation_admission.validate_rollout(mode)
     assert settings.generation_enabled_paths == frozenset(get_args(GenerationPath)) - {
-        "audio-to-video", "video-to-video", "appearance-to-video",
+        "audio-to-video", "video-to-video", "appearance-to-video", "openai-embeddings",
     }
 
 
