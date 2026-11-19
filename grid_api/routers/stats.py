@@ -23,6 +23,7 @@ from ..v2.schema import api_keys as api_keys_table
 from ..v2.schema import ledger as ledger_table
 from ..v2.schema import payouts as payouts_table
 from ..v2.schema import workers as workers_table
+from ._passthrough import GENERATIVE_FORMATS
 from .health import build_commit
 
 logger = logging.getLogger("grid_api.stats")
@@ -335,11 +336,13 @@ async def status_models():
     counts: dict[str, int] = {}
     types: dict[str, set] = {}
     ctx: dict[str, int] = {}
+    formats: dict[str, set] = {}
     for w in workers:
         wc = int(w.get("max_context_length") or 0)
         for m in w.get("models", []):
             counts[m] = counts.get(m, 0) + 1
             types.setdefault(m, set()).update(w.get("job_types", ["text"]))
+            formats.setdefault(m, set()).update(w.get("api_formats") or ["openai-chat"])
             if wc > 0:
                 ctx[m] = max(ctx.get(m, 0), wc)
     async with await new_session() as session:
@@ -358,6 +361,10 @@ async def status_models():
             "avg_ttft_s": p.get("avg_ttft_s"),
             "avg_latency_s": p.get("avg_latency_s"),
         }
+        if mtype == "text" and not GENERATIVE_FORMATS.intersection(formats.get(m) or ()):
+            # No worker serves it as a chat model: it answers /v1/embeddings only.
+            # Reported as its own type so chat clients do not list it.
+            item["type"] = "embedding"
         modes = _recipe_generation_modes(m)
         if modes:
             item["capabilities"] = modes
@@ -394,7 +401,7 @@ async def status_models():
     from ..services import pricing
 
     for item in out:
-        if item["type"] == "text":
+        if item["type"] in ("text", "embedding"):  # embeddings bill the input price only
             item["pricing"] = pricing.public_text_price(item["name"])
     return out
 

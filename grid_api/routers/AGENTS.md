@@ -22,6 +22,29 @@ transport, accounts, stats, health/metrics.
   non-streaming and text-only until a stream-aware settlement adapter exists.
 - `anthropic.py` - `POST /v1/messages` raw Anthropic Messages passthrough.
 - `responses.py` - `POST /v1/responses` raw OpenAI Responses passthrough.
+- `embeddings.py` - `POST /v1/embeddings` OpenAI-compatible embeddings, raw
+  passthrough to workers that advertise `openai-embeddings`. Closed unless
+  `openai-embeddings` is listed in `GENERATION_ENABLED_PATHS`; the gate runs
+  before validation, worker lookup and quota. Input is text only (a string or
+  up to `GRID_EMBEDDINGS_MAX_INPUTS`, default 64, non-empty strings); token
+  arrays are refused because Core bills and screens its own count of the text.
+  Only `model`, `input`, `encoding_format` and `dimensions` are forwarded.
+  Billing is input-only: reserve on Core's token count with a zero output
+  budget, settle on the same count. The response carries the grid model name
+  and Core's `usage`, never the backend's. Before settlement the body must
+  hold one entry per input, in order, each vector in the requested encoding,
+  of the requested `dimensions` when given, at most 8192 long and all of one
+  length; otherwise the worker is struck and not paid and the hold is
+  released. This proves shape only, not which model produced the vectors:
+  no validator or canary covers embeddings yet, so enrolment is as open as
+  for chat.
+  The worker reward is metered on Core's own count of the input, never on
+  the worker's `usage` report.
+- A worker that advertises no generative format (embeddings only) is left
+  out of `/v1/models` and of chat routing. `/v1/status/models` lists such a
+  model with `type: "embedding"`. It still appears in the other
+  `/v1/status/*` views and in validator text assignments, which filter on
+  `job_types` only; chat probes and the self-canary cannot pass for it.
 - `pricing.py` - public, unauthenticated `GET /v1/pricing`; exposes the exact
   versioned USD price book plus only fresh, source-linked same-model comparison
   workloads. Expired comparison evidence is omitted rather than repeated.

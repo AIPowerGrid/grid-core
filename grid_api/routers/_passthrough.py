@@ -21,6 +21,8 @@ the job's terminal event (and in a `finally` on disconnect) so a reservation is
 never stranded and a silent worker can't drive the charge to zero.
 """
 
+import base64
+import binascii
 import json
 import logging
 import os
@@ -44,6 +46,15 @@ SSE_HEADERS = {
 # When the client omits the output cap, default it HIGH so responses aren't
 # truncated (same knob as the chat path's GRID_DEFAULT_MAX_TOKENS).
 DEFAULT_OUTPUT_TOKENS = int(os.getenv("GRID_DEFAULT_MAX_TOKENS", "32768"))
+
+# `/v1/embeddings`: input-only. The request is text, the response is vectors,
+# so there is no completion to count and nothing to stream.
+EMBEDDINGS_FORMAT = "openai-embeddings"
+
+MAX_EMBEDDING_DIMENSIONS = 8192
+# Formats that generate text from a model. A worker that advertises none of
+# them is not a chat model and stays out of the text model list.
+GENERATIVE_FORMATS = frozenset({"openai-chat", "openai-responses", "anthropic"})
 MAX_OUTPUT_TOKENS = 32768
 
 
@@ -212,6 +223,10 @@ def _flatten_content(content) -> list[str]:
 def extract_prompt_text(api_format: str, req: dict) -> str:
     """Flatten a passthrough request to the text we bill the prompt on."""
     parts: list[str] = []
+    if api_format == EMBEDDINGS_FORMAT:
+        value = req.get("input")
+        texts = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+        return " ".join(text for text in texts if isinstance(text, str) and text)
     if api_format == "anthropic":
         parts += _flatten_content(req.get("system"))
         for m in req.get("messages") or []:
@@ -270,6 +285,8 @@ def completion_tokens(api_format: str, accumulated: list[str] | None, full_json:
     Prefer the assembled non-streaming body (`full_json`); otherwise sum the text
     from the relayed stream deltas. Counted by the grid (tiktoken), never the
     worker/backend `usage`. Used by the worker-WS terminal handler to settle."""
+    if api_format == EMBEDDINGS_FORMAT:
+        return 0  # vectors, not text: an embedding is billed on its input only
     if full_json:
         text = extract_output_text(api_format, full_json)
     else:
@@ -279,7 +296,7 @@ def completion_tokens(api_format: str, accumulated: list[str] | None, full_json:
 
 def extract_output_text(api_format: str, full_json: dict) -> str:
     """Assemble the completion text from a non-streaming response body."""
-    if not isinstance(full_json, dict):
+    if not isinstance(full_json, dict) or api_format == EMBEDDINGS_FORMAT:
         return ""
     parts: list[str] = []
     if api_format == "anthropic":
@@ -306,6 +323,65 @@ def extract_output_text(api_format: str, full_json: dict) -> str:
                 and isinstance(item.get("arguments"), str):
             parts.append(item["arguments"])
     return " ".join(parts)
+
+
+def _base64_vector_ok(value: str) -> bool:
+    """A base64 embedding: whole little-endian float32 values, within the size bound."""
+    if not value or len(value) > MAX_EMBEDDING_DIMENSIONS * 4 * 4 // 3 + 8:
+        return False
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    return bool(raw) and len(raw) % 4 == 0
+
+
+def embeddings_response_ok(full_json, request: dict) -> bool:
+    """True when a worker's embeddings body answers the request as asked.
+
+    Checked before settlement: one entry per input, in order; each vector is in
+    the requested encoding, non-empty, at most MAX_EMBEDDING_DIMENSIONS long and
+    of the requested `dimensions` when given; all vectors share one length.
+    This proves shape and size, not which model produced the numbers."""
+    inputs = request.get("input")
+    expected = len(inputs) if isinstance(inputs, list) else 1
+    if not isinstance(full_json, dict):
+        return False
+    data = full_json.get("data")
+    if not isinstance(data, list) or len(data) != expected:
+        return False
+    as_base64 = request.get("encoding_format") == "base64"
+    dimensions = request.get("dimensions")
+    lengths = set()
+    for position, item in enumerate(data):
+        if not isinstance(item, dict):
+            return False
+        if "index" in item and item["index"] != position:
+            return False
+        vector = item.get("embedding")
+        if as_base64:
+            if not isinstance(vector, str) or not _base64_vector_ok(vector):
+                return False
+            lengths.add(len(vector))
+            continue
+        if not isinstance(vector, list) or not 0 < len(vector) <= MAX_EMBEDDING_DIMENSIONS:
+            return False
+        if not all(isinstance(x, (int, float)) and not isinstance(x, bool) and x == x and abs(x) != float("inf")
+                   for x in vector):
+            return False
+        if dimensions is not None and len(vector) != dimensions:
+            return False
+        lengths.add(len(vector))
+    return len(lengths) == 1
+
+
+def raw_response_problem(api_format: str, request: dict, full_json) -> str | None:
+    """Reason a worker's non-streaming body must not be paid, or None.
+
+    Runs before settlement for the formats whose answer has a checkable shape."""
+    if api_format == EMBEDDINGS_FORMAT and not embeddings_response_ok(full_json, request):
+        return "Worker returned a malformed embeddings response."
+    return None
 
 
 # ── Reserve / settle ─────────────────────────────────────────────────────────

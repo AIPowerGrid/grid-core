@@ -52,6 +52,7 @@ from ..services import worker_identity as worker_identity_svc
 from ..services.den import calculate_den, calculate_media_den, count_tokens
 from ..services.metrics_state import record_job_complete, record_job_failed
 from ..v2.schema import workers as v2_workers_table
+from ._passthrough import GENERATIVE_FORMATS
 
 logger = logging.getLogger("grid_api.worker_ws")
 
@@ -372,6 +373,11 @@ async def get_available_models(job_type: str | None = None, api_format: str | No
     if no connected worker advertises the format, the model list is empty and
     the endpoint returns 503 — the grid never fakes a format it can't serve.
     Workers that don't advertise `api_formats` are treated as openai-chat.
+
+    A worker that advertises no generative format (only `openai-embeddings`)
+    serves an embedding model. Its model is returned only when that format is
+    asked for, so it never shows up in the chat model list or resolves for a
+    generation request.
     """
     r = get_redis()
     worker_ids = list(await r.smembers(WORKER_ACTIVE_SET))
@@ -393,7 +399,10 @@ async def get_available_models(job_type: str | None = None, api_format: str | No
         info = json.loads(data)
         if job_type and job_type not in (info.get("job_types") or ["text"]):
             continue
-        if api_format and api_format not in (info.get("api_formats") or ["openai-chat"]):
+        formats = info.get("api_formats") or ["openai-chat"]
+        if api_format and api_format not in formats:
+            continue
+        if job_type == "text" and not api_format and not GENERATIVE_FORMATS.intersection(formats):
             continue
         if media_feature and media_feature not in (info.get("media_features") or []):
             continue
@@ -508,7 +517,10 @@ async def worker_websocket(ws: WebSocket):
         # translates between formats. Legacy workers that don't send this are
         # assumed to be plain OpenAI chat workers.
         api_formats = init_msg.get("api_formats") or ["openai-chat"]
-        api_formats = [f for f in api_formats if f in ("openai-chat", "openai-responses", "anthropic")] or ["openai-chat"]
+        api_formats = list(dict.fromkeys(
+            f for f in (api_formats if isinstance(api_formats, list) else [])
+            if f in ("openai-chat", "openai-responses", "anthropic", "openai-embeddings")))
+        api_formats = api_formats or ["openai-chat"]
         media_features = init_msg.get("media_features")
         media_features = ([feature for feature in media_features if isinstance(feature, str)
                            and feature in {"recipe-image-bindings-v1", "recipe-media-sources-v1",
@@ -549,7 +561,6 @@ async def worker_websocket(ws: WebSocket):
             )
             await ws.close(code=4003)
             return
-
         # Refuse workers we just evicted for failing health — gives a flapping
         # worker (dead backend) time to actually recover before rejoining.
         if await _is_in_cooldown(worker_name):
@@ -2198,6 +2209,25 @@ async def _handle_raw_passthrough(ws: WebSocket, job: dict, selected_model: str,
             # DONE is published AFTER settlement commits (see below) so the client
             # never gets a success terminator on an unsettled job.
 
+            # Embeddings have a checkable answer shape (one vector per input).
+            # Checked before settlement so a malformed body is refunded, not paid.
+            from ._passthrough import EMBEDDINGS_FORMAT, extract_prompt_text, raw_response_problem
+
+            _format = payload.get("api_format", "openai-chat")
+            _request = payload.get("request") or {}
+            _problem = raw_response_problem(_format, _request, full_json)
+            if _problem:
+                # The worker answered, but not with what was asked: strike it like
+                # any failed generation, refund the client, pay nothing.
+                logger.error("Unpayable body for raw job %s: %s", opaque_id(job_id), _problem)
+                await _record_strike(worker_id, job_id)
+                await token_stream.publish_error(job_id, _problem, code=502)
+                record_job_failed()
+                await credits.release_job(job_id)
+                await ws.send_json({"type": "ack", "id": job_id, "den": 0})
+                route_events.capture_outcome(job=job, worker_id=worker_id, terminal_status="failed")
+                return True
+
             # Metering: trust the backend-reported usage (we tee it), but cap the
             # output at the job's requested max and the prompt at the worker's
             # advertised context so a self-dealer can't inflate den.
@@ -2209,6 +2239,11 @@ async def _handle_raw_passthrough(ws: WebSocket, job: dict, selected_model: str,
             effective_tokens = min(out_tokens, requested_max) if out_tokens else 0
             ctx_cap = int(worker_info.get("max_context_length", 2048) or 2048)
             prompt_tokens = min(in_tokens, ctx_cap)
+            if _format == EMBEDDINGS_FORMAT:
+                # The reward is metered on Core's own count of the input, never on
+                # the worker's usage report. An embedding has no output.
+                effective_tokens = 0
+                prompt_tokens = min(count_tokens(extract_prompt_text(_format, _request)), ctx_cap)
 
             den_awarded = calculate_den(
                 output_tokens=effective_tokens,

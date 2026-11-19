@@ -30,6 +30,7 @@ from .routers import (
     accounts,
     anthropic,
     audio,
+    embeddings,
     health,
     images,
     media_results,
@@ -574,6 +575,7 @@ app.include_router(pricing.router)
 app.include_router(oauth.router)
 app.include_router(anthropic.router)
 app.include_router(responses.router)
+app.include_router(embeddings.router)
 app.include_router(images.router)
 app.include_router(media_results.router)
 app.include_router(videos.router)
