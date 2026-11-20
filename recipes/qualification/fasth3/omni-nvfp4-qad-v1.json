@@ -1,0 +1,92 @@
+{
+  "_grid": {
+    "name": "FastH3 Omni NVFP4 QAD qualification v1",
+    "modelName": "FastH3 Omni NVFP4 QAD",
+    "engine": "comfyui",
+    "jobType": "video",
+    "deterministic": false,
+    "qualificationOnly": true,
+    "requiredModels": ["FastH3 Omni NVFP4 QAD"],
+    "videoContract": {
+      "schema": "aipg.fasth3-video.v1",
+      "variant": "omni-nvfp4-qad",
+      "min_frames": 124,
+      "max_frames": 362,
+      "canvases": ["1344x768", "768x1344", "768x768"]
+    },
+    "provenance": {
+      "model_repository": "FastVideo/FastH3-Omni-NVFP4-QAD-Comfy",
+      "model_revision": "b1b4d67d79930007a3f73ca8e98739796ded95a0",
+      "comfy_revision": "b1a247c9cf9dbfda4b2c0a0c1d50950667eeaa0c",
+      "shared_repository": "FastVideo/FastH3-Omni-Comfy",
+      "shared_revision": "f519722692a381f5e365a03b4b60e6ea27b6e31d",
+      "components": {
+        "fasth3_omniref_qad_nvfp4_comfy.safetensors": "bf25ee58df65b4dfee349d612f7ac62a2fea0dddd1e68eb37e75c8ce8b166f5a",
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors": "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6",
+        "minimax_h3_video_vae_fp16.safetensors": "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522",
+        "minimax_h3_audio_vae_fp32.safetensors": "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48"
+      },
+      "license_repository": "MiniMaxAI/MiniMax-H3",
+      "license_revision": "42ed227ee7df40d41602854ae760620d6eb651fe",
+      "license_sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44"
+    }
+  },
+  "model": {
+    "class_type": "UNETLoader",
+    "inputs": {"unet_name": "fasth3_omniref_qad_nvfp4_comfy.safetensors", "weight_dtype": "default"}
+  },
+  "encoder": {
+    "class_type": "CLIPLoader",
+    "inputs": {"clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", "type": "minimax", "device": "default"}
+  },
+  "video_vae": {
+    "class_type": "VAELoader",
+    "inputs": {"vae_name": "minimax_h3_video_vae_fp16.safetensors"}
+  },
+  "audio_vae": {
+    "class_type": "VAELoader",
+    "inputs": {"vae_name": "minimax_h3_audio_vae_fp32.safetensors"}
+  },
+  "conditioning": {
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "inputs": {
+      "clip": ["encoder", 0], "vae": ["video_vae", 0], "audio_vae": ["audio_vae", 0],
+      "prompt": "", "width": 1344, "height": 768, "length": 124, "ref_image_size": "match"
+    }
+  },
+  "shift": {
+    "class_type": "MiniMaxH3SigmaShift",
+    "inputs": {"model": ["model", 0], "shift_video": 12.0, "shift_audio": 3.0}
+  },
+  "sampler": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "res_multistep"}},
+  "sigmas": {
+    "class_type": "BasicScheduler",
+    "inputs": {"model": ["shift", 0], "scheduler": "simple", "steps": 8, "denoise": 1.0}
+  },
+  "guider": {
+    "class_type": "BasicGuider",
+    "inputs": {"model": ["shift", 0], "conditioning": ["conditioning", 0]}
+  },
+  "noise": {"class_type": "RandomNoise", "inputs": {"noise_seed": 29}},
+  "sample": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": ["noise", 0], "guider": ["guider", 0], "sampler": ["sampler", 0],
+      "sigmas": ["sigmas", 0], "latent_image": ["conditioning", 1]
+    }
+  },
+  "decode_video": {
+    "class_type": "VAEDecode", "inputs": {"samples": ["sample", 0], "vae": ["video_vae", 0]}
+  },
+  "decode_audio": {
+    "class_type": "VAEDecodeAudio", "inputs": {"samples": ["sample", 0], "vae": ["audio_vae", 0]}
+  },
+  "video": {
+    "class_type": "CreateVideo",
+    "inputs": {"images": ["decode_video", 0], "fps": 24, "audio": ["decode_audio", 0]}
+  },
+  "save": {
+    "class_type": "SaveVideo",
+    "inputs": {"video": ["video", 0], "filename_prefix": "fasth3_qualification", "format": "auto", "codec": "h264"}
+  }
+}
